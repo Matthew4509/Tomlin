@@ -1,6 +1,6 @@
 # Third-party parts
 
-TOMLIN's own files are under the MIT licence (LICENSE). These parts are other people's and keep their own licences.
+TOMLIN's own files are under the PolyForm Noncommercial licence 1.0.0 (LICENSE). These parts are other people's and keep their own licences.
 
 ## Shipped in the zip
 

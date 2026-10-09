@@ -12,7 +12,10 @@ outside service except what you start yourself: model and tool downloads, and th
 ## Before you use it
 
 - **Beta.** Screens, features and the way data is stored still change between versions, and things will break.
-- **As is, no warranty.** TOMLIN is free software under the MIT licence (see `LICENSE`): you use it at your own risk.
+- **Free, not for commercial use.** TOMLIN is under the PolyForm Noncommercial licence 1.0.0 (see `LICENSE`). Free for
+  personal use, hobby projects, study, charities, schools, public research and government. A business using it,
+  selling it or building it into a paid product needs the copyright holder's permission first.
+- **As is, no warranty.** You use it at your own risk.
   Nobody is responsible for lost data, a PC that is slowed down, or what a model writes or draws.
 - **Your own PCs only.** It is made for your own PCs on your own home network. Keep your own backups.
 - **Models are not ours.** You download each model yourself; each has its own licence and its own limits. Check them.
