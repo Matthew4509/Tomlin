@@ -1,0 +1,16 @@
+{
+  "// note": "The type check (npm run typecheck): Node runs the .ts files as they are, so this only checks; nothing is built. Needs typescript and @types/node (dev only, never in the pack).",
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tools/**/*.ts", "test/**/*.ts"]
+}

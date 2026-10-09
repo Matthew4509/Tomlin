@@ -1,0 +1,26 @@
+{
+  "name": "tomlin",
+  "version": "2.0.48",
+  "private": true,
+  "description": "Local chat and image generation on your own PC: CPU first, graphics chip when there is one.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test test/*.test.ts test/bridge/*.test.js",
+    "check": "node tools/check-syntax.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "fetch": "node tools/fetch.ts",
+    "pack": "node tools/pack.ts",
+    "get-model": "node tools/get-model.ts",
+    "hf-list": "node tools/hf-list.ts"
+  },
+  "dependencies": {
+    "onnxruntime-node": "1.30.0",
+    "pdfjs-dist": "6.4.299",
+    "sharp": "0.35.5"
+  }
+}

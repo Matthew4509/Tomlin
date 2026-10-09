@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="bridge-key" content="__BRIDGE_KEY__">
+<title>Bridge · TOMLIN</title>
+<link rel="stylesheet" href="app.css">
+<script src="js/theme-boot.js"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23005FB8'/%3E%3Cpath d='M8 44h48M14 44V30M50 44V30M8 30c8-12 40-12 48 0' stroke='white' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M24 44V26M32 44V24M40 44V26' stroke='white' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="app">
+  <nav aria-label="Pages">
+    <a class="brand" href="#projects" title="Home: Projects">
+      <span class="logo" id="conn-logo"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#005FB8"/><path d="M8 44h48M14 44V30M50 44V30M8 30c8-12 40-12 48 0" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M24 44V26M32 44V24M40 44V26" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg><i></i></span>
+      <div class="lbl">Bridge<small class="conn ok" id="conn" role="status"><span class="conn-dot" aria-hidden="true">●</span><span id="conn-text">Connected</span></small></div>
+    </a>
+    <a class="nav-item sm-back" href="/" title="Back to TOMLIN: chats, staff, jobs and models"><i class="ic">&#xE72B;</i><span class="lbl">TOMLIN</span></a>
+    <button class="nav-item" data-page="projects"><i class="ic">&#xE8F1;</i><span class="lbl">Projects</span><span class="count" id="n-projects"></span></button>
+    <button class="nav-item" data-page="folders"><i class="ic">&#xE8B7;</i><span class="lbl">Folders</span><span class="count" id="n-folders"></span></button>
+    <button class="nav-item" data-page="audits"><i class="ic">&#xEA18;</i><span class="lbl">Audits</span></button>
+    <button class="nav-item" data-page="prompts"><i class="ic">&#xE8BD;</i><span class="lbl">Prompts</span><span class="count" id="n-prompts"></span></button>
+    <section class="pcpanel" id="pcpanel" aria-label="This PC"><div class="pc-head">This PC <span id="pc-host"></span></div><div class="rings" id="pc-rings"></div><div class="pc-facts" id="pc-facts"></div></section>
+    <section class="runpanel" id="runpanel" aria-label="Running"></section>
+    <section class="runpanel" id="livepanel" aria-label="Live sites"></section>
+    <div class="nav-spacer"></div>
+    <button class="nav-item lost" id="nav-restart" type="button" hidden title="TOMLIN stopped answering"><i class="ic">&#xE72C;</i><span class="lbl">Reconnect</span></button>
+    <button class="nav-item" data-page="help"><i class="ic">&#xE897;</i><span class="lbl">Help</span></button>
+    <button class="nav-item" data-page="about"><i class="ic">&#xE946;</i><span class="lbl">About</span></button>
+  </nav>
+
+  <main>
+    <div class="orbit empty" id="orbit" aria-label="Sites in orbit"><div class="earth" aria-hidden="true"></div><i class="station" aria-hidden="true"></i><div class="hint" id="orbit-hint"></div><div class="empty-note" id="orbit-empty">No sites in orbit. Run local copy launches one.</div><div class="sky" id="orbit-sky"></div></div>
+    <div class="lostbar" id="lostbar" hidden role="alert"><i class="ic">&#xE783;</i><div class="txt"><b>Connection lost.</b><span id="lost-text">TOMLIN stopped answering, so what you see may be out of date.</span></div><span id="lost-act"></span></div>
+    <div class="testbar" id="testbar" hidden role="note"><i class="ic">&#xE7BA;</i><div><b>Test copy.</b> It does not open browsers, terminals or folders; it only says what it would do, and its settings are separate. Use the Bridge inside TOMLIN.</div></div>
+    <!-- Projects -->
+    <section class="page" id="page-projects">
+      <div class="page-head"><h1>Projects</h1></div>
+      <div class="cmdbar" role="toolbar" aria-label="Project commands">
+        <button class="cmd" id="cmd-add-project"><i class="ic">&#xE710;</i>Add project</button>
+        <button class="cmd" id="cmd-scan"><i class="ic">&#xE895;</i>Scan folders</button>
+        <button class="cmd" id="cmd-refresh"><i class="ic">&#xE72C;</i>Refresh</button>
+        <div class="cmd-sep"></div>
+        <div class="seg" role="group" aria-label="Display">
+          <button type="button" id="view-list" aria-pressed="true" title="List"><i class="ic">&#xE8FD;</i><span class="lbl">List</span></button>
+          <button type="button" id="view-tiles" aria-pressed="false" title="Tiles"><i class="ic">&#xF0E2;</i><span class="lbl">Tiles</span></button>
+        </div>
+        <select class="sel" id="sort" aria-label="Sort">
+          <option value="updated">Last updated</option>
+          <option value="mine">My order</option>
+          <option value="tokens">Most tokens</option>
+          <option value="name">Name</option>
+          <option value="running">Running first</option>
+        </select>
+        <button class="cmd" id="cmd-stopall" type="button" hidden><i class="ic">&#xE71A;</i><span id="stopall-label">Stop all</span></button>
+        <button class="cmd" id="cmd-hidden" type="button" aria-pressed="false" hidden><i class="ic">&#xE7B3;</i><span id="hidden-label">Show hidden</span></button>
+        <div class="grow"></div>
+        <label class="search"><i class="ic">&#xE721;</i><input type="search" id="search" placeholder="Search projects" aria-label="Search projects"></label>
+      </div>
+      <div class="list-head" id="list-head" aria-hidden="true"><span>Name</span><span>Tokens</span><span class="upd">Updated</span><span>State</span><span></span></div>
+      <div class="list" id="list"><div class="empty">Loading projects…</div></div>
+    </section>
+
+    <!-- Folders -->
+    <section class="page" id="page-folders" hidden>
+      <div class="page-head"><h1>Folders</h1></div>
+      <p class="lead">A working folder holds projects: every folder inside it shows as a project (for example the folder you keep your Claude Code work in, or your ChatGPT/Codex one). Projects kept somewhere else can be added one by one.</p>
+      <div class="cmdbar" role="toolbar" aria-label="Folder commands">
+        <button class="cmd" id="cmd-add-folder"><i class="ic">&#xE710;</i>Add working folder</button>
+        <button class="cmd" id="cmd-add-project-2"><i class="ic">&#xE8F4;</i>Add project</button>
+        <button class="cmd" id="cmd-scan-2"><i class="ic">&#xE895;</i>Scan folders</button>
+        <div class="grow"></div>
+        <span class="lead last-scan" id="last-scan"></span>
+      </div>
+      <h2 class="first">Working folders</h2>
+      <div class="card" id="wf-list"></div>
+      <h2>Projects added one by one</h2>
+      <div class="card" id="extra-list"></div>
+      <h2>Removed from the list</h2>
+      <p class="lead">Removing a project only takes it off the list; the folder and its files are not touched. Bring one back here.</p>
+      <div class="card" id="hidden-list"></div>
+    </section>
+
+    <!-- Audits -->
+    <section class="page" id="page-audits" hidden>
+      <div class="page-head"><h1>Audits</h1></div>
+      <p class="lead">The latest built-in audit of each project. Run one from a project's <b>…</b> menu › Scan app, or when you start its local copy. It is a simple check: it catches common core faults, not everything. It also looks for what publishing a project would give away about you: your private details, your other projects' names, AI notes and local paths.</p>
+      <div class="cmdbar" role="toolbar" aria-label="Audit commands">
+        <button class="cmd" id="cmd-private"><i class="ic">&#xE72E;</i>Private details…</button>
+      </div>
+      <div class="card" id="audit-list"></div>
+    </section>
+
+    <!-- Prompts -->
+    <section class="page" id="page-prompts" hidden>
+      <div class="crumb" id="prompts-crumb" role="navigation" aria-label="You are here" hidden><a href="#prompts">Prompts</a><span aria-hidden="true">›</span><span id="prompts-crumb-here"></span></div>
+      <div class="page-head"><h1 id="prompts-h1">Prompts</h1></div>
+      <p class="lead">Prompts you use again and again, sorted into categories. Open a category, copy a prompt and paste it into Claude, ChatGPT or the AI you use, or press Start to hand it to one of your staff in TOMLIN (its Send to card opens with it: pick who, change anything, send). Words in [brackets] are yours to fill in. They are kept on this PC only, and nothing is sent until you press Send there.</p>
+      <div class="cmdbar" role="toolbar" aria-label="Prompt commands">
+        <button class="cmd" id="cmd-add-cat"><i class="ic">&#xE8F4;</i>New category</button>
+        <button class="cmd" id="cmd-add-prompt"><i class="ic">&#xE710;</i>Add prompt</button>
+        <button class="cmd" id="cmd-rename-cat" hidden><i class="ic">&#xE8AC;</i>Rename category</button>
+        <button class="cmd" id="cmd-delete-cat" hidden><i class="ic">&#xE74D;</i>Delete category</button>
+        <div class="grow"></div>
+        <label class="search"><i class="ic">&#xE721;</i><input type="search" id="prompt-search" placeholder="Search prompts" aria-label="Search prompts"></label>
+      </div>
+      <div class="prompt-tiles" id="prompt-tiles"></div>
+      <div class="card" id="prompt-list" hidden></div>
+    </section>
+
+    <!-- Help -->
+    <section class="page help" id="page-help" hidden>
+      <div class="page-head"><h1>Help</h1></div>
+      <p class="lead">The Bridge is the part of TOMLIN that lists the projects on this PC, starts their local copies, checks them for common faults and keeps an eye on their git backups and live sites. It runs inside TOMLIN, on this PC only.</p>
+      <div class="card help-card">
+        <h2 id="help-start">Getting started</h2>
+        <p>It comes with TOMLIN: nothing to install. <b>TOMLIN</b> at the top of the left panel goes back to chats, staff and jobs; TOMLIN's own left panel has <b>Projects</b> to come back here. TOMLIN's app lock covers these pages too.</p>
+        <p>The first list holds the folders beside TOMLIN's own folder (or, for an installed copy, its workspace). Add the folder that holds your projects on the <a href="#folders">Folders</a> page, or single projects kept somewhere else. Used Myia Bridge before? <b>About › Bring in from Myia Bridge</b> copies its folders, prompts, private details and lists here.</p>
+        <h2 id="help-projects">Projects</h2>
+        <p>Each row shows the tokens your AI tools used on it, when it last changed, and its state, with two buttons and a <b>…</b> menu:</p>
+        <ul>
+          <li><b>Copy prompt</b> gives you a line to paste into the AI you use. <b>…</b> menu › <b>Start with a hire…</b> hands the same line to one of your staff instead: TOMLIN's Send to card opens with it, and nothing goes until you press Send. In an audit, <b>Fix with a hire</b> does the same with its faults, and <b>Review with AI…</b> has <b>Start with a hire</b> beside <b>Copy prompt</b>. A hire answers from the words it is sent: it does not open the project's folder, so for work across a whole project, Copy is still the way to an AI that reads folders (Claude Code, Codex).</li>
+          <li><b>Run local copy</b> starts the project's own dev server (from its <code>.claude/launch.json</code> or <code>project.json</code>) and opens it. <b>Stop</b> ends it.</li>
+          <li><b>…</b> menu › <b>Scan app (audit)</b> runs the built-in audit (about 130 rules: keys, including a key removed from the files that the git history still holds, injection, sign-in and payment gaps, uploads, saving and replies, .htaccess, accessibility, and checks that read the project as a whole: limits, clean-up jobs, the privacy page against the code, release builds). It catches common core faults, not everything. It also finds what publishing the project would give away about you; list your own private details under <b>Audits › Private details</b>. A finding names the detail's label, never the detail. <b>Not a fault…</b> beside a finding sets that one place aside with your reason (it comes back if the line is edited); <b>Import report-back…</b> does the same from a pasted "False flags" table. <b>Review with AI…</b> builds a prompt to copy into any AI for the faults no rule finds (money, access, promises); paste its answer into Import report-back… and its findings go on the project's fault list, each open, fixed or not a fault. Old copies of the app inside the project folder (an "original" or "-fixes" copy, an unpacked release beside its zip, older versions side by side) are left out so a fault is counted once, where the app lives; the audit's notes name each one and why. To scan one anyway, list it under <code>auditInclude</code> in the project's project.json.</li>
+          <li><b>…</b> menu › <b>Hosted live</b> takes the address the project is hosted at: a green, amber or red light shows whether it answers. It is checked when the Bridge starts and then every 5, 10 or 15 minutes (<b>Check every</b> in the Live sites panel, which also shows how long each page took). A site that goes down shows a red message that stays until you close it. The Bridge sends no emails or phone alerts: a site that must not go down unnoticed needs a monitoring service of its own.</li>
+          <li><b>…</b> menu › <b>Remove from list</b> only takes a project off the list. Its folder and files are never touched. <b>Folders › Removed from the list</b> brings it back.</li>
+          <li><b>…</b> menu › <b>Last audit</b>, <b>Open folder</b>, <b>Open terminal here</b>, <b>Move to top / up / down / bottom</b>, and <b>Hide from display</b>: a hidden project stays on the list but out of view until <b>Show hidden</b> is on.</li>
+        </ul>
+        <p>The bar above the list has <b>Add project</b>, <b>Scan folders</b> (what is new or gone since the last scan), <b>Refresh</b>, <b>List / Tiles</b>, the sort order (Last updated, My order, Most tokens, Name, Running first; in My order you can also drag a row), <b>Stop all</b> (everything the Bridge started; a tick adds other programs holding your projects' ports, each named first), <b>Show hidden</b> and search.</p>
+        <h2 id="help-window">The window</h2>
+        <ul>
+          <li><b>Bridge</b> near the top of the left panel takes you home to Projects. Its light shows ● Connected, or Connection lost in red when TOMLIN stops; then <b>Reconnect</b> appears and the page reconnects by itself once TOMLIN answers again.</li>
+          <li><b>This PC</b>: CPU, memory, disk and GPU, uptime, and the AI tokens used this month and in total (<b>Recount</b> counts them again).</li>
+          <li><b>Running</b>: every site that is up. ● started by the Bridge, ◐ another program holds that project's port. Click a name to open it; the square stops it.</li>
+          <li><b>Live sites</b>: every live address with its light and how long it took to answer, worst first, with <b>Check now</b> and <b>Check every</b>.</li>
+          <li>The bar at the bottom: how many projects, how many running, when the tokens were counted, and the <b>Git</b> count (click it for the projects waiting for a save or push).</li>
+          <li>The <b>Orbital</b> theme (About › Theme) shows your running sites as satellites over the Earth: click one to shoot it down (that stops it), ↗ opens it. The other themes are Windows, Light and Dark.</li>
+        </ul>
+        <h2 id="help-pages">Folders, Audits and Prompts</h2>
+        <ul>
+          <li><a href="#folders">Folders</a>: your working folders (every folder inside one is a project), projects added one by one, and projects removed from the list (bring one back here). <b>Add working folder</b> opens the Windows folder picker.</li>
+          <li><a href="#audits">Audits</a>: the latest audit of each project. <b>Private details…</b> holds the details about you (email, phone, street, full name) the audit looks for in what you would publish. A detail is typed once and never shown again; the audit shows only its label.</li>
+          <li><a href="#prompts">Prompts</a>: prompts you use again and again, a tile per category. Click a tile for its prompts, then <b>Copy</b>, <b>Start</b> (to one of your staff, in TOMLIN), <b>Edit</b> (which can move it to another category) or <b>Remove</b>. <b>New category</b> and <b>Add prompt</b> sit above the tiles; inside a category, <b>Rename category</b> and <b>Delete category</b> (which deletes its prompts, and says how many first). Words in [brackets] are yours to fill in. Kept on this PC only.</li>
+        </ul>
+        <h2 id="help-git">Git marks</h2>
+        <p>Git keeps a saved history of a project, and a copy on GitHub (or another host) is its backup. The Bridge only reads git: it never commits, pushes or changes a folder.</p>
+        <dl class="help-dl">
+          <dt><span class="l-up">● Backed up</span></dt><dd>Everything saved is on the backup copy.</dd>
+          <dt><span class="l-unsure">▲ unsaved</span></dt><dd>Files changed since the last save. <b>Commit</b> them, then <b>push</b>.</dd>
+          <dt><span class="l-unsure">▲ not pushed</span></dt><dd>Saved here but not on the backup copy yet. <b>Push</b>.</dd>
+          <dt><span class="l-unsure">▲ Only on this PC</span></dt><dd>No backup copy at all. Make an empty repository on GitHub, then link it and push.</dd>
+          <dt><span class="l-none">○ No git</span></dt><dd>No history and no backup. Fine for scratch folders.</dd>
+        </dl>
+        <p>Click a mark for the exact commands to copy into a terminal (<b>…</b> menu › Open terminal here). The <b>Git</b> count in the bar at the bottom lists every project waiting for a save or push.</p>
+        <p>When files have changed, <b>See what changed</b> in the project's git window shows every changed file since the last save, line by line (green new, red gone), so you can read what an AI changed before you commit. It only reads: nothing is saved or undone.</p>
+        <h2 id="help-nodes">Copies on my other PCs</h2>
+        <p>Besides git, TOMLIN can keep a copy of a project on your other PCs (the ones linked to it that have <b>Enable backups</b> ticked). Tick <b>Copy this project to my other PCs</b> in its git window: from then on it goes with TOMLIN's backup every 10 minutes when something changed, and only what changed crosses your home network. Each PC keeps the older versions too. In a git repository the copy takes what git keeps (saved files and new ones its <code>.gitignore</code> does not leave out); anywhere else, the whole folder except <code>.git</code> and <code>node_modules</code>. A file over 256 MB is left out and named. <b>Back up now</b> sends it straight away; <b>Bring back</b> puts a PC's newest copy in a new folder (TOMLIN's home, <code>restored projects</code>), never over the project.</p>
+        <dl class="help-dl">
+          <dt><span class="l-up">● On <i>PC</i></span></dt><dd>Its newest copy on that PC holds everything in it now.</dd>
+          <dt><span class="l-unsure">▲ Changed since copy</span></dt><dd>It changed after the last copy; the next backup takes the changes.</dd>
+          <dt><span class="l-none">○ Not copied yet</span></dt><dd>Ticked, but no copy has been made yet.</dd>
+        </dl>
+        <p>A project is safe from losing this PC when everything is pushed (● Backed up, nothing unsaved) or its copy is up to date (● On <i>PC</i>). The <b>Git</b> count's list of projects only on this PC says which of them have a copy on another PC.</p>
+        <h2 id="help-gitprog">Keeping Git itself up to date</h2>
+        <p>Old versions of the Git program had security holes that a single <code>git clone</code> of a bad repository could set off. <b>About › Git</b> shows your version and warns when it is older than the last security fix this Bridge knows about. To update: <code>winget upgrade --id Git.Git -e</code>, or download it from git-scm.com. Ticking <b>Check online for a newer Git</b> lets the Bridge ask GitHub once a day for the newest version; until you tick it, it asks nothing.</p>
+        <h2 id="help-privacy">What leaves this PC</h2>
+        <p>Nothing about you or your projects goes to the internet. The only requests that leave for it are plain page requests to the live addresses you add under Hosted live, and, only if you tick it, one request a day to GitHub for the newest Git version. A project you tick under Copies on my other PCs goes only to your own linked PCs, over your home network and encrypted. Tokens are counted from the AI transcripts already on this PC; they are read, never changed or sent.</p>
+        <h2 id="help-trouble">If something goes wrong</h2>
+        <ul>
+          <li><b>The page says Connection lost</b>: TOMLIN stopped. Start it again (its desktop icon, or Start TOMLIN.cmd); this page reconnects by itself.</li>
+          <li><b>A project shows "No start command"</b>: add a <code>"start"</code> to the project's own <code>project.json</code>, or list it in <code>projects.json</code> in the Bridge's data folder (TOMLIN's home, <code>dataridge</code>; see README.md).</li>
+          <li><b>Your folders or prompts are suddenly back to the start</b>: the file that held them could not be read. It was kept in the Bridge's data folder (TOMLIN's home, <code>dataridge</code>) as <code>settings.damaged-…json</code> or <code>prompts.damaged-…json</code>; close TOMLIN, copy back what you need, and start it again.</li>
+          <li><b>Git error on a project</b>: click the mark; it says why (git not installed, folder owned by another account, or git settings that could run a program).</li>
+        </ul>
+        <h2 id="help-remove">Where its data is</h2>
+        <p>Its settings, audits, prompts and lists are in TOMLIN's home, in <code>dataridge</code>, and go with TOMLIN's own backups. Uninstalling TOMLIN removes the Bridge with it.</p>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section class="page" id="page-about" hidden>
+      <div class="page-head"><h1>About</h1></div>
+      <div class="card">
+        <div class="set-row"><i class="ic">&#xE946;</i><div class="txt"><b id="about-version">Bridge</b><span>Part of TOMLIN, on this PC only (127.0.0.1); TOMLIN's app lock covers it; its desktop shortcut comes with TOMLIN's install, and "Start TOMLIN when this PC starts" (Nodes and memory) starts it with Windows. Nothing about you or your projects goes to the internet (a project you tick for copies goes only to your own linked PCs, encrypted); the only requests to the internet are plain page requests to the live addresses you add under Hosted live, and, only if you tick it under Git below, one request a day to GitHub for the newest Git version. It runs only the start commands stored in each project's own files.</span></div></div>
+        <div class="set-row wrap"><i class="ic">&#xE790;</i><div class="txt"><b>Theme</b><span id="theme-note">Orbital is the space look, with the Orbit view of your running sites. Windows follows your Windows light or dark setting.</span></div>
+          <div class="seg theme-seg" role="group" aria-label="Theme" id="theme-seg">
+            <button type="button" data-theme-pick="orbital"><span class="swatch sw-orbital"></span>Orbital</button>
+            <button type="button" data-theme-pick="default"><span class="swatch sw-windows"></span>Windows</button>
+            <button type="button" data-theme-pick="light"><span class="swatch sw-light"></span>Light</button>
+            <button type="button" data-theme-pick="dark"><span class="swatch sw-dark"></span>Dark</button>
+          </div></div>
+        <div class="set-row wrap"><i class="ic">&#xE896;</i><div class="txt"><b>Bring in from Myia Bridge</b><span id="import-note">Copies your working folders, prompts, private details, set-asides, live addresses and fault lists from a Myia Bridge folder on this PC. That Bridge is only read: nothing in it changes.</span></div><button class="btn" id="btn-import" type="button">Bring in…</button></div>
+        <div class="set-row wrap"><i class="ic">&#xE81C;</i><div class="txt"><b>Git</b><span id="git-note">…</span><label class="tick"><input type="checkbox" id="git-online"> Check online for a newer Git (asks GitHub once a day; off until you tick it)</label></div><button class="btn" id="btn-git-help" type="button">How to update</button></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="status"><span id="st-projects">…</span><span id="st-running"></span><span id="st-tokens" class="hide-s"></span><button type="button" class="linkbtn hide-s" id="st-git" title="Projects waiting for a save or push" hidden></button><span class="sp"></span></footer>
+</div>
+
+<div class="uplink" id="uplink" hidden role="dialog" aria-modal="true" aria-labelledby="uplink-title">
+  <div class="uplink-plate">
+    <button type="button" class="uplink-x" id="uplink-x" aria-label="Hide"><i class="ic">&#xE711;</i></button>
+    <div class="uplink-brand">TOMLIN · BRIDGE</div>
+    <div class="uplink-sys">Orbital Operations System</div>
+    <h2 id="uplink-title">Re-establishing uplink</h2>
+    <div class="uplink-field"><span>Operator</span><div class="uplink-val" id="uplink-op" aria-live="off"></div></div>
+    <div class="uplink-field"><span id="uplink-pass-label">Password</span><div class="uplink-locked" role="img" aria-labelledby="uplink-pass-label"><i class="ic" aria-hidden="true">&#xE72E;</i><b aria-hidden="true">••••••••</b><em>LOCKED</em></div></div>
+    <div class="uplink-bar" aria-hidden="true"><i></i></div>
+    <ol class="uplink-log" id="uplink-log" aria-live="polite"></ol>
+    <p class="uplink-note">Just for fun while TOMLIN starts: nothing is being signed in, and nothing here takes a password. The page reconnects by itself.</p>
+    <div class="uplink-act" id="uplink-act"></div>
+  </div>
+</div>
+<div class="menu" id="menu" hidden role="menu"></div>
+<dialog id="dlg"><form method="dialog" id="dlg-form"><div class="dlg-body" id="dlg-body"></div><div class="dlg-foot" id="dlg-foot"></div></form></dialog>
+<div class="infobar" id="infobar" hidden role="status"><i class="ic" id="ib-ic">&#xE946;</i><div id="ib-text"></div><button type="button" id="ib-copy" aria-label="Copy message" title="Copy"><i class="ic">&#xE8C8;</i></button><button type="button" id="ib-close" aria-label="Close"><i class="ic">&#xE711;</i></button></div>
+<script src="js/core.js"></script>
+<script src="js/pages.js"></script>
+<script src="js/projects.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/orbit.js"></script>
+<script src="js/status.js"></script>
+<script src="js/folders.js"></script>
+<script src="js/prompts.js"></script>
+<script src="js/dialogs.js"></script>
+<script src="js/git.js"></script>
+<script src="js/nodes.js"></script>
+<script src="js/sm.js"></script>
+<script src="js/private.js"></script>
+<script src="js/actions.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/boot.js"></script>
+</body>
+</html>

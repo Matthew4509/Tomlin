@@ -1,0 +1,32 @@
+{
+ "note": "Classes the scanner catches today, and quiet cases it still flags. test/museum.test.js fails if a caught class is lost; add ids here as phases catch more. Phase T1 baseline: 14 of 131 classes (11%), 35 of 474 faults (7%). Phase T2: 85 of 131 (65%), 253 of 474 faults (53%); one-file rules 81 of 90. Phase T3: 112 of 131 (85%), 398 of 474 faults (84%); cross-file 28 of 28. Phase T4: 119 of 131 (91%), 418 of 474 faults (88%); quiet-book-text fixed. Phase T5: 129 of 131 (98%), 470 of 474 faults (99%); live 13 of 13. Phase T7: 130 of 131 (img-no-dimensions back as Low); money-int-cast left out on purpose (T2).",
+ "caught": [
+  "rate-key-xff", "tracker-no-consent", "innerhtml-from-fetch", "secret-key-in-public-js", "privacy-omits-script-host",
+  "disc-private-detail", "disc-other-project", "disc-local-path", "disc-name-in-file-name", "disc-commit-email",
+  "disc-big-bundle", "live-csp-missing", "live-hsts-missing", "live-script-not-in-project", "img-decode-memory",
+  "img-exif-kept", "img-truncated-jpeg", "zip-inflate-cap", "upload-413", "php-input-unbounded",
+  "logout-on-get", "get-link-acts", "lockout-by-email", "pw-change-no-current", "pw-change-sessions",
+  "pay-status-ignored", "import-no-shape", "pdf-img-fixed-box", "fetch-keepalive-big", "big-file-no-validator",
+  "build-overwrites-release", "retry-after-missing", "json-in-script-php", "json-in-script-js", "href-scheme",
+  "hta-subfolder-https", "hta-php-flag", "hta-blocks-well-known", "fetch-success-no-ok", "catch-fixed-text",
+  "mail-result-ignored", "empty-catch", "race-check-then-write", "oauth-state-optional", "oauth-email-unverified",
+  "cors-subdomain-credentials", "link-from-host-header", "secret-compare-not-constant", "secret-from-query-stored", "rate-key-cf-unchecked",
+  "rate-key-ipv6-full", "pdf-core-font", "tracker-cookie-word", "json-shape-unchecked", "number-no-upper-cap",
+  "storage-read-outside-try", "query-no-limit", "webhook-200-bad-signature", "stripe-livemode-unchecked", "postmessage-star",
+  "repeated-field-no-brackets", "iso-date-as-today", "delete-no-confirm", "cli-tool-in-webroot", "back-is-history",
+  "sw-constant-cache", "fixed-temp-file", "log-injection", "symbol-not-imported", "font-below-floor",
+  "modal-no-dialog-role", "label-not-tied", "csv-formula", "ssrf-filter-var-only", "reply-to-from-input",
+  "exception-text-out", "account-enumeration", "sri-missing", "utf8-byte-cut", "regex-from-input",
+  "upload-stored-before-check", "csrf-json-post", "redirect-via-variable", "skip-check-when-key-empty", "disc-working-notes",
+  "anon-write-no-limit", "table-never-pruned", "public-whole-row", "webhook-ack-own-failure", "build-ships-unvetted",
+  "build-drops-referenced-file", "claim-vs-code", "privacy-omits-image-host", "privacy-omits-storage-key", "privacy-names-dropped-service",
+  "no-privacy-page", "alternate-write-skips-guard", "idor-delete-no-owner", "action-switch-no-role", "price-drift",
+  "sanitiser-misses-field", "outside-api-no-cap", "delete-leaves-files", "wipe-misses-keys", "baked-page-outlives-data",
+  "dead-api-route", "feature-off-in-browser-only", "install-drift", "webroot-deny-gap", "csp-blocks-own-form",
+  "immutable-unversioned", "hollow-tests", "disc-owner-quote", "disc-every-line", "disc-older-zip",
+  "disc-zip-in-history", "disc-ai-name-in-copy", "disc-prompt-file", "disc-start-here", "live-headers-by-file-type",
+  "live-soft-404", "live-folder-listing", "live-package-json", "live-orphan-file", "live-dmarc",
+  "live-no-description", "live-robots-prefix", "live-canonical-404", "live-outdated-library", "img-no-dimensions"
+ ],
+ "knownFalseFlags": []
+}

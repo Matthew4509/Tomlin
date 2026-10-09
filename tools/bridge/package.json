@@ -1,0 +1,4 @@
+{
+  "// note": "The Bridge part is plain JavaScript in CommonJS (require); the rest of TOMLIN is ES modules.",
+  "type": "commonjs"
+}

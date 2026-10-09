@@ -1,0 +1,12 @@
+data/
+models/
+runtime/
+node_modules/
+*.log
+build/
+models-folder.txt
+.scratch/
+src/partner.ts
+src/scene.ts
+test/partner.test.ts
+test/scene.test.ts

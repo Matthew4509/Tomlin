@@ -1,0 +1,1348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOMLIN</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<header class="bar" aria-label="This PC">
+  <h1 class="brand"><button class="brand-home" type="button" id="rail-home" title="Home: what is waiting for you, and the jobs"><img class="brand-mark" src="icon.svg" alt="" width="30" height="30"> <span class="brand-name">TOMLIN</span> <span class="rail-count" id="rail-count" hidden></span></button></h1>
+  <!-- This PC's name, shown when a linked PC's meters are beside its own (so the two are told apart). -->
+  <div class="bar-pc bar-mine" id="bar-mine" hidden><strong class="bar-pc-name" id="bar-mine-name"></strong><span class="bar-pc-model">This PC</span></div>
+  <div class="meters">
+    <div class="ring" id="m-cpu" role="img" aria-label="CPU"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">CPU</span></div>
+    <div class="ring" id="m-gpubusy" role="img" aria-label="GPU"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">GPU</span></div>
+    <div class="ring" id="m-ram" role="img" aria-label="RAM"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">RAM</span></div>
+    <div class="ring" id="m-gpu" role="img" aria-label="GPU mem"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">GPU mem</span></div>
+  </div>
+  <div class="loaded" id="loaded" aria-label="Models active"></div>
+  <!-- A chat with someone on a linked PC: that PC beside this one (its name, the model loaded there, its meters). -->
+  <div class="bar-node" id="bar-node" hidden>
+    <div class="bar-pc" id="bar-pc"><strong class="bar-pc-name" id="bar-pc-name"></strong><span class="bar-pc-model" id="bar-pc-model"></span></div>
+    <div class="meters">
+      <div class="ring" id="n-cpu" role="img" aria-label="CPU"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">CPU</span></div>
+      <div class="ring" id="n-gpubusy" role="img" aria-label="GPU"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">GPU</span></div>
+      <div class="ring" id="n-ram" role="img" aria-label="RAM"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">RAM</span></div>
+      <div class="ring" id="n-gpu" role="img" aria-label="GPU mem"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="trk" cx="18" cy="18" r="15.5"/><circle class="val" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="0 100"/></svg><span class="ring-v">–</span><span class="ring-k">GPU mem</span></div>
+    </div>
+  </div>
+  <button class="chip job-chip" type="button" id="job-chip" title="Go to the picture in progress" hidden></button>
+  <span class="chip serving-chip" id="serving-chip" role="status" hidden></span>
+  <span class="mute-all-line" id="mute-all-line" hidden><span id="mute-all-text"></span> <button class="link" type="button" id="mute-all-off">Unmute</button></span>
+  <button class="btn quiet mute-all" type="button" id="mute-all" aria-label="Mute all"></button>
+  <button class="btn quiet padlock" type="button" id="applock-btn" aria-label="App lock" title="App lock: set a PIN for the whole app" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="applock-shackle" d="M8 11V7a4 4 0 0 1 8 0"/></svg></button>
+  <button class="btn quiet colours-toggle" type="button" data-colours-toggle>Colours</button>
+  <button class="btn quiet settings-open" type="button" id="settings-open" title="Settings for the whole app: notifications, app lock, your data and updates"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg><span class="settings-word">Settings</span></button>
+  <button class="btn quiet" type="button" id="help-open" data-help="help-title">Help</button>
+</header>
+<div class="bar-ask" id="bar-ask" hidden></div>
+
+<div class="shell" id="shell" data-view="home">
+<nav class="rail" id="rail" aria-label="Chats, home and staff">
+  <button class="btn primary rail-new" type="button" id="rail-new"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
+  <ul class="rail-list rail-homeline" aria-label="Home">
+    <li><button class="rail-row" type="button" id="rail-home-row"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></span><span class="rail-text"><span class="rail-name">Home</span><span class="rail-sub" id="rail-home-sub">What is waiting for you, and the jobs</span></span><span class="rail-count" id="rail-home-count" hidden></span></button></li>
+    <li><a class="rail-row" href="/bridge/" id="rail-bridge"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17v-5M19 17v-5M3 12c4-5 14-5 18 0"/><path d="M9 17v-6M12 17v-7M15 17v-6"/></svg></span><span class="rail-text"><span class="rail-name">Projects</span><span class="rail-sub">The Bridge: your project folders, local copies, audits, backups and prompts</span></span></a></li>
+  </ul>
+  <ul class="rail-list rail-pinned" id="rail-pinned" aria-label="Pinned chats" hidden></ul>
+  <details class="rail-fold" id="rail-recent-fold">
+    <summary class="rail-head"><span id="rail-recent-title">Recent chats</span></summary>
+    <ul class="rail-list" id="rail-recent" aria-labelledby="rail-recent-title"></ul>
+    <button class="link rail-see-all" type="button" id="rail-recent-all">See all</button>
+  </details>
+  <ul class="rail-list rail-host" id="rail-host" aria-label="The host: this PC's own assistant, not staff (switched off for now)"></ul>
+  <details class="rail-fold" id="rail-staff-fold">
+    <summary class="rail-head"><span id="rail-staff-title">Staff</span></summary>
+    <ul class="rail-list" id="rail-staff" aria-labelledby="rail-staff-title"></ul>
+  </details>
+  <div id="rail-pcs-box" hidden>
+    <h2 class="rail-head" id="rail-hw-title">PCs</h2>
+    <ul class="rail-list rail-mypc" id="rail-mypc" aria-label="My PC"></ul>
+    <h2 class="rail-head" id="rail-pcs-title">Linked PCs</h2>
+    <ul class="rail-list" id="rail-pcs" aria-labelledby="rail-pcs-title"></ul>
+  </div>
+  <details class="rail-fold rail-setup" id="rail-setup-fold" open>
+    <summary class="rail-head"><span id="rail-setup-title">Set up</span></summary>
+    <ul class="rail-list rail-links" aria-labelledby="rail-setup-title">
+      <li><button class="link" type="button" data-setup="staff"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Staff: hire and edit</button></li>
+      <li><button class="link" type="button" data-setup="models"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Add a model</button></li>
+      <li><button class="link" type="button" data-setup="nodes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg>Nodes and memory</button></li>
+      <li><button class="link" type="button" data-setup="jobs"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Jobs</button></li>
+      <li><button class="link" type="button" data-setup="files"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>Files and blog writer</button></li>
+      <li><button class="link" type="button" data-setup="pcs"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Link another PC</button></li>
+    </ul>
+  </details>
+</nav>
+
+<section class="home" id="home" aria-labelledby="home-title">
+  <div class="home-main">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <div class="home-greet"><h2 id="home-title">Home</h2><span class="home-date" id="home-date"></span></div>
+    <button class="btn quiet claude-open" type="button" id="claude-open" title="Claude can be your project manager, splitting a project up into chunks that your cluster can handle">Connect Claude</button>
+  </div>
+  <div class="home-setup" id="home-setup" hidden></div>
+  <section class="home-part" id="home-paused-box" aria-labelledby="home-paused-title" hidden>
+    <h3 id="home-paused-title">Part done</h3>
+    <div class="home-list" id="home-paused"></div>
+  </section>
+  <section class="home-part" id="home-ready-box" aria-labelledby="home-ready-title" hidden>
+    <h3 id="home-ready-title">Recent projects</h3>
+    <div class="home-list" id="home-ready"></div>
+  </section>
+  <form class="home-part home-ask" id="home-ask" novalidate>
+    <h3 class="home-ask-title" id="home-ask-title">Lets create a project</h3>
+    <label class="field"><span>Project name (optional)</span><input id="home-name" type="text" maxlength="80" autocomplete="off"></label>
+    <label class="field"><span>Mini description (optional)</span><input id="home-about" type="text" maxlength="200" autocomplete="off" placeholder="e.g. billion dollar saas make no mistake"></label>
+    <label class="field"><span>Prompt</span><textarea id="home-goal" rows="3" maxlength="1500" placeholder="Describe what should exist when it is finished, e.g. a one-page tip calculator"></textarea></label>
+    <div class="home-staff-row">
+      <label class="home-staff-label" for="home-staff">Staff:</label>
+      <select class="home-staff-select" id="home-staff"></select>
+      <div class="staff-pick" id="home-hire" role="group" aria-label="Hire staff" hidden></div>
+      <button class="btn home-advanced" type="button" id="project-open" title="A few questions, then the colours, layout and type, before the plan">Advanced project setup</button>
+      <button class="btn primary home-go" type="submit" id="home-go">Lets go!</button>
+    </div>
+    <p class="hint" id="home-staff-line"></p>
+    <div id="home-ask-say" hidden></div>
+  </form>
+  </div>
+  <aside class="home-side" id="home-side" aria-label="Waiting for you and staff overview">
+    <details class="home-side-fold" id="home-side-fold" open>
+      <summary class="home-side-sum" id="home-side-sum" title="Fold or open what is waiting for you and the staff overview"><span class="home-side-tabs" role="tablist" aria-label="Waiting for you and staff overview"><button class="side-tab" type="button" role="tab" id="tab-waiting" aria-controls="home-panel-waiting" aria-selected="true"><span id="home-waiting-title">Waiting for you</span></button><span class="side-tab-bar" aria-hidden="true">|</span><button class="side-tab" type="button" role="tab" id="tab-home-staff" aria-controls="home-panel-staff" aria-selected="false" tabindex="-1">Staff overview</button></span><span class="rail-count" id="home-waiting-count" hidden></span><span class="home-side-busy" id="home-working-count" hidden></span></summary>
+      <div class="side-panel" role="tabpanel" id="home-panel-staff" aria-labelledby="tab-home-staff" hidden>
+        <div class="office" data-office="home"></div>
+        <ul class="staff-overview" id="home-staff-overview"></ul>
+      </div>
+      <div class="side-panel" role="tabpanel" id="home-panel-waiting" aria-labelledby="tab-waiting">
+      <div class="home-list" id="home-waiting" aria-live="polite"><p class="home-empty">Loading…</p></div>
+      <section class="home-side-part" aria-labelledby="home-working-title">
+        <h3 class="home-side-head" id="home-working-title">Working now</h3>
+        <div class="home-list" id="home-working"><p class="home-empty">Loading…</p></div>
+      </section>
+      <section class="home-side-part" aria-labelledby="home-queue-title">
+        <h3 class="home-side-head" id="home-queue-title">Queue</h3>
+        <div class="queue-head"><span class="hint" id="home-queue-count" role="status"></span><span class="queue-tools" id="home-queue-tools"></span></div>
+        <div id="home-queue-ask" hidden></div>
+        <ol class="queue-list" id="home-queue"></ol>
+      </section>
+      </div>
+    </details>
+  </aside>
+</section>
+
+<section class="nodes" id="nodes" aria-labelledby="nodes-title">
+  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <div class="home-head">
+    <h2 id="nodes-title">Nodes and memory</h2>
+  </div>
+  <div class="fault" id="node-fault" role="alert" hidden></div>
+  <section class="home-part node-switch" aria-labelledby="node-on-label">
+    <label class="check node-on"><input type="checkbox" id="node-on"> <span id="node-on-label">Enable this PC as a node</span></label>
+    <p class="hint" id="node-on-line"></p>
+    <div class="node-card node-setup" id="node-setup" hidden>
+      <h3>Setup</h3>
+      <div class="node-setup-grid">
+        <label class="field"><span>Node name:</span><input id="node-name" type="text" maxlength="40" autocomplete="off"></label>
+        <div class="field"><span>Setup Code</span><div class="node-code-row"><code class="node-code" id="node-code"></code><button class="link" type="button" id="node-code-new">New code</button></div></div>
+      </div>
+      <div id="node-code-ask" hidden></div>
+      <fieldset class="pick-set node-share" aria-describedby="node-share-about">
+        <legend>Models to share with others</legend>
+        <p class="hint" id="node-share-about">You can select which models connected PCs can see. Additional models can be pushed from host to allow for remote updating.</p>
+        <p class="node-busy" id="node-busy" role="status" hidden></p>
+        <label class="check node-share-all"><input type="checkbox" id="node-share-all"> Select all</label>
+        <div class="node-share-list" id="node-share-list"></div>
+        <div class="team-actions"><button class="btn primary" type="button" id="node-share-save" hidden>Save the list</button><span class="hint" id="node-share-line" role="status"></span></div>
+      </fieldset>
+      <fieldset class="pick-set node-allow">
+        <legend>Sharing permissions:</legend>
+        <label class="check"><input type="checkbox" id="node-allow-all"> Allow all</label>
+        <div class="node-allow-grid">
+          <div><label class="check"><input type="checkbox" data-allow="pull"> Sharing of models</label><p class="hint">Allows others on the network to pull (the models ticked above) across the network.</p></div>
+          <div><label class="check"><input type="checkbox" data-allow="backup"> Enable backups</label><p class="hint">This is a local git, that backs up host's projects to this node.</p></div>
+          <div><label class="check"><input type="checkbox" data-allow="push"> Allow host to push models</label><p class="hint">Allows a host PC to remote install a model: it goes in this PC's models folder.</p></div>
+          <div><label class="check"><input type="checkbox" data-allow="update"> Allow host to update TOMLIN remotely</label><p class="hint" id="node-restarts" hidden>This copy was not started by the installed TOMLIN or Start TOMLIN.cmd, so it cannot start a new version by itself: install it with Install TOMLIN.cmd, or start it with Start TOMLIN.cmd.</p></div>
+        </div>
+        <p class="hint ok" id="node-updated" role="status" hidden></p>
+        <p class="hint" id="node-kept" role="status"></p>
+        <div class="node-projects" id="node-projects"></div>
+      </fieldset>
+      <div class="field"><span>This PC's address (type it on the main PC if Find does not see it)</span><div id="node-addrs" class="node-addrs"></div></div>
+      <div class="node-fw">
+        <div class="node-code-row"><strong>Can other PCs reach this one?</strong><button class="btn quiet" type="button" id="node-fw-check">Check</button></div>
+        <p class="hint" id="node-fw-line" aria-live="polite">Checks this PC's network type and firewall. Nothing is changed.</p>
+        <div id="node-fw-fix" hidden>
+          <pre class="node-fw-code" id="node-fw-code"></pre>
+          <div class="node-code-row"><button class="btn primary" type="button" id="node-fw-copy">Copy</button><span class="hint">Copy gives one line that runs the lines above. Start menu, type <b>PowerShell</b> (or cmd), right-click, <b>Run as administrator</b>, paste, press Enter. Then press Check again.</span></div>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="node-pin-on"> Also ask for a PIN (optional)</label>
+      <p class="hint" id="node-pin-line" hidden></p>
+      <details class="sub"><summary>Advanced: port</summary>
+        <label class="field"><span>Port other PCs use (8741 unless something else uses it)</span><input id="node-port" type="number" min="1024" max="65535"></label>
+      </details>
+      <p class="hint">The link is encrypted. All files sent over the network are encrypted. The node keeps no history of work done, with two exceptions: a finished answer the host has not collected yet is kept encrypted for up to 3 days (then deleted, or deleted as soon as the host collects it), and token counts are logged for each project, by its name. Backups (from host, if enabled above) are not encrypted.</p>
+      <label class="check"><input type="checkbox" id="node-autostart"> Start TOMLIN when this PC starts</label>
+      <div class="node-away" id="node-away" hidden>
+        <p class="hint" id="node-away-line"></p>
+        <div class="team-actions">
+          <button class="btn primary" type="button" id="node-back-btn">Start it again</button>
+        </div>
+      </div>
+      <div id="node-paired-ask" hidden></div>
+      <div id="node-paired"></div>
+    </div>
+  </section>
+  <section class="home-part" id="node-link" aria-labelledby="node-others-title">
+    <h3 id="node-others-title">Other PCs</h3>
+    <p class="hint">On the other PC, tick <strong>Enable this PC as a node</strong>. Then find it here.</p>
+    <div class="team-actions">
+      <button class="btn primary" type="button" id="node-scan">Find PCs on my network</button>
+      <label class="field node-scan-port"><span>Port (if changed there)</span><input id="node-scan-port" type="number" min="1024" max="65535" value="8741"></label>
+    </div>
+    <p class="hint" id="node-scan-line" aria-live="polite"></p>
+    <div class="home-list" id="node-found"></div>
+    <details class="sub"><summary>Not found? Type its address instead</summary>
+      <form id="node-addr-form" class="node-link-form">
+        <label class="field"><span>Its address (shown on that PC)</span><input id="node-addr" type="text" placeholder="192.168.1.20:8741" autocomplete="off" required></label>
+        <label class="field"><span>Setup code</span><input id="node-addr-code" type="text" maxlength="9" autocomplete="off" placeholder="ABCD-EFGH" required></label>
+        <label class="field"><span>Link PIN: 6 digits, only if that PC shows one (never its app lock PIN)</span><input id="node-addr-pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+        <button class="btn" type="submit">Link</button>
+      </form>
+    </details>
+    <h4>Linked</h4>
+    <div class="team-actions"><button class="btn" type="button" data-net>My local LLMs</button><span class="hint">Copy a model a linked PC shares, or keep a restore point there.</span></div>
+    <div id="node-others-ask" hidden></div>
+    <div class="node-tiles" id="node-others"></div>
+  </section>
+  <section class="home-part" aria-labelledby="node-models-title">
+    <div class="calc-head"><h3 id="node-models-title">Models on this PC</h3><button class="btn" type="button" data-calc>What can this PC run?</button></div>
+    <p class="hint">List of models on this PC. Runs speed tests to see what works well.</p>
+    <div id="node-models-ask" hidden></div>
+    <div class="node-models" id="node-models"></div>
+  </section>
+</section>
+
+<section class="models-page" id="models-page" aria-labelledby="mp-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="mp-title">Models</h2>
+  </div>
+  <div class="mp-grid">
+    <div class="mp-side">
+      <section class="mp-search-filters" aria-labelledby="mp-filters-title">
+        <h3 id="mp-filters-title">Search filters</h3>
+        <div class="mp-filters" title="Chat model size: billions of parameters (B) and download size (GB). Empty = any.">
+          <label class="mp-f" for="mp-min-b">Min B:</label><input id="mp-min-b" type="number" min="0" step="0.5" inputmode="decimal" placeholder="any">
+          <label class="mp-f" for="mp-max-b">Max B:</label><input id="mp-max-b" type="number" min="0" step="0.5" inputmode="decimal" placeholder="any">
+          <label class="mp-f" for="mp-min-gb">Min GB:</label><input id="mp-min-gb" type="number" min="0" step="0.5" inputmode="decimal" placeholder="any">
+          <label class="mp-f" for="mp-max-gb">Max GB:</label><input id="mp-max-gb" type="number" min="0" step="0.5" inputmode="decimal" placeholder="any">
+          <button class="link mp-f-clear" type="button" id="mp-filter-clear" hidden>Clear sizes</button>
+        </div>
+      </section>
+      <nav class="mp-cats" id="mp-side" aria-label="Model categories"></nav>
+    </div>
+    <div class="mp-main">
+      <div class="mp-bar">
+        <form class="mp-bar-row" id="mp-search-form" role="search">
+          <label class="field grow"><span class="sr-only">Search models</span><input id="mp-search" type="search" placeholder="Search models: name or what it is for, e.g. qwen, gemma, coder" autocomplete="off"></label>
+          <button class="btn" type="submit" id="mp-search-go">Search</button>
+          <span class="mp-show-line">
+            <span class="g-shelves mp-show" id="mp-show" role="group" aria-label="Which models to list">
+              <button class="g-shelf" type="button" data-show="all" aria-pressed="true">All</button>
+              <button class="g-shelf" type="button" data-show="hide" aria-pressed="false" title="Only the models not on this PC yet">Not installed</button>
+              <button class="g-shelf" type="button" data-show="only" aria-pressed="false" title="Only the models on this PC, including the ones used from another folder">Installed</button>
+            </span>
+            <button class="g-shelf mp-net" type="button" data-net title="The models your linked PCs share, restore points kept on them, and updates going to them">My local LLMs</button>
+          </span>
+        </form>
+        <p class="hint mp-list-line" id="mp-hf-list" aria-live="polite"></p>
+        <div class="mp-job" id="mp-job" aria-live="polite"></div>
+      </div>
+      <div class="team-actions"><button class="btn" type="button" id="mp-stop" hidden>Stop the download</button></div>
+      <h3 id="mp-heading">All models</h3>
+      <div class="mp-folder mp-tiles" id="mp-folder-box" hidden>
+        <section class="mp-tile" aria-labelledby="mp-tile-download">
+          <h4 id="mp-tile-download">Download</h4>
+          <p>Download any compatible gguf file from <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener noreferrer">Hugging Face</a> and move the folder into:</p>
+          <p class="mp-path" id="mp-own-folder"></p>
+        </section>
+        <section class="mp-tile" aria-labelledby="mp-tile-connect">
+          <h4 id="mp-tile-connect">Connect</h4>
+          <p>Already have LLM files for another manager installed? Select the folder containing the files so that you have 1 folder for all your LLM's.</p>
+          <form id="mp-folder-form" class="team-hire">
+            <label class="field grow"><span class="sr-only">The folder containing the files</span><input id="mp-folder" type="text" autocomplete="off" placeholder="D:\AI models"></label>
+            <button class="btn" type="submit">Use this folder</button>
+            <button class="btn quiet" type="button" id="mp-folder-stop" hidden>Stop using it</button>
+          </form>
+          <p class="hint" id="mp-folder-line"></p>
+        </section>
+      </div>
+      <div id="mp-list" class="mp-list"></div>
+    </div>
+  </div>
+</section>
+
+<section class="models-page app-page" id="settings" aria-labelledby="settings-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="settings-title">Settings</h2>
+  </div>
+  <div class="help-body page-body">
+    <p class="hint">For the whole app. A model's own settings (where it runs, how many cores, its context) are under the gear beside its Connect button; a person's are in Staff.</p>
+    <fieldset class="colours-pick" data-colours-pick>
+      <legend>Colours</legend>
+      <p class="hint">Kept in this browser. The button beside Settings at the top swaps Day and Night.</p>
+      <label class="check"><input type="radio" name="colours" value=""> Follow Windows (light or dark, as Windows is set)</label>
+      <label class="check"><input type="radio" name="colours" value="day"> Day: light grey and blue</label>
+      <label class="check"><input type="radio" name="colours" value="night"> Night: deep navy and sky blue</label>
+    </fieldset>
+    <div id="settings-notify"></div>
+    <div id="settings-lock"></div>
+    <div id="settings-keep"></div>
+  </div>
+</section>
+
+<section class="models-page app-page" id="help" aria-labelledby="help-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="help-title">Help</h2>
+  </div>
+  <div class="help-body page-body">
+    <p class="hint help-toc">On this page: <button class="link" type="button" data-help="help-chat">Chat models</button> · <button class="link" type="button" data-help="help-images">Picture models</button> · <button class="link" type="button" data-help="help-staff">Staff</button> · <button class="link" type="button" data-help="help-jobs">Jobs</button> · <button class="link" type="button" data-help="help-bridge">Projects (the Bridge)</button> · <button class="link" type="button" data-help="help-notebooks">Memory</button> · <button class="link" type="button" data-help="help-nodes">Other PCs</button> · <button class="link" type="button" data-help="help-speed">Speed</button> · <button class="link" type="button" data-help="help-pins">The two PINs</button> · <button class="link" type="button" data-help="help-log">When something goes wrong</button></p>
+    <p class="hint">Bigger models answer and draw better but need more memory and time. Times were measured on an Intel HD 520 laptop
+      and a 32 GB CPU-only desktop. A token is about three quarters of a word.</p>
+    <p class="hint"><button class="link" type="button" data-calc>What can my PC run? Work it out</button></p>
+
+    <h3 id="help-chat">Chat models</h3>
+    <div class="table-wrap"><table class="help-table">
+      <thead><tr><th scope="col">Pick for</th><th scope="col">Model</th><th scope="col">Download</th><th scope="col">Measured</th><th scope="col">Good to know</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Fastest, low-end PC</th><td>Qwen 3.5 0.8B</td><td>0.5 GB</td><td>Laptop: first word 8 s, 17.7 tokens a second</td><td>Quick and simple; loses the thread in long chats.</td></tr>
+        <tr><th scope="row">Fast, better answers</th><td>Gemma 2 2B or Qwen 3.5 2B</td><td>1.7 GB / 1.3 GB</td><td>Gemma 2 2B, laptop: 6.4 tokens a second. Qwen 3.5 2B: not timed</td><td>Gemma 2 2B was the warmest of the small ones.</td></tr>
+        <tr><th scope="row">Balanced, 16 GB RAM</th><td>Qwen 3.5 9B</td><td>5.7 GB</td><td>Not timed</td><td>Clearly smarter; slow without a graphics card.</td></tr>
+        <tr><th scope="row">Best quality, 32 GB RAM</th><td>Qwen 3.5 35B-A3B</td><td>22 GB</td><td>32 GB desktop, CPU only: first word 4.6 s, 5.2 tokens a second</td><td>Best answers. Only 3B of it works on each word, so it runs like a small model, but it needs about 24 GB of free RAM.</td></tr>
+        <tr><th scope="row">Avoid without a graphics card</th><td>12B "dense" models, e.g. Mistral Nemo 12B</td><td>7.5 GB</td><td>32 GB desktop, CPU only: first word 51 s, 2.1 tokens a second</td><td>Every word reads the whole file, so a CPU crawls.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="hint">Chat models are .gguf files: put them in <code>TOMLIN\models\chat</code> in your user folder (Models lists what is found).</p>
+
+    <h3 id="help-images">Picture models</h3>
+    <div class="table-wrap"><table class="help-table">
+      <thead><tr><th scope="col">Pick for</th><th scope="col">Model</th><th scope="col">Download</th><th scope="col">Measured</th><th scope="col">Good to know</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Fast, photos (blog)</th><td>Realistic Vision 6 + LCM (SD 1.5)</td><td>2.3 GB</td><td>Laptop, 512 px, 4 steps: about 50 s on the HD 520 graphics, about 3 min on the CPU alone</td><td>Photo-like pictures. It cannot draw flat icons: it draws a photo instead.</td></tr>
+        <tr><th scope="row">Fast, icons and drawings</th><td>DreamShaper 8 LCM (SD 1.5)</td><td>2.1 GB</td><td>Not timed (same size as the one above)</td><td>Illustrations, icons, cartoon looks.</td></tr>
+        <tr><th scope="row">Better photos, graphics card 4 GB+</th><td>Juggernaut XL or RealVisXL (SDXL), 8-bit</td><td>About 4 GB</td><td>Not timed. Not in TOMLIN's Models list yet</td><td>A clear step up for photos, drawn at 1024 px. Check the licence of the version you download.</td></tr>
+        <tr><th scope="row">Best quality, NVIDIA card 4 GB+</th><td>Qwen-Image 2.1 (7B)</td><td>9.9 GB</td><td>Not run yet</td><td>Much better pictures and readable text. <strong>Non-commercial licence: not for a business blog.</strong></td></tr>
+        <tr><th scope="row">Fast and sharp, strong PC (suggested)</th><td>Z-Image Turbo (about 6B)</td><td>About 4 to 6 GB, 8-bit or 4-bit</td><td>Not run here. Suggested by a reader; not in TOMLIN's Models list yet</td><td>Draws good photos in about 8 steps. On a CPU-only laptop it would still take many minutes a picture, so it suits an NVIDIA card. Check the licence of the version you download.</td></tr>
+        <tr><th scope="row">Changing a picture you have (suggested)</th><td>FLUX.2 klein (4B, or 9B)</td><td>About 4 GB (4B) or 7 GB (9B), plus its text model</td><td>Not run here. TOMLIN cannot edit pictures yet</td><td>Made for "change this picture" as well as drawing from words. The 9B is understood to have a non-commercial licence, so for a business blog look at the 4B first.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 id="help-vision">Looking at pictures (picture to text)</h3>
+    <p class="hint">Today's chat models cannot see, so alt text comes from the prompt. These can describe a picture; none is installed or tested here.</p>
+    <div class="table-wrap"><table class="help-table">
+      <thead><tr><th scope="col">Pick for</th><th scope="col">Model</th><th scope="col">Download</th><th scope="col">Measured</th><th scope="col">Good to know</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Captions and alt text, any PC</th><td>Florence-2 (base or large)</td><td>Under 2 GB</td><td>Not run here</td><td>Tiny and very good at "describe this picture". Runs on a CPU. It describes; it does not chat.</td></tr>
+        <tr><th scope="row">Seeing and chatting</th><td>Qwen3-VL 2B or Gemma 3 4B (with its vision file)</td><td>About 2 to 4 GB</td><td>Not run here</td><td>A chat model that can also look at a picture you give it. Runs in the same runner as the chat models.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 id="help-tips">Getting a good picture</h3>
+    <ul class="help-tips">
+      <li><strong>Photo for a blog:</strong> Mode "Blog / photo" with Realistic Vision. Describe it like a photo: "a reading chair in a sunlit living room, 35mm photo, natural light". For a wide picture, set 768 × 512.</li>
+      <li><strong>Drafts, then full quality:</strong> the 4-step drafts are for choosing. Open the one you like and press "Re-run at full quality": same seed, sharper hands, keys and skin.</li>
+      <li><strong>Cartoons and cartoon profile pictures:</strong> use DreamShaper, Mode "Cartoon" (or "cartoon" in the prompt). "cartoon profile picture of a friendly baker" draws a square head-and-shoulders picture; then press "Set as profile photo" and pick whose it is. DreamShaper sometimes draws a ring round the head for these.</li>
+      <li><strong>Icons:</strong> use DreamShaper. A photo model in Icon mode reads "plain white background" as a studio photo shoot and often adds a person. With a photo model, try "product photo, isolated object, light grey background".</li>
+      <li><strong>People:</strong> say who, with an age ("a woman in her 30s"); left out, the model tends to draw someone young. For no people, put "people, person" in the Negative prompt and use full quality: the fast drafts (CFG 1) ignore the Negative prompt, and "no people" in the prompt itself can add one.</li>
+      <li><strong>Weak spots:</strong> hands, close-ups of keyboards, and any text or signs. Wide shots come out best.</li>
+    </ul>
+
+    <h3 id="help-staff">Staff</h3>
+    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). The chat shows the model of the chat open now; every model loaded is in the top bar. Staff are people you hire (Settings, Set up, Staff): a name, a role (Default, coder, writer, artist…) and a level. Default is the model as it is, with nothing of ours sent (no instructions, no memory, the model's own settings), as in a plain chat window; <b>Hire staff</b> is one window: their look, name, role and level on the left; on the right the PC they work on, then the models on that PC as cards with the memory each needs (a card says when a model needs more memory than is free). Their name comes from the model (Qwen, Gemma…) unless you type one, and the level starts at the size of the model picked (change it if you like: it only orders the models suggested to them). Give each a first choice model and a fallback under Edit Staff (the pencil beside them). <b>Look</b> (in Change look in Hire staff, and under Edit Staff) draws each hire as a little person: gender, skin, hair, hair colour, top, glasses, facial hair and headwear. It is their round picture wherever they have no profile photo (a photo, when set, still shows instead), and how the office in Staff overview draws them. Press a person in the left panel to talk to them. An artist's chat draws what you type there, exactly as typed; a picture asked for in any other chat is pointed to the artist. On the right of the chat, <b>Chats | Tools | Staff overview</b> (Home's right panel has <b>Waiting for you | Staff overview</b>): Staff overview shows each hire with their role, the model they run and on which PC, how they are now and what they are doing, with Talk and Edit. At its top is the office: each hire as a little person at their PC's desk while their model loads, reads, thinks, types or draws (a long think, over 15 seconds, goes to the boardroom). With nothing to do they stay at the desk for 2 minutes, then stand up and stretch in the room, and after 5 minutes go to the kitchen or the lounge. While their PC is off they are out of the front door on holiday at the beach, and the PC sits in the far corner in cobwebs. Press a person (or their card) to follow them; in a chat it follows the person you are talking to. Watch opens it full screen (Esc closes it). Drag a person onto another desk, or drag them from the left panel onto a desk, to move them: the same Move window as the left panel's, and they carry their box over. Firing someone (Staff, Edit, Fire) opens the office on them: the boss walks in, they pack a box and leave by the front door. In the full view, <b>Award employee of the month</b> gives it to whoever wrote the most tokens this month (their portrait goes on the lounge wall, with a 20% off voucher), <b>Buy them pizza</b> brings a pizza to the kitchen for everyone with nothing to do, the shop row spends the tokens your staff have written ("To spend"): <b>Buy them coffee</b> sends them out to a coffee cart, <b>Buy them donuts</b> brings a box to the kitchen table, and <b>Buy gym equipment</b> (100,000 tokens, bought once) puts a treadmill and a weights bench in the lounge, and this week's leaderboard is under the office. Press a person to see what they are holding. A PC linked while you watch is carried in and set up by IT (and carried out when removed); a project step brings a folder of work to the desk; up to two people with nothing to do join a long think in the boardroom; someone whose PC is in use by its owner is away: in the lounge, asleep in the armchair, or helping a brainstorm. Chats lists every chat under the project it belongs to (then Default, the chats in no project), each as the person and the subject. Tools keeps each piece of work with a person apart: type a subject name, pick its project (the open chat's, to start with) and press Create new subject, and its messages (or an artist's pictures) stay in that subject, in that project; the same name in another project is another subject. Under it, the Scratch pad keeps notes as you type (Save note files it in the notes folder, or in a project's admin notes, named with the date and time), and Snippets (global) keeps prompts or notes to use again (Browse lists them all with Copy on each; the save icon in the corner of the message box saves what is typed there, with a subject if you like); both are the same in every chat and no model reads them. A chat's writing tone is in the chat's gear for the host, and in each hire's profile (Staff) for them. The copy icon in the top right corner of a message you sent copies it; Save and Copy at the end of the chat's top row save the whole chat as a text file or copy it. Save on a code block in an answer puts that code in a file in the Files folder (Replace when the file is there; the old one is kept as .bak): a chat in Default saves into its own chats folder (named with when it started), and putting the chat in a project moves those files into the project; in a project, a writer's work goes into its specialists\writer folder, named with the date and time. If the connection to a linked PC is lost while it answers, it finishes the answer and keeps it: Reconnect under the words so far collects it (it is also collected by itself once a minute). <strong>Send to…</strong> under an answer hands it on: the card shows the words (or only the part you picked in the answer) to change first, Copy, and "Write it as a prompt for…" (a picture prompt for an artist, a brief for the coder or the writer); Send opens that person's chat (or the subject you name) and sends it at once, loading their model first if it is not loaded. The blog writer's picture button opens the same card with the picture prompt it wrote, so you see it before it is drawn.</p>
+
+    <h3 id="help-jobs">Jobs</h3>
+    <p class="hint">A job turns a goal into small steps you read and change before anything runs. On Home, Lets create a project takes a project name, a mini description (optional) and the prompt, and makes the project's folder inside the workspace folder, named with the date and time; Staff, a list of each hire as name - software - PC, picks who leads it (Default is the strongest worker available; a hire on a Backups only PC is not listed), and Lets go! has them make the plan. Advanced project setup, under it, asks a few questions and lets you pick the look first. Each step sees only its brief and its files, and code checks every answer.</p>
+    <p class="hint">In Jobs, the left column has each job's Overview, its steps (press one to read and change it) and See all. The Overview holds the Scope card and the design brief (the copy icon copies one; the pencil changes it, with Cancel and Save), Choose a Project manager, and Roles: for the Coder and the Writer, assigned is the hire you pick, not assigned means the project manager does those steps, and default is a hire in that role, else the project manager; for Auditing (the reviewer and the end-of-job report), assigned is the hire you pick, not assigned means nobody audits, and default is the strongest worker available. What you expect of the final audit goes to the auditor with the end-of-job report. Run the next step saves nothing until you press Save; LETS GO!!! runs the rest, saving each step that passes the checks and stopping at the first that does not.</p>
+
+    <h3 id="help-bridge">Projects (the Bridge)</h3>
+    <p class="hint">Projects in the left panel opens the Bridge (Myia Bridge, built in, in its own look): every project folder in your working folders, with its local copy (Run local copy, Stop), its git marks, a built-in audit, Hosted live lights for a site you host, your saved prompts, and the tokens your AI tools used on it. A project's git window has Copies on my other PCs: tick it and the project goes with the backups to your linked PCs (those with Enable backups ticked) every 10 minutes when it changed; Bring back puts a copy in a new folder, never over the project. Start with a hire, beside Copy, opens the Send to card here with the words, to send to one of your staff. Its own Help page says what each part does. Used Myia Bridge on its own before? Its About page has Bring in from Myia Bridge.</p>
+
+    <h3 id="help-queue">The queue</h3>
+    <p class="hint">The queue lines work up so your PCs carry on without you. <b>Add to the queue</b> is in three places: in Jobs beside LETS GO!!! (a project; one saved on Home with no plan yet is planned first), in an artist's pictures pane beside Draw (one picture, or a list with one picture per line, for the project chosen beside it), and in a chat when that person's PC is busy with the queue (you are asked: Add to the queue, Send now anyway, or Not now). Each PC does one thing at a time; work for different PCs runs side by side. A picture is drawn whole (not a draft) by the artist on their own PC, kept in the gallery and put in the project's specialists\images folder. A project runs its steps as LETS GO!!! does: each step that passes its checks is saved; one that needs you waits for you in Waiting for you, and the queue goes on to the next thing. A picture step in a project is drawn by the queue, and the project goes on after it. To make room, the queue may unload a model it does not need now (a picture model for a chat model, or the other way round); on a node, only one loaded for linked PCs, and only on a node with 2.0.41 or later. A line put back because its PC was busy or off is tried again every 2 minutes, for up to an hour.</p>
+    <p class="hint">On Home, the Queue panel lists the lines in order, with the PC each runs on: the arrows move a waiting line, Cancel ends one (asked first while it runs), <b>Stop</b> stops what runs now (it goes back in line) and starts nothing new until <b>Resume</b>, Again puts back a line that did not finish, and Clear the list takes every waiting line off (asked first). What came back waits in Waiting for you: Review photos for each project, Review documents for a project that finished, Reply and answer for a chat, and what did not finish. Seen takes a line off. When TOMLIN is closed while something runs, it runs again the next time it starts.</p>
+
+    <h3 id="help-think">Quick or Think</h3>
+    <p class="hint">Beside Send, each chat has <b>Quick</b> (the start) and <b>Think</b>. Quick answers straight away. Think lets the model work the question out first and answer after: better for sums, code, plans and anything with steps. It takes longer because every word of that working is written out, at the same speed as the answer, before the answer's first word; on a small PC that can be minutes. The working is folded above the answer ("Thought for 40 s"): open it to read it. It is kept with the answer but never sent to the model again. While it works, <b>Answer now</b> stops the working and asks for the answer with what it has worked out so far; TOMLIN does the same by itself when the working goes round in circles or runs very long, and says so under the answer. Only models that can think do it (Qwen 3 and 3.5); others answer straight away and say so. Reasoning models (DeepSeek R1, QwQ) always think, even on Quick. Small models overthink: on a 2B, Quick is often the better choice.</p>
+
+    <h3 id="help-notebooks">Memory</h3>
+    <p class="hint">Memory is what a person keeps between chats: lines you write or pin, read before each answer. Each hire has their own; the team memory is read by everyone. Type <code>remember: …</code> in a chat to add a line without a model (<code>remember for the team: …</code> for the team). Memory, under the chat box, shows each line to change or delete; at its foot, "What they read for the next answer" shows how much of the model's room each part takes (instructions, memory lines, the chat so far) and what was left out.</p>
+
+    <h3 id="help-nodes">Other PCs (nodes)</h3>
+    <p class="hint">Another PC on your home network can lend its models: a node. On that PC, Settings, Set up, Nodes and memory, tick Enable this PC as a node (a node must have the app lock, so it asks for that PIN first), then tick the models under Models to share with others (chat models answer, picture models draw) and press Save the list. On this PC, Other PCs, Find PCs on my network, then type the setup code shown on the node. The link is encrypted and the node keeps no history of the work, except a finished answer this PC has not collected yet (kept encrypted for up to 3 days) and token counts for each project, by its name.</p>
+    <p class="hint">Then hire staff on this PC as usual and pick the node under Assign a PC and one of its models under Choose a model (or change it later in Edit Staff): each reads like Qwen3.5-9B on "Worker PC". An artist picks one of its picture models the same way. Who they are, their memory and their chats stay on this PC; the node only loads the model and answers (or draws). Two PCs can use the same node: while its model works for one, the other waits. On the node, Nodes and memory says which models linked PCs are using now, and someone at the node is asked first ("Using this can impact connected users", I agree) before using one of them. Staff hired on a node and lent out are retired: their old chats are kept to read.</p>
+    <p class="hint">What linked PCs may do on a node is ticked there, under Sharing permissions (each tick asks the app lock PIN; Allow all ticks all four): <b>Sharing of models</b> lets them copy the shared models, <b>Enable backups</b> lets the host back its projects up there (a local git repository: every 10 minutes when something changed, only what changed is sent) and keep a restore point of its data (the newest 3), <b>Allow host to push models</b> lets them install one of their models there (shared from then on), <b>Allow host to update TOMLIN remotely</b> lets a newer TOMLIN be installed there. On this PC, My local LLMs (under Other PCs, and on the Models page) lists every model the linked PCs share: Get a copy brings one here over your home network, so a model you deleted to save room comes back without downloading it again. The same window keeps a restore point there; Bring back puts one in this PC's backups, and Settings, Your data and updates, Put back uses it. A copy that was cut short carries on from where it stopped.</p>
+    <p class="hint">Updating a linked PC: when it runs an older TOMLIN, its tile under Other PCs says <b>Outdated: 2.0.32 (this PC 2.0.33)</b> with <b>Update it</b>, or why it cannot be updated from here. On that PC, tick <b>Allow host to update TOMLIN remotely</b> first. Only the files that changed are sent; that PC puts the new version in a folder beside its copy (the old one is kept for going back), backs its data up, and starts the new version in the same window, once nothing is running there. It must run as the installed TOMLIN (Install TOMLIN.cmd) or from Start TOMLIN.cmd. A PC older than 2.0.33 cannot be updated this way: install the new version there by hand once.</p>
+    <p class="hint">Installing: unzip, then double-click <b>Install TOMLIN.cmd</b>. It asks first, needs no administrator, adds TOMLIN to the Start menu and Settings &gt; Apps, and runs it with an icon by the clock (no black window): the icon opens it, starts it again or quits it. Your data stays where it was. Windows may warn the first time ("More info", "Run anyway"): the installer is not signed.</p>
+    <p class="hint"><b>Repair install</b> (My PC, in the left panel; also in the icon's menu by the clock) puts an installed TOMLIN back in order without a zip: when a copy started from a folder (Start TOMLIN.cmd) ran and took the updates from linked PCs, it copies that copy into the install; it builds TOMLIN's program (TOMLIN.exe) again, points current.txt at the copy to run, and points the Start menu shortcut, the desktop shortcut and Start with Windows at it. It lists what it would do first and never touches your chats, staff, pictures or models. Then <b>Start the installed one now</b> closes the copy started from a folder, and the installed one takes over. In the same place: <b>Shortcut to desktop</b>, and <b>Start on start up</b> (<b>Cancel start on PC start up</b> when it is on). Started while TOMLIN already runs another way, the program by the clock opens that one instead of saying it failed.</p>
+
+    <h3 id="help-speed">Speed</h3>
+    <p class="hint">Every answer is timed: tokens written a second, and how fast the prompt was read (a token is about three quarters of a word). <b>Test speed</b> runs one example prompt (about 150 words) on a person's model, a linked PC's or a model here, and times it; it is under Edit Staff, on Nodes and memory, and under Staff on other PCs. The left panel shows each person's expected speed ("17 tok/s"): the average of their last answers once there are three, else the test. A person's Speed shows the test as the baseline, the average, and a chart of the recent answers. Only numbers are kept (in <code>speed.json</code>), never what was asked or answered.</p>
+
+    <h3 id="help-pc-costs">Uptime and costs</h3>
+    <p class="hint">Press a PC in the left panel (My PC, or a linked PC) for its window: how long TOMLIN has run there and how long the PC has been on, how many of this PC's once-a-minute checks it answered in the last 7 days, and its total tokens (read and written, from every answer its chat models wrote, for anyone; pictures are not counted). Give it, if you like, its power draw while a model works (watts) and the price of a kWh in US dollars: then each project's power cost is worked out (watts × working hours ÷ 1,000 × price), beside the same tokens at the Claude Opus 5.5 API's and the ChatGPT API's list prices, with the least of them marked. Only working time counts, never the PC sitting idle. Tokens are counted three ways: read new, read from the cache (the start of the chat the model read on the turn before: no work, but an API still bills it at its lower cached price), and written; the API figures price them that way, and say what they would be without caching. Each linked PC keeps its own log of the work it did for this PC, per project, and that log is the final tally (read once a minute and when its window opens); a project's Overview shows its tokens and cost over every PC. The prices were checked on the date shown and can be changed there. A linked PC needs 2.0.40 or later for its own log (2.0.39 for uptime and totals).</p>
+
+    <h3 id="help-pins">The app lock PIN</h3>
+    <p class="hint">The app lock PIN (the padlock in the top bar; Settings) locks the whole app. Lost it? Close TOMLIN and delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder: the PIN is gone and the chats stay.</p>
+
+    <h3 id="help-log">When something goes wrong</h3>
+    <p class="hint">TOMLIN writes what went wrong (a model that would not load, a chat or job step that stopped, a fault in the app) to a log file, one a day, the last 7 days kept, in <code>TOMLIN\data\logs</code> in your user folder. It holds where and what went wrong, never your chats or files, so it can be sent to someone who helps.</p>
+    <p class="hint"><button class="link" type="button" id="log-open">Open the log</button> <span id="log-said" role="status"></span></p>
+  </div>
+</section>
+
+<main class="panes" id="panes" data-show="chat">
+  <button class="btn quiet back panes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <!-- Chat -->
+  <section class="pane" id="pane-chat" data-pane="chat" aria-labelledby="chat-title">
+    <div class="pane-head">
+      <button class="avatar" type="button" id="chat-avatar" title="No profile photo yet. Open a picture and press &quot;Set as profile photo&quot;." aria-label="Profile photo: none yet">
+        <svg class="avatar-none" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.3-8 5.2V21h16v-1.8c0-2.9-3.6-5.2-8-5.2Z"/></svg>
+                  <img class="avatar-img" alt="" hidden>
+      </button>
+      <div class="chat-head-text" id="chat-who-box">
+        <span class="chat-who" id="chat-with"><strong id="chat-name"></strong><span id="chat-software"></span></span>
+        <span class="hint chat-pc" id="chat-pc"></span>
+      </div>
+      <div class="chat-where" id="chat-where">
+        <span class="chat-speed" id="chat-speed" hidden></span>
+      </div>
+      <div class="chat-subject">
+          <h2 id="chat-title">New chat</h2>
+          <form class="chat-title-form" id="chat-title-form" hidden><input id="chat-title-input" type="text" maxlength="80" autocomplete="off" aria-label="Chat name (Enter saves, Esc cancels)"></form>
+          <button class="chat-title-edit" type="button" id="chat-title-edit" hidden title="Rename this chat" aria-label="Rename this chat"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg></button>
+          <label class="chat-project" id="chat-project-row" hidden title="Which project this chat's work belongs to: Default keeps it with the chats by date"><span>Project</span><select id="chat-project"></select></label>
+      </div>
+      <span class="state" data-state="disconnected"><span class="dot" aria-hidden="true"></span><span class="state-text">Disconnected</span></span>
+      <div class="connect-row chat-tools">
+        <button class="btn primary connect" type="button">Connect</button>
+        <details class="pane-settings">
+          <summary class="btn quiet gear" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
+          <div class="settings-box">
+            <label class="field model-field"><span>Model</span><select class="model"></select></label>
+            <label class="check live-stats-row"><input type="checkbox" id="live-stats"> Enable live stats</label>
+            <p class="hint live-stats-hint">Timings, PC, model and tokens a second under each answer.</p>
+            <label class="field"><span>Run on</span><select class="device"><option value="auto">Auto</option><option value="gpu">GPU</option><option value="cpu">CPU</option></select></label>
+            <label class="field"><span>CPU cores to use</span><input class="threads" type="number" min="0" step="1"></label>
+            <p class="hint threads-hint"></p>
+            <label class="field"><span>Unload when idle (minutes, 0 = never)</span><input class="idle" type="number" min="0" max="1440" step="1"></label>
+            <label class="field"><span>Context (what it reads at once)</span><select id="ctx-size"></select></label>
+            <label class="field"><span>Memory for the context</span><select id="ctx-cache"><option value="f16">Full size (f16)</option><option value="q8_0">Half (q8_0, almost no loss)</option><option value="q4_0">Quarter (q4_0, some loss)</option></select></label>
+            <label class="field" id="ctx-place-row" hidden><span>Where it runs on the graphics card</span><select id="ctx-place"></select></label>
+            <div class="ctx-try" id="ctx-try-row" hidden><button class="btn quiet" type="button" id="ctx-try">Try each way</button><p class="hint" id="ctx-try-line" role="status"></p></div>
+            <p class="hint" id="ctx-hint"></p>
+            <label class="field" id="who-row"><span>How the host talks</span><select id="who"></select></label>
+            <p class="hint" id="who-hint"></p>
+            <label class="field" id="tone-row"><span>Tone for writing</span><select id="tone" title="Used when you ask for a letter, article or post"></select></label>
+            <p class="hint" id="tone-hint">Each hire has their own tone, in their profile (Staff).</p>
+            <!-- Opened from the left panel (Set up) and by other windows; kept here, hidden, so their code stays where it was. -->
+            <button class="btn quiet" type="button" id="team-open" hidden>Staff</button>
+            <button class="btn quiet" type="button" id="files-open" hidden>Files and blog writer</button>
+            <button class="btn quiet" type="button" id="jobs-open" hidden>Jobs</button>
+            <p class="hint profile-line" id="avatar-line" hidden><span id="avatar-line-name">Profile photo set.</span> <button class="link" type="button" id="avatar-remove">Remove it</button></p>
+          </div>
+        </details>
+        <button class="btn quiet chat-whole" type="button" id="chat-save" title="Save this whole chat as a text file" aria-label="Save this whole chat as a text file"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
+        <button class="btn quiet chat-whole" type="button" id="chat-copy" title="Copy this whole chat" aria-label="Copy this whole chat"></button>
+        <button class="btn quiet" type="button" id="chat-menu-open" hidden title="Rename, mute, empty or delete this chat" aria-label="This chat: rename, mute, empty or delete">…</button>
+      </div>
+    </div>
+    <div class="pane-body">
+            <div class="fit-note hint" hidden></div>
+      <div class="progress" hidden><div class="p-track"><div class="p-fill"></div></div><div class="p-text"></div></div>
+      <div class="conn-info hint" aria-live="polite"></div>
+      <div class="fault" hidden></div>
+
+      <div class="chat-docs" id="chat-docs" hidden></div>
+      <div class="chat-log" id="chat-log" aria-live="polite"></div>
+      <div class="chat-large" id="chat-large" role="status" hidden></div>
+      <div id="chat-ask" hidden></div>
+      <form class="chat-form" id="chat-form">
+        <div class="chat-grip" id="chat-grip" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to make the message box taller or shorter (double-click: back to its size)" aria-label="Message box height: drag, or press the up and down arrows"></div>
+        <textarea id="chat-input" rows="2" placeholder="Message" aria-label="Message"></textarea>
+        <button class="box-save" type="button" id="prompt-save" title="Save to prompts (global)" aria-label="Save to prompts (global)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg></button>
+        <div class="chat-actions">
+          <button class="btn quiet" type="button" id="notebook-open" title="What this person and the team remember: see, change or delete each line">Memory</button>
+          <button class="btn quiet" type="button" id="doc-add" title="Add a PDF, text or code file to this chat: each answer reads the parts that match your words, and names the page">Add a document</button>
+          <input type="file" id="doc-file" accept=".pdf,.txt,.md,.csv,.json,.xml,.yml,.yaml,.toml,.ini,.log,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.py,.php,.sql,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.sh,.ps1,.bat" multiple hidden>
+          <div class="g-shelves think-pick" id="think-pick" role="group" aria-label="How to answer">
+            <button class="g-shelf" type="button" data-think="quick" aria-pressed="true" title="Quick: answers straight away">Quick</button>
+            <button class="g-shelf" type="button" data-think="think" aria-pressed="false" title="Think: works it out first, then answers. Better for sums, code and plans; slower, because it writes its working before the first word of the answer. Only models that can think do it (Qwen 3 and 3.5).">Think</button>
+          </div>
+          <button class="btn" type="button" id="chat-stop" hidden>Stop</button>
+          <button class="btn primary" type="submit" id="chat-send">Send</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Image -->
+  <section class="pane" id="pane-image" data-pane="image" aria-labelledby="image-title">
+    <div class="pane-head">
+      <div class="chat-head-text">
+        <h2 id="image-title">Pictures</h2>
+        <span class="hint chat-with" id="image-with"></span>
+      </div>
+      <button class="btn quiet" type="button" id="image-menu-open" hidden title="Rename, mute or delete this chat" aria-label="This chat: rename, mute or delete">…</button>
+      <span class="state" data-state="disconnected"><span class="dot" aria-hidden="true"></span><span class="state-text">Disconnected</span></span>
+    </div>
+    <div class="pane-body">
+      <label class="field draw-as" id="draw-as-row" hidden><span>Artist</span><select id="draw-as"></select></label>
+      <div class="node-artist" id="node-artist" hidden>
+        <label class="field grow"><span id="node-artist-label">Model on the other PC</span><select id="node-artist-model"></select></label>
+        <p class="hint" id="node-artist-line" aria-live="polite"></p>
+      </div>
+      <div class="connect-row">
+        <label class="field grow"><span>Model</span><select class="model"></select></label>
+        <button class="btn primary connect" type="button">Connect</button>
+        <details class="pane-settings">
+          <summary class="btn quiet gear" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
+          <div class="settings-box">
+            <label class="field"><span>Run on</span><select class="device"><option value="auto">Auto</option><option value="gpu">GPU</option><option value="cpu">CPU</option></select></label>
+            <label class="field"><span>CPU cores to use</span><input class="threads" type="number" min="0" step="1"></label>
+            <p class="hint threads-hint"></p>
+            <label class="field"><span>Unload after idle minutes (0 = never)</span><input class="idle" type="number" min="0" max="1440" step="1"></label>
+            <label class="field"><span>Old drafts</span><select id="draft-days"><option value="0">Keep forever</option><option value="7">Delete after 7 days</option><option value="30">Delete after 30 days</option><option value="90">Delete after 90 days</option></select></label>
+            <p class="hint">Only drafts are deleted, never pictures in the gallery.</p>
+            <div id="draft-days-ask" hidden></div>
+          </div>
+        </details>
+        <button class="btn quiet help-q" type="button" data-help="help-images" title="Which picture model? Fast or best quality" aria-label="Which picture model? Fast or best quality">?</button>
+      </div>
+            <div class="fit-note hint" hidden></div>
+      <div class="progress" hidden><div class="p-track"><div class="p-fill"></div></div><div class="p-text"></div></div>
+      <div class="conn-info hint" aria-live="polite"></div>
+      <div class="fault" hidden></div>
+
+      <form class="img-form draw-box" id="img-form">
+        <label class="field"><span id="img-prompt-label">What to draw</span><textarea id="img-prompt" rows="2" placeholder="e.g. a reading chair in a sunny room, photo 600x600. Enter draws it; Shift+Enter starts a new line."></textarea></label>
+        <div class="img-tools">
+          <button class="btn primary" type="submit" id="img-go">Draw</button>
+          <button class="btn quiet" type="button" id="img-enhance" title="The chat model makes a short prompt longer: your words are no longer drawn exactly as typed">Enhance prompt</button>
+          <button class="btn" type="button" id="img-queue" title="Put this picture in the queue: it is drawn by itself when the artist's PC is free, whole (not a draft), and handed in to the project chosen beside it">Add to the queue</button>
+          <label class="queue-for"><span>for</span><select id="img-queue-project" aria-label="The project queued pictures go to"></select></label>
+          <span class="hint" id="img-detect"></span>
+        </div>
+        <p class="hint" id="img-note" role="status" hidden></p>
+        <details class="more-options" id="img-list-box">
+          <summary>Add a list to the queue: one picture per line</summary>
+          <label class="field"><span>Pictures, one per line</span><textarea id="img-list" rows="4" placeholder="a reading chair in a sunny room, photo&#10;an upright piano in a living room, photo 1200x800"></textarea></label>
+          <div class="img-tools"><button class="btn" type="button" id="img-list-go">Add to the queue</button><span class="hint" id="img-list-line"></span></div>
+          <p class="hint">Each line is drawn by the artist chosen above, on their PC, one after another, whole (not a draft). Each picture is kept in the gallery and put in the specialists\images folder of the project chosen beside Add to the queue. Size and mode come from each line, as when you press Draw.</p>
+        </details>
+        <details class="more-options" id="more-options">
+          <summary>More options: leave out, mode, size, seed, steps</summary>
+          <label class="field"><span>Leave out of the picture</span><textarea id="img-negative" rows="2" placeholder="e.g. blurry, text, watermark"></textarea></label>
+          <div class="img-row">
+            <label class="field"><span>Mode</span><select id="img-mode"><option value="auto">Auto (from the prompt)</option><option value="icon">Icon</option><option value="blog">Blog / photo</option><option value="cartoon">Cartoon</option><option value="custom">Custom</option></select></label>
+            <label class="field"><span>Width</span><input id="img-w" type="number" min="16" max="4096" step="1" placeholder="auto"></label>
+            <label class="field"><span>Height</span><input id="img-h" type="number" min="16" max="4096" step="1" placeholder="auto"></label>
+            <label class="field"><span>Fit</span><select id="img-fit"><option value="crop">Crop</option><option value="pad">Pad</option><option value="stretch">Stretch</option></select></label>
+          </div>
+          <div class="img-row">
+            <label class="field"><span>Seed</span><input id="img-seed" type="number" min="0" step="1" placeholder="random"></label>
+            <label class="check"><input type="checkbox" id="img-random" checked> New random seed each time</label>
+          </div>
+          <details class="sub"><summary>Advanced</summary>
+            <div class="img-row">
+              <label class="field"><span>Steps</span><input id="img-steps" type="number" min="1" max="100" step="1" placeholder="mode default"></label>
+              <label class="field"><span>CFG</span><input id="img-cfg" type="number" min="0" max="30" step="0.1" placeholder="mode default"></label>
+              <label class="field"><span>Drafts</span><input id="img-drafts" type="number" min="1" max="4" step="1" placeholder="mode default"></label>
+              <label class="field"><span>Sampler</span><select id="img-sampler"><option value="">Mode default</option><option>lcm</option><option>euler</option><option>euler_a</option><option>dpm++2m</option><option>ddim_trailing</option><option>tcd</option></select></label>
+            </div>
+            <label class="check"><input type="checkbox" id="img-ico"> Icon mode: also make 16–256 px sizes and an .ico</label>
+          </details>
+        </details>
+      </form>
+
+      <div class="in-progress" id="img-progress" hidden>
+        <div class="ip-frame" aria-hidden="true"><span class="ip-pct"></span></div>
+        <div class="ip-side">
+          <b>Picture in progress</b>
+          <p class="hint ip-prompt"></p>
+          <div class="p-track" role="progressbar" aria-label="Picture progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="p-fill"></div></div>
+          <div class="ip-row"><span class="p-text"></span><button class="btn" type="button" id="img-cancel" hidden>Cancel</button></div>
+        </div>
+      </div>
+      <div class="fault" id="img-fault" hidden></div>
+
+      <section class="main-photo" id="main-photo" aria-label="Picture">
+        <div class="mp-frame" id="mp-frame" tabindex="0" aria-label="Picture: left and right arrow keys step through them">
+          <img id="mp-img" alt="" hidden>
+          <p class="mp-empty hint" id="mp-empty">No pictures yet</p>
+          <button class="mp-nav mp-prev" type="button" id="mp-prev" title="Previous picture" aria-label="Previous picture" hidden>&#8249;</button>
+          <button class="mp-nav mp-next" type="button" id="mp-next" title="Next picture" aria-label="Next picture" hidden>&#8250;</button>
+          <button class="mp-expand" type="button" id="mp-expand" title="Expand: the picture large, with its details" aria-label="Expand" hidden>&#x2922;</button>
+          <span class="mp-badge" id="mp-badge" hidden>Draft</span>
+        </div>
+        <p class="hint mp-caption" id="mp-caption"></p>
+        <div class="mp-actions" id="mp-actions"></div>
+      </section>
+      <div class="results" id="img-results" aria-live="polite"></div>
+
+      <section class="gallery-box" id="gallery-box" aria-labelledby="gallery-title">
+        <div class="g-head">
+          <h3 id="gallery-title" class="sr-only">Gallery</h3>
+          <div class="g-shelves" role="group" aria-label="Show">
+            <button class="g-shelf" type="button" data-shelf="gallery" aria-pressed="true">Gallery</button>
+            <button class="g-shelf" type="button" data-shelf="drafts" aria-pressed="false">Drafts <span id="g-drafts"></span></button>
+            <button class="g-shelf" type="button" data-shelf="all" aria-pressed="false">All</button>
+          </div>
+          <div class="g-shelves" role="group" aria-label="Whose pictures">
+            <button class="g-scope" type="button" data-scope="chat" aria-pressed="true" title="Only the pictures drawn in the chat open now">This chat</button>
+            <button class="g-scope" type="button" data-scope="all" aria-pressed="false" title="Every picture, from every chat">All chats</button>
+          </div>
+          <input class="g-search" id="g-search" type="search" placeholder="Search prompts" aria-label="Search the prompts">
+        </div>
+        <div class="g-tools" id="g-tools">
+          <button class="btn" type="button" id="g-edit" title="Pick pictures to delete: a box on each picture, and an × to delete one">Edit</button>
+          <span class="g-picked" id="g-picked" hidden>
+            <button class="btn quiet" type="button" id="g-all">Select all</button>
+            <span class="g-picked-n" id="g-picked-n" aria-live="polite">0 selected</span>
+            <button class="btn danger" type="button" id="g-del" disabled>Delete selected</button>
+            <button class="btn quiet" type="button" id="g-clear-recent" title="Every picture this chat drew today">Delete today's</button>
+            <button class="btn quiet" type="button" id="g-clear-all" title="Every picture in this chat">Delete all in this chat</button>
+            <button class="btn primary" type="button" id="g-done">Done</button>
+          </span>
+          <div class="g-ask" id="g-ask" role="alert" hidden></div>
+        </div>
+        <div class="gallery" id="gallery"></div>
+        <button class="btn quiet g-more" type="button" id="g-more" hidden>See more</button>
+      </section>
+
+    </div>
+  </section>
+
+  <aside class="subjects" id="subjects" aria-label="Chats, tools and staff overview">
+    <details class="subjects-fold" id="subjects-fold" open>
+      <summary class="subjects-sum" id="subjects-sum"><h2 id="subjects-title">Chats | Tools | Staff overview</h2><span class="hint subjects-now" id="subjects-now"></span></summary>
+      <div class="side-tabs" role="tablist" aria-label="Chats, tools and staff overview">
+        <button class="side-tab" type="button" role="tab" id="tab-chats" aria-controls="panel-chats" aria-selected="true">Chats</button>
+        <span class="side-tab-bar" aria-hidden="true">|</span>
+        <button class="side-tab" type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1">Tools</button>
+        <span class="side-tab-bar" aria-hidden="true">|</span>
+        <button class="side-tab" type="button" role="tab" id="tab-staff" aria-controls="panel-staff" aria-selected="false" tabindex="-1">Staff overview</button>
+        <button class="link side-hide" type="button" id="subjects-hide" title="Hide this panel: the chat takes its room (Show brings it back)">Hide</button>
+      </div>
+      <div class="side-panel" role="tabpanel" id="panel-staff" aria-labelledby="tab-staff" hidden>
+        <div class="office" data-office="chat"></div>
+        <ul class="staff-overview" id="side-staff"></ul>
+      </div>
+      <div class="side-panel" role="tabpanel" id="panel-chats" aria-labelledby="tab-chats">
+        <ul class="rail-list side-chats" id="rail-chats" aria-labelledby="tab-chats"></ul>
+        <button class="link rail-more" type="button" id="rail-chats-more" hidden>Show all chats</button>
+      </div>
+      <div class="side-panel" role="tabpanel" id="panel-tools" aria-labelledby="tab-tools" hidden>
+        <p class="hint subjects-with" id="subjects-with"></p>
+        <form class="subjects-new" id="subjects-new">
+          <div class="field">
+            <span class="field-head"><label for="subject-name">Subject name</label> <button class="info-bang" type="button" id="subject-info" aria-expanded="false" aria-controls="subject-info-text" title="What a subject is">!</button></span>
+            <p class="hint info-text" id="subject-info-text" hidden>A subject is one chat with this person, named for what it is about. Put it in a project and the files it saves go into that project's folder. E.g. project website, subject blog.</p>
+            <input id="subject-name" type="text" maxlength="80" autocomplete="off" required placeholder="e.g. blog photos">
+          </div>
+          <label class="field"><span>Project</span><select id="subject-project"></select></label>
+          <button class="btn primary" type="submit">Create new subject</button>
+        </form>
+        <p class="hint subjects-note" id="subjects-note" role="status" hidden></p>
+          <details class="side-fold" id="scratch-fold" data-fold="scratch" open>
+            <summary class="side-sum"><h2 id="scratch-title">Scratch pad</h2><span class="hint side-state" id="scratch-state" role="status"></span></summary>
+            <div class="side-body">
+              <label class="sr-only" for="scratch-text">Scratch pad</label>
+              <textarea id="scratch-text" rows="7" maxlength="20000" spellcheck="true" placeholder="Notes for yourself: kept as you type, the same in every chat. No model reads them."></textarea>
+              <div class="snippet-btns note-save-row">
+                <label class="sr-only" for="note-where">Save the note in</label>
+                <select id="note-where" title="Where Save note puts it: the notes folder, or a project's admin notes"><option value="">Notes</option></select>
+                <button class="btn" type="button" id="note-save" title="Saves the scratch pad as a file named with the date and time and its first words">Save note</button>
+              </div>
+              <p class="hint" id="note-said" role="status" hidden></p>
+            </div>
+          </details>
+          <details class="side-fold" id="snippets-fold" data-fold="snippets" open>
+            <summary class="side-sum"><h2 id="snippets-title">Snippets (global)</h2><span class="hint side-state" id="snippets-count"></span></summary>
+            <div class="side-body">
+              <form id="snippet-form" class="snippet-form">
+                <label class="sr-only" for="snippet-new">New snippet</label>
+                <textarea id="snippet-new" rows="3" maxlength="4000" spellcheck="true" placeholder="A prompt or a note to keep"></textarea>
+                <div class="snippet-btns">
+                  <button class="btn primary" type="submit">Save</button>
+                  <button class="btn" type="button" id="snippet-browse" title="Every snippet, with Copy on each">Browse</button>
+                </div>
+              </form>
+              <p class="hint snippet-note" id="snippet-note" role="status" hidden></p>
+            </div>
+          </details>
+      </div>
+    </details>
+  </aside>
+</main>
+</div>
+
+<dialog id="viewer" aria-label="Picture">
+  <div class="viewer-body">
+    <img id="viewer-img" alt="">
+    <div class="viewer-side">
+      <dl id="viewer-meta"></dl>
+      <div class="viewer-actions" id="viewer-actions"></div>
+    </div>
+  </div>
+  <form method="dialog"><button class="btn" type="submit">Close</button></form>
+</dialog>
+
+<dialog id="applock-new" class="small-dlg" aria-labelledby="applock-new-title">
+  <form class="help-body private-form" id="applock-new-form">
+    <h2 id="applock-new-title">App lock</h2>
+    <p class="hint">A PIN for the whole app. While it is locked, nobody at this PC can open the chats, jobs or files here, from this window or any other.</p>
+    <div class="fault" id="applock-new-fault" role="alert" hidden></div>
+    <label class="field"><span>Create a new pin</span><input id="applock-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <label class="field"><span>Confirm pin</span><input id="applock-pin2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <p class="hint">4 to 12 digits.</p>
+    <label class="check"><input type="checkbox" id="applock-agree" required> I confirm if I lose my pin I will be locked out</label>
+    <p class="applock-warn" role="note">WARNING, BY ENABLING THIS YOU NEED TO USE PIN TO LOGIN</p>
+    <div class="team-actions">
+      <button class="btn primary" type="submit" id="applock-save">Save pin and lock</button>
+      <button class="btn" type="button" id="applock-cancel">Cancel</button>
+    </div>
+    <p class="hint">The PIN locks the app; it does not encrypt the files on disk. Lost it? Close TOMLIN, delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder and start it again: the PIN is gone and the chats stay.</p>
+  </form>
+</dialog>
+
+<div class="applock" id="applock" hidden>
+  <form class="applock-card" id="applock-form">
+    <img class="brand-mark applock-mark" src="icon.svg" alt="" width="30" height="30">
+    <h1 id="applock-title">Access is restricted.</h1>
+    <div class="fault" id="applock-fault" role="alert" hidden></div>
+    <div class="applock-row">
+      <button class="btn primary" type="submit" id="applock-open">Unlock</button>
+      <input id="applock-open-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="current-password" aria-label="PIN" placeholder="PIN" required>
+    </div>
+    <p class="hint" id="applock-about" hidden></p>
+    <div class="applock-node" id="applock-node" hidden>
+      <div class="applock-row" id="applock-ask-row">
+        <button class="btn" type="button" id="applock-ask">Send host</button>
+        <select id="applock-hours" aria-label="Message to the host">
+          <option value="1">I need to use the pc, please log out for 1 hour</option>
+          <option value="2">I need to use the pc, please log out for 2 hours</option>
+          <option value="4">I need to use the pc, please log out for 4 hours</option>
+        </select>
+      </div>
+      <p class="hint" id="applock-node-line" role="status"></p>
+    </div>
+    <p class="applock-keep" id="applock-update" role="status" hidden></p>
+  </form>
+</div>
+<p class="applock-keep update-banner" id="node-updating" role="status" hidden></p>
+
+<dialog id="keep-dlg" class="small-dlg" aria-labelledby="keep-title"></dialog>
+<dialog id="backup-dlg" class="small-dlg" aria-labelledby="backup-title"></dialog>
+
+<dialog id="impact-dlg" class="small-dlg" aria-labelledby="impact-title">
+  <form class="help-body private-form" id="impact-form">
+    <h2 id="impact-title">Using this can impact connected users</h2>
+    <p class="hint" id="impact-text"></p>
+    <label class="check"><input type="checkbox" id="impact-agree"> I agree</label>
+    <div class="team-actions">
+      <button class="btn primary" type="submit" id="impact-go">Go ahead</button>
+      <button class="btn" type="button" id="impact-cancel">Cancel</button>
+    </div>
+    <p class="hint" id="impact-why" role="status"></p>
+  </form>
+</dialog>
+
+<dialog id="node-pin" class="small-dlg" aria-labelledby="node-pin-title">
+  <form class="help-body private-form" id="node-pin-form">
+    <h2 id="node-pin-title">Type the app lock PIN</h2>
+    <p class="hint">This PC is a node: every change to it needs the PIN that opens TOMLIN, so whoever sits at it cannot change it.</p>
+    <div class="fault" id="node-pin-fault" role="alert" hidden></div>
+    <label class="field"><span>PIN</span><input id="node-pin-input" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="off" required></label>
+    <div class="team-actions">
+      <button class="btn primary" type="submit">Change it</button>
+      <button class="btn" type="button" id="node-pin-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- A person pressed in the left panel: a new chat with them on the left, their recent chats on the right (chats.js). -->
+<dialog id="person-chats" class="person-chats" aria-labelledby="person-chats-title">
+  <div class="help-body">
+    <h2 id="person-chats-title"></h2>
+    <div class="fault" id="person-chats-fault" role="alert" hidden></div>
+    <div class="person-chats-cols">
+      <div class="person-chats-new">
+        <span id="person-chats-face"></span>
+        <button class="btn primary" type="button" id="person-chats-start">New chat</button>
+      </div>
+      <div class="person-chats-recent">
+        <h3>Recent chats</h3>
+        <ul class="person-chats-list" id="person-chats-list"></ul>
+      </div>
+    </div>
+    <form method="dialog"><button class="btn" type="submit">Close</button></form>
+  </div>
+</dialog>
+
+<dialog id="new-chat" aria-labelledby="new-chat-title">
+  <div class="help-body">
+    <h2 id="new-chat-title">New chat: who with?</h2>
+    <p class="hint">Each chat keeps its own messages and pictures.</p>
+    <div class="fault" id="new-chat-fault" role="alert" hidden></div>
+    <ul class="people-grid" id="new-chat-people"></ul>
+    <p class="hint"><button class="link" type="button" id="new-chat-team">Hire someone, or give someone their own model…</button></p>
+    <form method="dialog"><button class="btn" type="submit">Cancel</button></form>
+  </div>
+</dialog>
+
+<dialog id="face-pick" aria-labelledby="face-pick-title">
+  <div class="help-body">
+    <h2 id="face-pick-title">Whose profile photo?</h2>
+    <div class="face-pick-top"><img id="face-pick-img" alt="" width="96" height="96"><p class="hint">The middle of the picture is cut to a square. Only the person you pick gets it; everyone else keeps their own.</p></div>
+    <div class="fault" id="face-pick-fault" role="alert" hidden></div>
+    <ul class="pick-list" id="face-pick-people"></ul>
+    <form method="dialog"><button class="btn" type="submit">Cancel</button></form>
+  </div>
+</dialog>
+
+<dialog id="notebook" aria-labelledby="notebook-title">
+  <div class="help-body">
+    <h2 id="notebook-title">Memory</h2>
+    <p class="hint">Lines kept on this PC and read fresh before every answer. You write them: Add here, type "remember: ..." in a chat ("remember for the team: ..." for everyone), or press Pin under a message. A model may suggest a line; it is kept only if you press Save.</p>
+    <div class="fault" id="notebook-fault" role="alert" hidden></div>
+    <div id="notebook-body"></div>
+    <details class="sub" id="reading-fold">
+      <summary id="reading-title">What they read for the next answer</summary>
+      <div class="fault" id="reading-fault" role="alert" hidden></div>
+      <div id="reading-body"></div>
+    </details>
+    <form method="dialog"><button class="btn" type="submit">Close</button></form>
+  </div>
+</dialog>
+
+<dialog id="prompt-save-dlg" aria-labelledby="prompt-save-title">
+  <div class="help-body">
+    <h2 id="prompt-save-title">Save to prompts (global)</h2>
+    <form id="prompt-save-form" class="prompt-save-form">
+      <label class="field"><span>Subject (optional)</span><input id="prompt-save-subject" type="text" maxlength="80" autocomplete="off" list="prompt-subjects" placeholder="e.g. blog"></label>
+      <datalist id="prompt-subjects"></datalist>
+      <label class="field"><span>Prompt</span><textarea id="prompt-save-text" rows="6" maxlength="4000" required spellcheck="true"></textarea></label>
+      <div class="fault" id="prompt-save-fault" role="alert" hidden></div>
+      <div class="team-actions"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="prompt-save-cancel">Cancel</button></div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="snippets-dlg" aria-labelledby="snippets-dlg-title">
+  <div class="help-body snippets-browse">
+    <h2 id="snippets-dlg-title">Snippets (global)</h2>
+    <label class="field"><span>Find</span><input id="snippets-find" type="search" autocomplete="off" placeholder="Words or a subject"></label>
+    <p class="hint snippet-note" id="snippets-dlg-note" role="status" hidden></p>
+    <div class="snippet-groups" id="snippet-groups"></div>
+    <form method="dialog"><button class="btn" type="submit">Close</button></form>
+  </div>
+</dialog>
+
+<dialog id="code-save" aria-labelledby="code-save-title">
+  <div class="help-body">
+    <h2 id="code-save-title">Save this code to your drive</h2>
+    <form id="code-save-form" class="code-save-form">
+      <label class="field"><span>File name (a folder in front is made for you, such as src/app.js)</span><input id="code-save-name" type="text" maxlength="200" required autocomplete="off" spellcheck="false"></label>
+      <p class="hint" id="code-save-where"></p>
+      <div class="fault" id="code-save-fault" role="alert" hidden></div>
+      <div class="team-actions"><button class="btn primary" type="submit" id="code-save-go">Save</button><button class="btn" type="button" id="code-save-cancel">Cancel</button></div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="chat-menu" aria-labelledby="chat-menu-title">
+  <div class="help-body">
+    <h2 id="chat-menu-title">This chat</h2>
+    <p class="hint" id="chat-menu-about"></p>
+    <div class="fault" id="chat-menu-fault" role="alert" hidden></div>
+    <form id="chat-rename" class="team-hire">
+      <label class="field grow"><span>Name</span><input id="chat-rename-text" type="text" maxlength="80" required autocomplete="off"></label>
+      <button class="btn" type="submit">Save the name</button>
+    </form>
+    <h3>Mute</h3>
+    <p class="hint" id="chat-mute-about"></p>
+    <div class="team-actions" id="chat-mute-actions"></div>
+    <h3>Empty it</h3>
+    <p class="hint">Every message goes, for good; the chat keeps its name, its documents and its pictures.</p>
+    <div class="team-actions" id="chat-clear-actions"><button class="btn" type="button" id="chat-clear">Empty this chat</button></div>
+    <h3>Delete it</h3>
+    <p class="hint" id="chat-delete-about">The chat's messages are deleted for good.</p>
+    <div class="team-actions" id="chat-delete-actions"></div>
+    <form method="dialog"><button class="btn" type="submit">Close</button></form>
+  </div>
+</dialog>
+
+<dialog id="team" aria-labelledby="team-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="team-title">Staff</h2>
+      <div class="dlg-top-actions">
+        <button class="btn" type="button" id="team-all">See all staff</button>
+        <button class="btn primary" type="button" id="team-hire">Hire staff</button>
+        <form method="dialog"><button class="btn" type="submit">Close</button></form>
+      </div>
+    </div>
+    <div class="fault" id="team-fault" hidden></div>
+    <!-- See all staff: everyone, under the PC they work on. -->
+    <div class="staff-all" id="staff-all" hidden>
+      <p class="hint">Everyone you have hired, under the PC they work on. Press <b>Edit</b> to open one person.</p>
+      <div id="team-list"></div>
+      <p class="hint">Need another model for someone? <button class="link" type="button" id="team-get-models">Get models</button>.</p>
+    </div>
+    <!-- One person: them on the left, their settings on the right. -->
+    <div class="staff-one" id="staff-one">
+      <aside class="staff-person" id="staff-person" aria-label="Who"></aside>
+      <section class="staff-settings" id="staff-edit" aria-label="Edit Staff">
+        <div id="staff-edit-body"></div>
+      </section>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="profile" class="profile-dlg" aria-labelledby="profile-name">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="profile-top">Profile</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <div class="fault" id="profile-fault" hidden></div>
+    <div id="profile-body"></div>
+  </div>
+</dialog>
+
+<dialog id="files" aria-labelledby="files-title">
+  <div class="help-body">
+    <h2 id="files-title">Files and blog writer</h2>
+    <p class="hint">Plain text files in one folder you choose. Nothing outside it is touched; saving keeps the old version beside it, with <code>.bak</code> on the end of its name.</p>
+    <div class="fault" id="files-fault" hidden></div>
+    <form id="files-folder-form" class="team-hire">
+      <label class="field"><span>Workspace folder (empty = the default one)</span><input id="files-folder" type="text" autocomplete="off"></label>
+      <button class="btn" type="submit">Use this folder</button>
+    </form>
+    <p class="hint" id="files-folder-note" aria-live="polite"></p>
+    <div class="files-grid">
+      <div class="files-side">
+        <h3>Files</h3>
+        <div id="file-list"></div>
+        <form id="file-new-form" class="team-hire">
+          <label class="field"><span>New file name</span><input id="file-new" type="text" maxlength="100" placeholder="notes.md or blog/idea.md" autocomplete="off"></label>
+          <button class="btn" type="submit">New file</button>
+        </form>
+      </div>
+      <div class="files-main">
+        <h3 id="file-name">No file open</h3>
+        <div id="file-ask-box" hidden></div>
+        <textarea id="file-text" rows="14" disabled aria-label="File text" spellcheck="true"></textarea>
+        <div class="team-actions">
+          <button class="btn primary" type="button" id="file-save" disabled>Save</button>
+          <button class="btn" type="button" id="file-add-answer" title="Adds the latest chat answer to the end of this file">Add last chat answer</button>
+          <button class="btn" type="button" id="file-ask" title="Puts this file into the chat message box so you can ask for changes">Ask the chat about this file</button>
+        </div>
+        <p class="hint" id="file-note" aria-live="polite"></p>
+      </div>
+    </div>
+    <h3>Blog writer</h3>
+    <p class="hint">The chat model connected now (Connect at the top of a chat) drafts a post in the tone you pick here. Read it, edit it, then save it (saving again writes over the same file). A picture is optional.</p>
+    <div class="fault" id="blog-fault" hidden></div>
+    <form id="blog-form" class="blog-form">
+      <label class="field"><span>What is the post about?</span><textarea id="blog-topic" rows="2" maxlength="300" required placeholder="e.g. why bread goes stale faster in the fridge"></textarea></label>
+      <div class="team-pick">
+        <label class="field"><span>Who is it for? (optional)</span><input id="blog-audience" type="text" maxlength="120" placeholder="e.g. home bakers"></label>
+        <label class="field"><span>About how many words</span><input id="blog-words" type="number" min="150" max="1200" step="50" value="400"></label>
+        <label class="field"><span>Tone</span><select id="blog-tone"></select></label>
+      </div>
+      <div class="team-actions"><button class="btn primary" type="submit" id="blog-go">Write the post</button><button class="btn" type="button" id="blog-stop" hidden title="Stops the writing and keeps what is written so far">Stop</button></div>
+    </form>
+    <pre class="team-answer" id="blog-draft" hidden></pre>
+    <div id="blog-edit" hidden>
+      <label class="field"><span>Title</span><input id="blog-title" type="text" maxlength="120"></label>
+      <label class="field"><span>Post</span><textarea id="blog-body" rows="14" spellcheck="true"></textarea></label>
+      <p class="hint" id="blog-count"></p>
+      <div class="team-actions"><button class="btn primary" type="button" id="blog-save">Save into the workspace</button></div>
+      <div id="blog-saved" hidden>
+        <p class="hint" id="blog-saved-line"></p>
+        <div class="team-actions"><button class="btn" type="button" id="blog-pic" title="The chat model writes a picture prompt from the post; you read and change it, then it is drawn">Add a picture to this post</button></div>
+        <div id="blog-pic-result"></div>
+      </div>
+    </div>
+    <form method="dialog"><button class="btn" type="submit">Close</button></form>
+  </div>
+</dialog>
+
+<dialog id="send-to" class="send-to" aria-labelledby="send-to-title">
+  <div class="help-body">
+    <h2 id="send-to-title">Send to…</h2>
+    <p class="hint" id="send-to-about"></p>
+    <div class="fault" id="send-to-fault" hidden></div>
+    <label class="field"><span>Prompt</span><textarea id="send-to-text" rows="8" maxlength="20000" spellcheck="true"></textarea></label>
+    <div class="team-actions send-to-tools">
+      <button class="btn" type="button" id="send-to-copy">Copy</button>
+      <button class="btn" type="button" id="send-to-write" title="The chat model connected here rewrites the words as what this person works from: a picture prompt for an artist, a brief for the coder or the writer. Nothing is sent until you press Send.">Write it as a prompt</button>
+      <button class="link" type="button" id="send-to-undo" hidden>Back to the words as they were</button>
+      <span class="hint" id="send-to-said" role="status"></span>
+    </div>
+    <label class="field"><span>Send to</span><select id="send-to-who"></select></label>
+    <label class="field" id="send-to-subject-row"><span>Into subject (optional: a subject with this name opens, or is made; blank = their latest chat)</span><input id="send-to-subject" type="text" maxlength="80" autocomplete="off" list="send-to-subjects"></label>
+    <datalist id="send-to-subjects"></datalist>
+    <p class="hint" id="send-to-what" aria-live="polite"></p>
+    <div class="team-actions"><button class="btn primary" type="button" id="send-to-go">Send</button></div>
+    <form method="dialog"><button class="btn quiet" type="submit">Cancel</button></form>
+  </div>
+</dialog>
+
+<dialog id="jobs" aria-labelledby="jobs-title">
+  <div class="help-body jobs-body">
+    <div class="dlg-top">
+      <h2 id="jobs-title">Jobs: plan, then one step at a time</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <div class="fault" id="jobs-fault" hidden></div>
+    <div id="jobs-ask" hidden></div>
+
+    <div class="job-shell">
+      <nav class="job-nav" id="job-nav" aria-label="Jobs and steps">
+        <button class="job-nav-item" type="button" id="job-nav-list">All jobs</button>
+        <div class="job-nav-job" id="job-nav-job" hidden>
+          <p class="job-nav-name" id="job-nav-name"></p>
+          <button class="job-nav-item" type="button" id="job-nav-overview">Overview</button>
+          <ol class="job-nav-steps" id="job-nav-steps"></ol>
+          <button class="job-nav-item" type="button" id="job-nav-all">See all</button>
+        </div>
+      </nav>
+
+      <div class="job-main">
+        <section id="job-list-view" aria-label="All jobs">
+          <form id="job-new-form" class="blog-form">
+            <label class="field"><span>New job: what should exist when it is finished?</span><textarea id="job-goal" rows="3" maxlength="1500" required placeholder="e.g. a one-page tip calculator: index.html, style.css and app.js, with a box for the bill and a choice of 10, 15 or 20 per cent"></textarea></label>
+            <button class="btn primary" type="submit" id="job-plan-go">Make a plan</button>
+          </form>
+          <p class="job-stage" id="job-stage" aria-live="polite" hidden></p>
+          <pre class="team-answer" id="job-stream" hidden></pre>
+          <div class="team-actions" id="job-stop-row" hidden><button class="btn" type="button" id="job-stop-plan">Stop</button></div>
+
+          <h3>Jobs in this workspace</h3>
+          <div id="job-list"></div>
+          <p class="hint">Other PCs are linked under <button class="link" type="button" id="job-pcs-link">Nodes and memory</button>; staff hired on their models can then take any seat on a job.</p>
+        </section>
+
+        <div id="job-view" hidden>
+          <section class="job-overview" id="job-overview" aria-labelledby="job-goal-line">
+            <p class="hint">Your goal becomes small steps you can edit.</p>
+            <h3 id="job-goal-line"></h3>
+            <p class="hint" id="job-progress"></p>
+            <div class="job-scope-checks" id="job-scope-checks" hidden></div>
+            <div class="job-cards" id="job-cards"></div>
+            <h3>Chats in this project</h3>
+            <div class="job-chats" id="job-chats"></div>
+            <h3>Handed in by the specialists</h3>
+            <div class="job-handed" id="job-handed"></div>
+            <h3>Tokens and cost so far</h3>
+            <div class="job-usage" id="job-usage"></div>
+
+            <div class="job-team" id="job-team">
+              <h3 id="job-pm-title">Choose a Project manager</h3>
+              <div class="staff-pick" id="job-pm" role="radiogroup" aria-labelledby="job-pm-title"></div>
+              <p class="hint job-doer" id="job-pm-line"></p>
+
+              <h3>Roles:</h3>
+              <div class="job-roles" id="job-roles"></div>
+
+              <label class="field" id="job-expect-row"><span>For final audit, what is your expectations</span><textarea id="job-expect" rows="2" maxlength="300" placeholder="(eg, make 1 billion dollar saas, with no mistakes)"></textarea></label>
+              <p class="hint" id="job-team-said" role="status"></p>
+            </div>
+
+            <h3>Tests</h3>
+            <p class="hint">Runs the tests in the project folder, so the code the models wrote. Only on this button; stops after 60 s.</p>
+            <div class="team-pick">
+              <label class="field"><span>Test command</span><select id="job-test-cmd"></select></label>
+              <div class="team-actions"><button class="btn" type="button" id="job-test-run">Run tests</button></div>
+            </div>
+            <div id="job-test-ask" hidden></div>
+            <div id="job-test-out"></div>
+
+            <div id="job-final-box">
+              <h3>End-of-job report</h3>
+              <p class="hint">The auditor reads the plan, each step and every check (not the files), then writes what was built and what to do next, saved as review.md.</p>
+              <div class="team-actions"><button class="btn" type="button" id="job-final">Write the report</button></div>
+              <div id="job-final-out"></div>
+            </div>
+            <div id="job-delete-ask" hidden></div>
+            <div class="team-actions job-keep">
+              <button class="btn quiet" type="button" id="job-hide" title="Takes it off the lists (Jobs and Home); nothing is deleted">Hide this job</button>
+              <button class="btn quiet" type="button" id="job-delete" title="Deletes the job for good: its plan and notes. Files its steps wrote stay">Delete this job</button>
+            </div>
+          </section>
+
+          <section class="job-steps-view" id="job-steps-view" aria-label="Steps" hidden>
+            <div class="job-split" id="job-split">
+              <ol id="job-steps" class="job-steps"></ol>
+              <section class="job-preview" id="job-preview" aria-labelledby="job-preview-title" hidden>
+                <div class="preview-bar">
+                  <h4 id="job-preview-title">Live preview</h4>
+                  <label class="sr-only" for="preview-page">Page to show</label>
+                  <select id="preview-page"></select>
+                  <button class="btn quiet" type="button" id="preview-reload">Reload</button>
+                  <button class="btn quiet" type="button" id="preview-close">Close</button>
+                </div>
+                <iframe id="preview-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Live preview of the page in the workspace"></iframe>
+                <p class="hint" id="preview-line" role="status">The page as it is saved in the workspace, on this PC only: it cannot reach the internet or TOMLIN. It reloads when a step saves a file.</p>
+              </section>
+            </div>
+            <div id="job-plan-ask" hidden></div>
+            <div class="team-actions">
+              <button class="btn" type="button" id="preview-open" hidden>Live preview</button>
+              <button class="btn" type="button" id="job-add">Add a step</button>
+              <button class="btn" type="button" id="job-save" disabled>Save plan changes</button>
+              <button class="btn primary" type="button" id="job-run">Run the next step</button>
+              <button class="btn" type="button" id="job-stop" hidden>Stop</button>
+            </div>
+            <label class="check" id="job-review-each-row"><input type="checkbox" id="job-review-each"> The auditor also reads each step before LETS GO!!! saves it (slower; on a small model it raises false alarms)</label>
+            <p class="hint" id="job-note" aria-live="polite"></p>
+            <ul class="job-log" id="job-log" hidden></ul>
+
+            <div id="job-result" hidden>
+              <h3 id="job-result-title"></h3>
+              <div id="job-result-checks"></div>
+              <div id="job-result-files"></div>
+              <label class="field"><span>Summary for the later steps (edit if it is wrong)</span><input id="job-summary" type="text" maxlength="400"></label>
+              <div id="job-accept-ask" hidden></div>
+              <div class="team-actions">
+                <button class="btn primary" type="button" id="job-accept">Save these files and mark the step done</button>
+                <button class="btn" type="button" id="job-ask-review">Ask the reviewer</button>
+                <button class="btn" type="button" id="job-retry">Run this step again</button>
+                <button class="btn" type="button" id="job-discard">Discard</button>
+              </div>
+              <div id="job-review-out"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="job-foot" id="job-foot" hidden>
+      <span class="hint" id="job-foot-line" role="status"></span>
+      <button class="btn job-queue" type="button" id="job-queue" title="Put this project in the queue: its steps run by themselves when the PCs are free, and it waits for you on Home when it is done or needs you">Add to the queue</button>
+      <button class="btn primary job-go" type="button" id="job-go">LETS GO!!!</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="project" class="project-dlg" aria-labelledby="project-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <div><h2 id="project-title">Advanced project setup</h2><span class="hint" id="project-step"></span></div>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <div class="fault" id="project-fault" role="alert" hidden></div>
+    <div id="project-body"></div>
+    <div class="project-foot">
+      <button class="btn" type="button" id="project-back">Back</button>
+      <button class="link" type="button" id="project-skip-rest">Skip the rest of these</button>
+      <button class="btn primary" type="button" id="project-next">Next</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="desk-move" class="small-dlg ask-pop" aria-labelledby="desk-move-title">
+  <div class="help-body quick-hire">
+    <h2 id="desk-move-title">Move</h2>
+    <p class="hint" id="desk-move-line"></p>
+    <label class="field" id="desk-move-row"><span>Software (the model they run on there)</span><select id="desk-move-model"></select></label>
+    <div class="team-actions" id="desk-move-send"></div>
+    <div class="fault" id="desk-move-fault" role="alert" hidden></div>
+    <div class="team-actions"><button class="btn primary" type="button" id="desk-move-go">Move them</button><button class="btn quiet" type="button" id="desk-move-cancel">Cancel</button></div>
+  </div>
+</dialog>
+
+<dialog id="hire-dlg" class="hire-dlg" aria-labelledby="hs-title">
+  <form class="help-body" id="hs-form">
+    <div class="dlg-top">
+      <h2 id="hs-title">Hire staff</h2>
+      <button class="btn" type="button" id="hs-close">Close</button>
+    </div>
+    <div class="hs-split">
+      <section class="hs-profile" aria-labelledby="hs-profile-title">
+        <h3 id="hs-profile-title">Profile</h3>
+        <div class="hs-face">
+          <img id="hs-pic" class="hs-pic" alt="Their look" width="96" height="96" hidden>
+          <button class="btn quiet" type="button" id="hs-look-btn" aria-expanded="false" aria-controls="hs-look-box" hidden>Change look</button>
+        </div>
+        <div class="hs-name-row">
+          <label class="field"><span>Name</span><input id="hs-name" type="text" maxlength="30" required autocomplete="off" placeholder="e.g. Rowan"></label>
+          <button class="btn quiet" type="button" id="hs-random" title="Put a random name in the box">Random</button>
+        </div>
+        <fieldset class="pick-set"><legend>Role</legend><div class="hs-roles" id="hs-roles"></div></fieldset>
+        <p class="hint" id="hs-role-line"></p>
+        <label class="field"><span>Level</span><select id="hs-level"></select></label>
+        <p class="hint" id="hs-level-line"></p>
+        <dl class="hs-sum">
+          <dt>Computer</dt><dd id="hs-sum-pc"></dd>
+          <dt>Model</dt><dd id="hs-sum-model"></dd>
+        </dl>
+      </section>
+      <section class="hs-right" aria-label="Their PC and model">
+        <div id="hs-pcs-block">
+          <h3>Assign a PC</h3>
+          <div class="hs-pcs" id="hs-pcs"></div>
+        </div>
+        <div class="hs-models-head">
+          <h3 id="hs-models-title">Choose a model</h3>
+          <p class="hint">Memory needed is an estimate (a chat model with an 8K context).</p>
+        </div>
+        <div class="hs-tools" id="hs-tools"><input id="hs-search" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off"></div>
+        <div class="hs-models" id="hs-models"></div>
+      </section>
+    </div>
+    <div class="hs-look-box" id="hs-look-box" hidden></div>
+    <div class="fault" id="hs-fault" role="alert" hidden></div>
+    <div class="team-actions hs-go"><button class="btn quiet" type="button" id="hs-cancel">Cancel</button><button class="btn primary" type="submit" id="hs-go">Hire staff</button></div>
+  </form>
+</dialog>
+
+<dialog id="queue-photos" class="pc-dlg" aria-labelledby="queue-photos-title">
+  <div class="help-body">
+    <h2 id="queue-photos-title">Review photos</h2>
+    <p class="hint" id="queue-photos-line"></p>
+    <div class="queue-photos" id="queue-photos-grid"></div>
+    <div class="team-actions"><button class="btn primary" type="button" id="queue-photos-done">Reviewed</button><button class="btn quiet" type="button" id="queue-photos-later">Later</button></div>
+  </div>
+</dialog>
+
+<dialog id="pc-dlg" class="pc-dlg" aria-labelledby="pc-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="pc-title">My PC</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <div id="pc-body"></div>
+    <div id="pc-ask" hidden></div>
+    <p class="hint" id="pc-said" role="status" hidden></p>
+    <div class="team-actions"><button class="btn quiet" type="button" id="pc-more">Its settings (Nodes and memory, Other PCs)</button></div>
+  </div>
+</dialog>
+
+<dialog id="claude-dlg" aria-labelledby="claude-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="claude-title">Connect Claude</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <p class="hint">Claude can be your project manager, splitting a project up into chunks that your cluster can handle.</p>
+    <h3>The prompt</h3>
+    <textarea id="claude-prompt" rows="14" readonly aria-label="The prompt for Claude"></textarea>
+    <div class="team-actions">
+      <button class="btn primary" type="button" id="claude-copy">Copy prompt</button>
+      <span class="hint" id="claude-said" role="status"></span>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="net-dlg" aria-labelledby="net-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="net-title">My local LLMs</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <p class="hint" id="net-said" role="status"></p>
+    <div class="net-list" id="net-transfers" aria-live="polite"></div>
+    <h3>Shared by linked PCs</h3>
+    <div class="net-list" id="net-rows"></div>
+    <h3>Restore points on linked PCs</h3>
+    <p class="hint">You can backup and restore your project to nodes. Your backups are listed below:</p>
+    <div class="net-list" id="net-kept"></div>
+    <div class="net-list" id="net-backups"></div>
+  </div>
+</dialog>
+
+<dialog id="upd-dlg" class="small-dlg" aria-labelledby="upd-title">
+  <div class="help-body upd-body">
+    <h2 id="upd-title">Updating</h2>
+    <ol class="upd-steps" id="upd-steps" aria-label="Steps"></ol>
+    <p class="hint" id="upd-line" role="status" aria-live="polite"></p>
+    <p class="applock-keep" id="upd-keep">Keep this window open until it finishes.</p>
+    <div class="team-actions">
+      <button class="btn quiet" type="button" id="upd-stop">Stop</button>
+      <button class="btn primary" type="button" id="upd-close" hidden>Close</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="calc" aria-labelledby="calc-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="calc-title">What can this PC run?</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <form class="calc-hw" id="calc-hw">
+      <label class="field"><span>PC</span><select id="calc-preset">
+        <option value="this">This PC</option>
+        <option value="old">Old laptop: 8 GB, graphics built into the processor</option>
+        <option value="laptop">Laptop: 16 GB, built-in graphics</option>
+        <option value="desktop">Desktop: 32 GB, no graphics card</option>
+        <option value="custom">Other: type it in</option>
+      </select></label>
+      <label class="field"><span>RAM (GB)</span><input id="calc-ram" type="number" min="1" max="1024" step="1"></label>
+      <label class="field"><span>Graphics card</span><select id="calc-card"></select></label>
+      <label class="field" id="calc-vram-row"><span>Its memory (GB)</span><input id="calc-vram" type="number" min="0" max="192" step="1"></label>
+      <label class="field"><span>CPU cores</span><input id="calc-cores" type="number" min="1" max="128" step="1"></label>
+    </form>
+    <div class="calc-test">
+      <button class="btn" type="button" id="calc-test" title="A short answer on the connected chat model (seconds for a small one, up to two minutes for a big one): its real speed replaces the guess for this PC. Test when the PC is quiet.">Test this PC</button>
+      <span class="hint" id="calc-test-line" aria-live="polite"></span>
+    </div>
+    <div class="fault" id="calc-fault" role="alert" hidden></div>
+    <div class="table-wrap"><table class="help-table calc-table">
+      <thead><tr><th scope="col">Model</th><th scope="col">Fits</th><th scope="col">Words a second</th><th scope="col" id="calc-post-head">600-word post</th></tr></thead>
+      <tbody id="calc-rows"></tbody>
+    </table></div>
+    <p class="hint" id="calc-basis"></p>
+  </div>
+</dialog>
+
+
+<script src="app.js"></script>
+<script src="speed.js"></script>
+<script src="lock.js"></script>
+<script src="images.js"></script>
+<script src="team.js"></script>
+<script src="files.js"></script>
+<script src="jobs.js"></script>
+<script src="home.js"></script>
+<script src="chats.js"></script>
+<script src="sendto.js"></script>
+<script src="notes.js"></script>
+<script src="mute.js"></script>
+<script src="notify.js"></script>
+<script src="memory.js"></script>
+<script src="look.js"></script>
+<script src="faces.js"></script>
+<script src="office.js"></script>
+<script src="models.js"></script>
+<script src="calc.js"></script>
+<script src="project.js"></script>
+<script src="keep.js"></script>
+<script src="backup.js"></script>
+<script src="claude.js"></script>
+<script src="network.js"></script>
+<script src="pcs.js"></script>
+<script src="hire.js"></script>
+<script src="queue.js"></script>
+</body>
+</html>

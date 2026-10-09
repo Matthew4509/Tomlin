@@ -1,0 +1,54 @@
+{
+  "id": "sd15-realistic-lcm",
+  "kind": "image",
+  "name": "Realistic Vision 6 + LCM (SD 1.5, fast)",
+  "about": "Photo-like pictures in 4 steps; the CPU choice. Stable Diffusion 1.5 photoreal checkpoint with the LCM LoRA for few-step drafts and TAESD for quick previews.",
+  "family": "sd15",
+  "licence": "CreativeML OpenRAIL-M (checkpoint: use limits apply, commercial use allowed); OpenRAIL++ (LCM LoRA); MIT (TAESD)",
+  "quant": "fp16",
+  "minRamGB": 3.5,
+  "minVramGB": 2.5,
+  "recommendedModes": [
+    "blog",
+    "icon",
+    "custom"
+  ],
+  "native": 512,
+  "files": [
+    {
+      "role": "model",
+      "repo": "SG161222/Realistic_Vision_V6.0_B1_noVAE",
+      "rev": "9a857a696b9aabbf509073e0aa55ec8200b6ef7d",
+      "path": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors",
+      "bytes": 2132625894,
+      "sha256": "c48bfd159cd7a6507b128685e963c398fa72399cefafaf603781df50ce836cc7"
+    },
+    {
+      "role": "lora",
+      "name": "lcm-lora-sdv1-5",
+      "repo": "latent-consistency/lcm-lora-sdv1-5",
+      "rev": "cf2fced511dbe7e26c8d1d397e728fbab875db4b",
+      "path": "pytorch_lora_weights.safetensors",
+      "saveAs": "lcm-lora-sdv1-5.safetensors",
+      "bytes": 134621556,
+      "sha256": "8f90d840e075ff588a58e22c6586e2ae9a6f7922996ee6649a7f01072333afe4"
+    },
+    {
+      "role": "taesd",
+      "repo": "madebyollin/taesd",
+      "rev": "614f76814bbe30edbe2e627ace1c2234c81a2c0e",
+      "path": "diffusion_pytorch_model.safetensors",
+      "saveAs": "taesd-sd15.safetensors",
+      "bytes": 9793292,
+      "sha256": "db169d69145ec4ff064e49d99c95fa05d3eb04ee453de35824a6d0f325513549"
+    }
+  ],
+  "defaults": {
+    "steps": 4,
+    "cfg": 1,
+    "sampler": "lcm",
+    "scheduler": "discrete",
+    "negative": "lowres, blurry, deformed, watermark, text"
+  },
+  "transparent": false
+}

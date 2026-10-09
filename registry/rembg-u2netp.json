@@ -1,0 +1,13 @@
+{
+  "id": "rembg-u2netp",
+  "kind": "helper",
+  "name": "Background remover (U2-Net small)",
+  "about": "Cuts the background away for Icon mode (transparent PNG). Runs on the CPU.",
+  "licence": "Apache-2.0 (U-2-Net)",
+  "quant": "fp32",
+  "minRamGB": 0.3,
+  "minVramGB": 0,
+  "files": [
+    { "role": "onnx", "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx", "saveAs": "u2netp.onnx", "bytes": 4574861, "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8" }
+  ]
+}

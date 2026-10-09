@@ -1,0 +1,44 @@
+{
+  "id": "dreamshaper8-lcm",
+  "kind": "image",
+  "name": "DreamShaper 8 LCM (SD 1.5, fast, illustration)",
+  "about": "All-round SD 1.5 model with LCM built in: good for icons and illustrations in 4 steps on a CPU.",
+  "family": "sd15",
+  "licence": "CreativeML OpenRAIL-M (use limits apply, commercial use allowed); MIT (TAESD)",
+  "quant": "fp16",
+  "minRamGB": 3.5,
+  "minVramGB": 2.5,
+  "recommendedModes": [
+    "icon",
+    "cartoon",
+    "custom"
+  ],
+  "native": 512,
+  "files": [
+    {
+      "role": "model",
+      "repo": "Lykon/dreamshaper-8-lcm",
+      "rev": "4645d8bc6a8e6b106d21606d63e8460cdad4f1a6",
+      "path": "DreamShaper8_LCM.safetensors",
+      "bytes": 2133804992,
+      "sha256": "a4f3e1526c5dc4fcbe342f5c410d83ae202c7a415fcefcbb92e0f93fcd0a87c3"
+    },
+    {
+      "role": "taesd",
+      "repo": "madebyollin/taesd",
+      "rev": "614f76814bbe30edbe2e627ace1c2234c81a2c0e",
+      "path": "diffusion_pytorch_model.safetensors",
+      "saveAs": "taesd-sd15.safetensors",
+      "bytes": 9793292,
+      "sha256": "db169d69145ec4ff064e49d99c95fa05d3eb04ee453de35824a6d0f325513549"
+    }
+  ],
+  "defaults": {
+    "steps": 4,
+    "cfg": 1,
+    "sampler": "lcm",
+    "scheduler": "discrete",
+    "negative": "lowres, blurry, deformed, watermark, text"
+  },
+  "transparent": false
+}

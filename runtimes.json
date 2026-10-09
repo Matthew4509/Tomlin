@@ -1,0 +1,35 @@
+{
+  "note": "The model runners TOMLIN uses, each pinned to one release and checked by SHA-256 before it is unpacked. A build is unpacked into runtime/<id>/. CUDA builds are for NVIDIA cards (CUDA 12 still runs Pascal cards such as the Quadro P2000; CUDA 13 does not). Change a pin only on purpose.",
+  "runtimes": {
+    "llama-cpu": {
+      "engine": "llama", "device": "cpu", "name": "llama.cpp b11284, CPU", "licence": "MIT",
+      "parts": [{ "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-cpu-x64.zip", "bytes": 19197239, "sha256": "d1ae718af63497d74caf4a012e4550bbbdfab2d9faceefbd5f06b73dacbe903a" }]
+    },
+    "llama-vulkan": {
+      "engine": "llama", "device": "vulkan", "name": "llama.cpp b11284, Vulkan (any graphics chip)", "licence": "MIT",
+      "parts": [{ "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-vulkan-x64.zip", "bytes": 33126908, "sha256": "69c70371c2c9fe3e80859cdbb48596aed3e4265627e470a90d5a9f66dd6779d5" }]
+    },
+    "llama-cuda": {
+      "engine": "llama", "device": "cuda", "name": "llama.cpp b11284, CUDA 12.4 (NVIDIA)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "parts": [
+        { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-cuda-12.4-x64.zip", "bytes": 262896552, "sha256": "5045d2f8f85337208c8528d03e7368f73c3f118fc127a52f9f129178bbb2cab0" },
+        { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/cudart-llama-bin-win-cuda-12.4-x64.zip", "bytes": 391443627, "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6" }
+      ]
+    },
+    "sd-cpu": {
+      "engine": "sd", "device": "cpu", "name": "stable-diffusion.cpp master-929, CPU", "licence": "MIT",
+      "parts": [{ "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-cpu-x64.zip", "bytes": 17486440, "sha256": "5e7caca2080321b25a12c1fa4175cb7d953f2b182309f8f73bfc9c725231d26c" }]
+    },
+    "sd-vulkan": {
+      "engine": "sd", "device": "vulkan", "name": "stable-diffusion.cpp master-929, Vulkan (any graphics chip)", "licence": "MIT",
+      "parts": [{ "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-vulkan-x64.zip", "bytes": 30067605, "sha256": "60e6850d650417409f18c2170ab5e27335db96da70cd3d1ad1e930bcffc2fd35" }]
+    },
+    "sd-cuda": {
+      "engine": "sd", "device": "cuda", "name": "stable-diffusion.cpp master-929, CUDA 12 (NVIDIA)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "parts": [
+        { "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-cuda12-x64.zip", "bytes": 337915440, "sha256": "217d6dead9abd3f827fc338268555cc179234e7e6330ef21ecb1c985e19d2dc7" },
+        { "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/cudart-sd-bin-win-cu12-x64.zip", "bytes": 563452046, "sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d" }
+      ]
+    }
+  }
+}
