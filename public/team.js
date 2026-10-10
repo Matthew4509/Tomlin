@@ -251,7 +251,7 @@ $('#team-open').addEventListener('click', async () => {
   if (id) return openProfile(id);
   editId = '';
   emptyEdit();
-  if (!dlg.open) dlg.showModal();
+  app.showAsPage(dlg, 'staff');
 });
 
 // ---- The right side: one person's Edit Staff (picked with Edit on the left). Hiring is its own window (hire.js) ----
@@ -375,7 +375,7 @@ async function openProfile(id) {
   drawEdit();
   staffMode();
   teamDraw();
-  if (!dlg.open) dlg.showModal();
+  app.showAsPage(dlg, 'staff');
   // On a phone the two sides stack: the edit side is below the list.
   if (matchMedia('(max-width: 760px)').matches) $('#staff-edit').scrollIntoView({ block: 'start' });
 }

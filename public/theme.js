@@ -1,6 +1,6 @@
-// Day or night colours, for both looks (today's and the second look at /alt/): kept in this browser as 'day' or
+// Day or night colours: kept in this browser as 'day' or
 // 'night'; nothing kept = follow the Windows light/dark setting. Loaded in <head>, before the page is drawn, so it
-// never flashes the other colours. The colours are in style.css and alt.css (:root, and [data-theme="night"]).
+// never flashes the other colours. The colours are in style.css (:root, and [data-theme="night"]).
 // Answers [data-colours-toggle] (one button: Day <-> Night) and [data-colours-pick] (radios: Follow Windows '', day,
 // night); a picker drawn later calls window.tomlinColours.draw() to show the one picked.
 'use strict';
@@ -71,7 +71,7 @@
     }
   }
 
-  // Listened for on the whole page, so a picker drawn later (the second look's Settings) works too.
+  // Listened for on the whole page, so a picker drawn later works too.
   document.addEventListener('click', e => {
     if (e.target instanceof Element && e.target.closest('[data-colours-toggle]')) pick(shown() === 'day' ? 'night' : 'day');
   });

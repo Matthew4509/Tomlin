@@ -3,7 +3,7 @@
 // on the way, Stop, and Start TOMLIN.cmd starting the new copy.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as update from '../src/update.ts';
@@ -253,10 +253,9 @@ test('files that say another version than the one sent are refused, with the way
   assert.deepEqual(node.done, []);
 });
 
-test('Start Shelby.cmd (the earlier name) only runs Start TOMLIN.cmd, so old shortcuts and older linked PCs keep working', () => {
-  const old = readFileSync(new URL('../Start Shelby.cmd', import.meta.url), 'utf8');
-  assert.match(old, /call "%~dp0Start TOMLIN\.cmd" %\*/);
-  assert.ok(update.PARTS.includes('Start Shelby.cmd') && update.PARTS.includes('Start TOMLIN.cmd'));
+test('a copy carries Start TOMLIN.cmd and no longer the Start Shelby.cmd forwarder (every PC runs 2.0.45 or newer)', () => {
+  assert.ok(update.PARTS.includes('Start TOMLIN.cmd') && !update.PARTS.includes('Start Shelby.cmd'));
+  assert.equal(existsSync(new URL('../Start Shelby.cmd', import.meta.url)), false);
 });
 
 test('a PC from before the TOMLIN name gets the launcher under the name it takes; its folder finds it either way', () => {
@@ -382,4 +381,28 @@ test('a build id that is not the files listed is refused before anything crosses
   const files = await update.appFiles(host);
   await assert.rejects(node.wire().ask('/worker/update-offer', { version: '2.0.33', build: 'd'.repeat(16), files }), /not build ddddddd as sent.*Close TOMLIN on the sending PC, start it again, then update again/);
   assert.equal(node.handle.incoming(), null);
+});
+
+test('half-come updates are not kept for ever: old ones go at start, another version\'s on an offer, nothing else', async () => {
+  const parent = tmp();
+  const root = aCopy(parent, '2.0.32');
+  const old = Date.now() / 1000 - (update.INCOMING_DAYS + 1) * 24 * 3600;
+  const plant = (name: string, age?: number) => {
+    put(join(parent, name), 'src/a.ts.part', 'half');
+    if (age) utimesSync(join(parent, name), age, age);
+  };
+  plant('.tomlin-2.0.30-incoming', old);
+  plant('.shelby-2.0.29-incoming', old);
+  plant('.tomlin-2.0.31-incoming');
+  plant('tomlin-2.0.28', old);
+  writeFileSync(join(parent, '.tomlin-notes-incoming'), 'not a folder of ours');
+  utimesSync(join(parent, '.tomlin-notes-incoming'), old, old);
+  const handle = update.updateSide({ root, version: '2.0.32', allowed: () => true, pcName: () => 'Worker PC', restarts: true, busy: () => null, freeBytes: async () => Infinity, done: async () => undefined });
+  assert.deepEqual((await handle.swept).sort(), ['.shelby-2.0.29-incoming', '.tomlin-2.0.30-incoming']);
+  const left = () => readdirSync(parent).sort();
+  assert.deepEqual(left(), ['.tomlin-2.0.31-incoming', '.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'a recent one stays, to be carried on');
+  const files = await update.appFiles(aCopy(tmp(), '2.0.33'));
+  const r = await handle('/worker/update-offer', { version: '2.0.33', files }, { key: 'b1b2b3b4', name: 'Laptop' });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(left(), ['.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'another version coming in clears the 2.0.31 one');
 });

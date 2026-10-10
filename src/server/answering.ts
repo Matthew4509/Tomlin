@@ -130,17 +130,17 @@ export function notebooksOf(who: string): { own: string | null; name: string } {
 export const lastContext = new Map<string, { ctx: number; at: number; model: string }>();
 
 /** The one context builder for a chat turn with the manager or a hire. */
-export async function chatContext(who: string, member: StaffMember | undefined, history: ChatLine[], message: string, ctx: number, opening?: string, docs?: string): Promise<memory.ChatContext> {
+export async function chatContext(who: string, member: StaffMember | undefined, history: ChatLine[], message: string, ctx: number, opening?: string, docs?: string, docsWhole?: string, squeeze?: number): Promise<memory.ChatContext> {
   const books = notebooksOf(who);
   // An answer a linked PC still owes, with nothing written yet, is not a turn: the model is not shown an empty answer.
   history = history.filter(l => !(l.waiting && !l.content.trim()));
   // A Default hire is sent as a plain chat window sends: no card, no notebooks, no "remember" rule (the chat, a handoff
   // it carries on from, and the documents added to it are still read).
-  if (isPlain(member)) return memory.buildChat({ ctx, maxAnswer: ANSWER_CEILING, card: '', team: null, own: null, name: books.name, history, message, opening, docs });
+  if (isPlain(member)) return memory.buildChat({ ctx, maxAnswer: ANSWER_CEILING, card: '', team: null, own: null, name: books.name, history, message, opening, docs, docsWhole, squeeze });
   const { tone } = await store.settings();
   const [team, own] = await Promise.all([notebooks.read('team'), books.own ? notebooks.read(books.own) : Promise.resolve<memory.NoteLine[] | null>(null)]);
   const card = member ? staffSystem(member, toneOf(member.tone ?? tone).prompt) : systemFor(who, tone, store.peek()?.managerName ?? '');
-  return memory.buildChat({ ctx, maxAnswer: ANSWER_CEILING, card, rules: memory.SUGGEST_RULE, team, own, name: books.name, history, message, opening, docs });
+  return memory.buildChat({ ctx, maxAnswer: ANSWER_CEILING, card, rules: memory.SUGGEST_RULE, team, own, name: books.name, history, message, opening, docs, docsWhole, squeeze });
 }
 
 /**

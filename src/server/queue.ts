@@ -7,6 +7,7 @@ import { readData, updateData } from '../atomic.ts';
 import * as brains from '../brains.ts';
 import * as Q from '../queue.ts';
 import type { QItem, Queue } from '../queue.ts';
+import { MESSAGE_MAX } from '../memory.ts';
 import { roleOf } from '../staff.ts';
 import { log } from '../log.ts';
 import { HOME, type Routes, chats, json, notifier, staff, staffId, store } from './core.ts';
@@ -231,7 +232,7 @@ async function runChat(it: QItem, signal: AbortSignal, st: { stage: string }): P
   // Its line says how far the answer is (loading, asked, working it out, writing), not "Starting" until it ends.
   const r = await queuedMessage(it.chat ?? '', it.message ?? it.title, it.think === true, signal, it.added, (event, data) => {
     st.stage = Q.chatStage(event, data, st.stage);
-  });
+  }, it.id);
   if ('error' in r) return { state: 'failed', error: r.error };
   return { state: 'done', result: `${r.who} answered (${r.ran}).` };
 }
@@ -273,8 +274,9 @@ async function itemFrom(raw: Record<string, unknown>): Promise<QItem | { error: 
     const chatId = typeof raw.chat === 'string' ? raw.chat : '';
     const info = await chats.get(chatId);
     if (!info) return { error: 'That chat is not here any more.' };
-    const message = String(raw.message ?? '').replace(/\r/g, '').trim().slice(0, 20_000);
+    const message = String(raw.message ?? '').replace(/\r/g, '').trim();
     if (!message) return { error: 'Type the message first.' };
+    if (message.length > MESSAGE_MAX) return { error: `That message is too long (over ${MESSAGE_MAX.toLocaleString('en-GB')} characters). Add it as a document instead, or split it.` };
     const planned = info.project ? await jobRoutes.loadJob(info.project) : null;
     const saved = info.project && !planned ? await jobRoutes.projectInfo(info.project) : null;
     const inProject = planned ? { id: planned.id, name: planned.name, goal: planned.goal } : saved ? { id: info.project!, name: saved.name, goal: saved.goal } : null;

@@ -171,9 +171,17 @@ export function json(res: ServerResponse, status: number, value: unknown): void 
  */
 export function saidError(error: unknown): string {
   const e = error as NodeJS.ErrnoException;
+  // A full disk: said as one (the log may not take the details either), with the drive and what to do.
+  if (e && (e.code === 'ENOSPC' || e.code === 'EDQUOT')) {
+    const drive = typeof e.path === 'string' ? /^([A-Za-z]:)[\\/]/.exec(e.path)?.[1]?.toUpperCase() : undefined;
+    return `The disk${drive ? ` (drive ${drive})` : ''} is full, so TOMLIN could not save that. Free some space on it (empty the Recycle Bin, or delete big files you do not need), then try again. Nothing saved before was changed.`;
+  }
   if (e && typeof e.code === 'string' && /^E[A-Z]+$/.test(e.code)) return `Something went wrong in TOMLIN: a file or folder could not be used (${e.code}). The details are in the log (Settings, Your data, Open log).`;
   return `Something went wrong in TOMLIN: ${e?.message ?? String(error)}`;
 }
+
+/** A caught fault for the page: a message TOMLIN wrote on purpose as it is, a system error (it has a code) in plain words. */
+export const faultWords = (error: unknown): string => (typeof (error as NodeJS.ErrnoException)?.code === 'string' && /^E[A-Z]+$/.test((error as NodeJS.ErrnoException).code!) ? saidError(error) : (error as Error)?.message ?? String(error));
 
 export function apiError(res: ServerResponse, status: number, message: string, code = 'tomlin_error'): void {
   json(res, status, { error: { message, type: code, code } });
@@ -199,7 +207,7 @@ export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Reco
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 export async function staticFile(res: ServerResponse, path: string): Promise<void> {
-  // The second look (public-alt/, /alt/) is dropped for now: its files stay in the repo, nothing serves them.
+  // The second look (/alt/) was dropped and its files deleted: an old bookmark to it opens the app.
   if (/^\/alt(\/|$)/.test(path)) return void res.writeHead(302, { location: '/', ...SECURITY_HEADERS }).end();
   const name = path === '/' || path === '' ? 'index.html' : path.replace(/^\/+/, '');
   if (!/^[\w.-]+$/.test(name)) return json(res, 404, { error: 'Not found.' });

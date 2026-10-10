@@ -91,10 +91,14 @@ export interface ChatLine {
   picture?: { output: string; prompt: string; alt?: string };
   /** The answer reached its length limit before it was finished: the page offers Continue. */
   cut?: boolean;
+  /** Stop was pressed part way (in the chat, or the queue's Stop): the words so far are kept. A queued message runs again on Resume. */
+  stopped?: boolean;
   /** The documents' pages the model was given for this answer ("manual.pdf page 31"), shown under it. */
   sources?: string;
   /** A message sent here with "Send to…": where it came from ("Sam's chat"), shown under it, never sent to a model. */
   from?: string;
+  /** A message the queue sent: its queue item's id, so a run again finds this item's own line, not one with the same words. */
+  queued?: string;
   /** An answer handed on with "Send to…": to whom ("Dana · blog photos"), shown under it, never sent to a model. */
   sent?: string[];
   /** What the model worked out before this answer (Think), folded above it; never sent to a model again. */
@@ -156,8 +160,15 @@ export class Store {
     // Read after the wait: another save may have changed it meanwhile, and its change must stay.
     const s = this.cache!;
     this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
-    await this.writeJson('settings.json', this.cache);
-    return this.cache;
+    const next = this.cache;
+    try {
+      await this.writeJson('settings.json', next);
+    } catch (e) {
+      // Not saved (a full disk): the settings go back to what the file holds, unless a later change already replaced them.
+      if (this.cache === next) this.cache = s;
+      throw e;
+    }
+    return next;
   }
 
   /** Each character keeps its own conversation, so Standard answers are never read by the optional character and the other way round. */

@@ -143,6 +143,10 @@ function fakeCpanel(home, opts = {}) {
           const hash = (src.match(/hash_equals\('([0-9a-f]{64})'/) || [])[1];
           const key = new URLSearchParams(Buffer.concat(chunks).toString()).get('key') || '';
           if (req.method !== 'POST' || crypto.createHash('sha256').update(key).digest('hex') !== hash) { res.writeHead(404); return res.end(); }
+          // A load that breaks part way (site.importFails, set by a test): the PHP process ends with the connection, or
+          // PHP stops with a fatal error page. Either way the page and the .sql file stay where they were.
+          if (site.importFails === 'drop') { site.loaded = 'part'; return req.socket.destroy(); }
+          if (site.importFails === 'fatal') { res.writeHead(500, { 'Content-Type': 'text/html' }); return res.end('<b>Fatal error</b>: Allowed memory size exhausted'); }
           const sqlAbs = (src.match(/\$tomlin_sql = '([^']+)'/) || [])[1];
           const sqlFile = abs(sqlAbs);
           const text = fs.existsSync(sqlFile) ? fs.readFileSync(sqlFile, 'utf8') : null;

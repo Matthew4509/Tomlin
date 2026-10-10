@@ -69,12 +69,13 @@ const sha = s => crypto.createHash('sha1').update(s).digest('hex').slice(0, 12);
 const ruleKey = (rule, rel, fp) => rule + '|' + rel.toLowerCase() + '|' + fp;
 
 // Every file of the folder. A folder it could not read (or too deep) is named in missed: an incomplete list must not
-// go out, as a file missing from it would be removed from the server.
+// go out, as a file missing from it would be removed from the server. One that stopped at MAX_FILES says so in missed
+// too (count: true), so a list made from it is never taken as whole.
 function walk(dir, missed = []) {
   const out = [];
   const relOf = d => path.relative(dir, d).replace(/\\/g, '/') || '.';
   const go = (d, depth) => {
-    if (out.length >= MAX_FILES) return;
+    if (out.length >= MAX_FILES) { if (!missed.some(m => m.count)) missed.push({ rel: '(more files)', count: true }); return; }
     if (depth > 20) { missed.push({ rel: relOf(d), why: 'is more than 20 folders deep' }); return; }
     let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { missed.push({ rel: relOf(d), why: 'could not be read (' + (e.code || e.message) + ')' }); return; }
     for (const e of ents) {
@@ -92,11 +93,15 @@ async function candidates(projectDir, folder, missed) {
   const isRepo = fs.existsSync(path.join(projectDir, '.git')) && !gitConfigRisky(projectDir);
   let list = null;
   try { list = await disclosure.publishedFiles(folder, isRepo); } catch { list = null; }
-  if (!list) return { rels: walk(folder, missed), ignored: [] };
-  const rels = [...new Set(list.map(f => f.rel.replace(/\\/g, '/')))].filter(rel => { try { return fs.statSync(path.join(folder, rel)).isFile(); } catch { return false; } });
-  // Also the files git leaves out, so they are shown as left out with that reason, never dropped without a word.
+  if (!list) return { rels: walk(folder, missed), ignored: [], ignoredMissed: [] };
+  // A listed file that is gone (deleted, not committed yet) or is a folder (a submodule) is not one to send; one that
+  // is there but cannot be looked at (no rights, held) stays, so the check names it instead of dropping it.
+  const rels = [...new Set(list.map(f => f.rel.replace(/\\/g, '/')))].filter(rel => { try { return fs.statSync(path.join(folder, rel)).isFile(); } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR'; } });
+  // Also the files git leaves out, so they are shown as left out with that reason, never dropped without a word. What
+  // that walk could not see matters only when they are sent too (the tick), so it is kept for the check to decide.
   const known = new Set(rels.map(x => x.toLowerCase()));
-  return { rels, ignored: walk(folder, []).filter(rel => !known.has(rel.toLowerCase())) };
+  const ignoredMissed = [];
+  return { rels, ignored: walk(folder, ignoredMissed).filter(rel => !known.has(rel.toLowerCase())), ignoredMissed };
 }
 
 /**
@@ -118,7 +123,10 @@ async function checkFolder(opts) {
     else if (!ignoredToo) left.push({ rel, why: 'in .gitignore (git leaves it out)', soft: 'gitignored' });
   }
   const rels = [...all.rels, ...(ignoredToo ? all.ignored.filter(rel => !HARD.some(([re]) => re.test(rel))) : [])].sort();
-  for (const m of missed) findings.push({ rule: 'FOLDER', rel: m.rel, line: 0, what: 'this folder ' + m.why + ', so the list of files to send is not complete: fix it and check again', key: '', canIgnore: false });
+  // Files the .gitignore leaves out are sent too: a folder that walk could not read makes that list incomplete as well.
+  if (ignoredToo) for (const m of all.ignoredMissed) if (!missed.some(x => x.rel === m.rel)) missed.push(m);
+  const cut = missed.some(m => m.count);
+  for (const m of missed.filter(m => !m.count)) findings.push({ rule: 'FOLDER', rel: m.rel, line: 0, what: 'this folder ' + m.why + ', so the list of files to send is not complete: fix it and check again', key: '', canIgnore: false });
   const send = new Set(opts.sendAnyway || []);
   const ignore = new Set(opts.ignore || []);
   // One value saved under two labels (the same Local and Live value) is looked for once, named by both.
@@ -127,20 +135,26 @@ async function checkFolder(opts) {
   const values = [...byValue].map(([v, names]) => [names.join(' and '), v, names[0]]);
   const matcher = disclosure.makeMatcher({ details: [...(opts.details || []), ...(opts.otherDetails || [])] });
   let bytes = 0;
-  if (rels.length >= MAX_FILES) findings.push({ rule: 'COUNT', rel: '(more files)', line: 0, what: 'the folder has more than ' + MAX_FILES.toLocaleString('en') + ' files, the most TOMLIN looks at, so the list to send is not complete: pick a smaller upload folder in Set up', key: '', canIgnore: false });
+  if (rels.length >= MAX_FILES || cut) findings.push({ rule: 'COUNT', rel: '(more files)', line: 0, what: 'the folder has more than ' + MAX_FILES.toLocaleString('en') + ' files, the most TOMLIN looks at, so the list to send is not complete: pick a smaller upload folder in Set up', key: '', canIgnore: false });
   for (const rel of rels) {
     const hard = HARD.find(([re]) => re.test(rel));
     if (hard) { left.push({ rel, why: hard[1] }); continue; }
     const soft = SOFT.find(([k, re]) => re.test(rel) && !send.has(k));
     if (soft) { left.push({ rel, why: soft[2], soft: soft[0] }); continue; }
     const abs = path.join(folder, rel);
-    let st; try { st = fs.statSync(abs); } catch { continue; }
-    let buf = null, sha, bigText = false;
+    // Gone since the list was made: not sent (as if deleted). There but not readable: a stop, never a silent drop (a
+    // file TOMLIN sent before that is missing from the list would be removed from the server).
+    let st; try { st = fs.statSync(abs); } catch (e) {
+      if (e.code !== 'ENOENT') findings.push({ rule: 'READ', rel, line: 0, what: 'could not be looked at (' + (e.code || e.message) + '): close the program that holds it, or give your account rights to it, and check again', key: '', canIgnore: false });
+      continue;
+    }
+    let buf = null, sha, bigText = false, hits = null;
     try {
-      // A big file is read whole only when it is text to look inside; a big binary one (a video) is only fingerprinted.
+      // A big file is read whole only when it is text to look inside; a big binary one (a video), or text too big to
+      // look inside, is fingerprinted in parts, and those same parts are searched for a saved secret's value.
       const big = st.size > MAX_TEXT && !isBinaryStart(abs);
       bigText = big && st.size > MAX_SCAN;
-      if (st.size > MAX_TEXT && (!big || bigText)) sha = hashFile(abs);
+      if (st.size > MAX_TEXT && (!big || bigText)) ({ sha, hits } = hashFile(abs, values.map(([, v]) => v), true));
       else { buf = fs.readFileSync(abs); sha = crypto.createHash('sha256').update(buf).digest('hex'); }
     } catch (e) { findings.push({ rule: 'READ', rel, line: 0, what: 'could not be read (' + e.code + '): close the program that holds it and check again', key: '', canIgnore: false }); continue; }
     files.push({ rel, size: st.size, sha });
@@ -153,7 +167,10 @@ async function checkFolder(opts) {
     // The file's own name can hold a private detail (an email as a file name).
     for (const h of matcher.inName(rel)) if (h.rule === 'DISC-001') found('NAME', 0, null, 'its name has ' + [...h.labels].join(', '));
     if (bigText) found('BIG', 0, sha, 'is a text file of ' + Math.round(st.size / 1048576) + ' MB, too big for TOMLIN to look inside: leave it out of the upload folder, or mark it "not a secret" to send it unchecked');
-    if (!buf) continue;
+    if (!buf) {
+      for (const i of hits || []) found('VALUE', 0, null, 'holds the value of ' + values[i][0] + ' (inside the file): leave the file out, or take the value out of it', false);
+      continue;
+    }
     const text = disclosure.decodeText(buf);
     if (text == null) {
       // A file read as binary (a database file, a PDF) is still searched for a saved secret's value, as bytes.
@@ -205,16 +222,29 @@ function isBinaryStart(abs) {
     return disclosure.decodeText(b.subarray(0, n)) == null;
   } finally { fs.closeSync(fd); }
 }
-// A file's sha256 read in parts, so a big one is never held in memory whole.
-function hashFile(abs) {
+// A file's sha256 read in parts, so a big one is never held in memory whole. With full, each part is also searched for
+// each of values as UTF-8 and as UTF-16 bytes, with the end of the part before kept in front of it, so a value cut in
+// two by the parts is still found: -> { sha, hits: [the index of each value found] }.
+function hashFile(abs, values = [], full = false) {
   const h = crypto.createHash('sha256');
+  const needles = values.flatMap((v, i) => [[i, Buffer.from(v, 'utf8')], [i, Buffer.from(v, 'utf16le')]]);
+  const keep = needles.reduce((a, [, b]) => Math.max(a, b.length - 1), 0);
+  const hits = new Set();
   const fd = fs.openSync(abs, 'r');
   try {
     const b = Buffer.alloc(1024 * 1024);
-    let n;
-    while ((n = fs.readSync(fd, b, 0, b.length, null)) > 0) h.update(b.subarray(0, n));
+    let n, tail = Buffer.alloc(0);
+    while ((n = fs.readSync(fd, b, 0, b.length, null)) > 0) {
+      const part = b.subarray(0, n);
+      h.update(part);
+      if (!needles.length) continue;
+      const look = tail.length ? Buffer.concat([tail, part]) : part;
+      for (const [i, nb] of needles) if (!hits.has(i) && look.includes(nb)) hits.add(i);
+      tail = Buffer.from(look.subarray(Math.max(0, look.length - keep)));
+    }
   } finally { fs.closeSync(fd); }
-  return h.digest('hex');
+  const sha = h.digest('hex');
+  return full ? { sha, hits: [...hits].sort((a, b) => a - b) } : sha;
 }
 
 // The upload folder a project most likely means: a folder named like a web root that holds an index page, else the

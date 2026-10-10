@@ -139,3 +139,36 @@ test('a queued chat line says how far its answer is, not Starting until it ends'
   assert.equal(Q.chatStage('text', { text: 'Hello' }, st), 'Writing the answer');
   assert.equal(Q.chatStage('impact', {}, 'Writing the answer'), 'Writing the answer');
 });
+
+test('a queued chat message run again: done with a whole answer; sent again after Stop, with the half answer taken out', () => {
+  const since = '2026-10-10T10:00:00.000Z';
+  const ask = { role: 'user', content: 'Write the intro', at: '2026-10-10T10:01:00.000Z', from: 'the queue' };
+  const before = { role: 'assistant', content: 'An older answer', at: '2026-10-10T09:00:00.000Z' };
+  assert.deepEqual(Q.runAgain([before], 'Write the intro', since), [], 'not sent yet: nothing to take out');
+  assert.equal(Q.runAgain([before, ask, { role: 'assistant', content: 'The intro.', at: '2026-10-10T10:02:00.000Z' }], 'Write the intro', since), 'done');
+  assert.equal(Q.runAgain([before, ask, { role: 'assistant', content: '', at: '2026-10-10T10:02:00.000Z', waiting: { rid: 'r1' } }], 'Write the intro', since), 'done', 'owed by a linked PC: it comes by itself');
+  // Stop (the queue's Pause) part way, then Resume: the half answer is not the answer.
+  assert.deepEqual(Q.runAgain([before, ask, { role: 'assistant', content: 'The in', at: '2026-10-10T10:02:00.000Z', stopped: true }], 'Write the intro', since), [1, 2]);
+  assert.deepEqual(Q.runAgain([before, ask, { role: 'assistant', content: ' ', at: '2026-10-10T10:02:00.000Z' }], 'Write the intro', since), [1, 2]);
+  assert.deepEqual(Q.runAgain([before, ask], 'Write the intro', since), [1], 'closed before any answer');
+  assert.deepEqual(Q.runAgain([before, { ...ask, from: undefined }], 'Write the intro', since), [], 'typed by him, not the queue');
+});
+
+test('two queued items with the same words are two messages; an answer to a later message is not the stopped one\'s', () => {
+  const since = '2026-10-10T10:00:00.000Z';
+  const a = { role: 'user', content: 'Go on', at: '2026-10-10T10:05:00.000Z', from: 'the queue', queued: 'qa' };
+  const answerA = { role: 'assistant', content: 'And then...', at: '2026-10-10T10:06:00.000Z' };
+  // Item b was added (since) before item a ran: a's line is at or after b's since, with the same words.
+  assert.deepEqual(Q.runAgain([a, answerA], 'Go on', since, 'qb'), [], 'b is not sent yet: a\'s answer is not b\'s');
+  assert.equal(Q.runAgain([a, answerA], 'Go on', since, 'qa'), 'done');
+  const b = { ...a, at: '2026-10-10T10:07:00.000Z', queued: 'qb' };
+  assert.deepEqual(Q.runAgain([a, answerA, b, { role: 'assistant', content: 'Half', at: '2026-10-10T10:08:00.000Z', stopped: true }], 'Go on', since, 'qb'), [2, 3]);
+  // A line from before the id was kept is still found by its words.
+  const old = { role: 'user', content: 'Go on', at: '2026-10-10T10:05:00.000Z', from: 'the queue' };
+  assert.equal(Q.runAgain([old, answerA], 'Go on', since, 'qa'), 'done');
+  // Stopped, then he typed something himself and it was answered: the queued message still has no whole answer.
+  const stoppedA = { role: 'assistant', content: 'And th', at: '2026-10-10T10:06:00.000Z', stopped: true };
+  const his = { role: 'user', content: 'Something else', at: '2026-10-10T10:09:00.000Z' };
+  const hisAnswer = { role: 'assistant', content: 'Sure.', at: '2026-10-10T10:10:00.000Z' };
+  assert.deepEqual(Q.runAgain([a, stoppedA, his, hisAnswer], 'Go on', since, 'qa'), [0, 1]);
+});

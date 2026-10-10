@@ -68,6 +68,7 @@
   <details class="rail-fold rail-setup" id="rail-setup-fold" open>
     <summary class="rail-head"><span id="rail-setup-title">Set up</span></summary>
     <ul class="rail-list rail-links" aria-labelledby="rail-setup-title">
+      <li><button class="link" type="button" data-setup="settings"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>Settings: colours, alerts, lock, data</button></li>
       <li><button class="link" type="button" data-setup="staff"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Staff: hire and edit</button></li>
       <li><button class="link" type="button" data-setup="models"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Add a model</button></li>
       <li><button class="link" type="button" data-setup="nodes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg>Nodes and memory</button></li>
@@ -306,6 +307,9 @@
     <div id="settings-keep"></div>
   </div>
 </section>
+
+<!-- Staff, Jobs and Files open here as pages beside the Set up menu (home.js showAsPage), not as windows over it. -->
+<section class="models-page app-page setup-page" id="setup-page" aria-label="Set up"></section>
 
 <section class="models-page app-page" id="help" aria-labelledby="help-title">
   <div class="home-head">
@@ -665,6 +669,13 @@
             <div class="side-body">
               <label class="sr-only" for="scratch-text">Scratch pad</label>
               <textarea id="scratch-text" rows="7" maxlength="20000" spellcheck="true" placeholder="Notes for yourself: kept as you type, the same in every chat. No model reads them."></textarea>
+              <div id="scratch-clash" hidden>
+                <p class="hint fault-line" id="scratch-clash-said" role="alert"></p>
+                <div class="snippet-btns">
+                  <button class="btn" type="button" id="scratch-mine" title="Saves the words in this window over the other window's">Keep mine</button>
+                  <button class="btn" type="button" id="scratch-theirs" title="Puts the other window's words here instead of yours">Use the other window's</button>
+                </div>
+              </div>
               <div class="snippet-btns note-save-row">
                 <label class="sr-only" for="note-where">Save the note in</label>
                 <select id="note-where" title="Where Save note puts it: the notes folder, or a project's admin notes"><option value="">Notes</option></select>
@@ -1318,6 +1329,7 @@
 
 
 <script src="app.js"></script>
+<script src="chatview.js"></script>
 <script src="speed.js"></script>
 <script src="lock.js"></script>
 <script src="images.js"></script>
@@ -1325,6 +1337,7 @@
 <script src="files.js"></script>
 <script src="jobs.js"></script>
 <script src="home.js"></script>
+<script src="homeview.js"></script>
 <script src="chats.js"></script>
 <script src="sendto.js"></script>
 <script src="notes.js"></script>

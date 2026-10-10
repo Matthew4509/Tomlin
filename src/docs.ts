@@ -140,7 +140,8 @@ export function textParts(text: string, size = PART_CHARS): DocPart[] {
   let first = 1;
   let n = 0;
   const flush = (last: number) => {
-    const t = cur.join('\n').trim();
+    // Blank lines off both ends, but the first line keeps its indent (code read whole needs it).
+    const t = cur.join('\n').replace(/^(\s*\n)+/, '').trimEnd();
     if (t) out.push({ page: null, lines: [first, last], text: t });
     cur = [];
     n = 0;
@@ -274,6 +275,37 @@ export function docSection(found: Found[]): string {
     'Parts of the documents in this chat that match the message (found by word match; the rest of each document was not given to you). Answer from them, quote the words that answer, and name the page (or lines) you used, like "(page 31)". If they do not hold the answer, say so; do not guess.',
     ...sorted.map(f => `[${partPlace(f.doc, f.part)}]\n${f.part.text}`),
   ].join('\n\n');
+}
+
+/** A document's whole text: a text file put back line for line (the blank lines between its parts too), a PDF page by page. */
+export function wholeText(d: Doc): string {
+  if (d.kind === 'pdf') {
+    const pages = new Map<number, string[]>();
+    for (const p of d.parts) pages.set(p.page ?? 0, [...(pages.get(p.page ?? 0) ?? []), p.text]);
+    return [...pages].map(([n, t]) => `[page ${n}]\n${t.join('\n')}`).join('\n\n');
+  }
+  let out = '';
+  let last = 0;
+  for (const p of d.parts) {
+    out += (out ? '\n'.repeat(Math.max(1, (p.lines?.[0] ?? last + 1) - last)) : '') + p.text;
+    last = p.lines?.[1] ?? last + 1;
+  }
+  return out;
+}
+
+/**
+ * Every document in the chat, whole, as the model reads it, when all of them fit in `room` characters (null when they
+ * do not: then the matching parts are sent, findParts). A file of code needs to be read whole, as LM Studio and Open
+ * WebUI give it when it fits; and the same words every turn keep the start of the prompt the same, so llama.cpp does
+ * not read the chat again.
+ */
+export function wholeSection(docs: Doc[], room: number): string | null {
+  if (!docs.length) return null;
+  const text = [
+    'The documents added to this chat, whole. When you answer from them, name the file and the page or lines you used.',
+    ...docs.map(d => `[${d.name}${d.kind === 'pdf' ? `, ${d.pages} page${d.pages === 1 ? '' : 's'}` : `, ${d.pages} line${d.pages === 1 ? '' : 's'}`}]\n${wholeText(d)}`),
+  ].join('\n\n');
+  return text.length <= room ? text : null;
 }
 
 /** "4, 5, 6, 9" -> "4-6, 9". */

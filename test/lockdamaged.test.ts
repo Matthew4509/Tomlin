@@ -10,12 +10,13 @@ import { startPc } from './pcs.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('a damaged app lock file keeps every door shut', { timeout: 120_000 }, async () => {
+// Cut off part way, or holding `null` (which once read as no PIN at all).
+for (const [what, text] of [['cut off', '{"salt":"ab'], ['holding null', 'null']]) test(`a damaged app lock file (${what}) keeps every door shut`, { timeout: 120_000 }, async () => {
   const top = mkdtempSync(join(tmpdir(), 'tomlin-lockdamaged-'));
   let pc;
   try {
     mkdirSync(join(top, 'data'), { recursive: true });
-    writeFileSync(join(top, 'data', 'app-lock.json'), '{"salt":"ab');
+    writeFileSync(join(top, 'data', 'app-lock.json'), text);
     pc = await startPc({ root: ROOT, home: top });
     const view = await pc.get('/api/applock');
     assert.equal(view.body.on, true);

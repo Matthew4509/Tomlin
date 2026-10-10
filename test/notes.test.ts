@@ -55,6 +55,18 @@ test('the scratch pad keeps what is typed, line ends made plain, up to its limit
   assert.ok(!big.ok && /Move the rest into a snippet/.test(big.error));
 });
 
+test('two windows on one scratch pad: a window that started from older words does not save over the newer ones', () => {
+  const saved = { ...EMPTY, scratch: 'typed in window A' };
+  // Window B loaded the pad empty, then typed: A's words would be lost.
+  const b = setScratch(saved, 'typed in window B', '');
+  assert.ok(!b.ok && b.clash && /Another window changed the scratch pad/.test(b.error));
+  // Started from what is saved (line ends as the browser sends them): saved.
+  assert.ok(setScratch({ ...EMPTY, scratch: 'one\ntwo' }, 'one\ntwo\nthree', 'one\r\ntwo').ok);
+  // Keep mine (no words to start from) saves over them; the same words as saved are no clash.
+  assert.ok(setScratch(saved, 'typed in window B').ok);
+  assert.ok(setScratch(saved, 'typed in window A', 'old').ok);
+});
+
 test('a damaged or odd file reads as empty or cleaned, never throws', () => {
   assert.deepEqual(clean(null), EMPTY);
   assert.deepEqual(clean({ scratch: 5, snippets: 'no' }), EMPTY);

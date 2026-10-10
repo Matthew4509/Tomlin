@@ -41,11 +41,15 @@ export function clean(raw: unknown): Notes {
   return { scratch: text(r.scratch).slice(0, SCRATCH_MAX), snippets };
 }
 
-export type Change = { ok: true; notes: Notes; id?: string } | { ok: false; error: string };
+export type Change = { ok: true; notes: Notes; id?: string } | { ok: false; error: string; clash?: boolean };
 
-/** The scratch pad's new words (written whole each time). */
-export function setScratch(n: Notes, words: unknown): Change {
+/**
+ * The scratch pad's new words (written whole each time). `was`: the words the window's pad started from; when the pad
+ * holds other words now (another window saved meanwhile), nothing is saved over them (clash). None sent: saved anyway.
+ */
+export function setScratch(n: Notes, words: unknown, was?: unknown): Change {
   const t = text(words);
+  if (typeof was === 'string' && text(was).slice(0, SCRATCH_MAX) !== n.scratch && t !== n.scratch) return { ok: false, clash: true, error: "Another window changed the scratch pad while you typed here, so this was not saved over it. Keep mine saves the words here; Use the other window's puts its words here instead." };
   if (t.length > SCRATCH_MAX) return { ok: false, error: `The scratch pad holds up to ${SCRATCH_MAX.toLocaleString('en-GB')} characters, and this is ${t.length.toLocaleString('en-GB')}. Move the rest into a snippet or a file (Files and blog writer), then it saves again.` };
   return { ok: true, notes: { ...n, scratch: t } };
 }

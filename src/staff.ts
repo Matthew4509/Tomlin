@@ -360,8 +360,15 @@ export class Staff {
     return s;
   }
 
+  // A save that fails (a full disk) has already changed the roster in memory: it is read back from the file before the
+  // fault is passed on, so a refused hire, change or firing never shows as done (and comes undone at the next start).
   private async save(): Promise<void> {
-    await writeAtomic(join(this.dir, 'staff.json'), JSON.stringify(this.file, null, 1));
+    try {
+      await writeAtomic(join(this.dir, 'staff.json'), JSON.stringify(this.file, null, 1));
+    } catch (e) {
+      this.file = (await Staff.load(this.dir).catch(() => null))?.file ?? this.file;
+      throw e;
+    }
   }
 
   list(): StaffMember[] {

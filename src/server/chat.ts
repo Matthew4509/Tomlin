@@ -1,9 +1,9 @@
 // A chat turn: a message, Continue and the handoff, documents in a chat, Send to.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { log } from '../log.ts';
-import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine } from '../docs.ts';
+import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine, wholeSection } from '../docs.ts';
 import type { ChatLine } from '../store.ts';
-import { ANSWER_CEILING, CONTINUE_ASK, everyFew, NoPrefill, repeatCut, streamChat, THINK_ROOM, thinksOf, withWorking, type ThoughtStop } from '../engine.ts';
+import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatCut, streamChat, THINK_ROOM, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { pictureAsk } from '../chatpic.ts';
 import { cleanAnswer, roleOf, isPlain, type StaffMember } from '../staff.ts';
@@ -23,6 +23,7 @@ import { addOwed, dropOwed, notLive } from './owed.ts';
 import { saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
+import * as Q from '../queue.ts';
 
 /** A new message, answered in the chat it names (`to`): never in whichever chat another window opened last. */
 async function chatMessage(res: ServerResponse, message: string, to: SendTarget, from = '', agree = false, think = false, now = false): Promise<void> {
@@ -123,7 +124,7 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
  * A message from the queue (src/server/queue.ts), answered with no page open: the same turn as one typed in that chat,
  * saved there; a page that opens the chat follows it. Waits (busy) while that chat is answering something else.
  */
-export async function queuedMessage(chatId: string, message: string, think: boolean, signal: AbortSignal, since = '', onEvent: (event: string, data: Record<string, unknown>) => void = () => undefined): Promise<{ who: string; ran: string } | { error: string }> {
+export async function queuedMessage(chatId: string, message: string, think: boolean, signal: AbortSignal, since = '', onEvent: (event: string, data: Record<string, unknown>) => void = () => undefined, qid = ''): Promise<{ who: string; ran: string } | { error: string }> {
   const info = await chats.get(chatId);
   if (!info) return { error: 'That chat is not here any more.' };
   if (!chatPersonHere(info.who)) return { error: 'The person in that chat is no longer on the team, so it can be read but not carried on.' };
@@ -136,13 +137,15 @@ export async function queuedMessage(chatId: string, message: string, think: bool
   const verdict = checkMessage(message, { recent: [] });
   if (!verdict.ok) return { error: REFUSAL[verdict.reason] };
   const name = member ? member.name.split(/\s+/)[0] : chatPeople().find(p => p.who === info.who)?.name ?? 'The host';
-  // Run again (TOMLIN was closed while it ran): the message may be in the chat already. With an answer (or an
-  // answer still owed by a linked PC, collected by itself) after it, it is done; with none, it is sent again in its place.
+  // Run again (TOMLIN was closed while it ran, or Stop then Resume): the message may be in the chat already
+  // (src/queue.ts runAgain).
   const file = chats.file(chatId);
-  const history = await store.chat(file);
-  const had = history.findLastIndex(l => l.role === 'user' && l.from === 'the queue' && l.content === message && l.at >= since);
-  if (had >= 0 && history.slice(had + 1).some(l => l.role === 'assistant' && (l.content.trim() || l.waiting))) return { who: name, ran: 'before TOMLIN was closed' };
-  if (had >= 0) await store.changeChat(file, lines => lines.filter((l, k) => k !== had && !(k > had && l.role === 'assistant' && !l.content.trim())));
+  const again = Q.runAgain(await store.chat(file), message, since, qid);
+  if (again === 'done') return { who: name, ran: 'before TOMLIN was closed' };
+  if (again.length) await store.changeChat(file, lines => {
+    const drop = Q.runAgain(lines, message, since, qid);
+    return drop === 'done' ? lines : lines.filter((_, k) => !drop.includes(k));
+  });
   // The turn writes to a page; here nobody is reading, so what it says is kept to learn how it ended.
   let buf = '';
   let end: { event: string; data: Record<string, unknown> } | null = null;
@@ -173,7 +176,7 @@ export async function queuedMessage(chatId: string, message: string, think: bool
   const stop = () => stopChats(a => a.chatId === chatId);
   signal.addEventListener('abort', stop, { once: true });
   try {
-    await answerTurn(sink as unknown as ServerResponse, () => undefined, { who: info.who, member, own, file, openId: chatId, mode: 'message', message, from: 'the queue', think });
+    await answerTurn(sink as unknown as ServerResponse, () => undefined, { who: info.who, member, own, file, openId: chatId, mode: 'message', message, from: 'the queue', ...(qid ? { queued: qid } : {}), think });
   } finally {
     signal.removeEventListener('abort', stop);
   }
@@ -217,7 +220,7 @@ async function answerTurn(res: ServerResponse, send: (event: string, data: unkno
 }
 
 /** `think`: Think was chosen for this message (the model works it out first, when it can). */
-type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; think?: boolean };
+type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; queued?: string; think?: boolean };
 
 /**
  * An answer being written in a chat, kept going for whoever follows it: the page that asked, and a page that opens the
@@ -241,7 +244,7 @@ class LiveAnswer {
     liveAnswers.set(chatId, this);
   }
   send = (event: string, data: unknown) => {
-    if (['text', 'status', 'progress', 'thinking'].includes(event)) this.said = this.said.filter(e => e.event !== event);
+    if (['text', 'status', 'progress', 'thinking', 'reading'].includes(event)) this.said = this.said.filter(e => e.event !== event);
     this.said.push({ event, data });
     for (const r of this.followers) if (!r.destroyed && !r.writableEnded) r.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
@@ -286,7 +289,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   workOn(live, who, openId, mode === 'message' ? 'answer' : mode);
   lastUsed.chat = Date.now();
   const now = new Date().toISOString();
-  const mine: ChatLine = { role: 'user', content: message, at: now, ...(t.from ? { from: t.from } : {}) };
+  const mine: ChatLine = { role: 'user', content: message, at: now, ...(t.from ? { from: t.from } : {}), ...(t.queued ? { queued: t.queued } : {}) };
   if (mode === 'message') await store.changeChat(file, lines => [...lines, mine], mark);
   // A fault that ends a new message's turn before any answer was written: shown now and kept under the message, so a
   // reload still says why there is no answer (never sent to a model). Continue and the handoff leave the chat as it was.
@@ -325,10 +328,18 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // Documents in this chat (PLAN F10 G6): the parts that match this message (and the one before it), found by code.
   const docs = mode === 'message' ? await docStore.all(openId) : [];
   const asked = `${message} ${[...history].reverse().find(l => l.role === 'user')?.content ?? ''}`;
-  const found = docs.length ? findParts(docs, pagesAskedFirst(message, asked), memory.docRoom(memory.chatRoom(ctx, ANSWER_CEILING)) - 600) : [];
-  const sources = found.length ? sourcesLine(found) : '';
+  const docsRoom = memory.docRoom(memory.chatRoom(ctx, ANSWER_CEILING)) - 600;
+  const found = docs.length ? findParts(docs, pagesAskedFirst(message, asked), docsRoom) : [];
   // The context is rebuilt for this turn, sized to the model that answers (src/memory.ts), and thrown away after.
-  const built = await chatContext(who, member, history, mode === 'message' ? message : mode === 'handoff' ? HANDOFF_ASK : '', ctx, info?.opening, found.length ? docSection(found) : undefined);
+  const build = (squeeze?: number) => chatContext(who, member, history, mode === 'message' ? message : mode === 'handoff' ? HANDOFF_ASK : '', ctx, info?.opening, found.length ? docSection(found) : undefined, wholeSection(docs, docsRoom) ?? undefined, squeeze);
+  let built = await build();
+  const sources = built.docsWhole ? `${docs.map(d => d.name).join('; ')} (whole)` : found.length ? sourcesLine(found) : '';
+  // A message bigger than this model's context can read with an answer: said plainly, never sent to be cut or refused.
+  if (mode === 'message' && message.length > Math.floor(built.room * 0.9)) {
+    const tokens = (chars: number) => Math.ceil(chars / memory.CHARS_PER_TOKEN).toLocaleString('en-GB');
+    await fault(`This message is about ${tokens(message.length)} word-pieces; at the context it runs with here (${ctx.toLocaleString('en-GB')}), ${target?.model || runner.view.modelName || 'this model'} reads about ${tokens(Math.floor(built.room * 0.9))} in one message. Choose a bigger context for it in Models, or add the text as a document (it is then read whole when it fits, or the parts that match).`);
+    return void res.end();
+  }
   lastContext.set(openId, { ctx: built.ctx, at: Date.now(), model: ran });
   let turns = built.turns;
   // Continue: the cut answer is the last turn, so the model goes on from inside it.
@@ -354,7 +365,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     setPhase(ac, 'thinking');
     Object.assign(working, { text, seconds });
     sendThought(text, seconds);
-  } };
+  }, onReading: everyFew(1000, (r: Reading) => send('reading', r)) };
   let thought: { text: string; seconds: number; stopped?: ThoughtStop } | null = null;
   // The chat it is in: a new chat gets its id with its first message, and Stop and Answer now need it.
   send('brain', { ran, note: target?.note ?? '', chat: openId });
@@ -379,9 +390,28 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // this PC stopping) does not lose it; the node finishes it and it is collected (src/server/owed.ts).
   let owe: Owed | null = null;
   let stillOwed = false;
+  // The answer so far goes to the page whole, at most every 150 ms: sent after every word-piece, a 16K answer came to
+  // hundreds of MB by its end, and the page drew it again each time. The last of it always follows (and 'done' has it all).
+  let latest = '';
+  let sentAt = 0;
+  let held: ReturnType<typeof setTimeout> | null = null;
+  const sendText = () => {
+    held = null;
+    sentAt = Date.now();
+    send('text', { text: latest });
+  };
   const show = (text: string) => {
     if (text) setPhase(ac, 'writing');
-    send('text', { text: before + text });
+    latest = before + text;
+    if (held) return;
+    const wait = 150 - (Date.now() - sentAt);
+    if (wait <= 0) sendText();
+    else held = setTimeout(sendText, wait);
+  };
+  /** Ended (done, fault, Stop): a text held back is not sent after it ('done', or the kept cut answer, has it all). */
+  const holdNoMore = () => {
+    if (held) clearTimeout(held);
+    held = null;
   };
   // llama.cpp streams a continued answer's start back first: only what comes after it is new.
   const fresh = (text: string) => (before && text.startsWith(before) ? text.slice(before.length) : text);
@@ -436,15 +466,30 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       try {
         r = await ask();
       } catch (error) {
-        if (!(error instanceof NoPrefill)) throw error;
-        turns = [...turns, { role: 'user', content: CONTINUE_ASK }];
-        r = await ask();
+        if (error instanceof ContextFull && mode !== 'continue') {
+          // The chat's words came to more word-pieces than the guess of 3 characters each (JSON, lock files, another
+          // alphabet): built again once, smaller by what llama.cpp counted, and asked again.
+          built = await build((0.95 * (built.used / memory.CHARS_PER_TOKEN)) / error.tokens);
+          turns = built.turns;
+          try {
+            r = await ask();
+          } catch (again) {
+            if (!(again instanceof ContextFull)) throw again;
+            await fault(`This chat came to ${again.tokens.toLocaleString('en-GB')} word-pieces, more than ${runner.view.modelName || 'this model'}'s context here holds (${again.ctx.toLocaleString('en-GB')}), even with the older part cut down. Choose a bigger context for it in Models, take a document out of this chat, or start a new chat.`);
+            return void res.end();
+          }
+        } else {
+          if (!(error instanceof NoPrefill)) throw error;
+          turns = [...turns, { role: 'user', content: CONTINUE_ASK }];
+          r = await ask();
+        }
       }
       perSecond = r.perSecond;
       cut = r.cut && !looped;
       if (r.thought) thought = { text: r.thought, seconds: r.thoughtSeconds, ...(r.thoughtStopped ? { stopped: r.thoughtStopped } : {}) };
     }
   } catch (error) {
+    holdNoMore();
     // The connection to the linked PC was lost and did not come back in two minutes: it is still writing the answer.
     // What came so far stays in the chat with Reconnect under it; the rest is collected (at Reconnect, every start,
     // and once a minute) and put in its place.
@@ -471,6 +516,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   } finally {
     endAnswer(ac);
     runnerUsed.set(runner, Date.now());
+    holdNoMore();
     // Came in whole, stopped, or failed there: nothing is owed any more.
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
@@ -508,7 +554,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // A "REMEMBER: ..." line is only a suggestion: it comes off the answer and he decides (Save / No).
   const sug = memory.takeSuggestion(shown);
   shown = sug.answer;
-  const line: ChatLine = { role: 'assistant', content: shown, at: new Date().toISOString(), perSecond, ran, ...(cut ? { cut } : {}), ...(sources ? { sources } : {}), ...(thought ? { thought } : {}) };
+  const line: ChatLine = { role: 'assistant', content: shown, at: new Date().toISOString(), perSecond, ran, ...(cut ? { cut } : {}), ...(ac.signal.aborted && !looped ? { stopped: true } : {}), ...(sources ? { sources } : {}), ...(thought ? { thought } : {}) };
   // A stand-in for this answer (owed, src/server/owed.ts) never stays beside the answer itself.
   const rid = owe?.rid;
   if (shown.trim() && !(await store.changeChat(file, lines => [...lines.filter(l => !rid || l.waiting?.rid !== rid), line], mark))) return gone();
@@ -705,7 +751,7 @@ export const chatPost: Routes = {
   '/api/chat': async ({ res, b }) => {
     const message = String(b.message ?? '').trim();
     if (!message) return json(res, 400, { error: 'Type a message first.' });
-    if (message.length > 20_000) return json(res, 400, { error: 'That message is too long (over 20,000 characters). Shorten it or split it.' });
+    if (message.length > memory.MESSAGE_MAX) return json(res, 400, { error: `That message is too long (over ${memory.MESSAGE_MAX.toLocaleString('en-GB')} characters): no model here can read that much at once. Add it as a document instead, or split it.` });
     // {chatId}: the chat it goes into; {chatId: '', who}: a new chat with that person, made by this message.
     const at = await namedTarget(b, true);
     if ('error' in at) return json(res, at.status, { error: at.error });

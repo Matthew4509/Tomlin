@@ -21,7 +21,7 @@ export const NEXT_COPY_FILE = 'next-copy.txt';
 // ---- What an app copy is: the same list the release zip is made from (tools/pack.ts) ----
 
 export const PARTS = ['src', 'public', 'tools', 'test', 'registry', 'runtime/node', 'runtime/llama-cpu', 'runtime/sd-cpu', 'runtime/llama-vulkan', 'runtime/sd-vulkan', 'node_modules', 'package.json', 'package-lock.json',
-  'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Start Shelby.cmd', 'Install TOMLIN.cmd', 'models/helpers/u2netp.onnx'];
+  'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd', 'models/helpers/u2netp.onnx'];
 // Other platforms' copies of the ONNX runtime and image library are left out (Windows x64 only).
 // Paths are matched with either slash ("\" on Windows, "/" elsewhere).
 // PDF.js (documents in a chat) ships only its Node text reader and its font tables: its drawing add-on
@@ -262,6 +262,27 @@ export interface UpdateNodeDeps {
 
 const no = (status: number, error: string) => ({ status, json: { error } as Record<string, unknown> });
 
+/** An update's files while they come in, beside the app's copies (.shelby- before the TOMLIN name). */
+const INCOMING = /^\.(tomlin|shelby)-\d+\.\d+\.\d+-incoming$/;
+/** An update left half way stays to be carried on, but not for ever: at start, one untouched this long is removed. */
+export const INCOMING_DAYS = 3;
+
+/**
+ * Removes the incoming folders in `parent` other than `keep`: all of them (an offer of another version), or only those
+ * untouched for `olderMs` (at start, when no update is coming in yet). Never anything but those folders.
+ */
+export async function sweepIncoming(parent: string, keep: string, olderMs: number, now = Date.now()): Promise<string[]> {
+  const gone: string[] = [];
+  for (const name of await readdir(parent).catch(() => [] as string[])) {
+    const dir = join(parent, name);
+    if (!INCOMING.test(name) || dir === keep) continue;
+    const st = await stat(dir).catch(() => null);
+    if (!st?.isDirectory() || (olderMs > 0 && now - st.mtimeMs < olderMs)) continue;
+    await rm(dir, { recursive: true, force: true }).then(() => gone.push(name), () => undefined);
+  }
+  return gone;
+}
+
 /** The doors of a node for updates: /worker/update-offer, -put, -finish, -drop. */
 export function updateSide(d: UpdateNodeDeps) {
   const room = d.freeBytes ?? freeBytes;
@@ -270,6 +291,8 @@ export function updateSide(d: UpdateNodeDeps) {
   let current: { version: string; build: string; files: AppFile[]; staging: string; from: string; fromName: string; at: number } | null = null;
   /** The new copy is whole and this one is ending so it starts: said on this PC's own screen until it ends. */
   let starting: { version: string; fromName: string } | null = null;
+  // Updates left half way days ago (the sending PC never came back) are cleared once, at start.
+  const swept = sweepIncoming(dirname(d.root), '', INCOMING_DAYS * 24 * 3600_000).catch(() => [] as string[]);
 
   // The same version is taken too when it is other files (both build ids known and different): the build id says what
   // code each copy is, so one number held by two apps no longer stops the update.
@@ -303,7 +326,9 @@ export function updateSide(d: UpdateNodeDeps) {
         if (build && buildIdOf(files) !== build) return no(400, `the list of files is not build ${shortBuild(build)} as sent, so the update was refused. Close TOMLIN on the sending PC, start it again, then update again.`);
         const version = b.version as string;
         const staging = join(dirname(d.root), `.tomlin-${version}-incoming`);
-        if (current && current.staging !== staging) await rm(current.staging, { recursive: true, force: true });
+        // Only this version's half-come files are carried on: any other version's (this run's or an earlier one's) go.
+        await swept;
+        await sweepIncoming(dirname(d.root), staging, 0);
         // What this copy has already (the same file, byte for byte) is copied here at the end; only the rest crosses.
         const own = new Map((await appFiles(d.root, cache)).map(f => [f.path, f.sha]));
         const need: number[] = [];
@@ -411,7 +436,7 @@ export function updateSide(d: UpdateNodeDeps) {
   const incoming = (now = Date.now()): { version: string; from: string; starting: boolean } | null =>
     starting ? { version: starting.version, from: starting.fromName, starting: true }
       : current && now - current.at < 2 * 60_000 ? { version: current.version, from: current.fromName, starting: false } : null;
-  return Object.assign(handle, { incoming });
+  return Object.assign(handle, { incoming, swept });
 }
 
 // ---- The host's side ----

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeAtomic } from '../src/atomic.ts';
@@ -40,6 +40,22 @@ test('settings saved many times at once keep every change', async () => {
     await Promise.all(Array.from({ length: 20 }, (_, i) => store.saveSettings({ loadSeconds: { [`m${i}`]: i } })));
     const again = new Store(dir);
     assert.equal(Object.keys((await again.settings()).loadSeconds).length, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a settings save that fails leaves the settings as the file holds them, not as if it had saved', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-atomic-'));
+  try {
+    const store = new Store(dir);
+    await store.saveSettings({ managerName: 'Before' });
+    // A folder where settings.json goes: the swap fails (after its tries), as a full or failing disk would fail it.
+    await rm(join(dir, 'settings.json'));
+    await mkdir(join(dir, 'settings.json', 'x'), { recursive: true });
+    await assert.rejects(store.saveSettings({ managerName: 'Refused' }));
+    assert.equal((await store.settings()).managerName, 'Before');
+    assert.equal(store.peek()?.managerName, 'Before');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

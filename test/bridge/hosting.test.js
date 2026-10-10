@@ -25,6 +25,8 @@ for (const d of [WS, DATA, HOME, FTP, SFTP, OLDHOME]) fs.mkdirSync(d, { recursiv
 const w = (base, rel, text) => { const p = path.join(base, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); return p; };
 const r = (base, rel) => fs.readFileSync(path.join(base, rel), 'utf8');
 const has = (base, rel) => fs.existsSync(path.join(base, rel));
+// The Live secrets file's name for a site (its name and a fingerprint of its server folder).
+const secName = (domain, root) => require('../../src/bridge/hosting/deploy').secretsName({ domain, root });
 const tempsLeft = prefix => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith(prefix));
 
 async function main() {
@@ -70,13 +72,14 @@ async function main() {
   const pageHtml = await (await fetch(BASE + '/')).text();
   const KEY = pageHtml.match(/name="bridge-key" content="([0-9a-f]+)"/)[1];
   // A kept-open connection the server closes (idle 5 s) just as a request goes out on it: the request never reached
-  // the server, so it is sent once more on a new one (a browser does the same).
+  // the server, so it is sent once more on a new one (a browser does the same). On Windows the same race can show as a
+  // reset (ECONNRESET, seen once in a full run under load), before any answer came back.
   const api = async (p, body, tries = 2) => {
     try {
       const res = await fetch(BASE + p, { method: body ? 'POST' : 'GET', headers: { 'X-Bridge-Key': KEY, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
       return res.json();
     } catch (e) {
-      if (tries > 1 && e && e.cause && e.cause.code === 'UND_ERR_SOCKET') return api(p, body, tries - 1);
+      if (tries > 1 && e && e.cause && (e.cause.code === 'UND_ERR_SOCKET' || e.cause.code === 'ECONNRESET')) return api(p, body, tries - 1);
       throw e;
     }
   };
@@ -179,12 +182,14 @@ async function main() {
     for (const f of ['index.php', 'about.html', 'css/site.css', 'lib/api.php']) assert(has(HOME, 'public_html/' + f), f);
     for (const f of ['.env', 'data/orders.json', NOTES]) assert(!has(HOME, 'public_html/' + f), f + ' must not be sent');
     assert.strictEqual(r(HOME, 'public_html/other.test/index.html'), 'OTHER SITE\n', 'the addon domain is untouched');
-    const sec = r(HOME, 'tomlin-secrets/shop.test.php');
+    const SHOP_SEC = secName('shop.test', '/home/user/public_html');
+    assert(/^shop\.test-[0-9a-f]{10}\.php$/.test(SHOP_SEC), SHOP_SEC);
+    const sec = r(HOME, 'tomlin-secrets/' + SHOP_SEC);
     assert(sec.includes("'API_KEY' => 'live-secret-123456'") && !sec.includes('local-secret-abc'), 'Live values only');
-    assert.strictEqual(cp.modes.get(path.join(HOME, 'tomlin-secrets', 'shop.test.php')), '0600');
+    assert.strictEqual(cp.modes.get(path.join(HOME, 'tomlin-secrets', SHOP_SEC)), '0600');
     assert(/Require all denied/.test(r(HOME, 'tomlin-secrets/.htaccess')));
     const loader = r(HOME, 'public_html/tomlin-secrets.php');
-    assert(loader.includes("'/home/user/tomlin-secrets/shop.test.php'") && !loader.includes('live-secret'), 'the loader has a path, no value');
+    assert(loader.includes("'/home/user/tomlin-secrets/" + SHOP_SEC + "'") && !loader.includes('live-secret'), 'the loader has a path, no value');
     assert(first.leaks.every(l => l.ok), JSON.stringify(first.leaks));
     assert.strictEqual(first.kept, 1, 'the hand-uploaded about.html was copied before it was replaced');
     assert.strictEqual(state.settings.liveUrls[shop.dir.toLowerCase()], 'http://127.0.0.1:' + cp.sitePort + '/');
@@ -319,6 +324,50 @@ async function main() {
     await api('/api/hosting/site/remove', { id: twin.id });
   });
 
+  await check('while a push runs, Set up, Forget, Secrets, Not a secret, the database and Disconnect wait; a record changed anyway stops the push before the site changes', async () => {
+    const connections = require('../../src/bridge/hosting/connections');
+    const store = require('../../src/bridge/hosting/store');
+    const real = connections.transport;
+    connections.transport = async c => { await sleep(1500); return real(c); };
+    try {
+      w(SHOP, 'public_html/about.html', '<h1>About, while busy</h1>\n');
+      const before = store.site(shop.dir);
+      const first = await api('/api/hosting/push', { id: shop.id });
+      assert(first.ok, JSON.stringify(first));
+      const tries = {
+        set: await api('/api/hosting/site/set', { id: shop.id, connection: conn.id, domain: 'other.test', folder: 'public_html' }),
+        remove: await api('/api/hosting/site/remove', { id: shop.id }),
+        secrets: await api('/api/hosting/secrets', { id: shop.id, rows: [{ name: 'API_KEY', live: 'changed-midway-999' }] }),
+        ignore: await api('/api/hosting/ignore', { id: shop.id, key: 'KEY|x|y' }),
+        dbSetup: await api('/api/hosting/db/setup', { id: shop.id, name: 'other' }),
+        dbLoad: await api('/api/hosting/db/load', { id: shop.id, file: 'db/schema.sql' }),
+        dbForget: await api('/api/hosting/db/forget', { id: shop.id }),
+        disconnect: await api('/api/hosting/disconnect', { connection: conn.id }),
+      };
+      for (const [k, x] of Object.entries(tries)) assert(!x.ok && /running|right now/.test(x.error), k + ': ' + JSON.stringify(x));
+      const j = await waitJob(first.job);
+      assert(j.ok, JSON.stringify(j));
+      const after = store.site(shop.dir);
+      assert(after && ['connection', 'domain', 'root', 'db', 'ignore'].every(k => JSON.stringify(after[k]) === JSON.stringify(before[k])), 'the site record is as it was');
+      assert.strictEqual((await require('../../src/bridge/hosting/secrets').values(shop.dir, 'live')).API_KEY, 'live-secret-123456', 'the secret was not changed');
+      assert(store.connection(conn.id), 'the connection is still there');
+      assert.strictEqual(r(HOME, 'public_html/about.html'), '<h1>About, while busy</h1>\n');
+
+      // A change that does not come through those buttons (another TOMLIN window on an older copy, a hand edit).
+      w(SHOP, 'public_html/about.html', '<h1>About, must not go</h1>\n');
+      const second = await api('/api/hosting/push', { id: shop.id });
+      assert(second.ok);
+      await sleep(150);
+      const was = store.site(shop.dir).root;
+      store.updateSite(shop.dir, x => ({ ...x, root: '/home/user/public_html/other.test' }));
+      const j2 = await waitJob(second.job);
+      store.updateSite(shop.dir, x => ({ ...x, root: was }));
+      assert(!j2.ok && /changed or taken off while the push ran/.test(j2.error), JSON.stringify(j2));
+      assert(r(HOME, 'public_html/about.html') === '<h1>About, while busy</h1>\n' && r(HOME, 'public_html/other.test/index.html') === 'OTHER SITE\n', 'nothing was sent anywhere');
+    } finally { connections.transport = real; }
+    w(SHOP, 'public_html/about.html', '<h1>About</h1>\n');
+  });
+
   await check('a live site that cannot be asked is not a pass: the push says the check did not run', async () => {
     const live = require('../../src/bridge/live');
     const realGet = live.get;
@@ -342,7 +391,7 @@ async function main() {
     assert(!JSON.stringify(x).includes(pw));
     const names = (await api('/api/hosting/site?id=' + encodeURIComponent(shop.id))).secrets.map(s => s.name);
     assert(['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS'].every(n => names.includes(n)), names.join(','));
-    assert(r(HOME, 'tomlin-secrets/shop.test.php').includes(pw));
+    assert(r(HOME, 'tomlin-secrets/' + secName('shop.test', '/home/user/public_html')).includes(pw));
     const again = await api('/api/hosting/db/setup', { id: shop.id, name: 'shop' });
     assert(!again.ok && /already has a database/.test(again.error));
   });
@@ -354,6 +403,34 @@ async function main() {
     assert(!fs.readdirSync(path.join(HOME, 'tomlin-secrets')).some(n => /\.sql$/.test(n)), 'the .sql file is gone');
     const bad = await api('/api/hosting/db/load', { id: shop.id, file: '../outside.sql' });
     assert(!bad.ok);
+  });
+
+  await check('database: a load that breaks part way says it may be part loaded, and the page and the .sql file are still taken off', async () => {
+    const before = (await api('/api/hosting/site?id=' + encodeURIComponent(shop.id))).site.db.loaded;
+    const closedPort = await freePort();
+    const leftovers = () => [...fs.readdirSync(path.join(HOME, 'public_html')).filter(n => /^tomlin-import-/.test(n)), ...fs.readdirSync(path.join(HOME, 'tomlin-secrets')).filter(n => /\.sql$/.test(n))];
+    try {
+      for (const [how, said] of [['drop', /broke off part way.*not all of it|not all of it.*broke off/], ['fatal', /answered 500.*not all of it/]]) {
+        cp.site.importFails = how;
+        const x = await api('/api/hosting/db/load', { id: shop.id, file: 'db/schema.sql' });
+        assert(!x.ok && said.test(x.error), how + ': ' + JSON.stringify(x));
+        assert(!/Is the domain pointing/.test(x.error), how + ': the site was reached: ' + x.error);
+        assert.deepStrictEqual(leftovers(), [], how + ': the loader page and the .sql file are taken off');
+        assert.deepStrictEqual((await api('/api/hosting/site?id=' + encodeURIComponent(shop.id))).site.db.loaded, before, how + ': not marked as loaded');
+      }
+    } finally { delete cp.site.importFails; }
+    // Nothing answers at the site's address: never reached, so nothing was loaded (and the files are taken off too).
+    const store = require('../../src/bridge/hosting/store');
+    const realUrl = store.site(shop.dir).url;
+    store.updateSite(shop.dir, x => ({ ...x, url: 'http://127.0.0.1:' + closedPort + '/' }));
+    try {
+      const x = await api('/api/hosting/db/load', { id: shop.id, file: 'db/schema.sql' });
+      assert(!x.ok && /Could not reach .*nothing was loaded/.test(x.error), JSON.stringify(x));
+      assert.deepStrictEqual(leftovers(), []);
+    } finally { store.updateSite(shop.dir, x => ({ ...x, url: realUrl })); }
+    // The project is free again: the next load works.
+    const ok = await api('/api/hosting/db/load', { id: shop.id, file: 'db/schema.sql' });
+    assert(ok.ok, JSON.stringify(ok));
   });
 
   await check('an older cPanel (no copy_file/delete_file): API 2 does the copies and removals', async () => {
@@ -440,14 +517,53 @@ async function main() {
     const j = await waitJob((await api('/api/hosting/push', { id: fp.id })).job);
     assert(j.ok, JSON.stringify(j));
     assert(r(FTP, 'public_html/sub dir/page one.html') === 'page one\n');
-    assert(r(FTP, 'tomlin-secrets/127.0.0.1.php').includes('ftp-live-value-1'));
-    assert.strictEqual(ftp.srv.modes.get('/tomlin-secrets/127.0.0.1.php'), '600');
+    const FP_SEC = secName('127.0.0.1', 'public_html');
+    assert(r(FTP, 'tomlin-secrets/' + FP_SEC).includes('ftp-live-value-1'));
+    assert.strictEqual(ftp.srv.modes.get('/tomlin-secrets/' + FP_SEC), '600');
     assert(/dirname\(__DIR__\)/.test(r(FTP, 'public_html/tomlin-secrets.php')));
     w(FP, 'public_html/index.html', 'ftp home 2\n');
     const j2 = await waitJob((await api('/api/hosting/push', { id: fp.id })).job);
     assert(j2.ok && j2.result.sent === 1 && j2.result.kept === 1, JSON.stringify(j2));
     const b = await waitJob((await api('/api/hosting/back', { id: fp.id })).job);
     assert(b.ok && r(FTP, 'public_html/index.html') === 'ftp home\n', JSON.stringify(b));
+  });
+  await check('FTPS: two sites of one domain in sibling folders each keep their own Live secrets file; an old shared name goes only when nothing reads it', async () => {
+    const store = require('../../src/bridge/hosting/store');
+    const deploy = require('../../src/bridge/hosting/deploy');
+    const url = 'http://127.0.0.1:' + ftpSite.address().port;
+    const two = [];
+    for (const n of ['one', 'two']) {
+      const dir = path.join(WS, 'ftp-' + n);
+      w(dir, 'index.html', n + '\n');
+      refreshProjects(true);
+      const pr = state.projects.find(p => p.dir.toLowerCase() === dir.toLowerCase());
+      const set = await api('/api/hosting/site/set', { id: pr.id, connection: fconn.id, root: 'public_html/' + n, url: url + '/' + n + '/', folder: '' });
+      assert(set.ok && set.site.secretsDir === 'public_html/tomlin-secrets', JSON.stringify(set));
+      assert((await api('/api/hosting/secrets', { id: pr.id, rows: [{ name: 'DB_PASS', live: 'pass-of-site-' + n + '-123' }] })).ok);
+      two.push(pr);
+    }
+    const push = async pr => { const j = await waitJob((await api('/api/hosting/push', { id: pr.id })).job); assert(j.ok, JSON.stringify(j)); return j; };
+    for (const pr of two) await push(pr);
+    const [f1, f2] = ['one', 'two'].map(n => secName('127.0.0.1', 'public_html/' + n));
+    assert(f1 !== f2, 'two names');
+    const one = r(FTP, 'public_html/tomlin-secrets/' + f1);
+    assert(one.includes('pass-of-site-one-123') && !one.includes('pass-of-site-two'), one);
+    assert(r(FTP, 'public_html/tomlin-secrets/' + f2).includes('pass-of-site-two-123'));
+    assert(r(FTP, 'public_html/one/tomlin-secrets.php').includes(f1) && r(FTP, 'public_html/two/tomlin-secrets.php').includes(f2), 'each loader reads its own file');
+    assert.strictEqual(store.site(two[0].dir).secretsFile, 'public_html/tomlin-secrets/' + f1);
+
+    // Both written by an older TOMLIN under the one name they shared: the first to push again leaves it (the other
+    // site still reads it); the second takes it off.
+    const OLD = 'public_html/tomlin-secrets/127.0.0.1.php';
+    w(FTP, OLD, '<?php return array();\n');
+    for (const pr of two) store.updateSite(pr.dir, x => { delete x.secretsFile; return x; });
+    assert.strictEqual(deploy.secretsFileOf(store.site(two[0].dir)), OLD);
+    await push(two[0]);
+    assert(has(FTP, OLD), 'kept while the other site still reads it');
+    await push(two[1]);
+    assert(!has(FTP, OLD), 'gone once no site reads it');
+    assert(r(FTP, 'public_html/tomlin-secrets/' + f2).includes('pass-of-site-two-123'));
+    for (const pr of two) await api('/api/hosting/site/remove', { id: pr.id });
   });
 
   // ---------- SFTP (a real key from Windows' ssh-keygen; a stand-in sftp.exe) ----------
@@ -467,7 +583,7 @@ async function main() {
     assert((await api('/api/hosting/secrets', { id: sp.id, rows: [{ name: 'TOKEN_A', live: 'sftp-live-value' }] })).ok);
     const j = await waitJob((await api('/api/hosting/push', { id: sp.id })).job);
     assert(j.ok, JSON.stringify(j));
-    assert(r(SFTP, 'www/img/a b.txt') === 'x\n' && r(SFTP, 'tomlin-secrets/127.0.0.1.php').includes('sftp-live-value'));
+    assert(r(SFTP, 'www/img/a b.txt') === 'x\n' && r(SFTP, 'tomlin-secrets/' + secName('127.0.0.1', 'www')).includes('sftp-live-value'));
     assert(fs.readFileSync(process.env.FAKE_SFTP_LOG, 'utf8').includes('"chmod":"600"'));
     // The server's key changes: nothing is sent, and the reason says so.
     process.env.FAKE_SFTP_HOSTKEY = 'AAAAC3NzaC1lZDI1NTE5AAAAIGRpZmZlcmVudC1zZXJ2ZXIta2V5LWhlcmUtISE=';
@@ -494,6 +610,13 @@ async function main() {
     w(dir, 'bad.json', '{ not json');
     assert.deepStrictEqual(store.readJson(path.join(dir, 'bad.json'), () => ({ sites: {} })), { sites: {} });
     assert(fs.readdirSync(dir).some(n => n.startsWith('bad.json.damaged-')), 'the damaged file is kept aside');
+    // Damaged, and the copy cannot be made (disk full): an error, never empty, so no save writes over the only copy.
+    w(dir, 'worse.json', '{ not json either');
+    const realCopy = fs.copyFileSync;
+    fs.copyFileSync = () => { const e = new Error('ENOSPC: no space left on device'); e.code = 'ENOSPC'; throw e; };
+    try { assert.throws(() => store.readJson(path.join(dir, 'worse.json'), () => ({ sites: {} })), /worse\.json is damaged .*ENOSPC.*changed nothing/); }
+    finally { fs.copyFileSync = realCopy; }
+    assert.strictEqual(r(dir, 'worse.json'), '{ not json either');
     store.writeJson(path.join(dir, 'good.json'), { a: 1 });
     assert.deepStrictEqual(store.readJson(path.join(dir, 'good.json'), () => ({})), { a: 1 });
     assert(!fs.readdirSync(dir).some(n => n.endsWith('.tmp')), 'no temp file is left');

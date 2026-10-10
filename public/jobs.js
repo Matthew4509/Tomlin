@@ -898,7 +898,7 @@ async function openJobs() {
     jobFault(e.message);
   }
   if (!jobUi.job) showPart('list');
-  if (!jobsDlg.open) jobsDlg.showModal();
+  app.showAsPage(jobsDlg, 'jobs');
 }
 $('#jobs-open').addEventListener('click', openJobs);
 

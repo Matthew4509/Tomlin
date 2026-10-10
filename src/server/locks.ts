@@ -14,10 +14,12 @@ import { jobRoutes } from './jobs.ts';
  * A damaged lock stays shut (it is never read as "no PIN"); deleting the file by hand is the way back.
  */
 async function readLock<T>(name: string, clean: (f: Partial<T>) => T | null): Promise<T | null | 'damaged'> {
+  // Only a missing file is "no PIN": a file that holds `null` (or anything else that is not a PIN) is damaged.
+  const missing = {};
   try {
-    const f = await store.readJson<Partial<T> | null>(name, null, { leave: true });
-    if (f === null) return null;
-    return (f && typeof f === 'object' && clean(f)) || 'damaged';
+    const f = await store.readJson<Partial<T> | null | typeof missing>(name, missing, { leave: true });
+    if (f === missing) return null;
+    return (f && typeof f === 'object' && clean(f as Partial<T>)) || 'damaged';
   } catch (e) {
     if (e instanceof DamagedFile) return 'damaged';
     throw e;

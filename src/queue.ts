@@ -3,6 +3,8 @@
 // different PCs run side by side. Pure: what may start, the order, moving and cancelling, and the lines Home shows when
 // work comes back. The server (src/server/queue.ts) runs the items and keeps the list in data/queue.json.
 
+import { MESSAGE_MAX } from './memory.ts';
+
 export type QKind = 'picture' | 'project' | 'chat';
 /** waiting: in line; running; done; needs: a project stopped at a step that needs him; failed; cancelled. */
 export type QState = 'waiting' | 'running' | 'done' | 'needs' | 'failed' | 'cancelled';
@@ -94,7 +96,7 @@ export function cleanItem(raw: unknown): QItem | null {
     ['lanes', Array.isArray(r.lanes) ? r.lanes.filter(x => typeof x === 'string' && /^(here|jobs|pc:[\w-]{1,40})$/.test(x)).slice(0, 3) : undefined],
     ['laneName', str(r.laneName, 80)], ['prompt', str(r.prompt, 2000)], ['as', id(r.as)], ['mode', str(r.mode, 20)],
     ['width', num(r.width, 64, 4096)], ['height', num(r.height, 64, 4096)], ['step', num(r.step, 0, 999)],
-    ['review', r.review === true ? true : undefined], ['waitFor', id(r.waitFor)], ['chat', id(r.chat)], ['message', str(r.message, 20_000)],
+    ['review', r.review === true ? true : undefined], ['waitFor', id(r.waitFor)], ['chat', id(r.chat)], ['message', str(r.message, MESSAGE_MAX)],
     ['think', r.think === true ? true : undefined], ['result', str(r.result, 600)], ['output', str(r.output, 300)], ['handed', str(r.handed, 400)],
     ['error', str(r.error, 600)], ['after', num(r.after, 0, 1e15)], ['tries', num(r.tries, 0, 1000)], ['note', str(r.note, 300)],
     ['seen', r.seen === true ? true : undefined],
@@ -239,6 +241,27 @@ export function countLine(q: Queue): string {
 /** True when a fault means the PC was busy or off for now (the item is put back and tried again), not that it failed. */
 export function forNow(error: string): boolean {
   return /\bbusy\b|answering something else|drawing something else|still drawing|is drawing|could not be reached|not answering|is off\b|log off|being used by its owner|still loading|is answering now|unloaded before the picture started/i.test(error);
+}
+
+/** The parts of a chat line the queue reads when a message runs again (src/store.ts ChatLine). */
+interface SaidLine { role: string; content: string; at: string; from?: string; queued?: string; waiting?: unknown; stopped?: boolean }
+
+/**
+ * A queued chat message running again (TOMLIN was closed while it ran, or Stop then Resume): 'done' when the message
+ * is in the chat with a whole answer after it (or one still owed by a linked PC); otherwise the lines to take out so it
+ * is sent again in its place: the message itself and the empty or stopped answers after it.
+ * The message is found by its queue item's id (qid), so two queued items with the same words are two messages; a line
+ * from before the id was kept is found by its words, sent at or after since. Only the answers up to the next message
+ * count: an answer to something typed after it is not its answer.
+ */
+export function runAgain(lines: SaidLine[], message: string, since: string, qid = ''): 'done' | number[] {
+  const had = lines.findLastIndex(l => l.role === 'user' && l.from === 'the queue'
+    && (qid && l.queued ? l.queued === qid : !l.queued && l.content === message && l.at >= since));
+  if (had < 0) return [];
+  const next = lines.findIndex((l, k) => k > had && l.role === 'user');
+  const after = lines.slice(had + 1, next < 0 ? lines.length : next);
+  if (after.some(l => l.role === 'assistant' && !l.stopped && (l.content.trim() || l.waiting))) return 'done';
+  return [had, ...after.flatMap((l, k) => (l.role === 'assistant' && (l.stopped || !l.content.trim()) ? [had + 1 + k] : []))];
 }
 
 /**

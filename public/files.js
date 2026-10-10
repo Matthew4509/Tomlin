@@ -270,5 +270,5 @@ $('#files-open').addEventListener('click', async () => {
   } catch (e) {
     fileFault(e.message);
   }
-  if (!filesDlg.open) filesDlg.showModal();
+  app.showAsPage(filesDlg, 'files');
 });

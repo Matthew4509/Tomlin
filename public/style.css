@@ -1,5 +1,5 @@
 :root {
-  /* Day (the redesign's colours, as in the second look): cool grey page, white cards, one blue accent; green only
+  /* Day (the redesign's colours): cool grey page, white cards, one blue accent; green only
      means "on". Night (below) is the Bridge's starting look: deep navy, sky-blue accent. Both follow Windows
      unless Day or Night is picked in the app (theme.js). */
   --bg: #f6f7f9;
@@ -1780,13 +1780,21 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 .upd-steps .p-track { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .upd-steps .p-fill { height: 100%; width: 0; background: var(--accent); transition: width .5s; }
 /* Settings (the top bar's button) puts the Set up menu at the top of the left panel, alone: no PCs, staff or chats.
-   Every other page leaves Set up out of the left panel. */
-.shell[data-view="settings"] > .rail > :not(#rail-setup-fold) { display: none; }
-.shell[data-view="settings"] > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
-.shell[data-view="settings"] > .rail > .rail-setup > summary.rail-head { margin-top: 4px; }
-.shell:not([data-view="settings"]) > .rail > #rail-setup-fold { display: none; }
-/* On a phone the menu sits above the settings */
-@media (max-width: 760px) { .shell[data-view="settings"] > .rail { display: flex; } }
+   It stays there on every page it opens (Models, Nodes, Staff, Jobs, Files), with the page open marked, so the next
+   one is one press away. Every other page leaves Set up out of the left panel. */
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > :not(#rail-setup-fold) { display: none; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > .rail-setup > summary.rail-head { margin-top: 4px; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > .rail > #rail-setup-fold { display: none; }
+.rail-links .link[aria-current="page"] { background: var(--hover); font-weight: 600; }
+.rail-links .link[aria-current="page"] svg { color: var(--ink); }
+/* On a phone the menu sits above the page */
+@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail { display: flex; } }
+/* Staff, Jobs and Files as pages (home.js showAsPage): the window's own box, backdrop and height let go */
+.shell:not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > #setup-page { display: none; }
+#setup-page > dialog.as-page { position: static; display: block; inset: auto; width: 100%; max-width: 1240px; height: auto; max-height: none; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: inherit; overflow: visible; }
+#setup-page > dialog.as-page:not([open]) { display: none; }
+#setup-page > dialog.as-page > .help-body { height: auto; }
 /* Home's right panel: two tabs, Waiting for you | Staff overview, in its fold line (home.js) */
 .home-side-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex: 1 1 auto; min-width: 0; margin-left: -10px; }
 /* On a wide screen Home's right panel runs down the window's right edge, with no gap: the main column and the panel

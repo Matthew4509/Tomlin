@@ -234,10 +234,55 @@ export interface AskOpts {
   final?: boolean;
   /** On a linked PC: the request id the answer is kept under there if the connection is lost (src/outbox.ts). */
   rid?: string;
+  /** How far the model is through reading the prompt, before the first word (a long chat takes minutes on a slow PC). */
+  onReading?: (r: Reading) => void;
+}
+
+/**
+ * Reading the prompt, from llama.cpp's progress (return_progress): `total` word-pieces in the prompt, `cached` already
+ * read on an earlier turn (not read again), `done` read so far (the cached ones included), `ms` spent on it.
+ */
+export interface Reading {
+  total: number;
+  cached: number;
+  done: number;
+  ms: number;
+}
+
+/** A Reading from anything (a linked PC's line): null when it is not one. */
+export function cleanReading(x: unknown): Reading | null {
+  const r = x as Record<string, unknown> | null;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : -1);
+  const total = n(r?.total), cached = n(r?.cached ?? r?.cache), done = n(r?.done ?? r?.processed), ms = n(r?.ms ?? r?.time_ms);
+  return total > 0 && cached >= 0 && done >= 0 && ms >= 0 ? { total, cached: Math.min(cached, total), done: Math.min(done, total), ms } : null;
 }
 
 /** A model server that cannot continue a cut answer from where it stopped (no prefill for this model's template). */
 export class NoPrefill extends Error {}
+
+/**
+ * The chat came to more word-pieces than the model's context holds, as llama.cpp counted them (the app's count is a
+ * guess of 3 characters each; JSON and lock files are nearer 2).
+ */
+export class ContextFull extends Error {
+  readonly tokens: number;
+  readonly ctx: number;
+  constructor(tokens: number, ctx: number) {
+    super(`the chat came to ${tokens.toLocaleString('en-GB')} word-pieces, more than the ${ctx.toLocaleString('en-GB')} this model's context holds`);
+    this.tokens = tokens;
+    this.ctx = ctx;
+  }
+}
+
+/** llama.cpp's "exceeds the available context size" answer as a ContextFull; null for any other. */
+export function contextFull(said: string): ContextFull | null {
+  try {
+    const e = (JSON.parse(said) as { error?: { type?: string; n_prompt_tokens?: number; n_ctx?: number } }).error;
+    return e?.type === 'exceed_context_size_error' && Number(e.n_prompt_tokens) > 0 && Number(e.n_ctx) > 0 ? new ContextFull(Number(e.n_prompt_tokens), Number(e.n_ctx)) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** When a model cannot continue its own cut answer (no prefill), it is asked to go on instead. */
 export const CONTINUE_ASK = 'Your last answer was cut off by its length limit. Carry on from exactly where it stopped: do not repeat anything, do not greet or explain, start with the next character (inside a code block, carry on the code).';
@@ -262,12 +307,16 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: turnsFor(turns, style), stream: true, max_tokens: maxTokens, ...style.sampling }),
+      // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word.
+      body: JSON.stringify({ messages: turnsFor(turns, style), stream: true, max_tokens: maxTokens, ...style.sampling, ...(opts.onReading ? { return_progress: true } : {}) }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {
-      const said = (await res.text().catch(() => '')).slice(0, 200);
+      const all = await res.text().catch(() => '');
+      const said = all.slice(0, 200);
       if (res.status === 400 && turns.at(-1)?.role === 'assistant' && /prefill/i.test(said)) throw new NoPrefill(said);
+      const full = contextFull(all);
+      if (full) throw full;
       throw new Error(`The model server answered ${res.status}: ${said}`);
     }
     let raw = '';
@@ -320,6 +369,11 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
             msg = JSON.parse(data);
           } catch {
             continue;
+          }
+          const reading = (msg as { prompt_progress?: unknown }).prompt_progress;
+          if (reading && opts.onReading) {
+            const r = cleanReading(reading);
+            if (r) opts.onReading(r);
           }
           const thinking = msg.choices?.[0]?.delta?.reasoning_content;
           if (thinking || msg.choices?.[0]?.delta?.content) {

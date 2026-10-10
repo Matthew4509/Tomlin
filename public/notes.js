@@ -10,6 +10,10 @@
   const notes = { data: null, loading: false };
   let padDirty = false;
   let padTimer = 0;
+  // The words this window's pad started from (as last loaded or saved): sent with each save, so a save never goes
+  // over words another window saved meanwhile. Null when not loaded.
+  let padBase = null;
+  const clash = $('#scratch-clash');
 
   // ---- Loading: at the start, and again on the next status tick if it failed (the app lock was up, or the server) ----
   async function load() {
@@ -17,7 +21,7 @@
     notes.loading = true;
     try {
       notes.data = await api('/api/notes');
-      if (!padDirty) pad.value = notes.data.scratch;
+      if (!padDirty && clash.hidden) { pad.value = notes.data.scratch; padBase = notes.data.scratch; }
       drawSnippets();
     } catch {
       notes.data = null;
@@ -28,35 +32,74 @@
     if (!notes.data) load();
   });
   load();
+  // Back to this window: another may have changed the pad (or the snippets) meanwhile.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !padDirty) load();
+  });
 
   // ---- Scratch pad: saved a moment after typing stops, when the box is left, and when the page closes ----
   const say = (text, fault = false) => {
     padState.textContent = text;
     padState.classList.toggle('fault-line', fault);
   };
-  async function savePad() {
+  // While Keep mine / Use the other window's is showing, nothing is saved by itself (leaving the box would send the
+  // same refused save again, and its answer could come back after his choice): only Keep mine saves.
+  let padSeq = 0;
+  async function savePad(mine = false) {
     clearTimeout(padTimer);
-    if (!padDirty) return;
+    if (!padDirty || (!clash.hidden && mine !== true)) return;
     padDirty = false;
+    const seq = ++padSeq;
     const words = pad.value;
     try {
-      notes.data = { ...(await api('/api/notes', { scratch: words })), id: undefined };
+      notes.data = { ...(await api('/api/notes', { scratch: words, ...(padBase !== null && mine !== true ? { was: padBase } : {}) })), id: undefined };
+      if (seq !== padSeq) return;
+      padBase = words;
+      clash.hidden = true;
       say(padDirty ? 'Saving…' : 'Saved');
     } catch (e) {
+      if (seq !== padSeq) return;
       padDirty = true;
+      // Another window saved the pad meanwhile: these words stay here, and he picks which to keep.
+      if (e.status === 409) {
+        $('#scratch-clash-said').textContent = e.message;
+        clash.hidden = false;
+        say('Not saved', true);
+        return;
+      }
       say(`Not saved: ${e.message}`, true);
     }
   }
+  $('#scratch-mine').addEventListener('click', () => {
+    padDirty = true;
+    savePad(true);
+  });
+  $('#scratch-theirs').addEventListener('click', async () => {
+    clearTimeout(padTimer);
+    padSeq++;
+    try {
+      notes.data = await api('/api/notes');
+      pad.value = notes.data.scratch;
+      padBase = notes.data.scratch;
+      padDirty = false;
+      clash.hidden = true;
+      drawSnippets();
+      say('The other window\'s words are here now.');
+    } catch (e) {
+      say(`Not loaded: ${e.message}`, true);
+    }
+    pad.focus();
+  });
   pad.addEventListener('input', () => {
     padDirty = true;
-    say('Saving…');
+    say(clash.hidden ? 'Saving…' : 'Not saved', !clash.hidden);
     clearTimeout(padTimer);
-    padTimer = setTimeout(savePad, 700);
+    padTimer = setTimeout(() => savePad(), 700);
   });
-  pad.addEventListener('blur', savePad);
+  pad.addEventListener('blur', () => savePad());
   addEventListener('pagehide', () => {
     if (!padDirty) return;
-    fetch('/api/notes', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scratch: pad.value }) }).catch(() => undefined);
+    fetch('/api/notes', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scratch: pad.value, ...(padBase !== null ? { was: padBase } : {}) }) }).catch(() => undefined);
   });
 
   // ---- Save note: the scratch pad as a file, in the notes folder or a project's admin notes (src/folders.ts) ----

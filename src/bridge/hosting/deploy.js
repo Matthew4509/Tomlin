@@ -45,18 +45,41 @@ function placeBusy(place) {
   }
   return null;
 }
-function claim(key, place) {
-  if (busy.has(key)) return 'A push or Go back for this project is already running.';
+function claim(key, place, connId = null) {
+  if (busy.has(key)) return 'A push, Go back or database job for this project is already running. Wait for it to finish, then try again.';
   const other = placeBusy(place);
   if (other) return 'Another project is pushing to the same folder on this host right now (' + (place.root || '/') + '). Wait for it to finish, then try again.';
-  busy.add(key); busyAt.set(key, place);
+  busy.add(key); busyAt.set(key, { ...place, connection: connId });
   return null;
 }
 function release(key) { busy.delete(key); busyAt.delete(key); }
+// A connection a running push, Go back or database job uses (Disconnect waits for it).
+const connectionBusy = id => [...busyAt.values()].some(b => b.connection === id);
+// The site's record must still say what the push began with; set up again meanwhile (another window), the push stops
+// before it changes anything in the site.
+function unchanged(p, s0) {
+  const now = store.site(p.dir);
+  const same = now && ['connection', 'kind', 'root', 'secretsDir', 'url', 'domain', 'sub', 'folder'].every(k => (now[k] || null) === (s0[k] || null));
+  if (!same) throw new Error('Where ' + p.name + ' goes was changed or taken off while the push ran (another window?), so nothing in the site was changed. Push again.');
+}
+/** A database job (db.js) holds the project and its server folder like a push: never two writers at once. */
+async function holding(p, conn, root, fn) {
+  const key = p.dir.toLowerCase();
+  const no = claim(key, placeOf(conn, root), conn.id);
+  if (no) return { ok: false, error: no };
+  try { return await fn(); } finally { release(key); }
+}
 
 const joinR = (...p) => posix.join(...p.filter(x => x != null && x !== ''));
 const phpStr = s => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 const siteId = s => (s.domain || 'site').replace(/[^a-z0-9.-]+/gi, '-').toLowerCase() + (s.sub ? '-' + s.sub.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : '');
+// The Live secrets file's name: the site's name to read, and a fingerprint of its server folder, so two sites in one
+// secrets folder never share a file (FTPS/SFTP: public_html/one and public_html/two of one domain; cPanel: folders
+// inside a site whose names differ only in punctuation, a.b and a-b).
+const rootPrint = root => crypto.createHash('sha1').update(posix.normalize('/' + String(root || '')).replace(/\/+$/, '')).digest('hex').slice(0, 10);
+const secretsName = s => siteId(s) + '-' + rootPrint(s.root) + '.php';
+// The file a site's secrets were last written to: as recorded, or (written before the record was kept) the old name.
+const secretsFileOf = s => (s && (s.secretsFile || (s.secretsWritten && s.secretsDir ? joinR(s.secretsDir, siteId(s) + '.php') : null))) || null;
 
 function newJob(kind, p) {
   const id = crypto.randomBytes(6).toString('hex');
@@ -93,8 +116,7 @@ async function checkInputs(p, s) {
 }
 
 /** Check only (the Check button, and step 1 of a push). */
-async function runCheck(p) {
-  const s = store.site(p.dir);
+async function runCheck(p, s = store.site(p.dir)) {
   if (!s) return { ok: false, error: 'Set up where ' + p.name + ' goes first.' };
   const folder = check.folderOf(p.dir, s.folder);
   if (!folder) return { ok: false, error: 'The upload folder "' + (s.folder || p.folder) + '" is not in ' + p.name + ' any more. Pick it again in Set up.' };
@@ -118,14 +140,27 @@ function loaderText(s, fileName) {
 }
 const DENY = '# Made by TOMLIN: nothing in this folder is ever served to a browser.\n<IfModule mod_authz_core.c>\n  Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n  Order allow,deny\n  Deny from all\n</IfModule>\n';
 
-/** Writes the Live values to the server (and the loader into the site, unless loader === false). */
-async function writeSecrets(t, s, live, loader = true) {
+/** Writes the Live values to the server (and the loader into the site, unless loader === false). With dir (the
+ * project's folder), the file is kept on the site's record, and a file this site wrote before under another name is
+ * removed once the loader reads the new one, unless another site on this PC still reads that file. */
+async function writeSecrets(t, s, live, loader = true, dir = null) {
   if (!s.secretsDir) throw new Error('This site\'s web folder is the top folder of the account, so there is no folder above it to keep secrets in. Pick a web folder inside the account (like public_html).');
-  const fileName = siteId(s) + '.php';
+  const fileName = secretsName(s);
+  const file = joinR(s.secretsDir, fileName);
   await t.putText(joinR(s.secretsDir, '.htaccess'), DENY, '0644');
-  const r = await t.putText(joinR(s.secretsDir, fileName), secretsFileText(s, live), '0600');
+  const r = await t.putText(file, secretsFileText(s, live), '0600');
   if (loader) await t.putText(joinR(s.root, 'tomlin-secrets.php'), loaderText(s, fileName), '0644');
-  return { file: joinR(s.secretsDir, fileName), chmod: !(r && r.chmod === false) };
+  if (dir) {
+    const { keyOf } = require('../projects');
+    const before = secretsFileOf(store.site(dir));
+    store.updateSite(dir, x => (x ? { ...x, secretsFile: file, secretsWritten: true } : x));
+    if (loader && before && before !== file) {
+      const me = keyOf(dir);
+      const shared = Object.entries(store.allSites()).some(([k, o]) => k !== me && o && o.connection === s.connection && secretsFileOf(o) === before);
+      if (!shared) { try { await t.remove(before); } catch {} }
+    }
+  }
+  return { file, chmod: !(r && r.chmod === false) };
 }
 
 // Ask the live site for the files that must never show a secret. Nothing found = good.
@@ -174,19 +209,22 @@ function pruneLocal(p, s) {
  */
 function push(p, opts = {}) {
   const key = p.dir.toLowerCase();
-  if (busy.has(key)) return { ok: false, error: 'A push or Go back for ' + p.name + ' is already running.' };
+  if (busy.has(key)) return { ok: false, error: 'A push, Go back or database job for ' + p.name + ' is already running. Wait for it to finish, then try again.' };
   const s0 = store.site(p.dir);
   if (!s0 || !s0.connection) return { ok: false, error: 'Set up where ' + p.name + ' goes first (Push live, Set up).' };
   const conn = store.connection(s0.connection);
   if (!conn) return { ok: false, error: 'The connection ' + p.name + ' used is gone. Pick another in Set up.' };
-  const no = claim(key, placeOf(conn, s0.root));
+  const no = claim(key, placeOf(conn, s0.root), conn.id);
   if (no) return { ok: false, error: no };
   const job = newJob('push', p);
   (async () => {
-    let s = s0, pushId = null, stage = null;
+    // The site as it was when the push began: every server path below comes from it, never from a record changed while
+    // the push runs (Set up and the rest are refused meanwhile, and a record changed anyway stops it before a change).
+    const s = s0;
+    let cur = s0, pushId = null, stage = null;
     try {
       step(job, 'Checking the files');
-      const c = await runCheck(p);
+      const c = await runCheck(p, s0);
       if (!c.ok) throw new Error(c.error);
       if (c.findings.length) { job.findings = c.findings; throw new Error(c.findings.length + ' thing' + (c.findings.length === 1 ? '' : 's') + ' must not go live. Nothing was sent.'); }
       if (!c.files.length) throw new Error('There are no files to send in the upload folder.');
@@ -240,6 +278,7 @@ function push(p, opts = {}) {
       const free = await t.freeBytes().catch(() => null);
       if (free != null && free < need) throw new Error('The hosting account has ' + (free / 1048576).toFixed(0) + ' MB free and this push needs about ' + (need / 1048576).toFixed(0) + ' MB (the files and the copies of what they replace). Free some space in cPanel (File Manager, or old backups), then push again.');
 
+      unchanged(p, s0);
       const backupRoot = conn.kind === 'cpanel' ? joinR(conn.home || posix.dirname(s.secretsDir || '/'), 'tomlin-push-backups', siteId(s), pushId) : null;
       const backedUp = [];
       if (replaced.length || removing.length) {
@@ -257,7 +296,8 @@ function push(p, opts = {}) {
       // On the list before anything on the server changes: a push that stops part way (a dropped connection, TOMLIN
       // closed) can still be undone with Go back, which puts back what it kept and removes what it added.
       const record = { id: pushId, at: manifest.at, sent: send.length, added: added.length, replaced: replaced.length, removed: removing.length, bytes: job.plan.bytes, secrets: Object.keys(live).length, ok: false, pending: true };
-      s = store.updateSite(p.dir, x => { x.pushes = [...(x.pushes || []), record].slice(-10); return x; });
+      unchanged(p, s0);
+      cur = store.updateSite(p.dir, x => { x.pushes = [...(x.pushes || []), record].slice(-10); return x; });
 
       if (send.length) {
         const st = step(job, 'Sending ' + send.length + ' file' + (send.length === 1 ? '' : 's') + ' (' + (job.plan.bytes / 1048576).toFixed(1) + ' MB)');
@@ -266,23 +306,24 @@ function push(p, opts = {}) {
       }
       let sec = null;
       // Secrets written before and none now: the file is emptied, so no old value stays on the server.
-      if (Object.keys(live).length || s.secretsWritten) { step(job, Object.keys(live).length ? 'Writing the Live secrets outside the web folder' : 'Emptying the Live secrets file (no Live secrets now)'); sec = await writeSecrets(t, s, live); }
+      if (Object.keys(live).length || s.secretsWritten) { step(job, Object.keys(live).length ? 'Writing the Live secrets outside the web folder' : 'Emptying the Live secrets file (no Live secrets now)'); sec = await writeSecrets(t, s, live, true, p.dir); }
       if (removing.length) {
         step(job, 'Removing ' + removing.length + ' file' + (removing.length === 1 ? '' : 's') + ' TOMLIN sent before that are gone from the folder or left out now');
         for (const x of removing) { try { await t.remove(joinR(s.root, x.rel)); } catch (e) { if (!/not (?:found|there)|No such|does not exist/i.test(e.message)) throw e; } }
       }
-      s = store.updateSite(p.dir, x => {
+      cur = store.updateSite(p.dir, x => {
+        if (!x) throw new Error('The site\'s record was taken off while the push ran. The files went to ' + s.root + '; set the site up again before the next push.');
         x.lastSent = now;
         if (sec) x.secretsWritten = true;
         for (const o of x.pushes || []) if (o.id === pushId) { o.ok = true; delete o.pending; }
         return x;
       });
-      pruneLocal(p, s);
+      pruneLocal(p, cur);
       // Old server-side copies: only the last few pushes keep theirs.
       if (conn.kind === 'cpanel') {
-        const old = (s.pushes || []).slice(0, -KEEP_BACKUPS).filter(x => !x.pruned);
+        const old = (cur.pushes || []).slice(0, -KEEP_BACKUPS).filter(x => !x.pruned);
         for (const o of old) { try { await t.remove(joinR(conn.home || posix.dirname(s.secretsDir || '/'), 'tomlin-push-backups', siteId(s), o.id)); } catch {} }
-        if (old.length) s = store.updateSite(p.dir, x => { for (const o of x.pushes) if (old.some(y => y.id === o.id)) o.pruned = true; return x; });
+        if (old.length) cur = store.updateSite(p.dir, x => { for (const o of x.pushes) if (old.some(y => y.id === o.id)) o.pruned = true; return x; });
       }
 
       step(job, 'Checking the live site shows no secret');
@@ -293,7 +334,7 @@ function push(p, opts = {}) {
       // A check that could not ask the site (no answer, a certificate fault) is not a pass: the push says so.
       const unasked = leaks.filter(l => l.ok == null);
       const verified = bad.length ? 'leak' : unasked.length ? 'not-checked' : 'ok';
-      s = store.updateSite(p.dir, x => { for (const o of x.pushes || []) if (o.id === pushId) o.verified = verified; return x; });
+      cur = store.updateSite(p.dir, x => { for (const o of (x && x.pushes) || []) if (o.id === pushId) o.verified = verified; return x; });
       const problems = [...bad.map(l => l.path + ' ' + l.said), ...(unasked.length ? ['TOMLIN could not ask the site for ' + unasked.map(l => l.path).join(', ') + ' (' + unasked[0].said + '), so it is not known whether they show a secret: open them in a browser to be sure they show nothing'] : [])];
       finish(job, !problems.length, problems.length ? 'The files went live, but: ' + problems.join('; ') + '.' : null,
         { url: s.url, pushId, sent: send.length, same: job.plan.same, removed: removing.length, kept: backedUp.length, secrets: sec, leaks, verified, live: lightState });
@@ -322,7 +363,7 @@ function push(p, opts = {}) {
  * that stopped part way. Files only: the Live secrets and a database are not put back. */
 function goBack(p) {
   const key = p.dir.toLowerCase();
-  if (busy.has(key)) return { ok: false, error: 'A push or Go back for ' + p.name + ' is already running.' };
+  if (busy.has(key)) return { ok: false, error: 'A push, Go back or database job for ' + p.name + ' is already running. Wait for it to finish, then try again.' };
   const s = store.site(p.dir);
   const last = s && (s.pushes || []).filter(x => !x.undone).pop();
   if (!last) return { ok: false, error: 'There is no push of ' + p.name + ' to go back from.' };
@@ -331,7 +372,7 @@ function goBack(p) {
   catch { return { ok: false, error: 'The record of the last push is not on this PC any more, so it cannot be undone.' }; }
   const conn = store.connection(manifest.connection);
   if (!conn) return { ok: false, error: 'The connection that push used is gone, so it cannot be undone. Connect it again first.' };
-  const no = claim(key, placeOf(conn, manifest.root));
+  const no = claim(key, placeOf(conn, manifest.root), conn.id);
   if (no) return { ok: false, error: no };
   const job = newJob('back', p);
   (async () => {
@@ -375,4 +416,4 @@ function goBack(p) {
 const progress = id => { const j = jobs.get(String(id)); return j ? { ok: true, job: j } : { ok: false, error: 'That push is not known (TOMLIN was restarted?).' }; };
 const running = dir => busy.has(dir.toLowerCase());
 
-module.exports = { push, goBack, progress, runCheck, writeSecrets, leakCheck, running, siteId, secretsFileText, loaderText, joinR, newJob, step, finish };
+module.exports = { push, goBack, progress, runCheck, writeSecrets, leakCheck, running, connectionBusy, holding, siteId, secretsName, secretsFileOf, secretsFileText, loaderText, joinR, newJob, step, finish };

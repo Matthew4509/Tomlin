@@ -274,6 +274,14 @@ rather than misread it.
   work is, what is decided, done and open; a new chat with the same person opens with it, folded at the top, and reads
   it with every answer) or **Ignore** (asked once more at 90%). The chat settings show how long a full context takes
   to read on this PC, from the reading speed measured on that model's own answers here, and warn past 10 minutes.
+- **Big contexts (up to 262,144):** a message can be up to 1,000,000 characters (it was 20,000), so a whole file can
+  be pasted; one bigger than the model's context can read is not sent, and says how big it is and what this context
+  takes. While the model reads, the answer's place says how far it has got ("Reading the chat: 50% (5,447 of 10,895
+  word-pieces) · about 2 min left"), on this PC or a linked one. The start of what each turn sends stays the same as
+  the chat grows (past full, the older messages drop off a third of the room at a time, not one every turn), so the
+  model reads only what is new: measured here with Qwen 3.5 0.8B, a second turn read 23 new word-pieces in under a
+  second instead of all 3,873 again (56 s). A chat that comes to more word-pieces than the model holds (JSON and lock
+  files are nearer 2 characters each than the 3 TOMLIN counts) is cut down to the model's own count and sent once more.
 - **Quick or Think (2.0.31):** beside Send. Quick answers straight away (thinking stays off). Think lets a model that
   can think (Qwen 3 and 3.5) work the question out first: the working streams into a fold above the answer
   ("Thinking first… 12 s", then "Thought for 40 s"), is kept with the answer and never sent to the model again. The
@@ -296,8 +304,10 @@ rather than misread it.
 - **Documents in a chat:** **Add a document** (or drop a file on the chat) puts a PDF, text or code file into the
   open chat with TOMLIN or a hire, up to 25 MB and 8 documents a chat. It is read once into plain text, split
   into parts of about 300 words (never across a page) and kept beside the chat in `data\docs`; the file itself is not
-  kept. For each message the parts that match its words best (a page named in it, "page 31", first) are given to the
-  model, up to two fifths of what it can read; the answer is asked to quote and name the page, and the line under it
+  kept. When every document in the chat fits in two fifths of what the model can read, they are given whole, the
+  same every turn (a code file read in parts is not code; the line under the answer says "Read: app.js (whole)").
+  Otherwise, for each message the parts that match its words best (a page named in it, "page 31", first) are given
+  to the model, up to two fifths of what it can read; the answer is asked to quote and name the page, and the line under it
   says which pages it was given ("Read: manual.pdf page 31"). A scanned PDF (pictures of pages, no text) has nothing
   to read and says so. PDF text is read by PDF.js (THIRD-PARTY.md). A carried-on chat keeps the documents; deleting
   the chat deletes them. Not for a hire on another PC.
@@ -479,6 +489,19 @@ rather than misread it.
 - **2.0.49:** **Push live** in the Bridge (see The page): one press to cPanel, FTPS or SFTP, secrets kept locked by
   Windows and written outside the web folder, a check that stops keys and private details, Go back, and the MySQL
   database on cPanel. The address it goes to becomes the project's live address. Licence: PolyForm Noncommercial 1.0.0.
+  Two linked PCs with one name show their address on their cards (and linking the second says so); a PC that answers
+  with nothing loaded says Asleep; a queued chat message stopped with Stop is sent again on Resume; half-sent updates
+  are cleared; a PIN file holding nothing keeps the app locked. Tidying: the second look's files and Start Shelby.cmd
+  are gone (SHELBY_* settings are still read, for PCs whose launcher started before the rename).
+  Push live, hardened: two sites in one secrets folder each get their own Live secrets file; a saved secret inside a
+  big binary file stops the push; files left out by .gitignore and sent with the tick must all be seen, and a file
+  that cannot be read stops it; Set up, Secrets, the database and Disconnect wait while a push runs. Two queued chat
+  messages with the same words are both sent; a site picture's hidden Edge is stopped even when it is too busy to answer.
+  A full disk is said plainly (which drive, and what to do), and a save it stopped never shows as done; a database
+  load cut off part way says some of it may be in; the scratch pad never saves over words another window saved.
+  Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
+  only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
+  stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
 - **2.0.48:** Layout passes 1 and 2: the chat head is a staff card (name and software over the PC, avg speed,
   rename in place, Project beside it); **Enable live stats** in the gear; Copy, Pin and Send to as icons; the top bar
   keeps this PC and shows a linked PC beside it with its model; staff rows "Name | Level" over the software; pressing

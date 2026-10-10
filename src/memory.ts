@@ -18,6 +18,8 @@ export interface NoteLine {
   from: 'owner' | 'pin' | 'suggested';
 }
 
+/** The longest chat message, in characters (about 300K word-pieces): more than the biggest context reads in one message. */
+export const MESSAGE_MAX = 1_000_000;
 export const NOTE_MAX = 300;
 export const NOTEBOOK_MAX_LINES = 200;
 /** Characters per token for chat prose, on the safe side (English prose is nearer 4). */
@@ -130,6 +132,8 @@ export interface ChatContext {
    * message, as if nothing were cut. Past 100 the older messages are only summarised; the page offers a handoff at 75.
    */
   fill: number;
+  /** The documents went in whole (not the matching parts). */
+  docsWhole?: boolean;
 }
 
 export interface ChatInput {
@@ -153,6 +157,13 @@ export interface ChatInput {
   opening?: string;
   /** The parts of the chat's documents that match the message (src/docs.ts), already sized to docRoom(). */
   docs?: string;
+  /** Every document whole (src/docs.ts wholeSection): sent instead of `docs` when it fits the documents' room. */
+  docsWhole?: string;
+  /**
+   * The share of the room to fill (0.2 to 1): less than all when the model counted more word-pieces than the guess of
+   * 3 characters each (JSON, another alphabet) and refused the chat as too long (src/engine.ts ContextFull).
+   */
+  squeeze?: number;
 }
 
 /** The characters a chat turn may fill (all but the answer), for a context of `ctx` tokens. */
@@ -177,7 +188,7 @@ const part = (key: string, label: string, text: string, state: Part['state'], no
 export function buildChat(x: ChatInput): ChatContext {
   const ctx = Math.max(2048, x.ctx || 8192);
   const answerTokens = Math.min(x.maxAnswer, Math.floor(ctx / 4));
-  const room = chatRoom(ctx, x.maxAnswer);
+  const room = Math.floor(chatRoom(ctx, x.maxAnswer) * Math.min(1, Math.max(0.2, x.squeeze ?? 1)));
   const parts: Part[] = [];
   const topic = `${x.message} ${[...x.history].reverse().find(l => l.role === 'user')?.content ?? ''}`;
   let left = room - x.card.length - (x.rules?.length ?? 0) - x.message.length;
@@ -203,28 +214,29 @@ export function buildChat(x: ChatInput): ChatContext {
     left -= text.length + 2;
     parts.push(part('opening', 'Handoff from the chat before', text, text.length < x.opening.length ? 'cut' : 'whole'));
   }
-  // The parts of the chat's documents that match this message (found by word match in src/docs.ts).
-  if (x.docs) {
-    const text = x.docs.slice(0, Math.max(0, Math.min(left, docRoom(room))));
+  // The chat's documents: whole when they fit, otherwise the parts that match this message (src/docs.ts).
+  const docsFit = Math.max(0, Math.min(left, docRoom(room)));
+  const docsWhole = !!x.docsWhole && x.docsWhole.length <= docsFit;
+  // With the card: whole, the same every turn; the matching parts, the same while the questions match the same parts.
+  // (Put with the new message instead, they changed the chat from that message on the turn after, since the chat on
+  // disk keeps the message without them: Qwen 3.5, a hybrid model, then read everything again every turn. Measured.)
+  if (docsWhole || x.docs) {
+    const text = docsWhole ? x.docsWhole! : x.docs!.slice(0, docsFit);
     sections.push(text);
     left -= text.length + 2;
-    parts.push(part('docs', 'Documents in this chat (the matching parts)', text, text.length < x.docs.length ? 'cut' : 'whole'));
+    parts.push(docsWhole ? part('docs', 'Documents in this chat (whole)', text, 'whole') : part('docs', 'Documents in this chat (the matching parts)', text, text.length < x.docs!.length ? 'cut' : 'whole'));
   }
-  // The recent messages, newest first, inside what is left after a place for the summary.
+  // The recent messages, inside what is left after a place for the summary.
   const history = x.history.filter(l => !l.refused && !l.failed && l.content.trim());
   const fixed = room - left;
-  const keepRoom = left - Math.min(Math.floor(room / 6), 1500);
-  const recent: ChatLine[] = [];
-  let n = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    const c = history[i].content.length + 8;
-    if (n + c > keepRoom) break;
-    recent.unshift(history[i]);
-    n += c;
-  }
-  const older = history.slice(0, history.length - recent.length);
+  const sumRoom = Math.min(Math.floor(room / 6), 1500);
+  const start = keptFrom(history.map(l => l.content.length + 8), left - sumRoom);
+  const recent = history.slice(start);
+  const older = history.slice(0, start);
   if (older.length) {
-    const sum = olderSummary(older, x.name, Math.max(0, left - n - 60));
+    // Sized by the summary's own place, not by what the recent messages left: the same older messages give the same
+    // summary every turn.
+    const sum = olderSummary(older, x.name, sumRoom - 100);
     if (sum) {
       const text = `Earlier in this chat (a short summary written by the app; the full chat is kept on disk):\n${sum}`;
       sections.push(text);
@@ -240,8 +252,35 @@ export function buildChat(x: ChatInput): ChatContext {
   const turns: ChatTurn[] = [...(system ? [{ role: 'system' as const, content: system }] : []), ...recent.map(l => ({ role: l.role, content: l.content })), ...(x.message ? [{ role: 'user' as const, content: x.message }] : [])];
   const used = system.length + recentText.length + x.message.length;
   const whole = fixed + history.reduce((n, l) => n + l.content.length + 8, 0);
-  return { turns, parts, ctx, answerTokens, room, used, fill: Math.round((whole / room) * 100) };
+  return { turns, parts, ctx, answerTokens, room, used, fill: Math.round((whole / room) * 100), docsWhole };
 }
+
+/**
+ * Where the messages a turn sends begin, from each message's size (oldest first) and the room they may fill: all of
+ * them when they fit. When they do not, the start moves on in steps of about a third of the room, at the first message
+ * that begins in each third, not by one message every turn: the start of the prompt then stays the same until a third
+ * of the room more has been said (in a 250K context, dozens of turns), and llama.cpp reads only what is new (a 250K
+ * chat read again from the top is an hour or more on a laptop). The step is skipped when it would leave out more than
+ * a third more than needed (one very long message): then only what must go goes.
+ */
+export function keptFrom(sizes: number[], room: number): number {
+  const fit = (r: number) => {
+    let i = sizes.length;
+    for (let n = 0; i > 0 && n + sizes[i - 1] <= r; i--) n += sizes[i - 1];
+    return i;
+  };
+  const need = fit(room);
+  if (need === 0) return 0;
+  const step = Math.max(1, Math.floor(room / 3));
+  let at = 0;
+  for (let i = 0; i < sizes.length; i++) {
+    if (i >= need && (i === 0 || Math.floor((at - sizes[i - 1]) / step) < Math.floor(at / step))) return at - sumTo(sizes, need) <= step ? i : need;
+    at += sizes[i];
+  }
+  return need;
+}
+
+const sumTo = (sizes: number[], i: number) => sizes.slice(0, i).reduce((t, s) => t + s, 0);
 
 // ---- Job steps: the packet a worker gets ----
 

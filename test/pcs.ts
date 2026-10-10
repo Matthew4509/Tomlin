@@ -102,12 +102,12 @@ export const NODE_CODE = 'TEST-NQDE';
  * A home for a node: the app lock set (a node needs one before it shares), sharing on at `workerPort` with a made-up
  * setup code and every tick on. Written before the copy starts, as the PC's own owner would have set it.
  */
-export function nodeHome(home: string, workerPort: number, name = 'Test node'): void {
+export function nodeHome(home: string, workerPort: number, name = 'Test node', id = 'a1b2c3d4'): void {
   const data = join(home, 'data');
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-lock.json'), JSON.stringify({ ...hashPin(NODE_PIN), idleMinutes: 0 }));
   writeFileSync(join(data, 'share.json'), JSON.stringify({
-    on: true, port: workerPort, name, id: 'a1b2c3d4', code: NODE_CODE, pinOn: false, pin: '', paired: [], models: [],
+    on: true, port: workerPort, name, id, code: NODE_CODE, pinOn: false, pin: '', paired: [], models: [],
     allow: { pull: true, backup: true, push: true, update: true },
   }));
 }

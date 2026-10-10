@@ -25,8 +25,9 @@ function retry(fn) {
     try { return fn(); } catch (e) { if (!HELD.has(e.code) || i >= 8) throw e; pause(60 * (i + 1)); }
   }
 }
-// Missing = empty. Damaged (not JSON) = a copy is kept aside, then empty. Unreadable (held, no rights) is an error,
-// never "empty": the next save would otherwise write over every connection, site or secret in it.
+// Missing = empty. Damaged (not JSON) = a copy is kept aside, then empty; a copy that could not be made is an error, as
+// the next save would write over the only one. Unreadable (held, no rights) is an error, never "empty": the next save
+// would otherwise write over every connection, site or secret in it.
 function readJson(file, empty) {
   let text;
   try { text = retry(() => fs.readFileSync(file, 'utf8')); } catch (e) {
@@ -37,7 +38,9 @@ function readJson(file, empty) {
     const v = JSON.parse(text.replace(/^﻿/, ''));
     if (v && typeof v === 'object' && !Array.isArray(v)) return v;
   } catch {}
-  try { fs.copyFileSync(file, file + '.damaged-' + Date.now()); } catch {}
+  try { retry(() => fs.copyFileSync(file, file + '.damaged-' + Date.now())); } catch (e) {
+    throw new Error(path.basename(file) + ' is damaged and TOMLIN could not keep a copy of it (' + (e.code || e.message) + '), so it changed nothing. Free some disk space or close the program that holds the folder, then try again.');
+  }
   return empty();
 }
 function writeJson(file, v) {

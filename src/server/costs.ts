@@ -9,7 +9,7 @@ import { chatNeed } from '../calc.ts';
 import { added, API_PRICES, cleanPower, cleanPrices, costs, dayOf, powerFault, PRICES_CHECKED, scope, ZERO, type ApiPrice, type Costs, type Power, type Tally } from '../meter.ts';
 import { nowModel, roleOf } from '../staff.ts';
 import * as update from '../update.ts';
-import { type Routes, BUILD, STARTED_AT, VERSION, byModel, byStaff, json, ledger, meter, pcProfiles, shortName, staff, store, uptime } from './core.ts';
+import { type Routes, BUILD, STARTED_AT, VERSION, byModel, byStaff, faultWords, json, ledger, meter, pcProfiles, shortName, staff, store, uptime } from './core.ts';
 import { photoPng, profileView, shownName } from '../pcprofile.ts';
 import { jobRoutes } from './jobs.ts';
 import { cpuHere, memoryNow, modelsHere } from './thispc.ts';
@@ -225,7 +225,7 @@ export const costsPost: Routes = {
     try {
       await pcProfiles.setPhoto(id, b.image === null ? null : await photoPng(b.image));
     } catch (e) {
-      return json(res, 400, { error: (e as Error).message });
+      return json(res, 400, { error: faultWords(e) });
     }
     const r = await pcView(id);
     return json(res, r.status, r.body);

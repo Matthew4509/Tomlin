@@ -1,6 +1,6 @@
 // Site pictures: three in a row all come out, and no hidden Edge is left running afterwards (Edge's msedge.exe is a
 // launcher that hands over and exits, so stopping it alone left the real browser holding the profile, and every
-// picture after the first failed). Uses a made-up page on a free port and a throwaway profile in a temp folder.
+// picture after the first failed). Uses a made-up page on a free port and one test profile kept in the temp folder.
 // Run: node test/snapshot.test.js   (Windows with Microsoft Edge; skipped elsewhere)
 'use strict';
 const fs = require('fs');
@@ -28,7 +28,10 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-snap-test-'));
   // Removed however the test ends (a failed check or a crash too); a folder something still holds gets a few tries.
   process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch {} });
-  const profile = path.join(tmp, 'profile');
+  // One profile for every run, never removed: ESET lets no program but Edge open or delete the browser data inside an
+  // Edge profile, so a fresh profile per run left a folder behind each time (88 of them, 1.7 GB, by 10 Oct). The app
+  // does the same (data/bridge/snaps/profile).
+  const profile = path.join(os.tmpdir(), 'bridge-snap-test-profile');
   const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>t</title><h1 style="color:teal">Made-up page</h1>'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + server.address().port + '/';
@@ -57,6 +60,20 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
       await takeSnapshot({ edge, url, out: path.join(tmp, 'after-leftover.png'), profile, settleMs: 300, timeoutMs: 20000 });
       assert(!(await stillThere(old)), 'the leftover browser on port ' + old + ' is still running');
       assert(!(await stillThere(portIn(profile))), 'the new picture\'s browser is still running');
+    });
+    await check('an Edge too busy to answer on its DevTools port is still stopped (found as the msedge.exe holding it)', async () => {
+      const { spawn } = require('child_process');
+      const { stopBrowser } = require('../../src/bridge/snapshot');
+      fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
+      spawn(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: 'ignore' }).unref();
+      let busy = null;
+      for (let k = 0; k < 50 && !(busy && await stillThere(busy)); k++) { await new Promise(r => setTimeout(r, 200)); busy = portIn(profile); }
+      assert(busy && await stillThere(busy), 'the browser did not start');
+      // It does not answer in time (a PC under load): every ask on its port fails.
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (u, ...rest) => (String(u).includes(':' + busy + '/') ? Promise.reject(new Error('timed out')) : realFetch(u, ...rest));
+      try { await stopBrowser(busy); } finally { globalThis.fetch = realFetch; }
+      assert(!(await stillThere(busy)), 'the browser on port ' + busy + ' is still running');
     });
   } finally {
     server.close();

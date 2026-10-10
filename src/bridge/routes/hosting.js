@@ -15,6 +15,11 @@ const db = require('../hosting/db');
 const OFF = { ok: false, off: true, error: 'Push live is off. Turn it on first: it is the part of TOMLIN that sends a project\'s files to your web host.' };
 const on = () => state.settings.pushLive === true;
 const gated = fn => ctx => (on() ? fn(ctx) : OFF);
+// What changes where a project goes, or what it sends, waits while its push, Go back or database job runs: that job
+// keeps going with what it began with, and a change in the middle would not be what went live.
+const BUSY = p => ({ ok: false, busy: true, error: 'A push, Go back or database job for ' + p.name + ' is running. Wait for it to finish, then try again.' });
+const idle = fn => ctx => (ctx.p && deploy.running(ctx.p.dir) ? BUSY(ctx.p) : fn(ctx));
+const CONN_BUSY = { ok: false, busy: true, error: 'A push, Go back or database job is using this connection right now. Wait for it to finish, then try again.' };
 const posix = path.posix;
 
 function sitePage(p) {
@@ -52,10 +57,11 @@ const post = {
     return { ok: false, error: 'Pick cPanel, FTPS or SFTP.' };
   }),
   '/api/hosting/test': gated(({ body }) => connections.test(String(body.connection || ''))),
-  '/api/hosting/disconnect': gated(({ body }) => connections.disconnect(String(body.connection || ''))),
+  '/api/hosting/disconnect': gated(({ body }) => (deploy.connectionBusy(String(body.connection || '')) ? CONN_BUSY : connections.disconnect(String(body.connection || '')))),
   '/api/hosting/forget-key': gated(({ body }) => {
     const c = store.connection(String(body.connection || ''));
     if (!c || c.kind !== 'sftp') return { ok: false, error: 'That is not an SFTP connection.' };
+    if (deploy.connectionBusy(c.id)) return CONN_BUSY;
     require('../hosting/sftp').forgetServer(c.host, c.port);
     store.putConnection({ ...c, hostKey: null });
     return { ok: true };
@@ -84,7 +90,7 @@ const pget = {
 const ppost = {
   // Where this project goes. cPanel: one of the account's sites (and an optional folder inside it). FTPS/SFTP: a
   // folder on the server and the address it shows at.
-  '/api/hosting/site/set': gated(async ({ p, body }) => {
+  '/api/hosting/site/set': gated(idle(async ({ p, body }) => {
     const c = store.connection(String(body.connection || ''));
     if (!c) return { ok: false, error: 'Pick a connection.' };
     const folder = String(body.folder == null ? '' : body.folder).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -110,14 +116,18 @@ const ppost = {
       next = { kind: c.kind, domain: new URL(u.url).hostname, sub: '', root: r.path, url: u.url, secretsDir: r.path ? posix.join(parent === '.' ? '' : parent, 'tomlin-secrets') : null };
     }
     const sendAnyway = Array.isArray(body.sendAnyway) ? body.sendAnyway.filter(k => check.SOFT.some(([x]) => x === k)) : [];
+    // Looked at again after the wait for the host's list of sites: a push may have begun meanwhile.
+    if (deploy.running(p.dir)) return BUSY(p);
     store.updateSite(p.dir, old => {
       const same = old && old.connection === c.id && old.root === next.root;
       return { ...(old || {}), ...next, connection: c.id, folder, sendAnyway, ignore: (old && old.ignore) || [],
-        lastSent: same ? old.lastSent || null : null, pushes: (old && old.pushes) || [], db: same ? (old && old.db) || null : null, secretsWritten: same ? !!(old && old.secretsWritten) : false };
+        lastSent: same ? old.lastSent || null : null, pushes: (old && old.pushes) || [], db: same ? (old && old.db) || null : null, secretsWritten: same ? !!(old && old.secretsWritten) : false,
+        // Another folder: the old one's secrets file is left as it is (a copy of the site may still read it there).
+        secretsFile: same ? old.secretsFile : undefined };
     });
     return { ok: true, site: sitePage(p) };
-  }),
-  '/api/hosting/site/remove': gated(({ p }) => { store.putSite(p.dir, null); return { ok: true, note: 'TOMLIN forgot where ' + p.name + ' goes. Nothing on the server was touched, and its live address stays in the Bridge.' }; }),
+  })),
+  '/api/hosting/site/remove': gated(idle(({ p }) => { store.putSite(p.dir, null); return { ok: true, note: 'TOMLIN forgot where ' + p.name + ' goes. Nothing on the server was touched, and its live address stays in the Bridge.' }; })),
   '/api/hosting/check': gated(async ({ p }) => {
     const r = await deploy.runCheck(p);
     if (!r.ok) return r;
@@ -125,20 +135,20 @@ const ppost = {
     for (const l of r.left) { const g = groups.get(l.why) || { why: l.why, soft: l.soft || null, count: 0, some: [] }; g.count++; if (g.some.length < 4) g.some.push(l.rel); groups.set(l.why, g); }
     return { ok: true, files: r.files.length, bytes: r.bytes, findings: r.findings, left: [...groups.values()], liveNames: r.liveNames };
   }),
-  '/api/hosting/ignore': gated(({ p, body }) => {
+  '/api/hosting/ignore': gated(idle(({ p, body }) => {
     const key = String(body.key || '');
     if (!/^(KEY|ASSIGN|PRIVATE|PATH|NAME|BIG)\|/.test(key)) return { ok: false, error: 'That finding cannot be set aside.' };
     store.updateSite(p.dir, x => { const set = new Set(x.ignore || []); if (body.on === false) set.delete(key); else set.add(key); return { ...x, ignore: [...set] }; });
     return { ok: true };
-  }),
+  })),
   '/api/hosting/push': gated(({ p, body }) => deploy.push(p, { all: body.all === true })),
   '/api/hosting/back': gated(({ p }) => deploy.goBack(p)),
-  '/api/hosting/secrets': gated(async ({ p, body }) => {
+  '/api/hosting/secrets': gated(idle(async ({ p, body }) => {
     try { return await secrets.save(p.dir, body.rows); } catch (e) { return { ok: false, error: e.message }; }
-  }),
+  })),
   '/api/hosting/db/setup': gated(async ({ p, body }) => { try { return await db.setup(p, body); } catch (e) { return { ok: false, error: e.message }; } }),
   '/api/hosting/db/load': gated(async ({ p, body }) => { try { return await db.load(p, body); } catch (e) { return { ok: false, error: e.message }; } }),
-  '/api/hosting/db/forget': gated(({ p }) => { store.updateSite(p.dir, x => ({ ...x, db: null })); return { ok: true, note: 'TOMLIN forgot the database record. The database itself and the DB_ secrets are still there.' }; }),
+  '/api/hosting/db/forget': gated(idle(({ p }) => { store.updateSite(p.dir, x => ({ ...x, db: null })); return { ok: true, note: 'TOMLIN forgot the database record. The database itself and the DB_ secrets are still there.' }; })),
 };
 
 module.exports = { get, post, pget, ppost };

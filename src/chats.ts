@@ -133,8 +133,15 @@ export class Chats {
     return this.cache;
   }
 
+  // A save that fails (a full disk) leaves the list in memory changed and the file not: the list is read from the file
+  // again, so a refused rename or new chat never shows as done (and comes undone at the next start).
   private async write(): Promise<void> {
-    await this.store.writeJson(INDEX, this.cache ?? []);
+    try {
+      await this.store.writeJson(INDEX, this.cache ?? []);
+    } catch (e) {
+      this.cache = null;
+      throw e;
+    }
   }
 
   /** Newest first (by when it was last used). */

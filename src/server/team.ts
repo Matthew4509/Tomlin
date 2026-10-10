@@ -13,7 +13,7 @@ import * as mute from '../mute.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { hereKey, pcKey, TEST_PROMPT, TEST_TOKENS, type Summary as SpeedSummary } from '../speed.ts';
-import { HOST_ON, type Routes, byStaff, chats, faces, hidden, json, mutes, notifier, pcProfiles, publicSettings, shortName, speeds, staff, staffId, store } from './core.ts';
+import { HOST_ON, type Routes, byStaff, chats, faces, faultWords, hidden, json, mutes, notifier, pcProfiles, publicSettings, shortName, speeds, staff, staffId, store } from './core.ts';
 import { shownName } from '../pcprofile.ts';
 import { chat, chatList, chatPlace, connectChat, images, lastUsed, main, runnerFor, runners } from './panes.ts';
 import { answerPhases, answeringBusy, endAnswer, lastWorked, reserve, stopOn, takeChat } from './answering.ts';
@@ -598,7 +598,7 @@ export const teamPost: Routes = {
         if ((await store.settings()).imageAs === b.id) await store.saveSettings({ imageAs: '' });
       } else return json(res, 400, { error: 'Unknown staff action.' });
     } catch (error) {
-      return json(res, 400, { error: (error as Error).message });
+      return json(res, 400, { error: faultWords(error) });
     }
     return json(res, 200, { ...(await staffView()), who: whoList(), settings: publicSettings(await store.settings()) });
   },

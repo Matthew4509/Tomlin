@@ -56,6 +56,15 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     const noAward = await post('/api/office/award/undo', {});
     assert.equal(noAward.status, 400);
     assert.match(((await noAward.json()) as { error: string }).error, /no award for/);
+    // Two windows on one scratch pad: a save from words older than what is saved is refused (409, with what is saved),
+    // never written over them; Keep mine (no starting words) saves.
+    assert.equal((await post('/api/notes', { scratch: 'window A (made-up)' })).status, 200);
+    const clash = await post('/api/notes', { scratch: 'window B (made-up)', was: '' });
+    assert.equal(clash.status, 409);
+    assert.equal(((await clash.json()) as { notes: { scratch: string } }).notes.scratch, 'window A (made-up)');
+    assert.equal((await post('/api/notes', { scratch: 'window A, more', was: 'window A (made-up)' })).status, 200);
+    assert.equal((await post('/api/notes', { scratch: 'window B, kept', was: 'window A (made-up)' })).status, 409);
+    assert.equal((await post('/api/notes', { scratch: 'window B, kept' })).status, 200);
 
     // Every send names its chat: the server's "open chat" is whichever window opened one last (two windows, or the
     // second look beside today's), so a message must never land in that one instead of its own.

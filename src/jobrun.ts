@@ -28,7 +28,9 @@ import { laneOfRef, nextLane, planLane, setup } from './jobrun/sizing.ts';
 import { backupTo, bringBack, copyFrom, keptOn, network, projectsBack, projectsOn, projectsTo, sendTo, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
-import { applyShare, askHost, goAway, impactOf, linkedUse, nodeView, projectsCopy, remotes, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
+import { applyShare, askHost, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
+import { remotes } from './jobrun/linking.ts';
+import { goAway } from './jobrun/giveway.ts';
 
 /** The main chat runner as the jobs see it (the one a step with no model of its own runs on). */
 export type ChatSeat = Pick<Pane, 'view' | 'worker' | 'disconnect' | 'busy'>;

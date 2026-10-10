@@ -18,18 +18,23 @@ const MAX_SQL = 64 * 1024 * 1024;
 const clean = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
 const phpStr = s => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 
-async function cpanelOf(p) {
+// The site and its cPanel connection (no connecting yet: the job holds the project first).
+function cpanelOf(p) {
   const s = store.site(p.dir);
   if (!s || !s.connection) throw new Error('Set up where ' + p.name + ' goes first.');
   const conn = store.connection(s.connection);
   if (!conn) throw new Error('The connection ' + p.name + ' used is gone. Pick another in Set up.');
   if (conn.kind !== 'cpanel') throw new Error('A database can be made only through cPanel. With ' + conn.kind.toUpperCase() + ', make it in your host\'s panel and type its details in Secrets (DB_HOST, DB_NAME, DB_USER, DB_PASS).');
-  return { s, conn, t: await connections.transport(conn) };
+  return { s, conn };
 }
 
-/** Make the database and its user (once). body: { name } */
+/** Make the database and its user (once). body: { name }. Never while a push or another database job of the project,
+ * or of the same server folder, runs: both write the Live secrets file and the loader. */
 async function setup(p, body) {
-  const { s, t } = await cpanelOf(p);
+  const { s, conn } = cpanelOf(p);
+  return deploy.holding(p, conn, s.root, async () => setupHeld(p, body, s, await connections.transport(conn)));
+}
+async function setupHeld(p, body, s, t) {
   if (s.db) return { ok: false, error: p.name + ' already has a database (' + s.db.name + '). Load a .sql file into it, or take it off TOMLIN\'s record first.' };
   const want = clean(body.name) || clean(p.folder) || 'site';
   const r = await t.dbRestrictions();
@@ -66,8 +71,7 @@ async function setup(p, body) {
   store.updateSite(p.dir, x => { const y = { ...x, db: { name: dbName, user: userName, at: new Date().toISOString() } }; delete y.dbMade; return y; });
   // Straight to the server, so the site can use it before the next push.
   const live = await secrets.values(p.dir, 'live');
-  await deploy.writeSecrets(t, store.site(p.dir), live);
-  store.updateSite(p.dir, x => ({ ...x, secretsWritten: true }));
+  await deploy.writeSecrets(t, store.site(p.dir), live, true, p.dir);
   return { ok: true, db: { name: dbName, user: userName }, note: 'Database ' + dbName + ' and user ' + userName + ' made, with a generated password kept only as the Live secret DB_PASS. Read them in your code with getenv(\'DB_NAME\') and the others.' };
 }
 
@@ -93,25 +97,37 @@ function importerText(sqlPath, keyHash) {
     + "tomlin_end(array('ok' => $err === null, 'statements' => $n, 'error' => $err));\n";
 }
 
+// A fault says whether the site was reached (e.reached): connected (and, over https, the padlock checked), so the load
+// may have started and stopped part way, or never reached at all, so nothing was loaded.
 function postKey(url, key, opts = {}) {
   const u = new URL(url);
-  const lib = u.protocol === 'https:' ? require('https') : require('http');
+  const https = u.protocol === 'https:';
+  const lib = https ? require('https') : require('http');
   const body = 'key=' + encodeURIComponent(key);
   return new Promise((resolve, reject) => {
+    let reached = false;
+    const fail = e => { e.reached = reached; reject(e); };
     const req = lib.request({ hostname: u.hostname, port: u.port || undefined, path: u.pathname, method: 'POST', timeout: 15 * 60 * 1000,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), 'User-Agent': 'TOMLIN push live' }, ...opts }, res => {
+      reached = true;
       const chunks = []; res.on('data', d => chunks.push(d));
       res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('error', fail);
+      res.on('aborted', () => fail(new Error('the connection broke off')));
     });
+    req.on('socket', sock => { const on = () => { reached = true; }; if (!sock.connecting && (!https || sock.authorized)) on(); else sock.once(https ? 'secureConnect' : 'connect', on); });
     req.on('timeout', () => req.destroy(new Error('the site took over 15 minutes')));
-    req.on('error', reject);
+    req.on('error', fail);
     req.end(body);
   });
 }
 
-/** Load a .sql file of the project into the site's database. body: { file } (path inside the project). */
+/** Load a .sql file of the project into the site's database. body: { file } (path inside the project). Held like setup. */
 async function load(p, body) {
-  const { s, t } = await cpanelOf(p);
+  const { s, conn } = cpanelOf(p);
+  return deploy.holding(p, conn, s.root, async () => loadHeld(p, body, s, await connections.transport(conn)));
+}
+async function loadHeld(p, body, s, t) {
   if (!s.db) return { ok: false, error: 'Make the database first (Set up database).' };
   const rel = String(body.file || '').replace(/\\/g, '/').replace(/^\/+/, '');
   const abs = path.resolve(p.dir, rel);
@@ -128,11 +144,14 @@ async function load(p, body) {
   await t.putText(sqlRemote, fs.readFileSync(abs), '0600');
   try {
     // The loader page needs the secrets loader beside it: written fresh, so DB_* are current.
-    await deploy.writeSecrets(t, s, await secrets.values(p.dir, 'live'));
+    await deploy.writeSecrets(t, s, await secrets.values(p.dir, 'live'), true, p.dir);
     await t.putText(pageRemote, importerText(sqlRemote, crypto.createHash('sha256').update(key).digest('hex')), '0644');
     let r;
     try { r = await postKey(new URL(name, url).href, key); }
-    catch (e) { return { ok: false, error: 'Could not reach ' + url + ' to load the file (' + e.message + '). Is the domain pointing at this host yet?' }; }
+    catch (e) {
+      if (e.reached) return { ok: false, error: 'The connection to ' + url + ' broke off part way through the load (' + e.message + '), so some of the file may be in the database, but not all of it. Look in cPanel, phpMyAdmin, before you load it again: loading it twice can add the same rows twice.' };
+      return { ok: false, error: 'Could not reach ' + url + ' to load the file (' + e.message + '), so nothing was loaded. Is the domain pointing at this host yet?' };
+    }
     let j = null; try { j = JSON.parse(r.text); } catch {}
     if (!j) return { ok: false, error: 'The site answered ' + r.status + ' instead of the loader\'s report' + (r.status === 404 ? ' (the site\'s address may not point at this folder yet)' : '') + '. Nothing was loaded, or not all of it: check in cPanel, phpMyAdmin.' };
     if (!j.ok) return { ok: false, error: 'The database load stopped: ' + j.error + '.' };

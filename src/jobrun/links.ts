@@ -1,7 +1,7 @@
 // Talking to linked PCs over the encrypted link: hellos, their models as brains, pictures drawn there, their meters.
 import * as share from '../share.ts';
 import * as link from '../link.ts';
-import type { AskOpts } from '../engine.ts';
+import { cleanReading, type AskOpts } from '../engine.ts';
 import * as brains from '../brains.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as carry from '../carry.ts';
@@ -192,7 +192,7 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
       if (signal.aborted) throw new Error('Stopped.');
     }
   };
-  const run = async (payload: Record<string, unknown>, onText: (t: string) => void, signal: AbortSignal, onThought?: AskOpts['onThought'], askedRid?: string) => {
+  const run = async (payload: Record<string, unknown>, onText: (t: string) => void, signal: AbortSignal, onThought?: AskOpts['onThought'], askedRid?: string, onReading?: AskOpts['onReading']) => {
     const body: Record<string, unknown> = shared ? { ...payload, model: shared.id } : { ...payload };
     // The project this is for, so that PC logs its work under it (its log is the final tally: src/meter.ts).
     const project = scope.getStore()?.project;
@@ -220,6 +220,11 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
           const text = await share.readStream(res, onText, (ev, data) => {
             if (ev === 'status') stage?.(`"${r.name}": ${String(data.text ?? '')}`);
             if (ev === 'thinking') onThought?.(String(data.text ?? ''), Number(data.seconds) || 0);
+            // How far that PC's model is through reading the chat (2.0.49 on).
+            if (ev === 'reading') {
+              const r = cleanReading(data);
+              if (r) onReading?.(r);
+            }
             if (ev === 'done') {
               brain.last = keepRemoteSpeed(r, String(data.model ?? shared?.name ?? h.model ?? ''), data.speed);
               // Stopped at its length limit there (2.0.43 on): Continue is offered here.
@@ -268,7 +273,7 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
     ask: (system, user, maxTokens, onText, signal) => run({ system, user, maxTokens }, onText, signal),
     // An older worker takes one message: the conversation is written into it.
     // `plain` and `think` go with it; an older PC does not read them and asks with its own settings.
-    chat: (turns, maxTokens, onText, signal, opts) => run(h.can.includes('turns') ? { turns, maxTokens, ...(opts?.plain ? { plain: true } : {}), ...(opts?.think ? { think: true } : {}) } : { ...brains.flatten(turns), maxTokens }, onText, signal, opts?.onThought, opts?.rid),
+    chat: (turns, maxTokens, onText, signal, opts) => run(h.can.includes('turns') ? { turns, maxTokens, ...(opts?.plain ? { plain: true } : {}), ...(opts?.think ? { think: true } : {}) } : { ...brains.flatten(turns), maxTokens }, onText, signal, opts?.onThought, opts?.rid, opts?.onReading),
     last: null,
   };
   return brain;

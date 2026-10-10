@@ -3,6 +3,7 @@
 // slow single-page apps on their loading screen. No packages: Node 22+ has WebSocket built in.
 'use strict';
 const { spawn } = require('child_process');
+const net = require('net');
 const { killTree, portOwners } = require('./platform');
 const fs = require('fs');
 const path = require('path');
@@ -56,26 +57,42 @@ async function closeBrowser(port) {
     try { ws.close(); } catch {}
   } catch {}
 }
-// Waits until no browser answers on the DevTools port any more (up to ms).
+// Is anything listening on the port? A refused connection is a quick no; a busy browser still takes the connection.
+function listening(port) {
+  return new Promise(res => {
+    const c = net.connect({ host: '127.0.0.1', port: Number(port) });
+    const done = v => { clearTimeout(t); c.destroy(); res(v); };
+    const t = setTimeout(() => done(true), 1000);
+    c.once('connect', () => done(true));
+    c.once('error', () => done(false));
+  });
+}
+// Waits until nothing listens on the DevTools port any more (up to ms).
 async function gone(port, ms) {
-  for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) {
-    try { await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(500) }); } catch { return true; }
-  }
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(150)) if (!(await listening(port))) return true;
   return false;
 }
 
-// Stops the hidden Edge listening on this DevTools port: Browser.close first, then (still answering) the Edge program
-// that holds the port, with its renderers. Windows does not let the Bridge read Edge's command lines, so the port it
-// wrote in DevToolsActivePort is how the real browser is found. Only an Edge that answers as a DevTools browser.
+// Stops the hidden Edge listening on this DevTools port: Browser.close first, then (still there) the Edge program that
+// holds the port, with its renderers. Windows does not let the Bridge read Edge's command lines, so the port it wrote
+// in DevToolsActivePort is how the real browser is found. Only an Edge: one that answers as a DevTools browser, or an
+// msedge.exe that holds the port without answering (a busy PC: an Edge that did not answer in time was left running
+// before, holding the profile, and the next picture failed). Done when nothing listens on the port any more.
 async function stopBrowser(port) {
-  if (!port) return;
+  if (!port || !(await listening(port))) return;
+  const edges = async () => (await portOwners([Number(port)]).catch(() => [])).filter(o => /^msedge(\.exe)?$/i.test(o.name || ''));
   let devtools = false;
-  try { devtools = !!(await (await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(1500) })).json()).webSocketDebuggerUrl; } catch {}
-  if (!devtools) return;
-  await closeBrowser(port);
-  if (await gone(port, 3000)) return;
-  for (const o of await portOwners([Number(port)])) if (/^msedge(\.exe)?$/i.test(o.name || '')) killTree(o.pid);
-  await gone(port, 3000);
+  try { devtools = !!(await (await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(3000) })).json()).webSocketDebuggerUrl; } catch {}
+  if (devtools) {
+    await closeBrowser(port);
+    if (await gone(port, 3000)) return;
+  }
+  for (let i = 0; i < 3; i++) {
+    const held = await edges();
+    if (!held.length) return;
+    for (const o of held) killTree(o.pid);
+    if (await gone(port, 2000)) return;
+  }
 }
 
 // Resolves true when `out` holds a fresh 640x400 PNG of `url`; throws with a short reason otherwise.
@@ -105,10 +122,12 @@ async function takeSnapshot({ edge, url, out, profile, settleMs = 3000, timeoutM
       sleep(Math.max(1000, deadline - Date.now())).then(() => { throw new Error('the page took too long'); })]);
     return true;
   } finally {
-    // Polite close first; then anything still holding the profile is stopped, so nothing is left running.
+    // Polite close first; then anything still holding the profile is stopped, so nothing is left running. An Edge that
+    // wrote its port only after the wait ran out is found by the port it wrote.
+    if (!port) { try { port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0].trim() || null; } catch {} }
     await stopBrowser(port);
     killTree(child.pid);
   }
 }
 
-module.exports = { takeSnapshot };
+module.exports = { takeSnapshot, stopBrowser };
