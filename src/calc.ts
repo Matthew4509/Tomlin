@@ -116,15 +116,24 @@ export function fitOf(need: number, hw: Hardware): { level: Level; where: ChatRo
 }
 
 /**
+ * The leeway before a model is called too big for a PC: 5% over all its memory (his call, 11 Oct). The need is an
+ * estimate and runs high (the 35B-A3B: about 26.7 GB worked out, about 24 GB in Help's note from the 32 GB desktop).
+ */
+export const FIT_LEEWAY = 1.05;
+/**
  * Whether a model needing `need` bytes fits a PC's memory as a whole (not what is free now): its graphics cards' own
  * memory (every card, `vram`) and its RAM together, as llama.cpp spreads a model over the cards and the RAM, with 3 GB
- * of the RAM kept for Windows; "tight" when only the whole RAM as well holds it. null when the RAM or the need is not
- * known. Hire staff marks the models on linked PCs with it, and moving someone to a PC refuses a model marked "no".
+ * of the RAM kept for Windows; "tight" up to 5% over all of it (FIT_LEEWAY); "no" beyond. null when the RAM or the need
+ * is not known. Hire staff marks the models on linked PCs with it, and moving someone to a PC refuses a model marked "no".
  */
 export function ramFit(need: number, mem: { ram: number; vram: number }): Level | null {
   if (!mem.ram || !need) return null;
-  return need <= mem.vram + Math.max(0, mem.ram - OS_RAM) ? 'ok' : need <= mem.vram + mem.ram ? 'tight' : 'no';
+  return need <= mem.vram + Math.max(0, mem.ram - OS_RAM) ? 'ok' : need <= (mem.vram + mem.ram) * FIT_LEEWAY ? 'tight' : 'no';
 }
+
+/** RAM this full (in use / total) or more: the PC's card in the left panel shows a yellow (!) (public/home.js). */
+export const RAM_FULL = 0.95;
+export const ramNearlyFull = (used: number, total: number) => total > 0 && used / total >= RAM_FULL;
 
 /** Why a move was refused: the model, what it needs, what that PC has, and what to do instead. */
 export function moveWontFit(model: string, need: number, pcWord: string, mem: { ram: number; vram: number }): string {

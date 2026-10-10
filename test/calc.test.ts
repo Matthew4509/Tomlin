@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, GB, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
+import { CHAT_MODELS, GB, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, ramNearlyFull, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
 
 const laptop: Hardware = { ram: 16 * GB, vram: 0, card: 'builtin', cores: 2 };
 const desktop: Hardware = { ram: 32 * GB, vram: 0, card: 'none', cores: 4 };
@@ -73,9 +73,18 @@ test('moving someone: a model fits a PC on its card or in its RAM less 3 GB, tig
   // Two 12 GB cards count together.
   assert.equal(ramFit(30 * GB, { ram: 16 * GB, vram: 24 * GB }), 'ok');
   assert.equal(ramFit(30 * GB, { ram: 16 * GB, vram: 12 * GB }), 'no');
+  // 5% leeway over all the memory before it is refused (FIT_LEEWAY): the 35B-A3B (about 26.7 GB) on a 26 GB PC is tight.
+  assert.equal(ramFit(26.7 * GB, { ram: 26 * GB, vram: 0 }), 'tight');
+  assert.equal(ramFit(26.7 * GB, { ram: 25 * GB, vram: 0 }), 'no');
+  // His examples: 32 GB + a 4 GB card, and 30 GB alone, both take it.
+  assert.equal(ramFit(26.7 * GB, { ram: 32 * GB, vram: 4 * GB }), 'ok');
+  assert.equal(ramFit(26.7 * GB, { ram: 30 * GB, vram: 0 }), 'ok');
   // Not known (a PC that is off, a model with no size): not refused.
   assert.equal(ramFit(4 * GB, { ram: 0, vram: 0 }), null);
   assert.equal(ramFit(0, laptop), null);
+  assert.equal(ramNearlyFull(15.2 * GB, 16 * GB), true);
+  assert.equal(ramNearlyFull(15 * GB, 16 * GB), false);
+  assert.equal(ramNearlyFull(1, 0), false);
   const why = moveWontFit('Qwen3.5-35B-A3B', 24 * GB, '"Worker PC"', laptop);
   assert.match(why, /^Not moved: Qwen3\.5-35B-A3B needs about 24 GB of memory, and "Worker PC" has 8\.0 GB of RAM \(3 GB of it is kept for Windows\)\./);
   assert.match(why, /Pick a smaller model for them there, or move them to a PC with more memory\.$/);

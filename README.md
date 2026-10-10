@@ -513,6 +513,9 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.51:** Moving someone to a PC refuses a model only when it needs more than 5% over all that PC's memory (the
+  need is an estimate and runs high); just over, it is a tight fit. A PC's card in the left panel has a yellow (!) when
+  95% or more of its RAM is in use (this PC and linked PCs), with the figures on the (!).
 - **2.0.50:** The office's boardroom and lounge start empty in every office, and the tokens your staff write buy the
   furniture piece by piece (Look after the team, a menu of picture cards beside the office): with no table a long think stays at the desk, each
   pair of chairs seats a helper, and an empty lounge sends the idle to the kitchen. Deck chairs with umbrellas on the

@@ -304,10 +304,12 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
 const reply = (res: ServerResponse, r: { status: number; body: unknown }) => d.json(res, r.status, r.body);
 
 /** A linked PC's total RAM and graphics-card memory, as it said in its last answer: null when it is off, VRAM 0 when it has no card of its own. */
-function pcMemory(r: { ok: boolean; memory?: unknown }): { ram: number | null; vram: number | null } {
-  const m = r.ok ? (r.memory as { ram?: { total?: unknown }; gpu?: { total?: unknown } | null } | null | undefined) : null;
+function pcMemory(r: { ok: boolean; memory?: unknown }): { ram: number | null; vram: number | null; ramUsed: number | null } {
+  const m = r.ok ? (r.memory as { ram?: { total?: unknown; used?: unknown }; gpu?: { total?: unknown } | null } | null | undefined) : null;
   const ram = typeof m?.ram?.total === 'number' ? m.ram.total : null;
-  return { ram, vram: ram === null ? null : typeof m?.gpu?.total === 'number' ? m.gpu.total : 0 };
+  // RAM in use now (its card shows a (!) when it is nearly full, src/calc.ts RAM_FULL).
+  const ramUsed = ram !== null && typeof m?.ram?.used === 'number' ? m.ram.used : null;
+  return { ram, vram: ram === null ? null : typeof m?.gpu?.total === 'number' ? m.gpu.total : 0, ramUsed };
 }
 
 export type { Step };

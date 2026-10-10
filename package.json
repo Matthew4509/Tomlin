@@ -1,6 +1,6 @@
 {
   "name": "tomlin",
-  "version": "2.0.50",
+  "version": "2.0.51",
   "private": true,
   "description": "Local chat and image generation on your own PC: CPU first, graphics chip when there is one.",
   "license": "PolyForm-Noncommercial-1.0.0",

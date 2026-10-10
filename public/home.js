@@ -289,9 +289,15 @@ function drawRail() {
   // with the same dot). A hire is dragged onto another PC to move them there. Under each PC's name: what it can hold
   // (RAM, and the graphics card's own memory), then what it has loaded; a PC that is off shows the numbers it gave last.
   const hw = app.status?.hardware;
+  // A yellow (!) when a PC's RAM is nearly full now (95% in use or more, src/calc.ts RAM_FULL): a model may not load there.
+  const fullWords = (used, total, where) => (used && total && used / total >= 0.95
+    ? `Memory nearly full: ${(used / 2 ** 30).toFixed(1)} of ${(total / 2 ** 30).toFixed(1)} GB of RAM in use (${Math.round((used / total) * 100)}%). A model may not load ${where} now: unload one, or close other programs there.`
+    : '');
+  const mineFull = hw ? fullWords(hw.ram.used, hw.ram.total, 'on this PC') : '';
   const desks = [{ id: '', row: staffRow({
     key: 'pc:mine', name: pcName('here', 'My PC'), avatar: 'PC', sub: [hw ? memWords(hw.ram.total, hw.gpu && !hw.gpu.shared ? hw.gpu.total : 0) : 'This PC', pcMake('here')].filter(Boolean).join(' · '), state: 'on', stateText: 'This PC', activity: 'available',
-    title: 'My PC: its uptime, total tokens and what its work cost', onClick: () => app.openPc?.('here'), mutable: false,
+    title: `${mineFull ? `${mineFull}
+` : ''}My PC: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.('here'), mutable: false, flag: mineFull || undefined,
   }) }];
   // Two linked PCs with one name (two machines both called "Worker PC") read as one PC that is both off and on:
   // those cards start their second line with their address (the name line is cut short in the panel).
@@ -309,14 +315,16 @@ function drawRail() {
     const asleep = p.activity === 'available' && p.state === 'asleep' && !p.backupsOnly;
     // Behind this PC: the yellow (!) on its card; its window (press the card) has Update it.
     const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update it` : `Outdated: ${p.outdated.version} (this PC ${p.outdated.mine}): press to update it`) : '';
+    const full = p.activity !== 'offline' ? fullWords(p.ramUsed, p.ram, `on "${p.name}"`) : '';
+    const flag = [old, full].filter(Boolean).join('\n');
     const mem = homeUi.pcMem[p.id];
     // A "Backups only" PC: no staff work there, so its card says what it keeps instead of what it has loaded.
     const sub = p.backupsOnly ? [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), 'Backups only', p.disk ? diskWords(p.disk) : '']
       : [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), p.model, p.speed?.expect ? app.speedWords(p.speed.expect, true) : '', p.picture ? `draws with ${p.picture}` : ''];
     desks.push({ id: p.id, name: at ? `${name} (${at})` : name, activity: p.activity, backupsOnly: p.backupsOnly, row: staffRow({
       key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: asleep ? 'Asleep' : undefined,
-      title: `${old ? `${old}
-` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.(p.id), mutable: false, flag: old || undefined,
+      title: `${flag ? `${flag}
+` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.(p.id), mutable: false, flag: flag || undefined,
     }) });
   }
   const card = x => {
