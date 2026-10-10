@@ -133,7 +133,8 @@ export async function copyFrom(b: Record<string, unknown>) {
     }
     const names = files.map(f => carry.safeModelFile(f.name));
     if (names.some(n => !n)) return `"${r.name}" named a file that is not a model file, so nothing was copied.`;
-    if (d.carry.chatHas(names[0]!)) return 'it is on this PC already (Models).';
+    // There only when every part is whole: a split model cut off part way is carried on with.
+    if ((await Promise.all(names.map((n, k) => carry.sizeOf(join(d.carry.chatDir, n!))))).every((n, k) => n === files[k].bytes)) return 'it is on this PC already (Models).';
     const room = carry.roomWhy(need, await carry.freeBytes(d.carry.chatDir), 'this PC');
     return room ?? names.map(n => join(d.carry.chatDir, n!));
   };
@@ -281,6 +282,10 @@ const DONE_FILE = 'project-backups.json';
 const HASH_FILE = 'project-hashes.json';
 /** How often the projects are checked for changes and backed up to the PCs that allow it. */
 const EVERY_MS = 10 * 60_000;
+/** The first round, a while after start (the PCs answer their first hello by then). */
+const FIRST_MS = 2 * 60_000;
+// TOMLIN_PROJECT_ROUND_SECONDS: a test copy runs its rounds every few seconds (the first one too), so a test sees them.
+const ROUND_TEST_MS = Math.max(1000, Math.round(Number(process.env.TOMLIN_PROJECT_ROUND_SECONDS) * 1000)) || 0;
 
 const projectsDone = () => d.store.readJson<Record<string, ProjectsDone>>(DONE_FILE, {});
 
@@ -478,8 +483,8 @@ export function startProjectBackups(): void {
       running = false;
     }
   };
-  setTimeout(() => void round(), 2 * 60_000).unref();
-  setInterval(() => void round(), EVERY_MS).unref();
+  setTimeout(() => void round(), ROUND_TEST_MS || FIRST_MS).unref();
+  setInterval(() => void round(), ROUND_TEST_MS || EVERY_MS).unref();
 }
 
 // ---- The Bridge's view of these backups (its project rows and each project's git window, src/server/bridge.ts) ----

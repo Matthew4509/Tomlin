@@ -162,7 +162,7 @@ test('newer compares versions number by number', () => {
   assert.equal(keep.newer('2.0.29', '2.0.29'), false);
 });
 
-test('backups keep the last 5; a restore puts the data back and backs up what was there', async () => {
+test('backups keep the last 5; a restore puts the data back and backs up what was there, and Push live records stay', async () => {
   const w = await world();
   try {
     await put(join(w.home.data, 'settings.json'), '{"v":"first"}');
@@ -176,11 +176,14 @@ test('backups keep the last 5; a restore puts the data back and backs up what wa
     assert.equal(names.length, 5);
     assert.ok(!names.includes(first), 'the oldest went');
     await put(join(w.home.data, 'settings.json'), '{"v":"second"}');
+    // Push live's records are never in a backup: a restore keeps the ones in place.
+    await put(join(w.home.data, 'bridge', 'hosting', 'connections.json'), '{"connections":[]}');
     const keepName = names[0];
     await keep.planNext(w.home, { do: 'restore', name: keepName });
     // The restored backup came from the "first" data.
     await keep.prepare(w.home, w.root, '2.0.27');
     assert.equal(await readFile(join(w.home.data, 'settings.json'), 'utf8'), '{"v":"first"}');
+    assert.equal(await readFile(join(w.home.data, 'bridge', 'hosting', 'connections.json'), 'utf8'), '{"connections":[]}', 'Push live records kept');
     assert.ok((await keep.listBackups(w.home)).some(b => b.name.includes('before restoring')));
     assert.match(keep.readVersion(w.home)?.note ?? '', /Restored the backup/);
   } finally {

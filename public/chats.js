@@ -13,7 +13,8 @@ async function loadChats() {
     const d = await api('/api/chats');
     chatUi.list = d.chats;
     chatUi.people = d.people;
-    chatUi.current = d.current;
+    // The chat on this window's screen; before one is drawn, the one the server reopens (another window may open others).
+    chatUi.current = app.chatId ?? d.current;
     // The projects a chat can belong to (the jobs in the workspace that are not hidden), by name.
     // and the ones saved on Home that are not planned yet.
     const j = await api('/api/jobs').catch(() => null);
@@ -441,8 +442,7 @@ app.afterSend = async (id = app.chatId ?? '', from = id) => {
  * is numbered: one pressed after it wins, so a slow one finishing late never shows the chat before over it.
  */
 let openTurn = 0;
-async function showOpened(r) {
-  const turn = ++openTurn;
+async function showOpened(r, turn = ++openTurn) {
   await loadModels();
   if (turn !== openTurn) return;
   if (r.model) await useModelOf({ model: r.model, kind: 'chat' });
@@ -467,8 +467,12 @@ async function showOpened(r) {
 }
 
 async function openChat(id) {
+  // Numbered when pressed, not when the answer comes: a slow chat pressed first never shows over one pressed after it.
+  const turn = ++openTurn;
   try {
-    await showOpened(await api('/api/chats/open', { id, plain: plainWho() }));
+    const r = await api('/api/chats/open', { id, plain: plainWho() });
+    if (turn !== openTurn) return;
+    await showOpened(r, turn);
   } catch (e) {
     if (e.status === 404) await loadChats();
     app.chatNote?.(e.message);
@@ -718,7 +722,7 @@ function askDelete(c) {
       delDlg.close();
       await loadChats();
       // This window's chat stays on screen, unless it was the one deleted.
-      showChat(await (c.id === app.chatId ? api('/api/chat') : app.chatAgain()));
+      showChat(c.id === app.chatId ? app.noChat() : await app.chatAgain());
       app.redrawGallery?.();
     } catch (err) {
       fault.textContent = err.message;
@@ -741,7 +745,7 @@ async function deleteChat(c, pictures) {
     await api('/api/chats/delete', { id: c.id, pictures });
     $('#chat-menu').close();
     await loadChats();
-    showChat(await (c.id === app.chatId ? api('/api/chat') : app.chatAgain()));
+    showChat(c.id === app.chatId ? app.noChat() : await app.chatAgain());
     app.redrawGallery?.();
   } catch (err) {
     $('#chat-menu-fault').textContent = err.message;

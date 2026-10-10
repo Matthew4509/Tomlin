@@ -63,27 +63,31 @@ export async function chatToSend(t: SendTarget): Promise<ChatInfo> {
  * The host is off: when the one chosen to answer is still the host (a new install, settings from before 2.0.31, or the
  * one chosen was fired), the first hire who chats takes over, with their latest chat. With nobody hired the page says
  * to hire someone. Run at start and when the team or the one chosen changes, never when a window reads its chat: a
- * read in one window must not change what another reopens.
+ * read in one window must not change what another reopens. Gives the chat to reopen when it chose again, else null.
  */
-export async function offHost(): Promise<void> {
-  if (HOST_ON) return;
+export async function offHost(): Promise<string | null> {
+  if (HOST_ON) return null;
   const s = await store.settings();
-  if (whoKind(s.who) !== 'manager') return;
+  if (whoKind(s.who) !== 'manager') return null;
   const first = staff.list().find(m => !roleOf(m.role).kind);
-  if (!first) return;
+  if (!first) return null;
   const open = await chats.get(s.chatId);
   // An old host chat he opened to read stays open; the next message goes to the hire.
-  await store.saveSettings({ who: `staff:${first.id}`, ...(open && open.who === 'manager' && s.chatId ? {} : { chatId: (await chats.latestFor(`staff:${first.id}`))?.id ?? '' }) });
+  return (await store.saveSettings({ who: `staff:${first.id}`, ...(open && open.who === 'manager' && s.chatId ? {} : { chatId: (await chats.latestFor(`staff:${first.id}`))?.id ?? '' }) })).chatId;
 }
 
-/** Chooses who answers; when that is someone else than the open chat is with, their latest chat opens (or none yet). */
-export async function setWho(to: string): Promise<void> {
+/**
+ * Chooses who answers; when that is someone else than the open chat is with, their latest chat opens (or none yet).
+ * Gives that chat's id ('' for none), so the window that chose reads it by id, not whichever chat another window opens
+ * in between.
+ */
+export async function setWho(to: string): Promise<string> {
   // An artist's chat is the pictures pane: they become the one who draws there.
   const s = await store.saveSettings({ who: to, ...(isArtistWho(to) ? { imageAs: to.startsWith('staff:') ? to.slice(6) : to } : {}) });
   const open = await chats.get(s.chatId);
-  if (!open || open.who !== whoKind(to)) await store.saveSettings({ chatId: (await chats.latestFor(whoKind(to)))?.id ?? '' });
+  const opened = !open || open.who !== whoKind(to) ? (await store.saveSettings({ chatId: (await chats.latestFor(whoKind(to)))?.id ?? '' })).chatId : s.chatId;
   // The host is off: the host chosen (firing the one chosen does that) hands over to the first hire who chats.
-  await offHost();
+  return (await offHost()) ?? opened;
 }
 
 /** Everyone a new chat can be with: the manager and each hire who chats. */

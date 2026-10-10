@@ -45,3 +45,20 @@ test('gallery, drafts and all; search by prompt words; old drafts cleared only b
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a list whose last line was cut off (a crash mid-write) does not swallow the next picture', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm2-gallery-torn-'));
+  try {
+    await mkdir(join(dir, '2026-10'), { recursive: true });
+    const first = pic('first', new Date().toISOString(), { kept: true });
+    await writeFile(join(dir, 'gallery.jsonl'), `${JSON.stringify(first)}\n{"id":"half","at":"20`);
+    await writeFile(join(dir, first.output), 'x');
+    const next = pic('next', new Date().toISOString(), { kept: true });
+    await writeFile(join(dir, next.output), 'x');
+    await new Gallery(dir).add(next);
+    const ids = (await new Gallery(dir).list(0, 60, 'all')).pictures.map(p => p.id).sort();
+    assert.deepEqual(ids, ['first', 'next']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

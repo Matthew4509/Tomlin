@@ -14,9 +14,19 @@ function readTail(file) {
   try { return fs.readFileSync(file, 'utf8').trim().slice(-400); } catch { return ''; }
 }
 
+// Projects being started now: a second press (another tab, a double click) while the first is still starting is
+// refused, so one project never gets two copies racing for its port.
+const starting = new Set();
+
 async function startProject(p, key, open = true) {
   const { running } = state;
   if (running.has(p.id)) return { ok: true, already: true, url: running.get(p.id).url };
+  if (starting.has(p.id)) return { ok: false, starting: true, error: p.name + ' is starting already. Wait a moment: it opens when it answers.' };
+  starting.add(p.id);
+  try { return await startNow(p, key, open); } finally { starting.delete(p.id); }
+}
+async function startNow(p, key, open) {
+  const { running } = state;
   const entry = p.commands.find(c => c.key === String(key));
   if (!entry) return { ok: false, error: 'No start command for ' + p.name + '. Nothing in its .claude/launch.json or project.json tells the Bridge how to run it. Add a "start" to project.json (see README), then try again.' };
   if (!entry.port) return { ok: false, error: '"' + entry.name + '" has no port in ' + entry.from + ', so the Bridge cannot check it is free or open it. Add "port" there.' };
@@ -32,6 +42,13 @@ async function startProject(p, key, open = true) {
     return { ok: false, portInUse: all[0], url: localUrl(entry), error: (all.length > 1 ? 'Ports ' + all.join(', ') + ' are all in use' : 'Port ' + all[0] + ' is already in use') + ', so ' + p.name + ' was not started. If it is already running, use Open in browser; otherwise stop whatever holds the port.' };
   }
   if (cmd.port !== entry.port) note = 'Port ' + entry.port + ' was busy, so it started on ' + cmd.port + '.';
+  // The project's Local secrets (Push live, Secrets) reach the local copy as environment variables, so its code reads
+  // them with getenv() the same way the live site does. They are never written into the project.
+  let env = process.env;
+  try {
+    const local = await require('./hosting/secrets').values(p.dir, 'local');
+    if (Object.keys(local).length) env = { ...process.env, ...local };
+  } catch (e) { note = (note ? note + ' ' : '') + 'Its Local secrets could not be opened (' + e.message + '), so it started without them.'; }
   const log = path.join(cfg.DATA, 'logs', p.id + '.log');
   const out = fs.openSync(log, 'w');
   let child;
@@ -40,7 +57,7 @@ async function startProject(p, key, open = true) {
   const run = os.runnable(cmd.exe, cmd.args, cmd.cwd || p.dir);
   if (run.error) { fs.closeSync(out); return { ok: false, error: 'Could not start "' + cmd.exe + '": ' + run.error + ' Check the entry in ' + cmd.from + '.' }; }
   try {
-    child = spawn(run.exe, run.args, { cwd: cmd.cwd || p.dir, stdio: ['ignore', out, out], windowsHide: true, shell: false, windowsVerbatimArguments: !!run.windowsVerbatimArguments });
+    child = spawn(run.exe, run.args, { cwd: cmd.cwd || p.dir, env, stdio: ['ignore', out, out], windowsHide: true, shell: false, windowsVerbatimArguments: !!run.windowsVerbatimArguments });
   } catch (e) {
     fs.closeSync(out);
     return { ok: false, error: 'Could not start "' + cmd.exe + '": ' + e.message + '. Check the path in ' + cmd.from + '.' };

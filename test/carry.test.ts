@@ -190,6 +190,25 @@ test('sending a model: installed in the node\'s chat folder; there already, noth
   for (const p of parts) assert.ok(readFileSync(join(node.chatDir, p.name)).equals(p.data));
 });
 
+test('a split model cut off after its first part is not "there already": the next send carries on with the rest, skipping the whole part', async () => {
+  const node = aNode();
+  const mine = tmp();
+  const parts = ['cut-00001-of-00002.gguf', 'cut-00002-of-00002.gguf'].map(name => ({ name, data: fileOf(mine, name, 2 * MB + 3) }));
+  const files = parts.map(p => ({ name: p.name, path: join(mine, p.name), bytes: p.data.length }));
+  // Only the first part reached the node (the send was stopped there).
+  writeFileSync(join(node.chatDir, parts[0].name), parts[0].data);
+  let puts = 0;
+  const w = node.wireAs(laptop, { beforePut: () => void puts++ });
+  assert.equal(await carry.push(w, { kind: 'chat', model: parts[0].name, name: 'Cut', files, progress: () => undefined, signal: new AbortController().signal }), true);
+  assert.ok(readFileSync(join(node.chatDir, parts[1].name)).equals(parts[1].data));
+  assert.equal(puts, 1, 'only the missing part was sent');
+  assert.deepEqual(node.installed, ['Cut']);
+  // A piece of a file already whole (its answer lost): the node says how much it has, and the send carries on.
+  const again = await node.handle('/worker/carry-put', { kind: 'chat', model: parts[0].name, name: 'Cut', files: files.map(f => ({ name: f.name, bytes: f.bytes })), file: 0, from: 0 }, laptop, Buffer.from('x'));
+  assert.equal(again.status, 409);
+  assert.equal('json' in again && again.json.at, files[0].bytes);
+});
+
 test('sending: refused without the tick, a bad file name, or no room; a piece crossing twice is carried on from, not doubled', async () => {
   const mine = tmp();
   const data = fileOf(mine, 'Gemma.gguf', 33 * MB);

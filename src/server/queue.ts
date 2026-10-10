@@ -99,11 +99,17 @@ async function pump(): Promise<void> {
     const start = Q.toStart(q, it => lanes.get(it.id)?.lanes ?? ['here'], busyOutside());
     for (const it of start) {
       const at = lanes.get(it.id)!;
+      // Started only if it is still waiting and the queue is not paused, as saved now: a Cancel or Stop pressed while
+      // this pass was looking is never run over.
+      let started = false;
       await change(x => {
         const y = find(x, it.id);
-        if (y && y.state === 'waiting') Object.assign(y, { state: 'running', started: new Date().toISOString(), lanes: at.lanes, laneName: at.name, note: undefined, error: undefined });
+        if (y && y.state === 'waiting' && !x.paused) {
+          Object.assign(y, { state: 'running', started: new Date().toISOString(), lanes: at.lanes, laneName: at.name, note: undefined, error: undefined });
+          started = true;
+        }
       });
-      void run(it.id);
+      if (started) void run(it.id);
     }
   } catch (e) {
     log.error('queue', e);

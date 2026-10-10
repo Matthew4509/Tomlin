@@ -180,7 +180,8 @@ export const settingsPost: Routes = {
     const to = 'who' in b ? whoId(b.who) : null;
     const hostModel = 'hostModel' in b ? (typeof b.hostModel === 'string' ? b.hostModel : '') : null;
     if (hostModel && !chatList().some(m => m.id === hostModel)) return json(res, 400, { error: 'That model is not on this PC any more. Pick another, or get one under Add a model.' });
-    if (to !== null) await setWho(to);
+    // {opened}: the chat that choice opened ('' for none yet), for the window that asked to read by its id.
+    const opened = to !== null ? await setWho(to) : null;
     if ('tone' in b) await store.saveSettings({ tone: toneOf(b.tone).id });
     if (hostModel !== null) await store.saveSettings({ hostModel });
     if ('imageAs' in b) {
@@ -194,7 +195,7 @@ export const settingsPost: Routes = {
       await images.gallery.clearDrafts(days).catch(() => 0);
     }
     if (typeof b.runModel === 'string' && chatModels.path(b.runModel)) await store.saveSettings({ run: { [b.runModel]: cleanRun(b.run) } });
-    return json(res, 200, publicSettings(await store.saveSettings({ [pane]: change })));
+    return json(res, 200, { ...publicSettings(await store.saveSettings({ [pane]: change })), ...(opened !== null ? { opened } : {}) });
   },
   '/api/keep': async ({ res, b }) => keepAction(res, b),
 };

@@ -180,6 +180,8 @@ export async function writeVersion(home: Home, v: VersionFile): Promise<void> {
 const stamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 /** Left out of every data backup: the Bridge's snapshot browser profile, as tar names it from the data folder. */
 export const SNAP_PROFILE = './bridge/snaps/profile';
+/** Also left out: Push live's connections, secrets and push records (sealed for this Windows account, and they stay in place). */
+export const HOSTING = './bridge/hosting';
 const tar = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar');
 
 export interface Backup {
@@ -218,7 +220,7 @@ export async function backup(home: Home, label: string): Promise<string> {
     // and a save's half-written copy (*.tmp) is not data. The Bridge's throwaway browser profile for page snapshots
     // (src/bridge/snaps.js) is not data either, and Windows can refuse to let it be read (a locked browser file): with
     // it in, every backup failed ("Permission denied" on its Affiliation Database).
-    await run(tar(), ['-a', '-c', '-f', part, '--exclude', 'runners.json', '--exclude', '*.tmp', '--exclude', SNAP_PROFILE, '-C', home.data, '.'], { windowsHide: true, maxBuffer: 1 << 20 });
+    await run(tar(), ['-a', '-c', '-f', part, '--exclude', 'runners.json', '--exclude', '*.tmp', '--exclude', SNAP_PROFILE, '--exclude', HOSTING, '-C', home.data, '.'], { windowsHide: true, maxBuffer: 1 << 20 });
     await rename(part, join(home.backups, name));
   } catch (e) {
     await rm(part, { force: true }).catch(() => undefined);
@@ -250,15 +252,31 @@ async function swapData(home: Home, fresh: string): Promise<void> {
   await rm(old, { recursive: true, force: true });
   if (existsSync(home.data)) await rename(home.data, old);
   await rename(fresh, home.data);
+  await carryKept(old, home.data);
   await rm(old, { recursive: true, force: true });
+}
+
+/**
+ * What every backup leaves out on purpose and keeps in place (Push live's connections, secrets and push records):
+ * moved from the old data into the new before the old goes, unless the new data brought its own.
+ */
+async function carryKept(old: string, data: string): Promise<void> {
+  const rel = HOSTING.split('/').slice(1);
+  const from = join(old, ...rel);
+  const to = join(data, ...rel);
+  if (!existsSync(from) || existsSync(to)) return;
+  await mkdir(dirname(to), { recursive: true });
+  await rename(from, to);
 }
 
 /** A swap cut off last time: finished (the new data is in place) or undone (data.old goes back). */
 async function settleSwap(home: Home): Promise<void> {
   const old = `${home.data}.old`;
   if (existsSync(old)) {
-    if (existsSync(home.data)) await rm(old, { recursive: true, force: true });
-    else await rename(old, home.data);
+    if (existsSync(home.data)) {
+      await carryKept(old, home.data);
+      await rm(old, { recursive: true, force: true });
+    } else await rename(old, home.data);
   }
   for (const half of [`${home.data}.restoring`, `${home.data}.importing`]) await rm(half, { recursive: true, force: true });
   await rm(join(home.backups, MAKING), { recursive: true, force: true });

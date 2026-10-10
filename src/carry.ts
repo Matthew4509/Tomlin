@@ -372,7 +372,9 @@ export function nodeSide(d: NodeDeps) {
   }
 
   /** Where each file of a model sent here goes; or why it cannot come. */
-  function incoming(b: Record<string, unknown>): { files: { name: string; path: string; bytes: number }[]; have: boolean } | string {
+  // Every file of a model whole on this PC (a split model cut off after its first part is not there yet).
+  const allWhole = async (files: { path: string; bytes: number }[]) => (await Promise.all(files.map(f => sizeOf(f.path)))).every((n, k) => n === files[k].bytes);
+  async function incoming(b: Record<string, unknown>): Promise<{ files: { name: string; path: string; bytes: number }[]; have: boolean } | string> {
     if (!d.allow().push) return `"${d.pcName()}" does not let other PCs install models on it now (its owner ticks "Allow host to push models" under Nodes and memory).`;
     const raw = Array.isArray(b.files) ? b.files.slice(0, 64) : [];
     if (b.kind === 'image') {
@@ -391,7 +393,7 @@ export function nodeSide(d: NodeDeps) {
       files.push({ name, path: join(d.chatDir, name), bytes });
     }
     if (!files.length) return 'no files were named.';
-    return { files, have: d.chatHas(files[0].name) };
+    return { files, have: await allWhole(files) };
   }
 
   return async function handle(p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece?: Buffer): Promise<NodeAnswer> {
@@ -410,22 +412,24 @@ export function nodeSide(d: NodeDeps) {
         return { status: 200, piece: await readPiece(f.path, from) };
       }
       case '/worker/carry-offer': {
-        const got = incoming(b);
+        const got = await incoming(b);
         if (typeof got === 'string') return no(403, got);
         if (got.have) return { status: 200, json: { have: true } };
-        const at = await Promise.all(got.files.map(f => sizeOf(partOf(f.path))));
+        // A file already whole says so (all its bytes), so the sender skips it instead of sending it again.
+        const at = await Promise.all(got.files.map(async f => ((await sizeOf(f.path)) === f.bytes ? f.bytes : sizeOf(partOf(f.path)))));
         const need = got.files.reduce((n, f, k) => n + f.bytes - Math.min(at[k], f.bytes), 0);
         const why = roomWhy(need, await room(dirname(got.files[0].path)), `"${d.pcName()}"`);
         if (why) return no(507, why);
         return { status: 200, json: { have: false, at } };
       }
       case '/worker/carry-put': {
-        const got = incoming(b);
+        const got = await incoming(b);
         if (typeof got === 'string') return no(403, got);
         const f = got.files[int(b.file)];
         if (!f || !piece) return no(400, 'that piece is not part of the model.');
         // A file already whole here is never written over by a copy (only its unfinished part takes pieces).
-        if ((await sizeOf(f.path)) === f.bytes) return no(409, `${basename(f.path)} is already whole on "${d.pcName()}".`);
+        // (It answers with all its bytes, so a sender whose last answer was lost carries on with the next file.)
+        if ((await sizeOf(f.path)) === f.bytes) return { status: 409, json: { error: `${basename(f.path)} is already whole on "${d.pcName()}".`, at: f.bytes } };
         if (!claim(f.path, who.key)) return no(409, `another PC is sending that model to "${d.pcName()}" now.`);
         const r = await addPiece(partOf(f.path), int(b.from), piece);
         if ('error' in r) return { status: 409, json: r };
@@ -436,13 +440,13 @@ export function nodeSide(d: NodeDeps) {
         const done = r.at === f.bytes && (await finish(partOf(f.path), f.path, f.bytes));
         if (done) {
           writing.delete(f.path);
-          if (int(b.file) === got.files.length - 1) d.onInstalled?.(String(b.name ?? f.name), b.kind === 'image' ? { kind: 'image', id: String(b.model) } : { kind: 'chat', id: got.files[0].name });
+          if (await allWhole(got.files)) d.onInstalled?.(String(b.name ?? f.name), b.kind === 'image' ? { kind: 'image', id: String(b.model) } : { kind: 'chat', id: got.files[0].name });
         }
         return { status: 200, json: { at: r.at, done } };
       }
       case '/worker/carry-drop': {
         // A send that was stopped: its unfinished parts go (whole files stay).
-        const got = incoming(b);
+        const got = await incoming(b);
         if (typeof got === 'string') return no(403, got);
         for (const f of got.files) {
           const w = writing.get(f.path);

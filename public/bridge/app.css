@@ -540,3 +540,26 @@ dialog.split{width:min(1180px,calc(100vw - 32px))}
 .split-head{font-size:16px;line-height:24px;font-weight:600;margin:0 0 8px}
 .split-col .node-part{margin-top:0;padding-top:0;border-top:0}
 @media (max-width:900px){.split-cols{grid-template-columns:minmax(0,1fr)}.split-col + .split-col{border-left:0;padding-left:0;border-top:1px solid var(--line);margin-top:16px;padding-top:12px}}
+/* Push live (js/hosting.js) */
+.pl-list{margin:0 0 12px;padding-left:20px} .pl-list li{margin:0 0 6px}
+.pl-summary p{margin:0 0 6px}
+.pl-acts{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.pl-small{font-size:13px}
+dialog .tick{display:flex;gap:8px;align-items:center;margin:6px 0;cursor:pointer;font-size:13px}
+.pl-soft{margin:4px 0 8px}
+.pl-steps{list-style:none;margin:12px 0;padding:0}
+.pl-steps[hidden]{display:none}
+.pl-step{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px}
+.pl-step .mark{width:16px;flex:none;text-align:center;font-weight:700}
+.pl-step.done .mark{color:var(--ok)} .pl-step.fail .mark,.pl-step.fail{color:var(--bad)} .pl-step.run .mark{color:var(--accent)}
+.pl-out p{margin:0 0 8px;overflow-wrap:anywhere}
+.pl-findings .check .btn{flex:none;min-width:0}
+.pl-left summary{cursor:pointer;color:var(--muted);font-size:13px;margin:4px 0}
+.pl-left p{font-size:13px;margin:4px 0;overflow-wrap:anywhere}
+.pl-conn .btn{flex:none;min-width:0}
+.pl-code{font:13px/1.5 Consolas,"Cascadia Mono",monospace;background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin:0 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}
+.pl-where .field select,.dlg-body .field select.sel{flex:1;min-width:0}
+.ps-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto auto;gap:8px;align-items:center}
+.ps-row .field{margin:4px 0} .ps-row .tick{margin:0;white-space:nowrap}
+@media (max-width:700px){.ps-row{grid-template-columns:minmax(0,1fr) auto;margin-bottom:12px}.ps-row .field:first-child{grid-column:1/-1}.ps-row .field:nth-child(2),.ps-row .field:nth-child(3){grid-column:1/-1}}
+.field input.pl-port{flex:0 0 90px}

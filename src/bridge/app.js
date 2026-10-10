@@ -40,6 +40,7 @@ function embed() {
   if (embedded) return { handle };
   embedded = true;
   cfg.ensureDataDirs();
+  try { require('./hosting/connections').sweepTemps(); } catch {}
   process.on('exit', stopEverything);
   warmUp().catch(e => logFault('starting', e));
   return { handle };

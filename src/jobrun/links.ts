@@ -395,7 +395,15 @@ export async function drawOn(r: Remote, ask: { prompt: string; style: string | n
   let buf = '';
   try {
     for (;;) {
-      const { value, done } = await reader.read();
+      // The node writes a line every 20 s while it draws: 75 s with nothing means it went off (as readStream).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const silent = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`"${r.name}" went quiet for 75 s while drawing (it may have been closed, asleep or off the network).`));
+          void reader.cancel().catch(() => undefined);
+        }, 75_000);
+      });
+      const { value, done } = await Promise.race([reader.read(), silent]).finally(() => clearTimeout(timer));
       if (done) break;
       buf += dec.decode(value, { stream: true });
       let i;

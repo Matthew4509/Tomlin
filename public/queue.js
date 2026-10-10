@@ -229,6 +229,7 @@
       box.hidden = true;
       done(how);
     };
+    app.askFor?.(box, () => end('no'));
     const queueIt = el('button', { class: 'btn primary', type: 'button', text: 'Add to the queue', onclick: async () => {
       try {
         await add([{ kind: 'chat', chat: data.chat, message, think }]);

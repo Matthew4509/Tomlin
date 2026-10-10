@@ -13,6 +13,7 @@
 // Plain functions and small stores; tested in test/meter.test.ts.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readData, writeAtomic } from './atomic.ts';
+import { renameSync, rmSync, writeFileSync } from 'node:fs';
 
 export interface Tally {
   /** Prompt tokens read new. */
@@ -95,6 +96,10 @@ export function dayOf(now = new Date()): string {
   return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
 }
 
+// Stores with a change not written yet: written at once when the process ends.
+const pendingKept = new Set<{ writeNowSync(): void }>();
+process.on('exit', () => { for (const k of pendingKept) k.writeNowSync(); });
+
 /** A small JSON file kept in memory and written a few seconds after a change (an answer ends many times a minute). */
 class Kept<T> {
   protected data: T;
@@ -104,13 +109,25 @@ class Kept<T> {
     this.file = file;
     this.data = empty;
   }
+  /** The file could not be read at start (held by another program): counted in memory, never saved over it. */
+  private readOnly = false;
   async load(clean: (raw: unknown) => T): Promise<this> {
-    this.data = clean(await readData<unknown>(this.file, null).catch(() => null));
+    // Missing = empty; damaged = set aside, then empty (readData). Unreadable: these counts start empty for this run
+    // and the file is left as it is.
+    const raw = await readData<unknown>(this.file, null).catch(e => {
+      this.readOnly = true;
+      console.error(`${this.file} could not be read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}): its counts are not saved until TOMLIN starts again.`);
+      return null;
+    });
+    this.data = clean(raw);
     return this;
   }
   protected changed(): void {
+    if (this.readOnly) return;
+    pendingKept.add(this);
     this.timer ??= setTimeout(() => {
       this.timer = null;
+      pendingKept.delete(this);
       void writeAtomic(this.file, JSON.stringify(this.data)).catch(() => undefined);
     }, 3000);
     this.timer.unref?.();
@@ -119,7 +136,22 @@ class Kept<T> {
   async flush(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    pendingKept.delete(this);
+    if (this.readOnly) return;
     await writeAtomic(this.file, JSON.stringify(this.data));
+  }
+  /** At exit (any exit: Ctrl+C, a restart for an update or a data action): a change still waiting is written at once. */
+  writeNowSync(): void {
+    if (!this.timer || this.readOnly) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+    const tmp = `${this.file}.${process.pid}.exit.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify(this.data));
+      renameSync(tmp, this.file);
+    } catch {
+      try { rmSync(tmp, { force: true }); } catch { /* gone */ }
+    }
   }
 }
 

@@ -15,7 +15,7 @@ import { refreshTray } from './trayfresh.ts';
 import { autostart } from './autostart.ts';
 import { ALREADY_RUNNING, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, hooks, saidError, json, staff, staticFile, store } from './server/core.ts';
 import { settingsGet, settingsPost } from './server/settings.ts';
-import { appFile, appLock, appLockAction, appLockView, appOk } from './server/locks.ts';
+import { appLock, appLockAction, appLockOn, appLockView, appOk } from './server/locks.ts';
 import { images, loadModel, openAiChat, panesGet, panesPost, unloadPane } from './server/panes.ts';
 import { answeringGet, answeringPost, askOnce } from './server/answering.ts';
 import { faceFile, offHost, peopleGet, peoplePost } from './server/people.ts';
@@ -93,7 +93,7 @@ const server = createServer(async (req, res) => {
     // The app lock, before anything else: while locked only the page's files and the lock's own door answer.
     // Every reply below is awaited, so a fault in one reaches the catch at the end and is answered, never left waiting.
     if (p === '/api/applock') return void (req.method === 'POST' ? await appLockAction(req, res, await body(req, 4096)) : json(res, 200, appLockView(req)));
-    if (appFile) {
+    if (appLockOn()) {
       // The Bridge's page while locked goes to the lock screen (its files and API stay shut, below).
       if (req.method === 'GET' && (p === '/bridge' || (p.startsWith(BRIDGE_PATH) && !p.startsWith(`${BRIDGE_PATH}api/`))) && !appOk(req)) {
         res.writeHead(302, { location: '/', 'cache-control': 'no-store' });

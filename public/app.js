@@ -56,6 +56,7 @@ function askHere(box, text, yes, no = 'Cancel', danger = true) {
       done(ok);
     };
     const go = el('button', { class: `btn ${danger ? 'danger' : 'primary'}`, type: 'button', text: yes, onclick: () => end(true) });
+    app.askFor?.(box, () => end(false));
     box.classList.add('page-ask');
     box.setAttribute('role', 'alert');
     box.replaceChildren(el('span', { text }), go, el('button', { class: 'btn quiet', type: 'button', text: no, onclick: () => end(false) }));
@@ -542,14 +543,21 @@ function drawTry() {
   const end = j.state === 'done' ? (j.best ? `Kept: ${j.rows.find(r => r.place === j.best).words}${j.best === j.was ? ' (as before: the others were not clearly faster)' : ' (the fastest)'}.` : 'Nothing could be measured; the way chosen before is kept.') : j.state === 'stopped' ? 'Stopped; the way chosen before is kept.' : j.now;
   line.textContent = [...rows, end].filter(Boolean).join(' ');
 }
+// One chain of asks at a time: each press of Try or Stop starts it again instead of adding another.
+let tryTimer = null;
+function pollTryIn(ms) {
+  clearTimeout(tryTimer);
+  tryTimer = setTimeout(pollTry, ms);
+}
 async function pollTry() {
+  tryTimer = null;
   try {
     app.tryNow = (await api('/api/place/try')).job;
   } catch {
     return;
   }
   drawTry();
-  if (app.tryNow?.state === 'running') setTimeout(pollTry, 2000);
+  if (app.tryNow?.state === 'running') pollTryIn(2000);
   else if (app.tryNow) {
     app.models = await api('/api/models').catch(() => app.models);
     drawContext();
@@ -562,7 +570,7 @@ $('#ctx-try').addEventListener('click', async () => {
       app.tryNow = (await api('/api/place/try', { id: panes.chat.model.value })).job;
       drawTry();
     }
-    setTimeout(pollTry, 500);
+    pollTryIn(500);
   } catch (err) {
     $('#ctx-try-line').textContent = err.message;
   }
@@ -572,10 +580,10 @@ panes.chat.model.addEventListener('change', drawContext);
 
 $('#who').addEventListener('change', e => {
   $('#who-hint').textContent = app.models.who.find(w => w.id === e.target.value)?.hint ?? '';
-  api('/api/settings', { who: e.target.value }).then(() => {
+  app.talkTo(e.target.value).then(r => {
     gearSaved('chat', false);
-    return api('/api/chat');
-  }).then(showChat).catch(err => gearSaid('chat', `Not saved: ${err.message}`));
+    showChat(r);
+  }).catch(err => gearSaid('chat', `Not saved: ${err.message}`));
 });
 $('#tone').addEventListener('change', e => api('/api/settings', { tone: e.target.value }).then(() => {
   app.models.settings.tone = e.target.value;
@@ -1232,7 +1240,7 @@ async function addDocs(files) {
       const r = await res.json().catch(() => ({ error: `TOMLIN answered ${res.status}.` }));
       if (!res.ok) throw new Error(r.error);
       note.textContent = r.said;
-      drawDocs(r.docs);
+      if ((app.chatId ?? '') === named.chatId || (!named.chatId && (app.chatId ?? '') === '')) drawDocs(r.docs);
       if (r.chat && r.chat !== named.chatId) {
         named.chatId = r.chat;
         await app.afterSend?.(r.chat, from);
@@ -1303,11 +1311,21 @@ function reconnectLine(w) {
 }
 /** A chat read by its id (not whichever chat another window opened last). */
 const chatUrl = id => `/api/chat?id=${encodeURIComponent(id)}`;
+/** No chat on screen: the next message starts one. */
+app.noChat = () => ({ lines: [], chat: null });
 /**
  * This window's chat read again by its id, after something that may have changed it (a staff change, a chat deleted
- * elsewhere). A window with no chat made yet reads the one to reopen.
+ * elsewhere). A window still on a new chat stays on it; only one that has drawn no chat yet reads the one to reopen.
  */
-app.chatAgain = () => api(app.chatId ? chatUrl(app.chatId) : '/api/chat');
+app.chatAgain = () => (app.chatId ? api(chatUrl(app.chatId)) : app.chatId === '' ? Promise.resolve(app.noChat()) : api('/api/chat'));
+/**
+ * Chooses who this window talks to and reads the chat that opened for them (their latest, or none yet) by its id: not
+ * whichever chat another window opened in between.
+ */
+app.talkTo = async who => {
+  const s = await api('/api/settings', { who });
+  return s.opened ? api(chatUrl(s.opened)) : app.noChat();
+};
 /** While an owed answer is on screen, the chat is read again every 30 s, so the answer shows once it is collected. */
 let owedTimer = 0;
 function watchOwed(chatId) {
@@ -1348,6 +1366,24 @@ function drawLarge(l) {
 }
 
 /** A chat's lines on screen, and who and what it is (chats.js draws the title and the left panel). */
+/**
+ * A question in the chat's own box (#chat-ask: "Load X and send?", "busy: add to the queue?") belongs to the chat it was
+ * asked in: opening another chat calls it off, so its answer can never send into the chat now on screen.
+ */
+const chatKey = () => `${app.chatId ?? ''}|${app.chatWho?.() ?? ''}`;
+app.askFor = (box, cancel) => {
+  if (box.id !== 'chat-ask') return;
+  box.askKey = chatKey();
+  box.cancelAsk = cancel;
+};
+function dropOtherAsk() {
+  const box = $('#chat-ask');
+  if (box && !box.hidden && box.cancelAsk && box.askKey !== chatKey()) {
+    const cancel = box.cancelAsk;
+    box.cancelAsk = null;
+    cancel();
+  }
+}
 function showChat(r) {
   drawChat(r.lines, r.chat);
   syncSend(r.chat?.id ?? '');
@@ -1357,6 +1393,7 @@ function showChat(r) {
   app.onChat?.(r.chat ?? null);
   restoreDraft(r.chat?.id ?? '');
   if (r.chat?.live) followAnswer(r.chat.id);
+  dropOtherAsk();
 }
 
 /**
@@ -1590,9 +1627,9 @@ async function talk(url, body, out, message, from = '') {
           if (data.cut) out.append(continueButton());
           if (data.waiting) {
             out.append(reconnectLine(data.waiting));
-            watchOwed(app.chatId ?? '');
+            watchOwed(chatId);
           }
-          if (data.large) drawLarge(data.large);
+          if (data.large && here()) drawLarge(data.large);
           const secs = ((performance.now() - t0) / 1000).toFixed(1);
           const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', data.note]);
           if (stats) out.append(stats);
@@ -1613,7 +1650,7 @@ async function talk(url, body, out, message, from = '') {
           // sent again only when he agrees.
           out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
           out.remove();
-          input.value = message;
+          if (here()) input.value = message;
           if (message && here() && (await app.agreeImpact(data.text))) {
             input.value = '';
             again = true;
@@ -1623,13 +1660,13 @@ async function talk(url, body, out, message, from = '') {
           // add it to the queue, send it now anyway, or not now (it stays in the box).
           out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
           out.remove();
-          input.value = message;
+          if (here()) input.value = message;
           const s = streams.get(chatId);
           if (s && data.chat) s.liveId = data.chat;
           if (message && here()) {
             const how = await app.offerQueue(data, message, thinkOn());
-            if (how === 'queued' || how === 'now') input.value = '';
-            if (how === 'now') again = 'now';
+            if ((how === 'queued' || how === 'now') && here()) input.value = '';
+            if (how === 'now' && here()) again = 'now';
           }
         } else if (ev === 'backup') {
           // Their PC is off: the message comes out of the chat until a backup is picked, then it is sent again.
@@ -1719,6 +1756,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   // Send in the Send to card was the ask (it said a model loads first), unless the model does not fit: that is asked.
   if (!(card.asked && !tight) && !(await askHere($('#chat-ask'), `No model is loaded for this chat yet (nothing loads by itself).${tight} Load ${m.name} and send your message?`, `Load ${m.name} and send`, 'Not now', !!tight))) return;
   input.value = '';
+  const typedIn = chatKey();
   await app.chatModelPicked?.(m.id);
   log.querySelector('.empty')?.remove();
   const mine = userBubble(message);
@@ -1745,6 +1783,8 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   }
   mine.remove();
   wait.remove();
+  // Another chat was opened while the model loaded: the message is not sent into it.
+  if (chatKey() !== typedIn) return app.chatNote(`${m.name} is loaded, but your message was typed in another chat, so it was not sent here. Open that chat and send it again: "${message.length > 80 ? message.slice(0, 80) + '…' : message}"`);
   send(message, card.from);
 }
 input.addEventListener('keydown', e => {
@@ -1774,9 +1814,12 @@ clearBtn.addEventListener('click', () => {
   yes.addEventListener('click', async () => {
     yes.disabled = true;
     try {
-      streams.get(app.chatId ?? '')?.ac.abort();
-      await api('/api/chat/clear', { chatId: app.chatId ?? '' });
-      drawChat([]);
+      const cleared = app.chatId ?? '';
+      streams.get(cleared)?.ac.abort();
+      await api('/api/chat/clear', { chatId: cleared });
+      // Drawn again from the server: the chat's documents stay (and are still read), so their bar stays too.
+      const again = cleared ? await api(chatUrl(cleared)).catch(() => null) : null;
+      if ((app.chatId ?? '') === cleared) again ? showChat(again) : drawChat([]);
       back();
       $('#chat-menu').close();
     } catch (err) {

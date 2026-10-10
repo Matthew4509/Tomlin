@@ -58,6 +58,18 @@ test('the release list leaves out what never ships: PDF.js beyond its text reade
   }
 });
 
+test('the type check\'s tools never ship: every dev-only package in package-lock.json is left out, and no package the app runs', () => {
+  const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8')) as { packages: Record<string, { dev?: boolean }> };
+  const pkgs = Object.entries(lock.packages).filter(([p]) => p.startsWith('node_modules/'));
+  assert.ok(pkgs.some(([, v]) => v.dev), 'package-lock.json lists the dev tools');
+  for (const [p, v] of pkgs) {
+    const file = `${p}/package.json`;
+    assert.equal(update.SKIP.test(file) && update.SKIP.test(file.replace(/\//g, '\\')), !!v.dev || /@napi-rs\/|@img\/sharp-(?!win32-x64|libvips-win32-x64)/.test(p), p);
+  }
+  for (const p of ['node_modules/.bin/tsc', 'node_modules/.bin/tsc.cmd', 'node_modules/.bin/tsc.ps1', 'node_modules\\typescript']) assert.ok(update.SKIP.test(p), p);
+  assert.equal(update.SKIP.test('node_modules/.bin/semver.cmd'), false);
+});
+
 test('a list from a host is checked whole: form, repeats, size, and the files a copy cannot do without', () => {
   const ok = [{ path: 'package.json', bytes: 2, sha: 'a'.repeat(64) }, { path: 'src/server.ts', bytes: 1, sha: 'b'.repeat(64) }, { path: 'Start TOMLIN.cmd', bytes: 1, sha: 'c'.repeat(64) }];
   assert.equal((update.cleanManifest(ok) as update.AppFile[]).length, 3);

@@ -27,7 +27,9 @@ export const PARTS = ['src', 'public', 'tools', 'test', 'registry', 'runtime/nod
 // PDF.js (documents in a chat) ships only its Node text reader and its font tables: its drawing add-on
 // (@napi-rs/canvas), the browser builds and the source maps stay out.
 // The private chat's files (partner.ts, scene.ts; taken out of the app) never ship, should an old folder still have them.
-export const SKIP = /@napi-rs[\\/]|pdfjs-dist[\\/](build|web|image_decoders|types|wasm|iccs)[\\/]|pdfjs-dist[\\/]legacy[\\/](web|image_decoders)[\\/]|pdfjs-dist[\\/].*\.map$|pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.(sandbox|min|worker\.min)|onnxruntime-node[\\/]bin[\\/]napi-v\d+[\\/](darwin|linux|win32[\\/]arm64)|@img[\\/]sharp-(?!win32-x64|libvips-win32-x64)|src[\\/]partner\.ts$|src[\\/]scene\.ts$|test[\\/]partner\.test\.ts$|test[\\/]scene\.test\.ts$|\.(part|zip)$/i;
+// The type check's tools (devDependencies: typescript and its program, @types/node and undici-types, the tsc
+// shortcuts) stay on the PC that builds; a test holds this to every "dev" package in package-lock.json.
+export const SKIP = /node_modules[\\/](typescript|@typescript|@types|undici-types)([\\/]|$)|node_modules[\\/]\.bin[\\/]tsc(\.cmd|\.ps1)?$|@napi-rs[\\/]|pdfjs-dist[\\/](build|web|image_decoders|types|wasm|iccs)[\\/]|pdfjs-dist[\\/]legacy[\\/](web|image_decoders)[\\/]|pdfjs-dist[\\/].*\.map$|pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.(sandbox|min|worker\.min)|onnxruntime-node[\\/]bin[\\/]napi-v\d+[\\/](darwin|linux|win32[\\/]arm64)|@img[\\/]sharp-(?!win32-x64|libvips-win32-x64)|src[\\/]partner\.ts$|src[\\/]scene\.ts$|test[\\/]partner\.test\.ts$|test[\\/]scene\.test\.ts$|\.(part|zip)$/i;
 /** Folders a node keeps from its old copy when the update has none of them (a host without its own Node.js). */
 export const KEEP_OWN_DIRS = ['runtime/node'];
 

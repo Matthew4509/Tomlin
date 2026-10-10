@@ -1,5 +1,6 @@
 // Where work goes in the workspace (src/folders.ts): a chat's Save, a quick chat's files going into a project, a note
 // saved from the right panel, a picture kept in a project's chat, and the work handed in to a project.
+import { existsSync } from 'node:fs';
 import { copyFile, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, extname } from 'node:path';
 import * as folders from '../folders.ts';
@@ -44,6 +45,12 @@ export async function moveChatFiles(c: ChatInfo): Promise<string> {
     const a = await ws.inside(root, m.from);
     const b = await ws.inside(root, m.to);
     if (!a || !b) {
+      plan.stay.push(m.from);
+      continue;
+    }
+    // Looked at on the disk just before the move: the list above stops at 500 files, and Windows' rename writes
+    // over a file of that name (in any case of letters) without a word.
+    if (existsSync(b)) {
       plan.stay.push(m.from);
       continue;
     }

@@ -211,9 +211,9 @@ function staffCard(m) {
       await app.openArtist(`staff:${m.id}`).catch(e => app.chatNote?.(e.message));
       return;
     }
-    await api('/api/settings', { who: `staff:${m.id}` });
+    const r = await app.talkTo(`staff:${m.id}`);
     await loadModels();
-    showChat(await api('/api/chat'));
+    showChat(r);
     await useModelOf(m);
     dlg.close();
     app.showPanes?.();
@@ -294,13 +294,13 @@ $('#team-get-models').addEventListener('click', () => {
 app.afterHire = async hired => {
   if (team.data.staff.some(s => s.kind === 'chat')) app.nobodyToTalkTo = false;
   // The chat turns to a new hire who chats: asked by this window (the server no longer turns every window's chat to them).
-  if (hired?.kind === 'chat') await api('/api/settings', { who: `staff:${hired.id}` }).catch(() => undefined);
+  const turned = hired?.kind === 'chat' ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
   // A new artist draws in this window's Images pane (Draw as), asked by this window: the server no longer picks them.
   if (hired?.kind === 'image') await api('/api/settings', { imageAs: hired.id }).catch(() => undefined);
   await app.loadChats?.();
   await app.loadFaces?.();
   await loadModels().catch(() => undefined);
-  showChat(await (hired?.kind === 'chat' ? api('/api/chat') : app.chatAgain()));
+  showChat(turned ?? await app.chatAgain());
   if (dlg.open) teamDraw();
   await useModelOf(hired);
   app.drawAs?.();

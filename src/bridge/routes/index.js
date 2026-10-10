@@ -10,9 +10,12 @@ const system = require('./system');
 const lists = require('./lists');
 const prompts = require('./prompts');
 const project = require('./project');
+const hosting = require('./hosting');
 
-const GET = { ...system.get, ...lists.get, ...prompts.get };
-const POST = { ...system.post, ...lists.post, ...prompts.post };
+const GET = { ...system.get, ...lists.get, ...prompts.get, ...hosting.get };
+const POST = { ...system.post, ...lists.post, ...prompts.post, ...hosting.post };
+const PGET = { ...project.get, ...hosting.pget };
+const PPOST = { ...project.post, ...hosting.ppost };
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + cfg.PORT, 'localhost:' + cfg.PORT]);
 
 async function reply(res, out) {
@@ -31,19 +34,19 @@ async function handle(req, res) {
 
     if (req.method === 'GET') {
       if (GET[url.pathname]) return await reply(res, GET[url.pathname](ctx));
-      if (project.get[url.pathname]) {
+      if (PGET[url.pathname]) {
         const p = findProject(url.searchParams.get('id'));
-        return p ? await reply(res, project.get[url.pathname]({ ...ctx, p })) : send(res, 404, { error: 'Unknown project.' });
+        return p ? await reply(res, PGET[url.pathname]({ ...ctx, p })) : send(res, 404, { error: 'Unknown project.' });
       }
     }
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
 
     // A pasted report-back table can be long; everything else is small.
-    ctx.body = await readBody(req, url.pathname.startsWith('/api/prompts/') ? prompts.BODY_LIMIT : url.pathname === '/api/audit/import' ? 200000 : 10000);
+    ctx.body = await readBody(req, url.pathname.startsWith('/api/prompts/') ? prompts.BODY_LIMIT : url.pathname === '/api/audit/import' ? 200000 : url.pathname === '/api/hosting/secrets' ? 400000 : 10000);
     if (POST[url.pathname]) return await reply(res, POST[url.pathname](ctx));
-    if (project.post[url.pathname]) {
+    if (PPOST[url.pathname]) {
       const p = findProject(ctx.body.id);
-      return p ? await reply(res, project.post[url.pathname]({ ...ctx, p })) : send(res, 404, { error: 'Unknown project. Reload the list.' });
+      return p ? await reply(res, PPOST[url.pathname]({ ...ctx, p })) : send(res, 404, { error: 'Unknown project. Reload the list.' });
     }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {

@@ -104,20 +104,20 @@ async function talkTo(row) {
       return;
     }
     if (row === 'manager') {
-      await api('/api/settings', { who: plainWho() });
+      const r = await app.talkTo(plainWho());
       await loadModels();
       // The host's own model (its pencil), as a hire's chat picks theirs.
       await useModelOf({ model: app.models?.settings?.hostModel, kind: 'chat' });
-      showChat(await api('/api/chat'));
+      showChat(r);
     } else if (row.who) {
       // Someone who lives on a paired PC: their latest chat opens (they answer there).
-      await api('/api/settings', { who: row.who });
+      const r = await app.talkTo(row.who);
       await loadModels();
-      showChat(await api('/api/chat'));
+      showChat(r);
     } else {
-      await api('/api/settings', { who: `staff:${row.id}` });
+      const r = await app.talkTo(`staff:${row.id}`);
       await loadModels();
-      showChat(await api('/api/chat'));
+      showChat(r);
       await useModelOf(row);
     }
   } catch (e) {
@@ -576,7 +576,7 @@ function drawNodeSwitch(n) {
   if (psig !== homeUi.drawn.paired) {
     homeUi.drawn.paired = psig;
     $('#node-paired').replaceChildren(...(sh.paired.length ? [el('p', { class: 'hint', text: 'PCs linked to this one:' }), ...sh.paired.map((x, k) => el('div', { class: 'job-remote' }, el('span', { text: x.name }), el('span', { class: 'hint', text: x.old ? 'linked before the link was encrypted: link it again from that PC' : `since ${new Date(x.at).toLocaleDateString()}` }),
-      el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-paired-ask'), `Stop lending to "${x.name}"? It would need the setup code again.`, `Stop lending to ${x.name}`, 'Keep it linked')) nodeShare({ unpair: k }); } })))] : [el('p', { class: 'hint', text: 'No PC has linked to this one yet.' })]));
+      el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-paired-ask'), `Stop lending to "${x.name}"? It would need the setup code again.`, `Stop lending to ${x.name}`, 'Keep it linked')) nodeShare({ unpair: k, unpairId: x.id }); } })))] : [el('p', { class: 'hint', text: 'No PC has linked to this one yet.' })]));
   }
   drawNodeShare(sh);
   drawNodeAllow(sh);
@@ -1227,7 +1227,7 @@ async function refresh() {
     if (app.models) keepPlain(app.models.settings.who);
     // The message box says who answers (the chat's own name and person are drawn by chats.js).
     // A hire who lives on another PC is not in this PC's staff list: the open chat's own person names them.
-    const openChat = chatUi.list.find(c => c.id === chatUi.current);
+    const openChat = chatUi.list.find(c => c.id === (app.chatId ?? chatUi.current));
     // The person in the chat on screen; with no chat open yet, the one chosen (another window may have chosen since).
     const onScreen = String(chatUi.open?.who ?? '');
     const talking = (onScreen ? homeUi.data.staff.find(s => s.kind === 'chat' && `staff:${s.id}` === onScreen) : homeUi.data.staff.find(s => s.kind === 'chat' && s.active))
@@ -1262,12 +1262,21 @@ async function refresh() {
     refreshing = false;
   }
 }
+// One ask at a time: a slow answer (a PC that is off takes seconds) is never overtaken by a later one; an ask made
+// meanwhile (after a change) runs once when it ends. A failed ask keeps the PCs as last seen (the top bar already
+// says when TOMLIN is not answering).
+let pcsAsking = false, pcsAgain = false;
 async function refreshPcs() {
+  if (pcsAsking) { pcsAgain = true; return; }
+  pcsAsking = true;
   try {
     homeUi.pcs = (await api('/api/home/pcs')).pcs;
     drawRail();
   } catch {
-    homeUi.pcs = [];
+    // Kept as they were.
+  } finally {
+    pcsAsking = false;
+    if (pcsAgain) { pcsAgain = false; refreshPcs(); }
   }
 }
 greet();
@@ -1277,8 +1286,11 @@ setInterval(refresh, 3000);
 // The queue (queue.js) asks for Home to be drawn again at once after a change.
 app.refreshHome = refresh;
 // Paired PCs are asked again now and then, so a PC that went off (and its staff) shows as off.
-setInterval(() => { if (homeUi.pcs.length && !document.hidden) refreshPcs(); }, 20_000);
-setInterval(refreshPcs, 30_000);
+// Every 20 seconds while the page is in front, every minute behind; at once when it comes to the front again.
+let pcsAt = Date.now();
+const pcsDue = () => { pcsAt = Date.now(); refreshPcs(); };
+setInterval(() => { if (!document.hidden || Date.now() - pcsAt >= 60_000) pcsDue(); }, 20_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - pcsAt >= 5_000) pcsDue(); });
 // The picture and loading lines follow the once-a-second status without asking the server again.
 app.onStatus.push(() => {
   if (homeUi.data && homeUi.view === 'home') drawHome();

@@ -244,6 +244,7 @@ function openMenu(r, anchor) {
   items.push(menuItem(0xEA18, 'Scan app (audit)', scanParts(r), () => scan(r)));
   if (r.audit) items.push(menuItem(0xE81C, 'Last audit', auditLabel(r.audit).when, () => showLastAudit(r)));
   items.push(menuItem(0xE909, 'Hosted live…', r.liveUrl ? hostOf(r.liveUrl) : 'add the address', () => liveDialog(r)));
+  items.push(menuItem(0xE898, 'Push live…', r.liveUrl ? 'to ' + hostOf(r.liveUrl) : 'send it to your web host', () => plOpen(r)));
   items.push(h('hr'));
   items.push(menuItem(0xE838, 'Open folder', r.folder, () => act('open-folder', r)));
   items.push(menuItem(0xE756, 'Open terminal here', null, () => act('open-terminal', r)));

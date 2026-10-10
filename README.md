@@ -7,7 +7,8 @@
 Chat and pictures on your own PC: two panes, side by side. Each one loads a model only when you press **Connect**,
 and **Disconnect** ends that model's process and gives its memory back. You can run chat only, pictures only, both,
 or neither. Everything runs on your own PCs (this one, and any you link on your home network). Nothing goes to an
-outside service except what you start yourself: model and tool downloads, and the Bridge's checks of sites you add.
+outside service except what you start yourself: model and tool downloads, the Bridge's checks of sites you add, and
+Push live (off until you turn it on), which sends a project to your own web host.
 
 ## Before you use it
 
@@ -53,6 +54,11 @@ outside service except what you start yourself: model and tool downloads, and th
 - **Lets create a project**: a name, a description and a prompt; it is planned in steps and your staff work through
   them, on the PCs that are free. A queue for chats, pictures and project steps.
 - **The Bridge**: your project folders, local copies, audits, backups and prompts in one place.
+- **Push live**: send a project to your web host in one press (cPanel, FTPS or SFTP); its address becomes the
+  project's live address in the Bridge. Secrets (passwords, keys) stay locked by Windows on this PC and go to one file
+  outside the site's web folder; a file with a key or a private detail stops the push; **Go back** puts back the
+  files of the last push (not the secrets or a database); on cPanel it also makes the MySQL database and loads a
+  .sql file. Off until you turn it on.
 - **Connect Claude**: a prompt that lets Claude act as the project manager of your PCs (it holds no PIN or code).
 
 **Looking after it**
@@ -191,6 +197,34 @@ rather than misread it.
   prompt, a project's prompt, a review, an audit's faults: TOMLIN's Send to card opens with the words), and
   **About › Bring in from Myia Bridge** (its folders, prompts, private details, set-asides, live addresses and fault
   lists copied in; that Bridge is only read). The stand-alone Myia Bridge stays a program of its own.
+- **Push live (the Bridge, 2.0.49):** a project's **…** menu › **Push live…**. Off until turned on in that window (it
+  is the one part of TOMLIN that sends a project out). **Connections** (kept in `data/bridge/hosting`, sealed by
+  Windows for this account, DPAPI; never in a project, a chat, a prompt or an update backup):
+  - **cPanel**: server name, user name and password; the password is used once to make TOMLIN's own API token
+    (Tokens::create_full_access, named TOMLIN_<PC>_<date>), then dropped. Or paste a token (two-step sign-in).
+    Disconnect deletes TOMLIN's token in cPanel. Every call is a POST, so no value lands in the host's access log.
+  - **FTPS** through Windows' own `curl.exe` (the password goes to curl over its input, never on a command line).
+    Plain FTP is refused.
+  - **SFTP** through Windows' own OpenSSH: TOMLIN makes a key and shows its public half to add in the host's panel;
+    the server's key is remembered on first use and a changed one stops everything.
+  **Set up** picks the site (cPanel: one of the account's domains, optionally a folder inside it; FTPS/SFTP: the web
+  folder and the address) and the upload folder (guessed: public_html, public, htdocs, www, site, dist, build, web).
+  **Push live** checks first (never sent: .env, .git, node_modules, keys, AI working notes; data/, logs, backups,
+  .sql only when ticked; a key, a written-out password, a saved secret's value, a private detail or a path on this
+  PC stops it with file and line; "Not a secret" sets a line aside until it changes), then sends only new and
+  changed files, removes only files it sent before, keeps a copy of everything it replaces or removes (cPanel: in
+  `~/tomlin-push-backups`, the last 3 pushes; FTPS/SFTP: on this PC), writes the Live secrets to
+  `tomlin-secrets/<site>.php` outside the web folder (owner-only, 600) with `tomlin-secrets.php` (no values) in the
+  site to load them, asks the live site for /.env, /tomlin-secrets.php and /.git/config (no secret may come back),
+  and sets the site's address as the project's live address with its light. **Go back** undoes the newest
+  push's files (also a push that stopped part way); the Live secrets and a database stay as they are.
+  **Secrets…**: names with a Local value (given to the local copy the Bridge starts, as environment variables) and
+  a Live value; the page never gets a value back. In PHP: `@include __DIR__ . '/tomlin-secrets.php';` then
+  `getenv('NAME')`. **Database…** (cPanel): makes the MySQL database and user with a generated password (Live
+  secrets DB_HOST, DB_NAME, DB_USER, DB_PASS) and loads a .sql file of the project (up to 64 MB) through a one-time
+  page with a random name and key that deletes itself and the file; it needs the site's https. Code:
+  `src/bridge/hosting/`, `src/bridge/routes/hosting.js`, `public/bridge/js/hosting.js`; test
+  `test/bridge/hosting.test.js` (stand-ins on this PC: a cPanel, an FTP server, sftp.exe).
 - **Top bar:** how busy the CPU and the graphics chip are (GPU %), RAM and graphics memory (GPU mem), refreshed every second, plus what is loaded and how much memory it holds.
 - **Chats:** **+ New chat** (left panel, top) asks who the chat is with (TOMLIN and each hire who chats), each
   with role · model · PC. The previous chats are in the **Chats** tab on the right of the chat, under the project each
@@ -442,6 +476,9 @@ rather than misread it.
   TOMLIN during install or uninstall touches only that install folder's program. Every place moves for tests
   (TOMLIN_INSTALL_ROOT, TOMLIN_START_MENU_DIR, TOMLIN_DESKTOP_DIR, TOMLIN_STARTUP_DIR, TOMLIN_UNINSTALL_KEY);
   `--dry-run` says each step and changes nothing.
+- **2.0.49:** **Push live** in the Bridge (see The page): one press to cPanel, FTPS or SFTP, secrets kept locked by
+  Windows and written outside the web folder, a check that stops keys and private details, Go back, and the MySQL
+  database on cPanel. The address it goes to becomes the project's live address. Licence: PolyForm Noncommercial 1.0.0.
 - **2.0.48:** Layout passes 1 and 2: the chat head is a staff card (name and software over the PC, avg speed,
   rename in place, Project beside it); **Enable live stats** in the gear; Copy, Pin and Send to as icons; the top bar
   keeps this PC and shows a linked PC beside it with its model; staff rows "Name | Level" over the software; pressing
@@ -643,8 +680,8 @@ rather than misread it.
     - A day's log stops at 20 MB.
     - Open log works without Notepad.
     - A pushed update that never starts goes back to the copy before it (the tray and `Start TOMLIN.cmd`).
-    - `npm run typecheck` runs a strict TypeScript check (needs `typescript` and `@types/node` installed; not in the
-      pack).
+    - `npm run typecheck` runs a strict TypeScript check (`typescript` and `@types/node` are dev dependencies since
+      2.0.49: `npm install` brings them; they stay out of the pack and out of updates).
 - **Updates pushed to nodes (2.0.33):** a linked PC running an older TOMLIN shows **Outdated: 2.0.32 (this PC
   2.0.33)** on its tile (Nodes and memory > Other PCs > Linked) with **Update it**, or why not. On the node, tick
   **Allow host to update TOMLIN** (since 2.0.44 "... remotely"; the fourth tick; Allow all covers it). The host sends its app files (the same
@@ -769,3 +806,12 @@ graphics card, is needed for that.
 
 `npm test`. `test/filter.test.ts` is a release blocker: picture prompts that sexualise anyone under 18, or real
 people, are refused.
+
+Two tests start real PCs on this one (`test/pcs.ts` starts each copy on 127.0.0.1 with a home of its own in the
+temp folder, and moves every place a copy could write there): `test/doors.test.ts` links a host and a node with the
+setup code and tries the node's front door (a web page, an unknown or unsealed link, sizes per door), then project
+backups through it (the round, with `TOMLIN_PROJECT_ROUND_SECONDS=3` instead of 10 minutes; "I need to use the pc";
+Back up now; brought back). `test/oldnode.test.ts` takes 2.0.44 (the last version before the TOMLIN name) out of git
+history and pushes Update it to it from a copy of this one: it must refuse the new launcher name, take the copy as
+`Start Shelby.cmd`, end with 76 and come back as this version with the same build. It is skipped where there is no git
+history. Together they add about two minutes to `npm test`.

@@ -12,7 +12,7 @@ import * as carry from '../carry.ts';
 import * as update from '../update.ts';
 import { BUILD, HOME, ROOT, SECURITY_HEADERS, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, json, ledger, meter, notebooks, notifier, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
 import { scope } from '../meter.ts';
-import { appFile, appPinCheck } from './locks.ts';
+import { appLockOn, appPinCheck } from './locks.ts';
 import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
 import { answeringBusy, stepAnswers, stopOn } from './answering.ts';
 import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
@@ -89,7 +89,7 @@ export function startJobs(): void {
     hireSystem: async m => staffSystem(m, toneOf(m.tone ?? (await store.settings()).tone).prompt),
     recipeOf: id => images.recipe?.(id) ?? null,
     onEvent: (id, e) => void tellJob(id, e),
-    appLockOn: () => !!appFile,
+    appLockOn,
     appPinCheck,
     unloadAll: async (still = () => true) => {
       for (const p of [...runners]) if (still() && (p.view.state === 'connected' || p.view.state === 'loading')) await p.disconnect();

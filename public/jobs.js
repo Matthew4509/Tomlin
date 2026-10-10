@@ -668,6 +668,8 @@ async function runStep() {
   const t0 = performance.now();
   try {
     const r = await jobStream('/api/jobs/step', { id: job.id, n }, { text: d => (out.textContent = d.text) });
+    // Another job opened while this step ran: its result is not shown (or accepted) there. It waits in this job's step.
+    if (jobUi.job?.id !== job.id) return;
     showResult(jobUi.job.steps[n], n, r.data, Math.round((performance.now() - t0) / 1000));
   } catch (err) {
     jobFault(err.message);

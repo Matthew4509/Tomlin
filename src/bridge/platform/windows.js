@@ -101,8 +101,11 @@ function runnable(exe, args, cwd) {
   }
   const bad = args.find(a => /[&|<>^%!"()\r\n]/.test(a));
   if (bad !== undefined) return { error: 'it is a Windows script (' + path.basename(full) + '), and the argument "' + bad.slice(0, 40) + '" has a character the Windows command line would treat as a command.' };
+  // The script's own path is always quoted (a folder named "R&D" would otherwise run "R"); cmd still reads %NAME%
+  // inside quotes, so a path with % or ! is refused.
+  if (/[%!]/.test(full)) return { error: 'it is a Windows script, and its path (' + full.slice(-60) + ') has % or ! in it, which the Windows command line would read. Rename that folder.' };
   const q = a => (/[\s]/.test(a) || a === '' ? '"' + a + '"' : a);
-  return { exe: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', '"' + [q(full), ...args.map(q)].join(' ') + '"'], windowsVerbatimArguments: true };
+  return { exe: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', '"' + ['"' + full + '"', ...args.map(q)].join(' ') + '"'], windowsVerbatimArguments: true };
 }
 function killCommand(pid, name) { return 'taskkill /PID ' + pid + ' /T /F (' + name + ')'; }
 function killTree(pid) {

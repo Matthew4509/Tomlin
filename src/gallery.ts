@@ -1,6 +1,6 @@
 // Past pictures and how each was made, in data/images/: the files by month, and gallery.jsonl with one line per
 // picture (prompt, seed, sizes, mode, model, time). Only names this file wrote can be served back.
-import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Size } from './sizes.ts';
@@ -57,6 +57,30 @@ export const isKept = (p: Picture): boolean => p.kept !== false;
 export class Gallery {
   readonly dir: string;
   private cache: Picture[] | null = null;
+  private endChecked = false;
+
+  /** One line on the list. The first in a run starts on a new line if the last one was cut off (a crash mid-write), so a
+   * half line never swallows the next picture. */
+  private async line(text: string): Promise<void> {
+    let lead = '';
+    if (!this.endChecked) {
+      this.endChecked = true;
+      const h = await open(this.index, 'r').catch(() => null);
+      if (h) {
+        try {
+          const { size } = await h.stat();
+          if (size > 0) {
+            const b = Buffer.alloc(1);
+            await h.read(b, 0, 1, size - 1);
+            if (b[0] !== 10) lead = '\n';
+          }
+        } finally {
+          await h.close();
+        }
+      }
+    }
+    await appendFile(this.index, lead + text);
+  }
 
   constructor(dir: string) {
     this.dir = dir;
@@ -178,7 +202,7 @@ export class Gallery {
     await mkdir(this.dir, { recursive: true });
     // Read the list before the new line is written, or a first read would find the picture and it would be added twice.
     const all = await this.all();
-    await appendFile(this.index, `${JSON.stringify(p)}\n`);
+    await this.line(`${JSON.stringify(p)}\n`);
     all.push(p);
   }
 
@@ -187,7 +211,7 @@ export class Gallery {
     const p = all.find(x => x.id === id);
     if (!p) return undefined;
     Object.assign(p, change);
-    await appendFile(this.index, `${JSON.stringify({ id, ...change })}\n`);
+    await this.line(`${JSON.stringify({ id, ...change })}\n`);
     return p;
   }
 

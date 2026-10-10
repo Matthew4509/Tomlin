@@ -16,7 +16,7 @@ import { HOME, ROOT, type Routes, SECURITY_HEADERS, chatModels, chats, json, sho
 import { chat, chatList, contextBytes, fit, images, lastUsed, main, runOf } from './panes.ts';
 import { answeringBusy, askOnce, endAnswer, imageSpecialist, takeChat } from './answering.ts';
 import { jobRoutes } from './jobs.ts';
-import { appFile, appLock } from './locks.ts';
+import { appLock, appLockOn } from './locks.ts';
 
 // ---- Live preview (PLAN F10 G7): the workspace's pages, shown in a sandbox beside a job ----
 // Served at /preview/<key>/<path>: the key is made at each start and given only to the page (through /api/preview,
@@ -45,7 +45,7 @@ export async function previewFile(res: ServerResponse, path: string): Promise<vo
   };
   if (!m || m[1] !== PREVIEW_KEY) return notHere('This preview is out of date: press Reload in the job window.');
   // The frame's own requests carry no cookie, so the key opens it; while the app lock is shut, it opens nothing.
-  if (appFile && !appLock.isOpen()) return notHere('TOMLIN is locked. Open it with its PIN, then press Reload.');
+  if (appLockOn() && !appLock.isOpen()) return notHere('TOMLIN is locked. Open it with its PIN, then press Reload.');
   let rel: string;
   try {
     rel = decodeURIComponent(m[2]);

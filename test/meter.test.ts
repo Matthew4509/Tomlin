@@ -188,3 +188,17 @@ test('most-used models: per PC and model, the last 7 days only, most worked firs
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a count made just before TOMLIN ends is saved, not lost with the 3-second wait', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'meter-exit-'));
+  try {
+    const { execFileSync } = await import('node:child_process');
+    const file = join(dir, 'meter.json');
+    const src = new URL('../src/meter.ts', import.meta.url).href;
+    execFileSync(process.execPath, ['--input-type=module', '-e', `const { Meter } = await import(${JSON.stringify(src)}); const m = await new Meter(${JSON.stringify(file)}).load(); m.add({ in: 7, cached: 0, out: 3, ms: 100 }); process.exit(0);`]);
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(saved.total.out, 3);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -17,10 +17,20 @@ import { cleanRid, Outbox, type Follower, type Kept, type Lock } from '../outbox
 import { inScope, scope } from '../meter.ts';
 import { log } from '../log.ts';
 import { type Send, d, sleep } from './shared.ts';
+import type { Remote } from '../store.ts';
 import { hello, seen, workerPost } from './links.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { setup } from './sizing.ts';
 import { actionBusy } from './actions.ts';
+
+/** The link request with as many extra proofs as fit: a node reads only 4 KB of it (and an older one cuts the rest). */
+function pairBody(ask: Record<string, unknown>, proofs: string[]): string {
+  for (let n = proofs.length; n > 0; n--) {
+    const text = JSON.stringify({ ...ask, proofs: proofs.slice(0, n) });
+    if (text.length <= 3800) return text;
+  }
+  return JSON.stringify(ask);
+}
 
 export async function remotes(b: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
   const s = await d.store.settings();
@@ -47,9 +57,13 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // Linked before at this address with working keys: proved, so the new link takes over the old one there.
     const oldKeys = link.keysOf(s.remotes.find(r => r.url === url)?.key);
     const proof = oldKeys ? link.takeOverProof(oldKeys, ask.pub) : undefined;
+    // The same PC at a new address (a router that gave it another one): this PC does not know yet which link it is, so
+    // it proves each link it holds; the node takes over the one it knows (and keeps its restore points). Each proof
+    // opens only with that link's own keys, so the other nodes' links are not given away.
+    const proofs = s.remotes.filter(r => r.url !== url).map(r => link.keysOf(r.key)).filter((k): k is Buffer => !!k).slice(0, 16).map(k => link.takeOverProof(k, ask.pub));
     let res: Response;
     try {
-      res = await fetch(`${url}/worker/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...ask, ...(proof ? { proof } : {}) }), signal: AbortSignal.timeout(15_000) });
+      res = await fetch(`${url}/worker/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: pairBody({ ...ask, ...(proof ? { proof } : {}) }, proofs), signal: AbortSignal.timeout(15_000) });
     } catch (e) {
       return unreachable(e);
     }
@@ -65,9 +79,13 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const name = done.name.replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'Worker PC';
     // The node's own id, so linking it again (or at a new address) keeps its chats and staff.
     // The list as it is now (read again after the network work): a PC removed or renamed meanwhile stays so.
-    const others = (await d.store.settings()).remotes.filter(r => r.url !== url && r.id !== done.id);
+    const now = (await d.store.settings()).remotes;
+    const others = now.filter(r => r.url !== url && r.id !== done.id);
     const id = /^[0-9a-f]{8}$/.test(done.id) ? done.id : randomBytes(4).toString('hex');
-    const made = { id, name, url, token: done.token, key: link.keysText(done.keys) };
+    // The same PC (its own id) linked again: only the address and keys are new; what this PC set for it (Backups only)
+    // and its last known models stay. Another PC that took over an address starts fresh.
+    const same = now.find(r => r.id === id);
+    const made: Remote = { ...(same?.backupsOnly ? { backupsOnly: true } : {}), ...(same?.models ? { models: same.models } : {}), id, name, url, token: done.token, key: link.keysText(done.keys) };
     await d.store.saveSettings({ remotes: [...others, made] });
     // Asked at once, so the people who work there show straight away.
     await hello((await d.store.settings()).remotes.find(r => r.id === made.id)!, 4000).catch(() => undefined);
@@ -195,7 +213,7 @@ function lanList(): { address: string; via: string }[] {
 }
 
 export function shareView() {
-  return { on: shareState.on, listening: !!shareServer, error: shareError, port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key }) => ({ name, at, old: !key })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), models: shareState.models ?? [], allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { on: shareState.on, listening: !!shareServer, error: shareError, port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), models: shareState.models ?? [], allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */
@@ -669,17 +687,18 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         guard.wrong(ip);
         return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Nodes and memory.' : 'wrong setup code. Type the code shown on that PC under Nodes and memory (8 letters and numbers).' });
       }
-      guard.right(ip);
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a
-      // working link off the end of the list. A real retry from the main PC makes a new one.
+      // working link off the end of the list. A real retry from the main PC makes a new one. Checked before the wrong-try
+      // count is cleared, so a recording cannot clear it either.
       if (!usePairNonce(String(b.nonce))) return workerJson(res, 409, { error: 'this link request was already used. Press Link again on the main PC.' });
+      guard.right(ip);
       // Linking again from the same PC replaces its old link and keeps its restore points, only when it proves it holds
       // that link's keys. Without the proof (a PC that knows only the setup code and an id) it gets a link of its own.
       const from = typeof b.from === 'string' && /^[0-9a-f]{8}$/.test(b.from) ? b.from : undefined;
       // The link whose keys made the proof (two can claim one id: the real one and one made with only the code).
       const old = from ? shareState.paired.find(x => {
         const k = x.from === from ? link.keysOf(x.key) : null;
-        return !!k && link.takeOverProven(k, String(b.pub), b.proof);
+        return !!k && [b.proof, ...(Array.isArray(b.proofs) ? b.proofs.slice(0, 16) : [])].some(pr => link.takeOverProven(k, String(b.pub), pr));
       }) : undefined;
       const proven = !!old;
       const kept = proven ? shareState.paired.filter(x => x !== old) : shareState.paired;
@@ -1011,7 +1030,9 @@ export async function setShare(b: Record<string, unknown>) {
   if ('models' in b) shareState.models = nodestaff.cleanTicks(b.models, [...d.chatList().map(m => m.id), ...d.pictureModels().filter(m => m.installed).map(m => m.id)]);
   if (b.newPin === true || (shareState.pinOn && !shareState.pin)) shareState.pin = share.newPin();
   if (b.newCode === true) shareState.code = share.newCode();
-  if ('unpair' in b) shareState.paired = shareState.paired.filter((_, k) => k !== Number(b.unpair));
+  // By the link's own id (its token's fingerprint): the list can change while the page shows it (a PC links meanwhile).
+  if (typeof b.unpairId === 'string' && b.unpairId) shareState.paired = shareState.paired.filter(x => String(x.hash ?? '').slice(0, 12) !== b.unpairId);
+  else if ('unpair' in b) shareState.paired = shareState.paired.filter((_, k) => k !== Number(b.unpair));
   if (b.unpairAll === true) shareState.paired = [];
   if ('on' in b) shareState.on = b.on === true;
   await saveShare();

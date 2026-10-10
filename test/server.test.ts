@@ -131,6 +131,17 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     assert.equal((await reading(`?chat=&who=${encodeURIComponent(maya)}`)).body.name, 'Maya', 'a chat with no messages yet: the person named');
     assert.equal((await reading('?chat=gone-chat')).status, 404);
 
+    // Choosing who to talk to answers with the chat it opened ({opened}): the window that chose reads that one by id,
+    // and another window opening a chat in between does not swap it.
+    const chose = async (body: Record<string, unknown>) => (await (await post('/api/settings', body)).json()) as { opened?: string };
+    const toOtto = await chose({ who: otto });
+    assert.ok(toOtto.opened, JSON.stringify(toOtto));
+    assert.equal((await post('/api/chats/open', { id: chatA })).status, 200);
+    const ottoChat = await linesOf(toOtto.opened!);
+    assert.equal((ottoChat.chat as { who?: string } | null)?.who, otto, 'the chat that choice opened, read by its id');
+    assert.equal(((await (await fetch(`${base}/api/chat`)).json()) as { chat: { id: string } | null }).chat?.id, chatA, 'the server\'s open chat is the other window\'s now');
+    assert.equal('opened' in (await chose({ tone: 'natural' })), false, 'a change that chooses nobody opens nothing');
+
     // The blog writer's picture names its chat and its artist ('' = none): one naming neither is refused before anything.
     assert.equal((await post('/api/blog/picture', { path: 'blog/a.md', prompt: 'a lighthouse' })).status, 400);
     assert.equal((await post('/api/blog/picture', { path: 'blog/a.md', prompt: 'a lighthouse', as: '', chat: 'gone-chat' })).status, 404);

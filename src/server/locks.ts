@@ -35,6 +35,8 @@ const appRead = await readLock<AppLockFile>(APP_LOCK_FILE, f => (typeof f.salt =
 const appDamaged = appRead === 'damaged';
 export let appFile: AppLockFile | null = appRead === 'damaged' ? null : appRead;
 appLock.idleMinutes = appFile?.idleMinutes ?? appLock.idleMinutes;
+/** The app lock is on: a PIN is set, or its file is damaged (which keeps every door shut, never open). */
+export const appLockOn = () => !!appFile || appDamaged;
 const appCookie = (res: ServerResponse, token: string | null) => res.setHeader('set-cookie', `${APP_COOKIE}=${token ?? ''}; HttpOnly; SameSite=Strict; Path=/${token ? '' : '; Max-Age=0'}`);
 /** This request's browser has the app open (or there is no PIN). */
 export const appOk = (req: IncomingMessage, touch = false) => !appDamaged && (!appFile || appLock.check(cookieValue(req.headers.cookie, APP_COOKIE), touch));
