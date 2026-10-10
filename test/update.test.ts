@@ -406,3 +406,35 @@ test('half-come updates are not kept for ever: old ones go at start, another ver
   assert.equal(r.status, 200, JSON.stringify(r.json));
   assert.deepEqual(left(), ['.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'another version coming in clears the 2.0.31 one');
 });
+
+// A TOMLIN zip uploaded under Nodes and memory (src/server/selfupdate.ts): only a whole, newer TOMLIN is taken.
+test('zipWhy takes a whole newer TOMLIN, or the same version with other files, and nothing else', () => {
+  const b1 = 'a'.repeat(16);
+  const b2 = 'b'.repeat(16);
+  assert.equal(update.zipWhy({ name: 'tomlin', version: '2.0.51' }, [], b2, '2.0.50', b1), '');
+  assert.equal(update.zipWhy({ name: 'tomlin', version: '2.0.50' }, [], b2, '2.0.50', b1), '');
+  assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.50' }, [], b1, '2.0.50', b1), /already runs TOMLIN 2\.0\.50 with the same files/);
+  assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.50' }, [], '', '2.0.50', b1), /nothing to update/);
+  assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.47' }, [], b2, '2.0.50', b1), /older than the 2\.0\.50/);
+  assert.match(update.zipWhy({ name: 'shelby', version: '2.0.51' }, [], b2, '2.0.50', b1), /not a TOMLIN release/);
+  assert.match(update.zipWhy({ name: 'tomlin', version: 'x' }, [], b2, '2.0.50', b1), /not a TOMLIN release/);
+  assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.51' }, ['src/server.ts'], b2, '2.0.50', b1), /src\/server\.ts is missing/);
+});
+
+test('an older PC that refuses a file it does not know gets the same copy without it: the welcome page, then the old launcher name', () => {
+  const f = (path: string) => ({ path, bytes: 1, sha: 'a'.repeat(64) });
+  const files = [f('src/server.ts'), f('Start TOMLIN.cmd'), f('Install TOMLIN.cmd'), f('Welcome to TOMLIN.html')];
+  const refused = (name: string) => new Error(`"Old node": a file in the update was not named as an app file (${name}), so the update was refused.`);
+  // A TOMLIN-named PC before 2.0.50: only the welcome page goes.
+  const one = update.retryFor(files, files, refused('Welcome to TOMLIN.html'))!;
+  assert.deepEqual(one.map(x => x.path), ['src/server.ts', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd']);
+  // A PC from before the TOMLIN name then refuses the launcher: the old name, and still no welcome page.
+  const two = update.retryFor(files, one, refused('Start TOMLIN.cmd'))!;
+  assert.deepEqual(two.map(x => x.path), ['src/server.ts', 'Start Shelby.cmd']);
+  // Refused again for the same names, or for anything else: no more tries.
+  assert.equal(update.retryFor(files, two, refused('Start TOMLIN.cmd')), null);
+  assert.equal(update.retryFor(files, one, refused('Welcome to TOMLIN.html')), null);
+  assert.equal(update.retryFor(files, files, new Error('no room on that PC')), null);
+  // The welcome page is not part of the build id, so leaving it out does not make the PC look different afterwards.
+  assert.ok(update.NEWER_FILES.every(p => !update.BUILD_PARTS.some(b => p === b || p.startsWith(`${b}/`))));
+});

@@ -81,6 +81,10 @@ app.showAsPage = showAsPage;
 for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('click', () => setView('rail'));
 $('#rail-home').addEventListener('click', () => setView('home'));
 $('#rail-home-row').addEventListener('click', () => setView('home'));
+// The Set up menu is the whole left panel on its pages: Home at its top goes back.
+$('#rail-setup-home').addEventListener('click', () => setView('home'));
+// Under Projects: Hire staff as the Staff page, the Set up menu open beside it.
+$('#rail-staff-row').addEventListener('click', () => app.openHire({ page: true }));
 phone.addEventListener('change', e => {
   if (!e.matches && homeUi.view === 'rail') setView(store('view') === 'chat' ? 'chat' : 'home');
 });
@@ -89,8 +93,9 @@ setView(phone.matches ? 'rail' : store('view') === 'home' ? 'home' : 'chat');
 // The staff list under "Staff" starts open; folding it is kept in this browser.
 $('#rail-staff-fold').open = store('staff-open') !== '0';
 $('#rail-staff-fold').addEventListener('toggle', e => store('staff-open', e.target.open ? '1' : '0'));
-$('#rail-setup-fold').open = store('setup-open') !== '0';
-$('#rail-setup-fold').addEventListener('toggle', e => store('setup-open', e.target.open ? '1' : '0'));
+// The Set up menu never folds: it is the whole left panel on the pages it opens, so its heading is only a heading.
+$('#rail-setup-fold').open = true;
+$('#rail-setup-fold > summary').addEventListener('click', e => e.preventDefault());
 // Home's "Waiting for you" panel folds to a strip (it keeps the number); folding it is kept in this browser.
 $('#home-side-fold').open = store('home-waiting-open') !== '0';
 $('#home-side').classList.toggle('folded', !$('#home-side-fold').open);
@@ -200,7 +205,7 @@ const activityDot = a => el('span', { class: 'sdot', 'data-activity': a, 'aria-h
  * A person in the left panel. With `level` (a hire): "Name | Level", the software under it, and a third line only when
  * they are working or muted (how they are otherwise is the dot's shape on their icon, and the tooltip).
  */
-function staffRow({ key, name, avatar, sub, level, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true }) {
+function staffRow({ key, name, avatar, sub, level, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true, flag }) {
   // Muted (right-click the row, or Mute all): a bell with a line and "Muted until …", a grey dot in place of the number.
   const muted = mutable ? app.mutedBy?.([key]) : null;
   const bits = app.muteBits?.(muted, count) ?? { icon: null, count: count ? el('span', { class: 'rail-count', text: String(count) }) : null };
@@ -209,7 +214,9 @@ function staffRow({ key, name, avatar, sub, level, state, stateText, activity, a
   const b = el('button', { class: 'rail-row', type: 'button', 'data-key': key, title: `${title}\n${name}: ${sub}\n${busy ?? stateText}${muted ? `\nMuted ${muted.text}` : mutable ? '\nTo mute: right-click, or the … in the chat' : ''}`, 'aria-current': active ? 'true' : null },
     app.avatar ? app.avatar(key, avatar, mark) : el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, avatar, mark),
     el('span', { class: 'rail-text' },
-      el('span', { class: 'rail-name' }, name, level ? el('span', { class: 'rail-level', text: ` | ${level}` }) : null),
+      // flag: a yellow (!) at the right of the name line, with its words (a linked PC behind this one).
+      flag ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'rail-flag', role: 'img', 'aria-label': flag, title: flag, text: '!' }))
+        : el('span', { class: 'rail-name' }, name, level ? el('span', { class: 'rail-level', text: ` | ${level}` }) : null),
       el('span', { class: 'rail-sub', text: sub }),
       level && !busy && !muted ? null : el('span', { class: `rail-state ${activity ? `a-${activity}` : `s-${busy ? 'on' : state}`}`, text: [busy && level ? 'Working' : word, app.mutedWords?.(muted)].filter(Boolean).join(' · ') })),
     bits.icon, bits.count);
@@ -300,13 +307,16 @@ function drawRail() {
     const at = twice.has(name) ? where(p, i) : '';
     // Answering with nothing loaded: still free for work (the green dot), but the word says it is asleep.
     const asleep = p.activity === 'available' && p.state === 'asleep' && !p.backupsOnly;
+    // Behind this PC: the yellow (!) on its card; its window (press the card) has Update it.
+    const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update it` : `Outdated: ${p.outdated.version} (this PC ${p.outdated.mine}): press to update it`) : '';
     const mem = homeUi.pcMem[p.id];
     // A "Backups only" PC: no staff work there, so its card says what it keeps instead of what it has loaded.
     const sub = p.backupsOnly ? [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), 'Backups only', p.disk ? diskWords(p.disk) : '']
       : [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), p.model, p.speed?.expect ? app.speedWords(p.speed.expect, true) : '', p.picture ? `draws with ${p.picture}` : ''];
     desks.push({ id: p.id, name: at ? `${name} (${at})` : name, activity: p.activity, backupsOnly: p.backupsOnly, row: staffRow({
       key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: asleep ? 'Asleep' : undefined,
-      title: `${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.(p.id), mutable: false,
+      title: `${old ? `${old}
+` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.(p.id), mutable: false, flag: old || undefined,
     }) });
   }
   const card = x => {
@@ -350,13 +360,15 @@ const CHAT_BUBBLE = 'M5 3h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4.3A2 2 0 0 
 function drawStaffOverview(counts) {
   const d = homeUi.data;
   const hw = app.status?.hardware;
-  const sig = JSON.stringify([d.staff, counts, hw?.ram?.total ?? 0, homeUi.pcMem]);
+  // On a break is the office's own (a deck chair after 10 minutes with nothing to do): asked of it each time.
+  const breaks = app.office?.breaks?.() ?? [];
+  const sig = JSON.stringify([d.staff, counts, hw?.ram?.total ?? 0, homeUi.pcMem, breaks]);
   if (sig === homeUi.drawn.overview) return;
   homeUi.drawn.overview = sig;
   const follow = s => app.office?.select(s.id);
   const ramOf = s => (s.pcId ? homeUi.pcMem[s.pcId]?.ram : hw?.ram?.total) ?? 0;
   const card = s => {
-    const doing = s.doingText ?? (s.busy ? `Working: ${s.busy}` : ACTIVITY_WORD[s.activity] ?? s.text ?? '');
+    const doing = breaks.includes(s.id) ? 'On a break: in a deck chair on the beach' : s.doingText ?? (s.busy ? `Working: ${s.busy}` : ACTIVITY_WORD[s.activity] ?? s.text ?? '');
     const ram = ramOf(s);
     const where = `${s.pc || pcName('here', 'My PC')}${ram ? ` · ${Math.round(ram / 2 ** 30)} GB RAM` : ''}`;
     const hover = [s.modelName || 'No model given', counts[s.id] ? `${doing} · ${counts[s.id]} waiting for you` : doing].filter(Boolean).join('\n');
@@ -438,19 +450,34 @@ async function deskMove(s, pc, pcName) {
   }
   const models = deskModels(s, pc);
   const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
+  // Each model against that PC's memory as a whole (the server sends ramFit; src/calc.ts): one that will not fit is
+  // shown but cannot be picked, and says what it needs and what the PC has.
+  const mem = pc ? team.data?.pcs?.find(p => p.id === pc) : team.data?.here;
+  const gb = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
+  const wontFit = c => c.ramFit === 'no';
+  const fits = models.filter(c => !wontFit(c));
   const same = models.find(c => short(c.name) === short(s.modelName));
   $('#desk-move-title').textContent = `Move ${s.name} to ${pcName}`;
   const sel = $('#desk-move-model');
-  sel.replaceChildren(...models.map(c => el('option', { value: c.id, text: c.name.replace(/ on ".*?"/, '') })));
-  if (same) sel.value = same.id;
+  sel.replaceChildren(...models.map(c => el('option', { value: c.id, disabled: wontFit(c),
+    text: `${c.name.replace(/ on ".*?"/, '')}${wontFit(c) ? ` (needs about ${gb(c.need)}: more than ${pcName} has)` : c.ramFit === 'tight' ? ' (tight fit)' : ''}` })));
+  if (same && !wontFit(same)) sel.value = same.id;
+  else if (fits.length) sel.value = fits[0].id;
   $('#desk-move-row').hidden = !models.length;
-  $('#desk-move-go').hidden = !models.length;
+  $('#desk-move-go').hidden = !fits.length;
+  // The ones left out, said in words (a greyed line in a closed list is not seen).
+  const big = fits.length ? models.filter(wontFit) : [];
+  $('#desk-move-big').hidden = !big.length;
+  $('#desk-move-big').textContent = big.length ? `Not offered, too big for ${pcName}${mem?.ram ? ` (${gb(mem.ram)} of RAM, 3 GB of it kept for Windows${mem.vram ? `, and ${gb(mem.vram)} of graphics-card memory` : ''})` : ''}: ${big.map(c => `${c.name.replace(/ on ".*?"/, '').replace(/ \(.*\)$/, '')} needs about ${gb(c.need)}`).join('; ')}.` : '';
   $('#desk-move-fault').hidden = true;
   const line = $('#desk-move-line');
   const box = $('#desk-move-send');
   box.replaceChildren();
   const own = s.model && !String(s.model).startsWith('remote:') ? s.model : '';
-  if (same) line.textContent = `${pcName} has ${s.modelName}: ${s.name} keeps the same software there.`;
+  const ram = mem?.ram ? `${pcName} has ${gb(mem.ram)} of RAM${mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : ''}` : '';
+  if (models.length && !fits.length) line.textContent = `None of the models on ${pcName} fits its memory${ram ? ` (${ram}, 3 GB of it kept for Windows)` : ''}. Send a smaller model there first, or move ${s.name} to a PC with more memory.`;
+  else if (same && wontFit(same)) line.textContent = `${pcName} has ${s.modelName}, but it needs about ${gb(same.need)} and ${ram || 'that PC has less'}. Pick a smaller model ${s.name} runs on there.`;
+  else if (same) line.textContent = `${pcName} has ${s.modelName}: ${s.name} keeps the same software there.`;
   else if (models.length) line.textContent = `${pcName} does not have ${s.modelName || 'their model'}. Pick the software ${s.name} runs on there${pc && own ? ', or send a copy of theirs first' : ''}.`;
   else line.textContent = pc ? "The staff can't log in to this machine, go to the machine, and check its permissions." : `This PC has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet.`;
   // Their model is on this PC and the target is a node: a copy can go there first (the node must allow it).
@@ -475,7 +502,7 @@ $('#desk-move-go').addEventListener('click', async () => {
   const go = $('#desk-move-go');
   go.disabled = true;
   try {
-    team.data = await api('/api/staff', { action: 'change', id: moveDlg.dataset.id, model: $('#desk-move-model').value });
+    team.data = await api('/api/staff', { action: 'change', id: moveDlg.dataset.id, model: $('#desk-move-model').value, move: true });
     moveDlg.close();
     await refresh();
   } catch (err) {
@@ -966,6 +993,7 @@ app.openPcs = async () => {
 };
 
 function drawOthers(pcs) {
+  drawUpdateAll(pcs);
   keepFocus($('#node-others'), pcs.length ? pcs.map(p => {
     const mem = p.ok && p.memory?.ram?.bar;
     const away = p.ok && p.away ? new Date(p.away).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
@@ -1006,11 +1034,6 @@ function drawOthers(pcs) {
         el('span', { class: 'sdot', 'data-state': p.ok && !away ? (p.model ? 'on' : 'asleep') : 'off', 'aria-hidden': 'true' }),
         el('strong', { text: p.name }),
         el('span', { class: 'hint', text: `${p.url} · ${state}` })),
-      mem ? memBar(p.memory.ram.bar, 'Memory (RAM)') : null,
-      mem && p.memory.gpu ? memBar(p.memory.gpu.bar, `Graphics memory (${p.memory.gpu.name})`) : null,
-      p.ok ? el('span', { class: 'hint', text: p.disk ? `Backup disk: ${diskWords(p.disk)}.` : 'Backup disk: not reported (that PC runs an older TOMLIN: update it to see its free space here).' }) : null,
-      role,
-      p.ok && !mem ? el('span', { class: 'hint', text: `Its memory is not reported: that PC runs TOMLIN ${p.version || 'older than 2.0.16'}. Update it to see its memory here.` }) : null,
       // Behind this PC (a lower version, or the same one with different files): "Update it" sends this PC's TOMLIN there
       // (it starts the new version by itself), or why not.
       p.ok && p.update ? el('div', { class: 'node-update' },
@@ -1025,13 +1048,24 @@ function drawOthers(pcs) {
             e.target.disabled = false;
           }
         } })) : null,
+      mem ? memBar(p.memory.ram.bar, 'Memory (RAM)') : null,
+      mem && p.memory.gpu ? memBar(p.memory.gpu.bar, `Graphics memory (${p.memory.gpu.name})`) : null,
+      p.ok ? el('span', { class: 'hint', text: p.disk ? `Backup disk: ${diskWords(p.disk)}.` : 'Backup disk: not reported (that PC runs an older TOMLIN: update it to see its free space here).' }) : null,
+      role,
+      p.ok && !mem ? el('span', { class: 'hint', text: `Its memory is not reported: that PC runs TOMLIN ${p.version || 'older than 2.0.16'}. Update it to see its memory here.` }) : null,
       // The models it lets this PC use by name (hire staff on them here).
-      p.ok && !away && !p.backupsOnly ? el('span', { class: 'hint', text: !p.can?.includes('models') ? 'Lets this PC use: only the model it has loaded (its TOMLIN is older: update it there to share models by name).'
-        : p.models?.length ? `Lets this PC use: ${p.models.map(m => {
-          const bits = [m.kind === 'image' ? 'draws' : '', m.busy ? (m.kind === 'image' ? 'busy: drawing for someone now' : 'busy: answering someone now') : m.loaded ? 'loaded' : ''].filter(Boolean);
-          return `${m.name}${bits.length ? ` (${bits.join(', ')})` : ''}`;
-        }).join('; ')}. Hire staff on them here: Hire staff, pick that PC, then the model.`
-        : 'Lets this PC use: no models yet. On that PC, Nodes and memory, tick the models other PCs may use.' }) : null,
+      // One model a line, chat models under Standard and picture models under Images.
+      p.ok && !away && !p.backupsOnly ? (!p.can?.includes('models') ? el('span', { class: 'hint', text: 'Lets this PC use: only the model it has loaded (its TOMLIN is older: update it there to share models by name).' })
+        : p.models?.length ? el('div', { class: 'node-uses' },
+          el('span', { class: 'hint', text: 'Lets this PC use:' }),
+          ...[['Standard', p.models.filter(m => m.kind !== 'image')], ['Images', p.models.filter(m => m.kind === 'image')]].filter(([, list]) => list.length).map(([head, list]) => el('div', { class: 'node-uses-group' },
+            el('h4', { text: head }),
+            el('ul', {}, ...list.map(m => {
+              const bit = m.busy ? (m.kind === 'image' ? 'busy: drawing for someone now' : 'busy: answering someone now') : m.loaded ? 'loaded' : '';
+              return el('li', { text: `${m.name}${bit ? ` (${bit})` : ''}` });
+            })))),
+          el('span', { class: 'hint', text: 'Hire staff on them here: Hire staff, pick that PC, then the model.' }))
+        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Nodes and memory, tick the models other PCs may use.' })) : null,
       // How fast its loaded model answers for this PC (its answers here are timed; Test speed runs the example prompt there).
       p.ok && p.model && !away && !p.backupsOnly ? el('span', { class: 'hint' }, p.speed?.expect ? `Speed: ${app.speedWords(p.speed.expect)} (${p.speed.basis === 'answers' ? `the average of ${p.speed.average.n} answers` : 'tested'}) · ` : 'Speed: not measured yet · ', app.speedLink(`remote:${p.id}`, msg => sayHere($('#node-others-ask'), msg), refreshOthers)) : null,
       el('div', { class: 'team-actions' }, back, el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => {
@@ -1067,6 +1101,102 @@ function openNodes() {
   homeUi.drawn.models = homeUi.drawn.team = homeUi.drawn.paired = null;
   refreshNodes();
   refreshOthers();
+  drawInstall();
+}
+
+// ---- Update this install: a TOMLIN zip uploaded here becomes this PC's next copy; then the linked PCs from here ----
+
+async function drawInstall() {
+  const v = await api('/api/install/zip').catch(() => null);
+  if (!v) return;
+  // A copy started another way (node src/server.ts) cannot start the new one: said, and the upload is not offered.
+  $('#node-install-pick').hidden = !v.restarts;
+  $('#node-install-line').textContent = `This PC runs TOMLIN ${v.version}${v.build ? ` (build ${v.build})` : ''}.${v.restarts ? '' : ' It was not started by its installed program or Start TOMLIN.cmd, so it cannot update itself from a zip here: close it, unzip the new version and run Install TOMLIN.cmd there.'}`;
+  if (v.ready && $('#node-install-ask').hidden) askInstall(v.ready, v.version);
+}
+
+/** The zip is checked: Update now (this copy ends, the new one starts) or Cancel (the opened copy is removed). */
+async function askInstall(z, mine) {
+  const box = $('#node-install-ask');
+  const same = z.version === mine;
+  const go = await askHere(box, `The zip holds TOMLIN ${z.version}${z.build ? ` (build ${z.build})` : ''}${same ? ', the same version with other files' : ''}. This PC runs ${mine}. Update now closes TOMLIN for about half a minute and starts ${z.version}: anything being written or drawn now stops. The old copy stays in its folder beside the new one.`, 'Update now', 'Cancel', false);
+  if (!go) {
+    await api('/api/install/zip-drop', {}).catch(() => undefined);
+    return;
+  }
+  try {
+    const r = await api('/api/install/zip-go', { version: z.version });
+    installSaid(`TOMLIN ${r.version} is starting (${r.folder}). This page opens again by itself when it answers.`, 1);
+    waitForVersion(r.version);
+  } catch (e) {
+    sayHere(box, `Not updated: ${e.message}`);
+  }
+}
+
+function installSaid(text, frac) {
+  $('#node-install-progress').hidden = !text;
+  $('#node-install-said').textContent = text ?? '';
+  $('#node-install-fill').style.width = `${Math.round(Math.min(1, frac ?? 0) * 100)}%`;
+}
+
+/** Asks every 2 seconds until this PC answers with the new version (or 3 minutes pass), then opens the page again. */
+async function waitForVersion(version) {
+  for (const t0 = Date.now(); Date.now() - t0 < 180_000;) {
+    await new Promise(r => setTimeout(r, 2000));
+    const v = await fetch('/api/install/zip', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null), () => null);
+    if (v?.version === version) return location.reload();
+  }
+  installSaid(`TOMLIN ${version} has not answered for 3 minutes. Look at its window by the clock (or the Start TOMLIN window): it says what happened.`, 1);
+}
+
+$('#node-install-file').addEventListener('change', e => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  const box = $('#node-install-ask');
+  box.hidden = true;
+  if (!/\.zip$/i.test(file.name)) return sayHere(box, `${file.name} is not a zip. Pick the tomlin-<version>.zip file.`);
+  // XMLHttpRequest, not fetch: it says how much of the file has gone up.
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/install/zip');
+  x.setRequestHeader('content-type', 'application/zip');
+  $('#node-install-pick').classList.add('is-busy');
+  installSaid(`Uploading ${file.name}…`, 0);
+  x.upload.onprogress = p => p.lengthComputable && installSaid(p.loaded < p.total ? `Uploading ${file.name}: ${Math.round((p.loaded / p.total) * 100)}%` : 'Opening the zip and checking every part…', p.loaded / p.total);
+  x.onloadend = () => {
+    $('#node-install-pick').classList.remove('is-busy');
+    installSaid('');
+    let r = null;
+    try {
+      r = JSON.parse(x.responseText);
+    } catch {
+      // said below
+    }
+    if (x.status !== 200 || !r?.version) return sayHere(box, r?.error ?? (x.status ? `The zip was not taken (the server said ${x.status}). Try again.` : 'The upload stopped: TOMLIN is not answering. Start it again, then upload the zip again.'));
+    askInstall({ version: r.version, build: r.build }, r.mine);
+  };
+  x.send(file);
+});
+
+/** The linked PCs this one can update now (behind it, and nothing stopping it), on the Update all button. */
+function drawUpdateAll(pcs) {
+  const can = pcs.filter(p => p.ok && p.update && !p.update.why);
+  const stuck = pcs.filter(p => p.ok && p.update?.why);
+  const off = pcs.filter(p => !p.ok).length;
+  const b = $('#node-update-all');
+  b.disabled = !can.length;
+  b.textContent = can.length ? `Update all linked PCs (${can.length})` : 'Update all linked PCs';
+  b.onclick = async () => {
+    b.disabled = true;
+    const failed = [];
+    for (const p of can) await api('/api/network/update', { pc: p.id }).catch(err => failed.push(`"${p.name}": ${err.message}`));
+    $('#node-update-all-line').textContent = failed.length ? `Not started on ${failed.join(' ')}` : '';
+    // The updates under way show in My local LLMs, each with its own line.
+    if (failed.length < can.length) app.openNet?.();
+    refreshOthers();
+  };
+  $('#node-update-all-line').textContent = stuck.length ? `Behind but not updatable from here now: ${stuck.map(p => `"${p.name}"`).join(', ')} (${stuck.length === 1 ? 'its tile says' : 'their tiles say'} why).`
+    : can.length ? '' : pcs.length ? `Every linked PC that answers runs this version${off ? ` (${off} not answering now)` : ''}.` : 'No linked PCs yet.';
 }
 app.openNodes = openNodes;
 setInterval(refreshOthers, 30_000);

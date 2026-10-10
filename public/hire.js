@@ -6,7 +6,7 @@
 'use strict';
 {
   const dlg = $('#hire-dlg');
-  const hs = { role: '', pc: '', model: '', level: '', levelPicked: false, look: null, lookPicked: false, nameAuto: '', q: '' };
+  const hs = { role: '', pc: '', model: '', level: '', levelPicked: false, look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map() };
 
   /** Names of four or five letters for Random, never one already on the team or the one in the box now. */
   const NAMES = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina', 'Adam', 'Alan', 'Brian', 'Colin', 'David', 'Dylan', 'Ethan', 'Frank', 'Gavin', 'Harry', 'Henry', 'Isaac', 'Jack', 'James', 'Jason', 'Kyle', 'Liam', 'Lucas', 'Mark', 'Mason', 'Neil', 'Noah', 'Oscar', 'Owen', 'Peter', 'Ryan', 'Simon', 'Tyler', 'Wade'];
@@ -176,6 +176,131 @@
     $('#hs-models-title').textContent = `Choose a model${list.length ? ` (${list.length})` : ''}`;
   }
 
+  // ---- All models: every model on the network that the PC picked has not got, to copy there (then hire on it) ----
+
+  /** A model's key across PCs, as src/carry.ts modelKey makes it: a chat model by its file name, a picture model by its id. */
+  const keyOf = (k, id) => (k === 'image' ? `image:${id}` : `chat:${String(id).replace(/\\/g, '/').split('/').pop().toLowerCase()}`);
+  /** A hire choice's key: a linked PC's is "remote:<pc>:<its model id>". */
+  const choiceKey = c => keyOf(kind(), c.pc ? c.id.slice(`remote:${c.pc}:`.length) : c.id);
+
+  async function loadNet() {
+    hs.net = await api('/api/network').catch(() => null);
+    drawAllModels();
+  }
+
+  /** Each model on the network of this kind: where it is ('' = this PC), by its key. */
+  function networkModels() {
+    const k = kind();
+    const all = new Map();
+    const add = (key, name, bytes, on) => {
+      const e = all.get(key) ?? { key, name, bytes, on: [] };
+      e.on.push(on);
+      all.set(key, e);
+    };
+    for (const m of hs.net?.mine ?? []) if (m.kind === k) add(keyOf(k, m.id), m.name, m.bytes, { pc: '', model: m.id, copy: true, why: '' });
+    for (const r of hs.net?.rows ?? []) if (r.kind === k) for (const o of r.on) add(r.key, r.name, r.bytes, { pc: o.pc, name: o.pcName, model: o.model, copy: o.copy, why: o.why });
+    return [...all.values()];
+  }
+
+  /** How a model gets to the PC picked: { from, via } (via: through this PC first), or { why } it cannot now. */
+  function routeTo(e, target) {
+    const here = e.on.find(o => !o.pc);
+    const linked = e.on.find(o => o.pc && o.copy) ?? null;
+    if (!target) return linked ? { from: linked } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+    const send = hs.net?.pcs.find(p => p.id === target)?.send;
+    if (send) return { why: send };
+    if (here) return { from: here };
+    return linked ? { from: linked, via: true } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+  }
+
+  function drawAllModels() {
+    const block = $('#hs-all-block');
+    // Only with other PCs linked: alone, Add a model is where models come from.
+    block.hidden = !d()?.pcs.length;
+    if (block.hidden) return;
+    const target = hs.pc;
+    const there = new Set(onPc(target).map(choiceKey));
+    const q = hs.q.trim().toLowerCase();
+    const list = networkModels().filter(e => !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+    const thing = kind() === 'image' ? 'picture models' : 'chat models';
+    $('#hs-all-line').textContent = !hs.net ? 'Asking the linked PCs which models they have…'
+      : list.length ? `The ${thing} on your other PCs that ${pcName(target)} has not got. Copy one there, then hire on it.`
+      : `${pcName(target)} has every ${thing.slice(0, -1)} your linked PCs share${q ? ` that matches "${hs.q.trim()}"` : ''}.`;
+    keepButtons($('#hs-all'), list.map(allCard));
+  }
+
+  function allCard(e) {
+    const target = hs.pc;
+    const where = e.on.map(o => (o.pc && o.name) || pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
+    const route = routeTo(e, target);
+    const moving = hs.moving.get(e.key);
+    const btn = el('button', { class: 'btn', type: 'button', 'data-key': e.key, text: route.via ? `Copy to ${pcName(target)} (through this PC)` : `Copy to ${pcName(target)}`, disabled: !!route.why || !!moving, onclick: () => pull(e) });
+    return el('div', { class: 'pick-card hs-model hs-net' },
+      el('span', { class: 'hs-model-text' },
+        el('strong', { text: e.name }),
+        el('span', { class: 'hint', text: [e.bytes ? `file ${GBs(e.bytes)}` : '', `On ${where}`].filter(Boolean).join(' · ') }),
+        moving ? el('span', { class: 'hint', role: 'status', text: moving.said }) : route.why ? el('span', { class: 'hs-warn', text: `${route.why.charAt(0).toUpperCase()}${route.why.slice(1)}.` }) : null),
+      btn);
+  }
+
+  /** Buttons drawn again keep the keyboard on the same one. */
+  function keepButtons(box, kids) {
+    const was = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+    box.replaceChildren(...kids);
+    if (was) box.querySelector(`button[data-key="${CSS.escape(was)}"]`)?.focus();
+  }
+
+  /** Waits for a copy or a send to end, saying how far it is on the model's card. */
+  async function follow(e, id, words) {
+    for (;;) {
+      const t = (await api('/api/network/transfers').catch(() => null))?.transfers?.find(x => x.id === id);
+      if (!t) throw new Error('the copy is no longer listed: look in My local LLMs (Nodes and memory)');
+      if (t.state === 'done') return t;
+      if (t.state !== 'working') throw new Error(t.said || 'it stopped');
+      hs.moving.set(e.key, { said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
+      if (dlg.open) drawAllModels();
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  /** Copies a model to the PC picked: from a linked PC, from this PC, or from a linked PC through this one. */
+  async function pull(e) {
+    const target = hs.pc;
+    const k = kind();
+    const route = routeTo(e, target);
+    if (route.why) return;
+    hs.moving.set(e.key, { said: 'Starting…' });
+    drawAllModels();
+    try {
+      let local = route.from.pc ? null : route.from.model;
+      if (route.from.pc) {
+        const r = await api('/api/network/copy', { pc: route.from.pc, model: route.from.model, kind: k });
+        await follow(e, r.transfer.id, `Copying from ${route.from.name || pcName(route.from.pc)}`);
+        await loadNet();
+        local = hs.net?.mine.find(m => m.kind === k && keyOf(k, m.id) === e.key)?.id ?? null;
+      }
+      if (target) {
+        if (!local) throw new Error('it came to this PC but is not listed here yet: send it from My local LLMs');
+        const r = await api('/api/network/send', { pc: target, model: local, kind: k });
+        await follow(e, r.transfer.id, `Sending to ${pcName(target)}`);
+      }
+      hs.moving.delete(e.key);
+      await app.hireRedraw();
+      await loadNet();
+      // Picked for this hire, when it is on that PC's list now.
+      const c = onPc(target).find(x => choiceKey(x) === e.key);
+      if (c && hs.pc === target) {
+        pickModel(c.id);
+        drawModels();
+      }
+      fault('');
+    } catch (err) {
+      hs.moving.delete(e.key);
+      drawAllModels();
+      fault(`${e.name} was not copied to ${pcName(target)}: ${err.message}`);
+    }
+  }
+
   /** Cards drawn again keep the keyboard on the same card. */
   function keepCards(box, kids) {
     const was = document.activeElement && box.contains(document.activeElement) ? document.activeElement.value : null;
@@ -187,14 +312,18 @@
     keepCards($('#hs-pcs'), [pcCard(''), ...d().pcs.map(p => pcCard(p.id))]);
     $('#hs-pcs-block').hidden = !d().pcs.length;
     drawModels();
+    drawAllModels();
     drawLevel();
     fillName();
     drawSummary();
     for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === hs.role;
   }
 
-  /** Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). */
-  app.openHire = async ({ role = '', pc = '' } = {}) => {
+  /**
+   * Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). `page`: as the Staff page (Set
+   * up, Staff: hire and edit), with the Set up menu on the left; else a window over the page.
+   */
+  app.openHire = async ({ role = '', pc = '', page = false } = {}) => {
     try {
       team.data = await api('/api/staff');
     } catch (e) {
@@ -216,7 +345,17 @@
     drawRoles();
     drawLook();
     drawAll();
-    if (!dlg.open) dlg.showModal();
+    void loadNet();
+    if (page) app.showAsPage(dlg, 'staff');
+    else {
+      // Shown as the page before: back to a window of its own (closing it there goes back to where it was opened from).
+      if (dlg.classList.contains('as-page')) {
+        dlg.close();
+        dlg.classList.remove('as-page');
+        document.body.append(dlg);
+      }
+      if (!dlg.open) dlg.showModal();
+    }
     $('#hs-name').focus();
   };
   /** A model hidden, shown, deleted or got: the cards are read again while the window is open. */
@@ -242,6 +381,7 @@
   $('#hs-search').addEventListener('input', e => {
     hs.q = e.target.value;
     drawModels();
+    drawAllModels();
     drawSummary();
   });
   $('#hs-random').addEventListener('click', () => {
@@ -253,6 +393,11 @@
   });
   $('#hs-cancel').addEventListener('click', () => dlg.close());
   $('#hs-close').addEventListener('click', () => dlg.close());
+  // Editing is on the Staff page: each person, with See all staff.
+  $('#hs-see-staff').addEventListener('click', () => {
+    dlg.close();
+    $('#team-open').click();
+  });
   $('#hs-form').addEventListener('submit', async e => {
     e.preventDefault();
     const go = $('#hs-go');

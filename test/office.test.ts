@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, phasesByWho, purseOf, SHOP, shopView, undoAward, winnerOf } from '../src/home.ts';
+import { awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, LOUNGE_SPOTS, phasesByWho, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Bought } from '../src/home.ts';
 import { ByStaff } from '../src/meter.ts';
 
 const at = (o: Partial<Parameters<typeof doingOf>[0]>) => doingOf({ state: 'on', away: false, remoteBusy: false, phase: null, picture: false, job: false, ...o });
@@ -144,21 +144,21 @@ test('tokens written are counted per hire per day, and a board covers only the d
 
 test('the office shop is paid from the tokens written: treats again and again, the gym once, never past the purse', () => {
   const now = new Date(2026, 9, 9, 21);
-  assert.deepEqual(SHOP.map(i => [i.id, i.price]), [['coffee', 2000], ['donuts', 5000], ['gym', 100000]]);
+  assert.deepEqual(SHOP.filter(i => ['coffee', 'donuts', 'gym'].includes(i.id)).map(i => [i.id, i.price]), [['coffee', 10_000], ['donuts', 25_000], ['gym', 500_000]]);
   // Too little: says the price and what there is, spends nothing.
-  const short = buy('gym', 99_999, [], now);
-  assert.ok('error' in short && /100,000/.test(short.error) && /99,999/.test(short.error), JSON.stringify(short));
+  const short = buy('gym', 499_999, [], now);
+  assert.ok('error' in short && /500,000/.test(short.error) && /499,999/.test(short.error), JSON.stringify(short));
   assert.ok('error' in buy('caviar', 1e9, [], now));
   let bought = cleanBought({});
   for (const item of ['coffee', 'coffee', 'donuts']) {
-    const r = buy(item, 10_000, bought, now);
+    const r = buy(item, 50_000, bought, now);
     assert.ok('bought' in r, item);
     bought = [...bought, r.bought];
   }
-  assert.deepEqual(purseOf(10_000, bought), { earned: 10_000, spent: 9_000, left: 1_000 });
-  // 1,000 left: no more coffee.
-  assert.ok('error' in buy('coffee', 10_000, bought, now));
-  const gym = buy('gym', 200_000, bought, now);
+  assert.deepEqual(purseOf(50_000, bought), { earned: 50_000, spent: 45_000, left: 5_000 });
+  // 5,000 left: no more coffee.
+  assert.ok('error' in buy('coffee', 50_000, bought, now));
+  const gym = buy('gym', 1_000_000, bought, now);
   assert.ok('bought' in gym);
   bought = [...bought, gym.bought];
   assert.equal(shopView(bought).find(i => i.id === 'gym')?.owned, true);
@@ -168,4 +168,107 @@ test('the office shop is paid from the tokens written: treats again and again, t
   // Kept as JSON and read back; junk is dropped; the purse never goes below 0.
   assert.deepEqual(cleanBought(JSON.parse(JSON.stringify({ bought: [...bought, { item: 'yacht', price: 1 }, null] }))), bought);
   assert.equal(purseOf(5, bought).left, 0);
+});
+
+/** Buys each of `items` in turn with plenty of tokens; the purchases kept. */
+function bought(...items: string[]): Bought[] {
+  let list: Bought[] = [];
+  for (const item of items) {
+    const r = buy(item, 1e9, list, new Date(2026, 9, 10, 12));
+    assert.ok('bought' in r, `${item}: ${'error' in r ? r.error : ''}`);
+    list = [...list, r.bought];
+  }
+  return list;
+}
+
+test('every office starts empty: no boardroom, nothing in the lounge, no deck chairs, the kitchen only to rest in', () => {
+  // Nothing bought (a new office, or one made before 2.0.50: nothing counts as owned already).
+  const none = roomsOf(cleanBought({}));
+  assert.deepEqual(none.boardroom, { table: false, chairs: 0, whiteboard: false });
+  assert.deepEqual(none.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: false });
+  assert.deepEqual(none.rest, ['coffee', 'vending', 'lunch']);
+  // Away staff (their PC's owner is using it) wait by the lounge window while the lounge is empty.
+  assert.deepEqual(none.away, ['window']);
+  assert.equal(none.deckchairs, 0);
+  // An office.json from before (awards only, or a gym bought) keeps what it had and nothing more.
+  const old = roomsOf(cleanBought({ awards: [], bought: [{ item: 'gym', price: 100_000, at: '2026-10-09' }, { item: 'coffee', price: 2000, at: '2026-10-09' }] }));
+  assert.equal(old.boardroom.table, false);
+  assert.deepEqual(old.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: true });
+  assert.deepEqual(old.rest, ['coffee', 'vending', 'lunch', 'treadmill', 'weights']);
+  assert.deepEqual(old.away, ['treadmill', 'weights']);
+});
+
+test('what each room offers with some and with all of it bought', () => {
+  // Some: a table and one pair of chairs; the armchair.
+  const some = roomsOf(bought('table', 'chairs', 'armchair'));
+  assert.deepEqual(some.boardroom, { table: true, chairs: 2, whiteboard: false });
+  assert.deepEqual(some.rest, ['coffee', 'vending', 'lunch', 'nap']);
+  assert.deepEqual(some.away, ['nap']);
+  // All: three pairs (six chairs), the whiteboard, every lounge piece, the gym, six deck chairs.
+  const all = roomsOf(bought('table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', ...Array(6).fill('deckchair')));
+  assert.deepEqual(all.boardroom, { table: true, chairs: 6, whiteboard: true });
+  assert.deepEqual(all.lounge, { armchair: true, bookcase: true, sofa: true, tv: true, gym: true });
+  assert.deepEqual([...all.rest].sort(), ['chat', 'coffee', 'library', 'lunch', 'nap', 'treadmill', 'tv', 'vending', 'weights']);
+  assert.ok(!all.away.includes('window'));
+  assert.equal(all.deckchairs, 6);
+  // Every lounge place the page draws needs a piece the shop sells.
+  for (const [spot, item] of Object.entries(LOUNGE_SPOTS)) assert.ok(SHOP.some(i => i.id === item && i.room === 'lounge'), spot);
+});
+
+test('furniture is bought once (chairs a pair at a time to six, deck chairs to six), the chairs after the table, never past the purse', () => {
+  const now = new Date(2026, 9, 10, 12);
+  // Twice: refused, with where it stands.
+  const twice = buy('table', 1e9, bought('table'), now);
+  assert.ok('error' in twice && /already/.test(twice.error) && /boardroom/.test(twice.error), JSON.stringify(twice));
+  const tv = buy('tv', 1e9, bought('tv'), now);
+  assert.ok('error' in tv && /the TV already/.test(tv.error), JSON.stringify(tv));
+  // Chairs before the table: refused, and it says to buy the table first.
+  const early = buy('chairs', 1e9, [], now);
+  assert.ok('error' in early && /table first/.test(early.error), JSON.stringify(early));
+  // A fourth pair: refused (six round the table).
+  const fourth = buy('chairs', 1e9, bought('table', 'chairs', 'chairs', 'chairs'), now);
+  assert.ok('error' in fourth && /six chairs/.test(fourth.error), JSON.stringify(fourth));
+  const seventh = buy('deckchair', 1e9, bought(...Array(6).fill('deckchair')), now);
+  assert.ok('error' in seventh && /6 deck chairs/.test(seventh.error), JSON.stringify(seventh));
+  // Short of tokens: refused with the price and what there is.
+  const short = buy('sofa', 59_999, [], now);
+  assert.ok('error' in short && /60,000/.test(short.error) && /59,999/.test(short.error), JSON.stringify(short));
+  // The shop's view: how many, all bought, waiting for the table.
+  const view = shopView(bought('table', 'chairs'));
+  assert.deepEqual(view.find(i => i.id === 'chairs'), { ...SHOP.find(i => i.id === 'chairs'), have: 1, owned: false, waits: false });
+  assert.equal(view.find(i => i.id === 'table')?.owned, true);
+  assert.equal(shopView([]).find(i => i.id === 'chairs')?.waits, true);
+  // Each piece is paid for: the purse goes down by its price.
+  assert.equal(purseOf(200_000, bought('table', 'chairs', 'whiteboard')).left, 200_000 - 75_000 - 25_000 - 40_000);
+});
+
+test('furniture kept on the list for good, however many treats are bought after it', () => {
+  const list = [...bought('table', 'deckchair'), ...Array.from({ length: 1200 }, (_, i) => ({ item: 'coffee' as const, price: 10_000, at: String(i) }))];
+  const kept = cleanBought({ bought: list });
+  assert.equal(kept.filter(b => b.item === 'coffee').length, 1000);
+  assert.equal(roomsOf(kept).boardroom.table, true);
+  assert.equal(roomsOf(kept).deckchairs, 1);
+});
+
+test('the office page reads what is bought from the server, and says On a break and PC off apart', async () => {
+  const js = await readFile(new URL('../public/office.js', import.meta.url), 'utf8');
+  // Drawn from `rooms` (GET /api/office), not from a first-start flag.
+  assert.match(js, /d\.rooms/);
+  assert.doesNotMatch(js, /firstStart|first_start/);
+  // A long think needs the table: without it they stay at the desk.
+  assert.match(js, /\(s\.doing === 'thinking' && \(!longThink \|\| !table\)\)/);
+  // The two beach states have their own words and marks.
+  assert.match(js, /'On a break'/);
+  assert.match(js, /'PC off'/);
+  assert.match(js, /powerMark/);
+  assert.match(js, /cupMark/);
+  // The picture menu: its headings, and how tokens are earned said truly (not "completed work").
+  for (const words of ['Look after the team', 'Treat the team', 'Improve the office', 'Gain tokens from work done']) assert.ok(js.includes(words), words);
+  assert.doesNotMatch(js, /completed work/i);
+  // Coffee is delivered to each of them by a courier (no cart outside to walk to); the menu's words sit at its foot.
+  assert.match(js, /kind: 'coffee', who:/);
+  assert.doesNotMatch(js, /coffee cart|CART_SPOTS/);
+  assert.match(js, /shopTiles, fullSaid\)/);
+  // Every lounge place the server names is a REST spot on the page (and the window).
+  for (const spot of [...Object.keys(LOUNGE_SPOTS), 'window']) assert.match(js, new RegExp(`id: '${spot}'`), spot);
 });

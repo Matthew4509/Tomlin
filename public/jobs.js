@@ -11,9 +11,12 @@ const STATUS_TEXT = { todo: 'to do', done: 'done', skipped: 'skipped' };
 /** The roles of a job's team, each with its three choices: assigned, not assigned, default. */
 const ROLE_SEATS = [['coder', 'Coder'], ['writer', 'Writer'], ['audit', 'Auditing']];
 
-function jobFault(message) {
+function jobFault(message, data) {
   const f = $('#jobs-fault');
   f.textContent = message ?? '';
+  // Another job is running: a way to it (its Stop is there), unless it is the one open now.
+  const other = data?.running?.jobId;
+  if (message && other && other !== jobUi.job?.id) f.append(' ', el('button', { class: 'btn', type: 'button', text: 'Open that job', onclick: () => { jobFault(''); openJob(other); } }));
   f.hidden = !message;
   if (message) f.scrollIntoView({ block: 'nearest' });
 }
@@ -197,7 +200,7 @@ async function hideJob() {
     await loadJobs();
     if (typeof refresh === 'function') refresh();
   } catch (e) {
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
 }
 $('#job-hide').addEventListener('click', hideJob);
@@ -215,7 +218,7 @@ $('#job-delete').addEventListener('click', async () => {
     await loadJobs();
     if (typeof refresh === 'function') refresh();
   } catch (e) {
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
 });
 
@@ -238,7 +241,7 @@ async function openJob(id, show = 'overview') {
     $('#job-log').replaceChildren();
     await loadJobs();
   } catch (e) {
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
 }
 
@@ -315,7 +318,7 @@ async function saveTeam(change) {
     said.textContent = 'Saved.';
   } catch (e) {
     said.textContent = '';
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
 }
 
@@ -576,7 +579,7 @@ function pictureStepButton(step, n) {
       $('#img-prompt').focus();
       app.imageNote?.(`Step ${n + 1} of the job, "${step.title}": its brief is in the box. Press Draw (connect the picture model first if it is not loaded). When it is drawn, open Jobs and press Mark done on step ${n + 1}.`);
     } catch (e) {
-      jobFault(e.message);
+      jobFault(e.message, e.data);
     }
   } }));
 }
@@ -595,7 +598,7 @@ async function change(body) {
     showJob(await api('/api/jobs/change', { id: jobUi.job.id, ...body }));
     await loadJobs();
   } catch (e) {
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
 }
 
@@ -630,7 +633,7 @@ $('#job-new-form').addEventListener('submit', async e => {
     $('#job-team-said').textContent = `Here is the plan from ${r.data.planner}: ${r.data.job.steps.length} steps, listed on the left. Press a step to read or change it, or LETS GO!!! to run them all.`;
     await loadJobs();
   } catch (err) {
-    jobFault(err.message);
+    jobFault(err.message, err.data);
   } finally {
     out.hidden = true;
     stage(null);
@@ -672,7 +675,7 @@ async function runStep() {
     if (jobUi.job?.id !== job.id) return;
     showResult(jobUi.job.steps[n], n, r.data, Math.round((performance.now() - t0) / 1000));
   } catch (err) {
-    jobFault(err.message);
+    jobFault(err.message, err.data);
   } finally {
     out.hidden = true;
     stage(null);
@@ -754,7 +757,7 @@ $('#job-ask-review').addEventListener('click', async () => {
     showReview(v.data);
   } catch (e) {
     out.replaceChildren();
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   } finally {
     stage(null);
     busyButtons(false);
@@ -823,7 +826,7 @@ $('#job-go').addEventListener('click', async () => {
     if (current) current.className = 'bad';
     // Another project is working: "busy: add to the queue".
     if (err.data?.queue && (await askHere($('#jobs-ask'), err.message, 'Add to the queue', 'Not now', false))) await app.queueJob?.(job, (text, bad) => (bad ? jobFault(text) : logLine(text, 'ok')));
-    else jobFault(err.message);
+    else jobFault(err.message, err.data);
   } finally {
     out.hidden = true;
     stage(null);
@@ -863,7 +866,7 @@ $('#job-test-run').addEventListener('click', async () => {
     showJob(r);
   } catch (e) {
     $('#job-test-out').replaceChildren();
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   } finally {
     busyButtons(false);
     showJob(jobUi.view);
@@ -882,7 +885,7 @@ $('#job-final').addEventListener('click', async () => {
     pre.textContent = r.data.text;
   } catch (e) {
     out.replaceChildren();
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   } finally {
     stage(null);
     busyButtons(false);
@@ -895,7 +898,7 @@ async function openJobs() {
   try {
     await Promise.all([loadJobs(), loadSetup()]);
   } catch (e) {
-    jobFault(e.message);
+    jobFault(e.message, e.data);
   }
   if (!jobUi.job) showPart('list');
   app.showAsPage(jobsDlg, 'jobs');

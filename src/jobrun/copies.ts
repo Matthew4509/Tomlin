@@ -225,9 +225,19 @@ export async function updatePc(b: Record<string, unknown>) {
     if (mine && sent !== mine) throw new Error(`this PC's folder changed after TOMLIN started here (its files are no longer build ${update.shortBuild(mine)}, the one that runs), so nothing was sent. Close TOMLIN on this PC and start it again, then press Update it.`);
     const before = h.up?.since ?? null;
     const push = (list: update.AppFile[]) => update.pushUpdate(w, { version: d.version, root: d.update.root, files: list, progress, signal, waiting: busy => progress({ wait: busy }) });
-    // A PC from before the TOMLIN name refuses "Start TOMLIN.cmd" (nothing is kept there yet): the same copy again, with
-    // the launcher under the name it takes.
-    const folder = await push(files).catch(e => (update.refusedNewNames(e) ? push(update.forOlderNode(files)) : Promise.reject(e)));
+    // An older PC refuses a copy that names a file it does not know (nothing is kept there yet): a PC from before
+    // 2.0.50 the welcome page, one from before the TOMLIN name "Start TOMLIN.cmd" too. The same copy again without
+    // them, or with the launcher under the name it takes (update.retryFor), until it is taken or refused for another reason.
+    const send = async (list: update.AppFile[], tries: number): Promise<string> => {
+      try {
+        return await push(list);
+      } catch (e) {
+        const again = tries > 0 ? update.retryFor(files, list, e) : null;
+        if (!again) throw e;
+        return send(again, tries - 1);
+      }
+    };
+    const folder = await send(files, 3);
     progress({ stage: 'check', wait: '' });
     // It ends and starts the new copy: asked again until it answers with the new version and the files sent (about 10 to
     // 30 seconds). Before it ends it still answers with the same version when only the files differ, so its build id

@@ -115,6 +115,24 @@ export function fitOf(need: number, hw: Hardware): { level: Level; where: ChatRo
   return { level: 'no', where };
 }
 
+/**
+ * Whether a model needing `need` bytes fits a PC's memory as a whole (not what is free now): its graphics cards' own
+ * memory (every card, `vram`) and its RAM together, as llama.cpp spreads a model over the cards and the RAM, with 3 GB
+ * of the RAM kept for Windows; "tight" when only the whole RAM as well holds it. null when the RAM or the need is not
+ * known. Hire staff marks the models on linked PCs with it, and moving someone to a PC refuses a model marked "no".
+ */
+export function ramFit(need: number, mem: { ram: number; vram: number }): Level | null {
+  if (!mem.ram || !need) return null;
+  return need <= mem.vram + Math.max(0, mem.ram - OS_RAM) ? 'ok' : need <= mem.vram + mem.ram ? 'tight' : 'no';
+}
+
+/** Why a move was refused: the model, what it needs, what that PC has, and what to do instead. */
+export function moveWontFit(model: string, need: number, pcWord: string, mem: { ram: number; vram: number }): string {
+  const gb = (n: number) => `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB`;
+  const card = mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : '';
+  return `Not moved: ${model} needs about ${gb(need)} of memory, and ${pcWord} has ${gb(mem.ram)} of RAM${card} (3 GB of it is kept for Windows). Pick a smaller model for them there, or move them to a PC with more memory.`;
+}
+
 /** Tokens a second for `read` bytes a word. `tested` is this PC's measured CPU speed (GB/s), when there is one. */
 export function speedOf(read: number, need: number, hw: Hardware, where: ChatRow['where'], tested?: number): { mid: number; low: number; high: number } {
   const g = read / GB;

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to TOMLIN</title>
+<meta name="description" content="What TOMLIN is, what it can do and what it needs, before you install it.">
+<!-- Opened from the unzipped folder, before installing: everything is in this file or in public/ beside it. Nothing is
+     loaded from the internet. The pictures are Help's screenshots (public/help-*.webp), taken on a test copy with
+     made-up staff, PCs and addresses. -->
+<style>
+  :root {
+    --bg: #f4f6f9; --panel: #ffffff; --ink: #1d232c; --ink-soft: #566173; --line: #dde2ea;
+    --accent: #2457d6; --accent-ink: #ffffff; --accent-soft: #eaf0ff; --good: #18734a;
+    --shadow: 0 1px 2px rgba(20, 30, 50, .05), 0 10px 30px rgba(20, 30, 50, .08);
+    --shot-shadow: 0 2px 6px rgba(20, 30, 50, .08), 0 24px 60px rgba(20, 30, 50, .14);
+    --radius: 20px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1220; --panel: #121b2c; --ink: #e8edf5; --ink-soft: #a3aec0; --line: #24304a;
+      --accent: #5b8cff; --accent-ink: #0b1220; --accent-soft: #1a2747; --good: #5fd39a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .3);
+      --shot-shadow: 0 2px 6px rgba(0, 0, 0, .35), 0 24px 60px rgba(0, 0, 0, .45);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1220; --panel: #121b2c; --ink: #e8edf5; --ink-soft: #a3aec0; --line: #24304a;
+    --accent: #5b8cff; --accent-ink: #0b1220; --accent-soft: #1a2747; --good: #5fd39a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .3);
+    --shot-shadow: 0 2px 6px rgba(0, 0, 0, .35), 0 24px 60px rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: var(--accent); }
+  .wrap { width: min(1160px, 100% - 32px); margin: 0 auto; }
+
+  /* Top bar */
+  .bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .bar .wrap { display: flex; align-items: center; gap: 16px; min-height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; letter-spacing: .02em; }
+  .brand svg { width: 32px; height: 32px; }
+  .bar nav { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+  .bar nav a { color: var(--ink-soft); text-decoration: none; font-size: 15px; }
+  .bar nav a:hover { color: var(--ink); }
+  .pill { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 22px; border-radius: 999px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid transparent; }
+  .pill.primary { background: var(--accent); color: var(--accent-ink); }
+  .pill.primary:hover { filter: brightness(1.08); }
+  .pill.outline { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  .pill.outline:hover { border-color: var(--ink-soft); }
+  .bar .pill { min-height: 38px; padding: 0 18px; }
+
+  /* Hero */
+  .hero { padding: 64px 0 40px; }
+  .hero .wrap { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; }
+  h1 { font-size: clamp(36px, 5.2vw, 60px); line-height: 1.05; letter-spacing: -.02em; margin: 0 0 20px; }
+  .lead { font-size: 18px; color: var(--ink-soft); margin: 0 0 28px; max-width: 34em; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 26px; }
+  .ticks { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 0; margin: 0; list-style: none; color: var(--ink-soft); font-size: 14px; }
+  .ticks li { display: flex; align-items: center; gap: 7px; }
+  .ticks svg { flex: none; width: 16px; height: 16px; color: var(--good); }
+  .shot { margin: 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shot-shadow); }
+  .shot.small { max-width: 520px; }
+
+  /* Sections */
+  section { padding: 56px 0; }
+  h2 { font-size: clamp(28px, 3.4vw, 38px); line-height: 1.15; letter-spacing: -.01em; margin: 0 0 12px; }
+  h3 { font-size: 19px; margin: 0 0 6px; }
+  .intro { color: var(--ink-soft); font-size: 18px; margin: 0 0 30px; max-width: 46em; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 22px 20px; box-shadow: var(--shadow); }
+  .card p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+  .card .mark { width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
+  .card .mark svg { width: 22px; height: 22px; }
+
+  .feature { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; padding: 34px 0; }
+  .feature.flip > .words { order: 2; }
+  .feature .words p { color: var(--ink-soft); margin: 0 0 14px; }
+  .facts { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; }
+  .facts li { padding-left: 26px; position: relative; color: var(--ink-soft); font-size: 15px; }
+  .facts li::before { content: ""; position: absolute; left: 4px; top: .55em; width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+  .facts b { color: var(--ink); }
+  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 18px; font-weight: 600; font-size: 15px; }
+  .chain span { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 6px 14px; }
+  .chain i { font-style: normal; color: var(--ink-soft); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 14px 10px; border-top: 1px solid var(--line); }
+  tr:first-child th, tr:first-child td { border-top: 0; }
+  th { width: 30%; font-weight: 600; }
+  td { color: var(--ink-soft); }
+  .sizes { margin-top: 18px; }
+  .sizes th, .sizes td { padding: 10px; }
+  .sizes thead th { color: var(--ink-soft); font-weight: 600; width: auto; }
+  .sizes tbody th { width: auto; }
+  .table-wrap { overflow-x: auto; }
+  .note { color: var(--ink-soft); font-size: 14px; margin: 14px 0 0; }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+  .steps li { counter-increment: step; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); color: var(--ink-soft); font-size: 15px; }
+  .steps li::before { content: counter(step); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 700; margin-bottom: 12px; }
+  .steps b { color: var(--ink); }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: .92em; background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; color: var(--ink); }
+
+  footer { padding: 34px 0 48px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 14px; }
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 900px) {
+    .hero .wrap, .feature { grid-template-columns: 1fr; gap: 28px; }
+    .feature.flip > .words { order: 0; }
+    .cards { grid-template-columns: 1fr 1fr; }
+    .steps { grid-template-columns: 1fr 1fr; }
+    .bar nav a:not(.pill) { display: none; }
+  }
+  @media (max-width: 560px) {
+    .cards, .steps { grid-template-columns: 1fr; }
+    .hero { padding-top: 36px; }
+    section { padding: 40px 0; }
+    th { width: 38%; }
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="TOMLIN, back to the top">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2457d6"/><path d="M8 10.5h16M16 10.5v12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="8" cy="10.5" r="3.2" fill="#fff"/><circle cx="24" cy="10.5" r="3.2" fill="#fff"/><circle cx="16" cy="23" r="3.2" fill="#fff"/><circle cx="16" cy="10.5" r="1.6" fill="#fff"/></svg>
+      TOMLIN
+    </a>
+    <nav aria-label="On this page">
+      <a href="#why">Why</a>
+      <a href="#features">Features</a>
+      <a href="#screens">Screenshots</a>
+      <a href="#needs">Requirements</a>
+      <a class="pill primary" href="#install">How to install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div class="wrap">
+      <div>
+        <h1>Your own AI team, on the PCs you already have.</h1>
+        <p class="lead">TOMLIN runs chat and picture models on your own computers. Hire staff, give each one a role, a model and a PC, and watch them write, code and draw for your projects in a little office of their own.</p>
+        <div class="actions">
+          <a class="pill primary" href="#install">How to install</a>
+          <a class="pill outline" href="#screens">See it working</a>
+        </div>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Runs on your own PCs</li>
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>No account to make</li>
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Free for personal use</li>
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>A graphics card is optional</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="public/help-office.webp" width="1080" height="752" alt="TOMLIN's office: little people at their desks typing and drawing, one thinking at the boardroom table, with a shop beside it to furnish the office"></figure>
+    </div>
+  </div>
+
+  <section id="why">
+    <div class="wrap">
+      <h2>Why use TOMLIN</h2>
+      <p class="intro">A chat box answers one question at a time. TOMLIN gives you a team that works on your PCs, keeps its work in your folders, and stays yours.</p>
+      <div class="cards">
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div><h3>Yours, on your PCs</h3><p>Chats, staff and files stay on your computers. Nothing goes to an outside service except what you start yourself, such as downloading a model.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.6-3 3-4.8 5.5-4.8s4.9 1.8 5.5 4.8M14.5 15.2c2.6-.5 5.4.9 6 3.8"/></svg></div><h3>Staff, not a chat box</h3><p>A coder, a writer, an artist, a project manager: each with a level, a look and the model that suits the job.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><h3>Uses what you have</h3><p>It runs on the processor first and uses a graphics chip when there is one. An old laptop can run the small models.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/></svg></div><h3>All your PCs as one</h3><p>Link the other PCs in your home and spread the team across them. Each PC does its own work, side by side.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h6l2 2h8v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></svg></div><h3>Work that is kept</h3><p>Projects, saved code, notes, snippets and prompts, in folders you can open. Git and a built-in audit for your sites.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 7.9 8 9 4.6-1.1 8-4.6 8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></div><h3>Backups across your PCs</h3><p>Your other PCs can keep copies of your projects and restore points, over your home network, with no internet needed.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What it can do</h2>
+      <p class="intro">Start with one PC. When that works, add the others.</p>
+
+      <div class="feature">
+        <div class="words">
+          <h3>Hire staff for the job</h3>
+          <div class="chain" aria-label="A hire ties the specialist to the software to the hardware"><span>The specialist</span><i aria-hidden="true">→</i><span>The software</span><i aria-hidden="true">→</i><span>The hardware</span></div>
+          <p>Every hire ties three things together: who they are (a role and a level), the model they think with, and the PC that model runs on. Hire staff shows the memory each model needs, and says when one is a tight fit.</p>
+          <ul class="facts">
+            <li><b>Six roles</b>: Default, Coder, Writer, Project manager, Graphic designer and Artist.</li>
+            <li><b>All models</b> lists the models your other PCs have, with a button to copy one across.</li>
+          </ul>
+        </div>
+        <figure class="shot"><img src="public/help-hire.webp" width="1000" height="690" loading="lazy" alt="Hire staff: a profile and the roles on the left; Assign a PC, Choose a model and All models on the right"></figure>
+      </div>
+
+      <div class="feature flip">
+        <div class="words">
+          <h3>Chat, and keep what they make</h3>
+          <p>Talk to any of your staff. Put a chat in a project and its work goes into that project's folder: <b>Save</b> on a block of code puts it in a file.</p>
+          <ul class="facts">
+            <li><b>Subjects</b> keep each piece of work with a person apart.</li>
+            <li><b>Scratch pad, snippets and prompts</b> are the same in every chat, and no model reads them.</li>
+            <li><b>Quick or Think</b>: answer straight away, or work it out first.</li>
+          </ul>
+        </div>
+        <figure class="shot"><img src="public/help-chat-save.webp" width="704" height="528" loading="lazy" alt="A chat: a question to Maya and her answer with a code block that has Save in its corner"></figure>
+      </div>
+
+      <div class="feature">
+        <div class="words">
+          <h3>Link the other PCs in your home</h3>
+          <p>On another PC, tick <b>Enable this PC as a node</b>. On yours, <b>Find PCs on my network</b> and type its setup code. The link is encrypted, and the other PC keeps no history of the work beyond token counts and an answer you have not collected yet.</p>
+          <ul class="facts">
+            <li><b>The PC's owner stays in charge</b>: each linked PC has its own app lock, and its owner decides what linked PCs may do there.</li>
+            <li><b>Backups only</b>: a PC that keeps backups and takes no other work.</li>
+          </ul>
+        </div>
+        <figure class="shot"><img src="public/help-linked.webp" width="1003" height="630" loading="lazy" alt="Two linked PCs: Worker PC with its memory and the models it lets this PC use, and Backup PC kept for backups only"></figure>
+      </div>
+
+      <div class="feature flip">
+        <div class="words">
+          <h3>Move staff to where the memory is</h3>
+          <p>Drag someone onto another PC's desk. TOMLIN offers only the models that fit that PC's memory, says why the others are left out, and can send their own model over first.</p>
+        </div>
+        <figure class="shot small"><img src="public/help-move.webp" width="480" height="354" loading="lazy" alt="Move Maya to Worker PC: a model too big for that PC is not offered, and the window says it needs about 27 GB while the PC has 16 GB"></figure>
+      </div>
+
+      <div class="feature">
+        <div class="words">
+          <h3>Download a model once</h3>
+          <p>Models are big. <b>My local LLMs</b> lists every model your linked PCs share, and copies one across your home network instead of downloading it again. A copy cut short carries on where it stopped.</p>
+        </div>
+        <figure class="shot"><img src="public/help-llms.webp" width="860" height="720" loading="lazy" alt="My local LLMs: models shared by linked PCs, some already on this PC and some with Get a copy from Worker PC; restore points on linked PCs below"></figure>
+      </div>
+
+      <div class="feature flip">
+        <div class="words">
+          <h3>Your projects, with git</h3>
+          <p>The Bridge lists your project folders with their git state, runs a local copy, checks a site you host, and runs a built-in audit before you publish. It catches common faults, not everything.</p>
+          <ul class="facts">
+            <li><b>The exact git commands</b> to copy, for each project's state.</li>
+            <li><b>Copies on your other PCs</b> every 10 minutes when a project changed.</li>
+          </ul>
+        </div>
+        <figure class="shot"><img src="public/help-git.webp" width="1180" height="755" loading="lazy" alt="A project's git and backups window: its git state, See what changed, the commands to copy, and Copy this project to my other PCs"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="wrap">
+      <h2>Screenshots</h2>
+      <p class="intro">Taken on a test copy with made-up staff, PCs and addresses. Help, inside TOMLIN, has these and more, step by step.</p>
+      <div class="cards">
+        <figure class="shot"><img src="public/help-models.webp" width="742" height="640" loading="lazy" alt="The Models page: search, then models with Download or On this PC"></figure>
+        <figure class="shot"><img src="public/help-node.webp" width="1003" height="680" loading="lazy" alt="Nodes and memory on a node: its name, setup code, shared models and sharing permissions"></figure>
+        <figure class="shot"><img src="public/help-scan.webp" width="1003" height="398" loading="lazy" alt="Find PCs on my network: two PCs found, each with a box for its setup code"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="needs">
+    <div class="wrap">
+      <h2>What it needs</h2>
+      <p class="intro">A Windows PC is enough to start. More memory runs bigger, smarter models.</p>
+      <div class="panel">
+        <table>
+          <tr><th scope="row">Windows</th><td>64-bit Windows (tested on Windows 11).</td></tr>
+          <tr><th scope="row">Nothing else to install</th><td>The zip carries its own Node.js and the model runners for the processor and for any graphics chip. The runners need Microsoft's Visual C++ Runtime: most PCs have it, and Install TOMLIN.cmd offers it when it is missing.</td></tr>
+          <tr><th scope="row">Memory (RAM)</th><td>It depends on the model; see the table below. TOMLIN works out what each model needs and keeps 3 GB for Windows.</td></tr>
+          <tr><th scope="row">A graphics card</th><td>Optional. Chat runs on the processor first; a graphics card makes it faster. A picture takes about 3 minutes on a laptop's processor and about 50 seconds on its built-in graphics chip (an Intel HD 520, 512 px, 4 steps).</td></tr>
+          <tr><th scope="row">Disk</th><td>Room for TOMLIN and for the models you download: from 0.5 GB for the smallest chat model to 22 GB for the biggest below.</td></tr>
+          <tr><th scope="row">Internet</th><td>Only to download models. Linking your PCs uses your home network.</td></tr>
+        </table>
+      </div>
+      <div class="panel sizes">
+        <div class="table-wrap"><table>
+          <thead><tr><th scope="col">Chat model</th><th scope="col">Download</th><th scope="col">Memory it needs</th><th scope="col">Runs on a PC with</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Qwen 3.5 0.8B: fastest</th><td>0.5 GB</td><td>about 1.5 GB</td><td>8 GB of RAM</td></tr>
+            <tr><th scope="row">Qwen 3.5 2B</th><td>1.2 GB</td><td>about 2.4 GB</td><td>8 GB of RAM</td></tr>
+            <tr><th scope="row">Gemma 2 2B</th><td>1.6 GB</td><td>about 2.9 GB</td><td>8 GB of RAM</td></tr>
+            <tr><th scope="row">Qwen 3.5 9B: balanced</th><td>5.7 GB</td><td>about 8.3 GB</td><td>16 GB of RAM</td></tr>
+            <tr><th scope="row">Qwen 3.5 35B-A3B: best answers</th><td>22 GB</td><td>about 27 GB</td><td>32 GB of RAM</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">"Memory it needs" is the model's file, its working memory for an 8K-token context (about 6,000 words) and the runner, as TOMLIN works it out; a model also fits when a graphics card's own memory holds it. Measured: Qwen 3.5 0.8B wrote 17.7 tokens a second on an Intel HD 520 laptop, and Qwen 3.5 35B-A3B 5.2 tokens a second on a 32 GB desktop with no graphics card. A token is about three quarters of a word. Inside TOMLIN, <b>What can my PC run?</b> works it out for your own PC.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>How to install</h2>
+      <p class="intro">You are already halfway there: this page came out of the zip.</p>
+      <ol class="steps">
+        <li><b>Unzip</b> the whole folder somewhere you keep programs (not inside the zip itself).</li>
+        <li>Double-click <b>Install TOMLIN.cmd</b>. It asks first, needs no administrator, and adds TOMLIN to the Start menu and Settings &gt; Apps.</li>
+        <li>Windows may warn the first time: press <b>More info</b>, then <b>Run anyway</b>. The installer is not signed.</li>
+        <li>TOMLIN starts, with an icon by the clock that opens it. <b>Add a model</b>, then <b>Hire staff</b>. Help, at the top right, takes you step by step.</li>
+      </ol>
+      <p class="note">Rather not install? <b>Start TOMLIN.cmd</b> runs it from this folder; closing its command window stops TOMLIN and every model it loaded.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><b>TOMLIN</b> is free for personal use, hobby projects, study, charities, schools, public research and government, under the PolyForm Noncommercial licence 1.0.0 (see <code>LICENSE</code> in this folder). A business using it, selling it or building it into a paid product needs the copyright holder's permission first.</p>
+    <p>It comes as is, with no warranty: keep your own backups. Models are not ours: you download each one yourself, and each has its own licence. Check them.</p>
+  </div>
+</footer>
+
+</body>
+</html>

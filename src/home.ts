@@ -188,7 +188,7 @@ export function activityOf(o: { state: State; busy: boolean; away: boolean }): A
  */
 export type Doing = 'off' | 'owner' | 'nodesk' | 'arriving' | 'waiting' | 'researching' | 'thinking' | 'typing' | 'drawing' | 'working' | 'resting';
 export const DOING_WORDS: Record<Doing, string> = {
-  off: 'On holiday: their PC is off',
+  off: 'PC off: on holiday at the beach',
   owner: "Away: their PC's owner is using it",
   nodesk: 'No desk yet: no model given',
   arriving: 'Getting ready: their model is loading',
@@ -287,17 +287,34 @@ export function undoAward(awards: Award[], month: string): { awards: Award[]; un
 
 /**
  * The office's reward shop (public/office.js): the team's tokens written are its money. A coffee round and a box of
- * donuts are treats (bought again and again); the gym equipment stays in the lounge once bought.
+ * donuts are treats (bought again and again). Everything else is kept once bought: the boardroom and the lounge start
+ * empty in every office and are furnished piece by piece (the boardroom chairs a pair at a time, up to the six round
+ * the table), the gym, and the beach's deck chairs (a chair and its umbrella at a time, up to six). `most`: how many
+ * can be bought (0 = no end); `needs`: bought only after that one; `the`: its name in a sentence. Set so both rooms
+ * take about 9 hours of nonstop writing at 13 tokens a second (a 35B model on a 5 GB card).
  */
-export const SHOP = [
-  { id: 'coffee', name: 'Coffee round', price: 2_000, keeps: false },
-  { id: 'donuts', name: 'Box of donuts', price: 5_000, keeps: false },
-  { id: 'gym', name: 'Gym equipment', price: 100_000, keeps: true },
-] as const;
-export type ShopId = (typeof SHOP)[number]['id'];
+export type ShopId = 'coffee' | 'donuts' | 'table' | 'chairs' | 'whiteboard' | 'armchair' | 'bookcase' | 'sofa' | 'tv' | 'gym' | 'deckchair';
+export type ShopRoom = 'treats' | 'boardroom' | 'lounge' | 'beach';
+export interface ShopItem { id: ShopId; name: string; the: string; price: number; keeps: boolean; most: number; room: ShopRoom; needs?: ShopId }
+export const SHOP: readonly ShopItem[] = [
+  { id: 'coffee', name: 'Coffee round', the: 'the coffee round', price: 10_000, keeps: false, most: 0, room: 'treats' },
+  { id: 'donuts', name: 'Box of donuts', the: 'the box of donuts', price: 25_000, keeps: false, most: 0, room: 'treats' },
+  { id: 'table', name: 'Boardroom table', the: 'the boardroom table', price: 75_000, keeps: true, most: 1, room: 'boardroom' },
+  { id: 'chairs', name: 'Pair of boardroom chairs', the: 'a pair of boardroom chairs', price: 25_000, keeps: true, most: 3, room: 'boardroom', needs: 'table' },
+  { id: 'whiteboard', name: 'Whiteboard', the: 'the whiteboard', price: 40_000, keeps: true, most: 1, room: 'boardroom' },
+  { id: 'armchair', name: 'Armchair', the: 'the armchair', price: 30_000, keeps: true, most: 1, room: 'lounge' },
+  { id: 'bookcase', name: 'Bookcase', the: 'the bookcase', price: 50_000, keeps: true, most: 1, room: 'lounge' },
+  { id: 'sofa', name: 'Sofa', the: 'the sofa', price: 60_000, keeps: true, most: 1, room: 'lounge' },
+  { id: 'tv', name: 'TV', the: 'the TV', price: 75_000, keeps: true, most: 1, room: 'lounge' },
+  { id: 'gym', name: 'Gym equipment', the: 'the gym equipment', price: 500_000, keeps: true, most: 1, room: 'lounge' },
+  { id: 'deckchair', name: 'Deck chair and umbrella', the: 'a deck chair and umbrella', price: 50_000, keeps: true, most: 6, room: 'beach' },
+];
 /** One purchase: what, what it cost then, when. */
 export interface Bought { item: ShopId; price: number; at: string }
-/** Purchases as kept (data/office.json, beside the awards): oldest first, the last 1000. */
+/**
+ * Purchases as kept (data/office.json, beside the awards): oldest first. Every piece kept (furniture, the gym, deck
+ * chairs) stays on the list for good; of the treats, the last 1000.
+ */
 export function cleanBought(raw: unknown): Bought[] {
   const list = Array.isArray((raw as { bought?: unknown })?.bought) ? (raw as { bought: unknown[] }).bought : [];
   const out: Bought[] = [];
@@ -306,7 +323,10 @@ export function cleanBought(raw: unknown): Bought[] {
     if (!SHOP.some(i => i.id === r.item)) continue;
     out.push({ item: r.item as ShopId, price: Math.max(0, Math.round(Number(r.price) || 0)), at: String(r.at ?? '').slice(0, 40) });
   }
-  return out.slice(-1000);
+  const kept = (b: Bought) => !!SHOP.find(i => i.id === b.item)?.keeps;
+  const treats = out.filter(b => !kept(b));
+  const drop = new Set(treats.slice(0, Math.max(0, treats.length - 1000)));
+  return out.filter(b => !drop.has(b));
 }
 /** The team's purse: every token its hires ever wrote, less what was spent. */
 export function purseOf(earned: number, bought: Bought[]): { earned: number; spent: number; left: number } {
@@ -314,18 +334,56 @@ export function purseOf(earned: number, bought: Bought[]): { earned: number; spe
   const e = Math.max(0, Math.round(earned) || 0);
   return { earned: e, spent, left: Math.max(0, e - spent) };
 }
-/** The shop's items with whether each is owned already (only the gym can be). */
-export const shopView = (bought: Bought[]) => SHOP.map(i => ({ ...i, owned: i.keeps && bought.some(b => b.item === i.id) }));
-/** Buying `item`: the purchase to keep, or why not (unknown, owned already, not enough tokens). */
+const countOf = (bought: Bought[], id: ShopId) => bought.filter(b => b.item === id).length;
+/**
+ * The shop's items with how many are bought (`have`), whether no more can be (`owned`), and whether the piece it
+ * needs is still to buy (`waits`: the chairs before the table).
+ */
+export const shopView = (bought: Bought[]) => SHOP.map(i => {
+  const have = i.keeps ? countOf(bought, i.id) : 0;
+  return { ...i, have, owned: i.keeps && have >= i.most, waits: !!i.needs && !countOf(bought, i.needs) };
+});
+/** Where a kept piece stands, for "it stays in the lounge". */
+const PLACE: Record<ShopRoom, string> = { treats: 'the kitchen', boardroom: 'the boardroom', lounge: 'the lounge', beach: 'on the beach' };
+/** Buying `item`: the purchase to keep, or why not (unknown, all bought already, its table first, not enough tokens). */
 export function buy(item: unknown, earned: number, bought: Bought[], now = new Date()): { bought: Bought } | { error: string } {
   const i = SHOP.find(x => x.id === item);
-  if (!i) return { error: 'That is not in the office shop. Pick a coffee round, donuts or the gym equipment.' };
-  if (i.keeps && bought.some(b => b.item === i.id)) return { error: `The office has the ${i.name.toLowerCase()} already: it stays in the lounge.` };
+  if (!i) return { error: 'That is not in the office shop. Pick something from the shop above the office.' };
+  const have = countOf(bought, i.id);
+  if (i.keeps && have >= i.most) {
+    if (i.id === 'chairs') return { error: 'The boardroom has all six chairs already: there is no room round the table for more.' };
+    if (i.id === 'deckchair') return { error: `The beach has all ${i.most} deck chairs already: there is no room on the sand for more.` };
+    return { error: `The office has ${i.the} already: it stays in ${PLACE[i.room]}.` };
+  }
+  const needs = i.needs ? SHOP.find(x => x.id === i.needs) : null;
+  if (needs && !countOf(bought, needs.id)) return { error: `Buy ${needs.the} first: the chairs go round it.` };
   const left = purseOf(earned, bought).left;
   const n = (x: number) => x.toLocaleString('en-GB');
-  if (left < i.price) return { error: `Not enough tokens yet: the ${i.name.toLowerCase()} costs ${n(i.price)} and the team has ${n(left)} to spend. Every token your staff write adds to it, so talk to them and come back.` };
+  if (left < i.price) return { error: `Not enough tokens yet: ${i.the} costs ${n(i.price)} and the team has ${n(left)} to spend. Every token your staff write adds to it, so talk to them and come back.` };
   return { bought: { item: i.id, price: i.price, at: now.toISOString() } };
 }
+
+/** The lounge's places to rest (public/office.js REST ids) and the piece each needs. */
+export const LOUNGE_SPOTS: Record<string, ShopId> = { nap: 'armchair', library: 'bookcase', chat: 'sofa', tv: 'tv', treadmill: 'gym', weights: 'gym' };
+/**
+ * What each room offers with what is bought (sent with GET /api/office; public/office.js draws and walks by it).
+ * Boardroom: no table = no room to think in (a long think stays at the desk); `chairs` seats (a pair per purchase),
+ * the thinkers sit first and each chair left over seats a helper. `rest`: every place to rest open now (the kitchen's
+ * always; the lounge's by its furniture). `away`: where staff whose PC's owner is using it wait: the lounge's places,
+ * or the lounge window while it is empty. `deckchairs`: places on the beach for a break.
+ */
+export function roomsOf(bought: Bought[]) {
+  const has = (id: ShopId) => countOf(bought, id) > 0;
+  const lounge = Object.entries(LOUNGE_SPOTS).filter(([, id]) => has(id)).map(([spot]) => spot);
+  return {
+    boardroom: { table: has('table'), chairs: Math.min(3, countOf(bought, 'chairs')) * 2, whiteboard: has('whiteboard') },
+    lounge: { armchair: has('armchair'), bookcase: has('bookcase'), sofa: has('sofa'), tv: has('tv'), gym: has('gym') },
+    rest: ['coffee', 'vending', 'lunch', ...lounge],
+    away: lounge.length ? lounge : ['window'],
+    deckchairs: Math.min(6, countOf(bought, 'deckchair')),
+  };
+}
+export type Rooms = ReturnType<typeof roomsOf>;
 
 /**
  * A paired worker PC: On (a model loaded), Asleep (answers, no model loaded), Off (does not answer), or Not linked (it

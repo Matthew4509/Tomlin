@@ -82,7 +82,7 @@ app.drawChats = drawChats;
 // ---- The left panel, under Projects: pinned chats (they stay), then the 5 newest others in "Recent chats" ----
 
 const RAIL_RECENT_SHOWN = 5;
-const PIN_RAIL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3z"/><path d="M12 14v6"/></svg>';
+const MORE_RAIL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 function drawRecent() {
   const inChat = homeUi.view === 'chat';
   const row = c => {
@@ -90,10 +90,14 @@ function drawRecent() {
       app.avatar(c.who, c.avatar),
       el('span', { class: 'rail-text' }, el('span', { class: 'rail-name', text: c.title }), el('span', { class: 'rail-sub', text: c.name })));
     b.addEventListener('click', () => openChat(c.id));
-    const pin = el('button', { class: `rail-edit rail-pin${c.pinned ? ' on' : ''}`, type: 'button', 'aria-pressed': String(!!c.pinned), title: c.pinned ? `Unpin "${c.title}"` : `Pin "${c.title}" under Projects`, 'aria-label': c.pinned ? `Unpin the chat ${c.title}` : `Pin the chat ${c.title}` });
-    pin.innerHTML = PIN_RAIL_ICON;
-    pin.addEventListener('click', () => pinChat(c, !c.pinned));
-    return el('li', { class: 'rail-staff-item' }, b, pin);
+    // The … beside a chat: Pin or Unpin, and Delete (the same window as the chat's own menu).
+    const more = el('button', { class: 'rail-edit rail-more', type: 'button', title: `"${c.title}": pin, unpin or delete`, 'aria-label': `More for the chat ${c.title}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
+    more.innerHTML = MORE_RAIL_ICON;
+    more.addEventListener('click', () => railMenu(more, [
+      [c.pinned ? 'Unpin' : 'Pin under Projects', () => pinChat(c, !c.pinned)],
+      ['Delete…', () => askDelete(c), true],
+    ]));
+    return el('li', { class: 'rail-staff-item' }, b, more);
   };
   const pinned = chatUi.list.filter(c => c.pinned);
   const recent = chatUi.list.filter(c => !c.pinned).slice(0, RAIL_RECENT_SHOWN);
@@ -102,6 +106,51 @@ function drawRecent() {
   keepFocus($('#rail-recent'), recent.length ? recent.map(row) : [el('li', { class: 'rail-empty hint', text: pinned.length ? 'Every chat is pinned above.' : 'No chats yet.' })]);
   $('#rail-recent-all').hidden = chatUi.list.length <= pinned.length + recent.length;
 }
+/** A small menu under a … button: [words, what it does, danger] rows; Escape or a press elsewhere closes it. */
+let railMenuOpen = null;
+function railMenu(button, rows) {
+  const was = railMenuOpen;
+  railMenuOpen?.close();
+  if (was?.button === button) return;
+  const menu = el('div', { class: 'rail-menu', role: 'menu' }, ...rows.map(([text, go, danger]) => el('button', { class: `rail-menu-item${danger ? ' danger' : ''}`, type: 'button', role: 'menuitem', text, onclick: () => {
+    close();
+    go();
+  } })));
+  const r = button.getBoundingClientRect();
+  menu.style.top = `${Math.round(r.bottom + 4)}px`;
+  menu.style.left = `${Math.round(Math.max(8, r.right - 180))}px`;
+  const away = e => {
+    if (!menu.contains(e.target) && e.target !== button && !button.contains(e.target)) close();
+  };
+  const key = e => {
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+      close();
+      button.focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+    } else if (e.key === 'Tab') close();
+  };
+  function close() {
+    menu.remove();
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', away, true);
+    document.removeEventListener('keydown', key, true);
+    if (railMenuOpen?.menu === menu) railMenuOpen = null;
+  }
+  document.body.append(menu);
+  // Kept inside the window at the foot of the screen.
+  const h = menu.getBoundingClientRect().height;
+  if (r.bottom + 4 + h > innerHeight - 8) menu.style.top = `${Math.round(Math.max(8, r.top - h - 4))}px`;
+  button.setAttribute('aria-expanded', 'true');
+  document.addEventListener('pointerdown', away, true);
+  document.addEventListener('keydown', key, true);
+  railMenuOpen = { menu, button, close };
+  menu.querySelector('[role="menuitem"]')?.focus();
+}
+
 async function pinChat(c, on) {
   try {
     const d = await api('/api/chats/pin', { id: c.id, on });

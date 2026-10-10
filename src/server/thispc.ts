@@ -34,7 +34,10 @@ export function memoryNow() {
     return [{ pane: name, id: v.model, name: String(v.modelName ?? v.model).replace(/\s*[(+].*$/, ''), ram: measured ? use!.ram : file ?? 0, measured, gpu: use?.gpuDedicated ?? 0, state: v.state }];
   });
   const gpu = snap.gpu && snap.gpu.total && !snap.gpu.shared ? { name: snap.gpu.name, total: snap.gpu.total, used: snap.gpu.used } : null;
+  // Every graphics card with memory of its own (the bar above shows one): a model can be spread over two or more.
+  const own = hardware.gpus.filter(g => !g.integrated && (g.total ?? 0) > 0);
   return {
+    cards: { count: own.length, total: own.reduce((n, g) => n + (g.total ?? 0), 0) },
     ram: { total: snap.ram.total, used: snap.ram.used, bar: memoryBar(snap.ram.total, snap.ram.used, held.map(h => ({ name: h.name, bytes: h.ram }))) },
     gpu: gpu ? { ...gpu, bar: memoryBar(gpu.total, gpu.used, held.map(h => ({ name: h.name, bytes: h.gpu }))) } : null,
     held,

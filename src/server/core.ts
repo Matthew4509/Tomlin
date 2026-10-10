@@ -2,7 +2,7 @@
 // Every other part of the server (src/server/*.ts) builds on these; this module imports none of them.
 import { ByModel, ByStaff, Ledger, Meter, Uptime } from '../meter.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readdir, readFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readHardware, Sampler } from '../hardware.ts';
@@ -27,7 +27,7 @@ import { autostart } from '../autostart.ts';
 import * as keep from '../keep.ts';
 import { LOCK_FILE, releaseHome, takeHomeOrRepair } from '../onecopy.ts';
 import { HfList } from '../hflist.ts';
-import { buildId } from '../update.ts';
+import { buildId, NEXT_COPY_FILE, RESTART_INTO } from '../update.ts';
 
 export const staffId = (v: unknown) => (typeof v === 'string' && v.startsWith('staff:') && staff.get(v.slice(6)) ? v : null);
 /** What the chat with this PC's own assistant is called until it is given a name: the host (it is not one of the staff). */
@@ -72,6 +72,17 @@ export const HOME = keep.resolveHome();
   process.on('exit', () => releaseHome(HOME.home));
 }
 export const startupOf = autostart(ROOT);
+/**
+ * Ends this copy so its launcher (Start TOMLIN.cmd, or TOMLIN.exe by the clock) starts the whole new copy in `dir`: an
+ * update pushed from a linked PC, or a TOMLIN zip uploaded under Nodes and memory. Ended a moment later, so the answer
+ * reaches whoever asked first.
+ */
+export async function restartInto(dir: string): Promise<void> {
+  // "Start with Windows" meant the app, not the folder: it now starts the new copy.
+  if (await startupOf.on().catch(() => false)) await autostart(dir).set(true).catch(() => undefined);
+  await writeFile(join(ROOT, NEXT_COPY_FILE), dir);
+  setTimeout(() => process.exit(RESTART_INTO), 1500).unref();
+}
 export const ready = await keep.prepare(HOME, ROOT, VERSION, {
   // "Start with Windows" pointed at the copy imported from: it now starts this one (the tick meant the app, not the folder).
   repoint: async from => (await autostart(from).on()) && (await startupOf.set(true), true),
@@ -204,7 +215,7 @@ export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Reco
   }
 }
 
-const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 
 export async function staticFile(res: ServerResponse, path: string): Promise<void> {
   // The second look (/alt/) was dropped and its files deleted: an old bookmark to it opens the app.

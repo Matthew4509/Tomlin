@@ -1,16 +1,13 @@
 // The jobs, the linking of PCs and this PC's worker door (src/jobrun.ts), given the server's parts.
-import { writeFile } from 'node:fs/promises';
 import { askText } from '../share.ts';
 import { readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { toneOf } from '../persona.ts';
 import { staffSystem } from '../staff.ts';
 import { createJobs } from '../jobrun.ts';
-import { autostart } from '../autostart.ts';
 import * as keep from '../keep.ts';
 import * as carry from '../carry.ts';
-import * as update from '../update.ts';
-import { BUILD, HOME, ROOT, SECURITY_HEADERS, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, json, ledger, meter, notebooks, notifier, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
+import { BUILD, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, json, ledger, meter, notebooks, notifier, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
 import { scope } from '../meter.ts';
 import { appLockOn, appPinCheck } from './locks.ts';
 import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
@@ -144,13 +141,7 @@ export function startJobs(): void {
     update: {
       root: ROOT,
       restarts: process.env.TOMLIN_LOOP === '1',
-      switchTo: async dir => {
-        // "Start with Windows" meant the app, not the folder: it now starts the new copy.
-        if (await startupOf.on().catch(() => false)) await autostart(dir).set(true).catch(() => undefined);
-        await writeFile(join(ROOT, update.NEXT_COPY_FILE), dir);
-        // Ended a moment later, so the answer reaches the linked PC; Start TOMLIN.cmd then starts the new copy.
-        setTimeout(() => process.exit(update.RESTART_INTO), 1500).unref();
-      },
+      switchTo: restartInto,
     },
   });
 }

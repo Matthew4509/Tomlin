@@ -35,7 +35,7 @@ Push live (off until you turn it on), which sends a project to your own web host
 **Staff you hire**
 - Hire people with a name, a role (Default, Coder, Writer, Project manager, Graphic designer, Artist), a level and a
   look; each works on the model you choose for them, on the PC you choose.
-- Move a hire to another PC; TOMLIN warns when their model will not fit there.
+- Move a hire to another PC; a model that will not fit that PC's memory is not offered (and refused if sent), with why.
 - Staff overview: who is reading, thinking, typing or drawing, and on which PC.
 
 **Linked PCs (nodes)**
@@ -69,9 +69,10 @@ Push live (off until you turn it on), which sends a project to your own web host
 
 **The office (a small game)**
 - Your staff drawn as little people in an office: at their desk while they work, in the boardroom while they think,
-  in the kitchen or the lounge while they rest, at the beach when their PC is off.
-- Rewards paid from the tokens your staff have written: **coffee** (they walk out to a coffee cart), **donuts**, and
-  **gym equipment** (100,000 tokens, kept). Free pizza, employee of the month, and a weekly leaderboard.
+  in the kitchen or the lounge while they rest, at the beach when their PC is off. The boardroom and the lounge start
+  empty: the tokens your staff write buy the furniture piece by piece, and deck chairs on the beach for their breaks.
+- Rewards paid from the tokens your staff have written: **coffee** (delivered to each of them), **donuts**, and
+  **gym equipment** (500,000 tokens, kept). Free pizza, employee of the month, and a weekly leaderboard.
 
 ## Install (2.0.37)
 
@@ -166,25 +167,35 @@ rather than misread it.
   by public/office.js from Home's staff list. Desks = My PC and each linked PC. What each hire does comes from the server
   (src/home.ts doingOf): Researching (their model reads what it was sent), Thinking, Typing, Drawing, Working on a
   project, Waiting for the PC (another answer is on it), Getting ready (model loading), Resting, Away (the PC's
-  owner uses it: the lounge, a nap, or helping a brainstorm), On holiday (PC off: out of the front door to the beach; the PC in the far corner in cobwebs). All work
-  is done at the desk (a think over 15 s goes to the boardroom); idle: 2 min at the desk, then stretching in the room,
-  after 5 min the kitchen or lounge (`idleFor` from the server, which remembers each hire's last answer). Press a person or their card to follow them; a chat
+  owner uses it: the lounge, a nap, or helping a brainstorm), PC off (out of the front door to a towel on the beach; the PC in the far corner in cobwebs). All work
+  is done at the desk (a think over 15 s goes to the boardroom once it has a table); idle: 2 min at the desk, then stretching in the room,
+  after 5 min the kitchen or lounge, after 10 min a deck chair on the beach if one is bought and free (`idleFor` from the server, which remembers each hire's last answer). Press a person or their card to follow them; a chat
   follows the person talked to. **Watch** = full screen, Esc closes. Drag a person onto a desk (in the office, or from the
   left panel) = the Move window; they then carry a box to the new desk. Frames only while it is on screen.
   Fire (Staff) = app.office.fire: full view zoomed on them, the boss walks in, a box is packed, out of the front
   door. Full view: **Award employee of the month** (POST /api/office/award: most tokens written this month, from
   meter.ts ByStaff `written` per day; kept in data/office.json; portrait on the lounge wall; a 20% off voucher shown in
   "Holding"; **Undo award** takes this month's back, POST /api/office/award/undo, and the leaderboard says when someone has written more since; a tie is not awarded), **Buy them pizza** (page only), this week's leaderboard (GET /api/office, from Monday). **The shop**
-  (a row under the title): the team's tokens written are its money ("To spend": every token every hire ever wrote,
-  less what was spent; ByStaff totalWritten, src/home.ts purseOf). **Buy them coffee** (2,000): whoever has nothing to
-  do walks out of the front door to a coffee cart on the sand and back with a cup; anyone busy goes when they stop
-  (within 10 minutes). **Buy them donuts** (5,000): a donut delivery to the kitchen table, like the pizza. **Buy gym
-  equipment** (100,000, once, kept): a treadmill and a weights bench in the lounge, two more places to rest. POST
-  /api/office/buy {item} (src/home.ts buy: refuses an unknown item, a second gym, or more than the purse holds, and
-  says the price and what there is); purchases kept in data/office.json beside the awards.
+  (**Look after the team**, a menu of picture cards beside the office, under it on a phone: Treat the team, then
+  Improve the office by room; each card its price, what is bought, and how far off it is): the team's tokens written are its money ("To spend": every token every hire ever wrote,
+  less what was spent; ByStaff totalWritten, src/home.ts purseOf). **Coffee** (10,000): a coffee delivery comes in
+  by the front door with a tray and hands each of them a cup wherever they are, busy or not (not the staff of a PC
+  that is off). **Donuts** (25,000): a donut delivery to the kitchen table, like the pizza. **Furniture
+  (2.0.50):** the boardroom and the lounge start EMPTY in every office (one made before included: nothing counts
+  as owned, nothing refunded) and each piece is bought once: boardroom table 75,000 (opens the room: a long think goes to
+  it; without it the think stays at the desk), chairs 25,000 a pair up to six (after the table; the thinkers sit first,
+  each chair left over seats a helper, up to two), whiteboard 40,000 (notes while someone thinks there); lounge armchair
+  30,000 (nap), bookcase 50,000 (reading), sofa 60,000 (chatting), TV 75,000 (watching), gym equipment 500,000 (treadmill
+  and weights); an empty lounge sends the idle to the kitchen and away staff (owner using their PC) to its window.
+  **Deck chair and umbrella** 50,000 each, up to six: a hire resting 10 minutes at a desk of their own takes a break in a
+  free one (On a break: sitting up, a drink, a green cup mark) and walks back when work comes (the work never waits);
+  the staff of a PC that is off lie on towels (PC off: sunglasses, a grey power mark); Staff overview's card says which.
+  POST /api/office/buy {item} (src/home.ts buy: refuses an unknown item, one bought already, chairs before the table, or
+  more than the purse holds, and says why); GET /api/office sends `rooms` (src/home.ts roomsOf: what each room offers);
+  purchases kept in data/office.json beside the awards (every kept piece for good, the last 1000 treats).
   Also: IT carries a newly linked PC in (and a removed one out) while watched; a project step starting brings a folder
   by courier (it stays on the desk until the step ends); up to two idle people (away, no desk, or idle 2 min+) help a
-  think that has gone on 15 s in the boardroom; Away = lounge, a nap, or the brainstorm. app.office.advance(s) steps
+  think that has gone on 15 s in the boardroom, one to each chair left over; Away = lounge, a nap, or the brainstorm. app.office.advance(s) steps
   the office for checks (the browser pane can stop giving frames).
 - **Projects (the Bridge, 2.0.44):** left panel, under Home. Myia Bridge, built in, in its own look (Orbital,
   Windows, Light, Dark): every project folder in your working folders, local copies started and stopped (from each
@@ -370,7 +381,7 @@ rather than misread it.
   steps. Every job keeps its events in `jobs/<id>/events.jsonl` in the workspace (job rooms were dropped in 2.0.36).
 - **Nodes and memory** (Set up, in the left list; also a card on Home while nothing is set up): this PC as a node,
   the linked PCs as tiles (three across on a wide screen: On / Asleep / Off, their memory bar, the models each lets
-  this PC use, speed), and every model on this PC with its speed. This PC's own memory and loaded models are in the
+  this PC use under Standard and Images, one a line, speed), and every model on this PC with its speed. This PC's own memory and loaded models are in the
   top bar. Nothing loads by itself. A model you load stays loaded until you drop it (Drop in the top bar) or another
   model needs its place: a new one goes beside the loaded ones when it fits, else the least recently used one that
   is not answering makes room. On a node, a model loaded because a linked PC asked for it is dropped by itself when
@@ -502,6 +513,23 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.50:** The office's boardroom and lounge start empty in every office, and the tokens your staff write buy the
+  furniture piece by piece (Look after the team, a menu of picture cards beside the office): with no table a long think stays at the desk, each
+  pair of chairs seats a helper, and an empty lounge sends the idle to the kitchen. Deck chairs with umbrellas on the
+  beach: a hire with nothing to do for 10 minutes takes a break there, shown apart from a PC that is off (On a break,
+  a green cup, sitting up; PC off, a grey power mark, lying on a towel), on the office and on their Staff overview card.
+  Press the employee of the month's frame: who won, and this month's tokens by person (a pie). **Update this install**
+  (Nodes and memory): upload a newer TOMLIN zip and it starts in place of this one (the old copy stays beside it), then
+  **Update all linked PCs**; a linked PC behind this one has a yellow (!) on its card in the left panel. A chat in the
+  left panel has a … for Pin / Unpin and Delete. The Set up menu no longer folds. Staff: hire and edit opens Hire staff
+  (See all staff beside Close for editing); under Choose a model, **All models** lists the models on your other PCs that the
+  PC picked has not got, with Copy to it (a model on another linked PC goes through this PC), then hire on it.
+  Moving someone to another PC (the office or the left panel) offers only the models that fit that PC's memory (its RAM
+  with 3 GB kept for Windows, plus every graphics card's own memory); the others are named with what they need, and the server
+  refuses such a move too. **Welcome to TOMLIN.html**, at the top of the zip, says what TOMLIN is, what it does and
+  what it needs before installing (it works offline, with Help's pictures). Help is rewritten in two parts, one PC
+  first (models, hiring, saving your work), then your network (a node, moving staff, backups, models and software,
+  git, scanning), with screenshots.
 - **2.0.48:** Layout passes 1 and 2: the chat head is a staff card (name and software over the PC, avg speed,
   rename in place, Project beside it); **Enable live stats** in the gear; Copy, Pin and Send to as icons; the top bar
   keeps this PC and shows a linked PC beside it with its model; staff rows "Name | Level" over the software; pressing

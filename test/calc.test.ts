@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, GB, chatNeed, chatRows, fitOf, pictureRow, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
+import { CHAT_MODELS, GB, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
 
 const laptop: Hardware = { ram: 16 * GB, vram: 0, card: 'builtin', cores: 2 };
 const desktop: Hardware = { ram: 32 * GB, vram: 0, card: 'none', cores: 4 };
@@ -59,4 +59,24 @@ test('times read as people say them', () => {
   assert.equal(timeText(380), '6 min');
   assert.equal(timeText(5000), '83 min');
   assert.equal(timeText(6000), '1 h 40 min');
+});
+
+test('moving someone: a model fits a PC on its card or in its RAM less 3 GB, tight up to the whole RAM, else it is refused', () => {
+  const laptop = { ram: 8 * GB, vram: 0 };
+  assert.equal(ramFit(4 * GB, laptop), 'ok');
+  assert.equal(ramFit(6 * GB, laptop), 'tight');
+  assert.equal(ramFit(24 * GB, laptop), 'no');
+  // A graphics card that holds it all: fits whatever the RAM.
+  assert.equal(ramFit(10 * GB, { ram: 8 * GB, vram: 12 * GB }), 'ok');
+  // Spread over the card and the RAM (llama.cpp does): 12 GB card + 16 GB RAM holds a 20 GB need, though neither alone does.
+  assert.equal(ramFit(20 * GB, { ram: 16 * GB, vram: 12 * GB }), 'ok');
+  // Two 12 GB cards count together.
+  assert.equal(ramFit(30 * GB, { ram: 16 * GB, vram: 24 * GB }), 'ok');
+  assert.equal(ramFit(30 * GB, { ram: 16 * GB, vram: 12 * GB }), 'no');
+  // Not known (a PC that is off, a model with no size): not refused.
+  assert.equal(ramFit(4 * GB, { ram: 0, vram: 0 }), null);
+  assert.equal(ramFit(0, laptop), null);
+  const why = moveWontFit('Qwen3.5-35B-A3B', 24 * GB, '"Worker PC"', laptop);
+  assert.match(why, /^Not moved: Qwen3\.5-35B-A3B needs about 24 GB of memory, and "Worker PC" has 8\.0 GB of RAM \(3 GB of it is kept for Windows\)\./);
+  assert.match(why, /Pick a smaller model for them there, or move them to a PC with more memory\.$/);
 });

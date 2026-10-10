@@ -17,7 +17,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OLD = '1005386';
 const OLD_PARTS = ['src', 'public', 'tools', 'registry', 'package.json', 'package-lock.json', 'runtimes.json', 'Start Shelby.cmd'];
 /** What this copy sends (src/update.ts PARTS, without the models, runners and packages a scratch copy does not hold). */
-const NEW_PARTS = ['src', 'public', 'tools', 'test', 'registry', 'package.json', 'package-lock.json', 'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd'];
+const NEW_PARTS = ['src', 'public', 'tools', 'test', 'registry', 'package.json', 'package-lock.json', 'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd', 'Welcome to TOMLIN.html'];
 
 const git = (...args: string[]) => execFileSync('git', ['-C', ROOT, ...args], { maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
 const hasOld = (() => {

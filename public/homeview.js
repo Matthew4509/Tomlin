@@ -271,7 +271,7 @@ app.onStatus.push(() => {
 for (const b of document.querySelectorAll('[data-setup]')) {
   b.addEventListener('click', () => {
     if (b.dataset.setup === 'settings') app.openSettings?.();
-    else if (b.dataset.setup === 'staff') $('#team-open').click();
+    else if (b.dataset.setup === 'staff') app.openHire({ page: true });
     else if (b.dataset.setup === 'models') app.openModels();
     else if (b.dataset.setup === 'nodes') openNodes();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();

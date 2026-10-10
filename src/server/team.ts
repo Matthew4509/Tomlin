@@ -7,7 +7,7 @@ import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
 import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
-import { staffState as homeState, activityOf, awardBehind, awardPeriods, buy, cleanAwards, cleanBought, doingOf, DOING_WORDS, purseOf, shopView, undoAward, winnerOf, type Award } from '../home.ts';
+import { staffState as homeState, activityOf, awardBehind, awardPeriods, buy, cleanAwards, cleanBought, doingOf, DOING_WORDS, purseOf, roomsOf, shopView, undoAward, winnerOf, type Award } from '../home.ts';
 import { readData, updateData } from '../atomic.ts';
 import * as mute from '../mute.ts';
 import * as nodestaff from '../nodestaff.ts';
@@ -22,7 +22,7 @@ import { jobRoutes } from './jobs.ts';
 import { queueHome } from './queue.ts';
 import { staffUsage } from './costs.ts';
 import { memoryNow } from './thispc.ts';
-import { chatNeed } from '../calc.ts';
+import { chatNeed, moveWontFit, ramFit } from '../calc.ts';
 
 // ---- Staff ----
 
@@ -53,34 +53,36 @@ async function staffView() {
   // and the level its size suggests (the level picker starts there; it can be changed).
   const mem = memoryNow();
   const memOf = (raw: unknown) => {
-    const m = raw as { ram?: { total?: number }; gpu?: { total?: number; shared?: boolean } | null } | null | undefined;
-    return { ram: m?.ram?.total ?? 0, vram: m?.gpu && !m.gpu.shared ? m.gpu.total ?? 0 : 0 };
+    const m = raw as { ram?: { total?: number }; gpu?: { total?: number; shared?: boolean } | null; cards?: { total?: number } } | null | undefined;
+    // Every card's own memory (2.0.50 sends it); an older PC said only one card's.
+    const cards = typeof m?.cards?.total === 'number' ? m.cards.total : m?.gpu && !m.gpu.shared ? m.gpu.total ?? 0 : 0;
+    return { ram: m?.ram?.total ?? 0, vram: cards };
   };
   const pcMem = new Map(pcs.map(r => [r.id, memOf(r.ok ? r.memory : null)]));
   /** Whether a model needing `need` bytes fits a linked PC: on its card, else in its RAM (3 GB kept for Windows); null = not known. */
   const fitThere = (pc: string, need: number) => {
     const m = pcMem.get(pc);
-    if (!m?.ram || !need) return null;
-    return need <= m.vram || need <= m.ram - 3 * 2 ** 30 ? 'ok' : need <= m.ram ? 'tight' : 'no';
+    return m ? ramFit(need, m) : null;
   };
+  const here = memOf(mem);
   const chatLevel = (name: string, bytes: number) => (bytes || paramsB(name) !== null ? levelOfSize(sizeB(name, bytes)).id : null);
   const imageLevel = (bytes: number) => (bytes ? LEVELS.find(l => bytes / 2 ** 30 <= IMAGE_TIERS[l.id].maxGB)?.id ?? null : null);
   const remoteChoice = (image: boolean) => (b: ReturnType<typeof pcBrains>[number]) => {
     const pc = brains.parseRef(b.id).kind === 'remote' ? (brains.parseRef(b.id) as { pc: string }).pc : '';
     const need = image ? b.bytes : b.bytes ? Math.round(chatNeed(b.bytes)) : 0;
-    return { id: b.id, name: b.name, nick: b.nick, ok: b.ok, hidden: b.hidden, pc, label: b.label, bytes: b.bytes, need, fit: fitThere(pc, need), loaded: b.loaded, busy: b.busy, level: image ? imageLevel(b.bytes) : chatLevel(b.label, b.bytes) };
+    return { id: b.id, name: b.name, nick: b.nick, ok: b.ok, hidden: b.hidden, pc, label: b.label, bytes: b.bytes, need, fit: fitThere(pc, need), ramFit: fitThere(pc, need), loaded: b.loaded, busy: b.busy, level: image ? imageLevel(b.bytes) : chatLevel(b.label, b.bytes) };
   };
   return {
     sharing: jobRoutes.shareView().on,
     pcs: pcs.map(r => ({ id: r.id, name: r.name, ok: r.ok, away: r.ok && !!r.away, ...pcMem.get(r.id)! })),
-    here: memOf(mem),
+    here,
     roles: ROLES.map(({ id, name, hint, examples, kind }) => ({ id, name, hint, examples, kind: kind ?? 'chat' })),
     levels: LEVEL_CHOICES.map(({ id, name, size, suggest }) => ({ id, name, size, suggest, imageSuggest: IMAGE_TIERS[id].suggest, imageSize: IMAGE_TIERS[id].size })),
     connected: chat.view.state === 'connected' ? chat.view.model : null,
     // For Hire staff (public/hire.js): every model a new hire can start on, with the short name the name box offers (src/nicknames.ts).
     hireChoices: {
-      chat: [...models.map(x => ({ id: x.id, name: shortName(x.name) || x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
-      image: [...images.list().filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
+      chat: [...models.map(x => ({ id: x.id, name: shortName(x.name) || x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, ramFit: ramFit(Math.round(chatNeed(x.bytes)), here), loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
+      image: [...images.list().filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
     },
     connectedAll: runners.filter(p => p.view.state === 'connected').map(p => p.view.model),
     connectedImage: images.pane.view.state === 'connected' ? images.pane.view.model : null,
@@ -501,6 +503,7 @@ async function officeView() {
     awards,
     purse: purseOf(byStaff.totalWritten(), bought),
     shop: shopView(bought),
+    rooms: roomsOf(bought),
   };
 }
 
@@ -583,6 +586,16 @@ export const teamPost: Routes = {
           const ref = brains.parseRef(v);
           const ok = ref.kind === 'remote' ? remotes.some(r => r.id === ref.pc) : ref.kind === 'here' && (image ? images.has(ref.id) : chatList().some(m => m.id === ref.id));
           if (!ok) return json(res, 400, { error: `That is not a ${image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
+        }
+        // Moving someone to another PC (the Move window: the office or the left panel): a model that will not fit that
+        // PC's memory is refused, by the same rule Hire staff marks the models with (src/calc.ts ramFit).
+        if (b.move === true && typeof change.model === 'string' && change.model) {
+          const view = await staffView();
+          const c = view.hireChoices[image ? 'image' : 'chat'].find(x => x.id === change.model);
+          if (c?.ramFit === 'no') {
+            const pc = c.pc ? view.pcs.find(x => x.id === c.pc) : null;
+            return json(res, 400, { error: moveWontFit(c.label, c.need, pc ? `"${pc.name}"` : 'This PC', pc ?? view.here) });
+          }
         }
         // The related models a hire may also use are models on this PC (a node lends only its own).
         if (change.group !== undefined) {

@@ -1,11 +1,13 @@
 // Staff overview's office: the staff drawn as little people (public/look.js) in an office seen from above, where they
 // are and what they do read from Home's staff list every few seconds (src/home.ts doingOf, sent by src/server/team.ts).
 // Desks are the PCs: My PC first, then each linked PC. Typing, researching, drawing and a project step sit at their PC's
-// desk; thinking goes to the boardroom; waiting for the PC stands in line beside its desk; resting is the kitchen or
-// the lounge; a PC that is off sends its staff out of the front door, on holiday at the beach. A tile at the top of Staff overview (Home's right panel and the
-// chat's) follows the person picked; Watch opens it full screen (Esc closes). Drag a person onto another desk (or one
-// from the left panel onto a desk) to move them: the same Move window as the left panel's, then they carry their box
-// over. Frames are drawn only while the office is on screen. Uses app.js's el; adds only app.office.
+// desk; a long think goes to the boardroom once it has a table; waiting for the PC stands in line beside its desk;
+// resting is the kitchen or the lounge (what is bought for it), a long rest a deck chair on the beach (once bought); a PC
+// that is off sends its staff out of the front door, on holiday on a towel at the beach. The boardroom and the lounge
+// start empty: the shop (the tokens the staff write) buys each piece (src/home.ts SHOP, roomsOf). A tile at the top of
+// Staff overview (Home's right panel and the chat's) follows the person picked; Watch opens it full screen (Esc
+// closes). Drag a person onto another desk (or one from the left panel onto a desk) to move them: the same Move window
+// as the left panel's, then they carry their box over. Frames are drawn only while the office is on screen. Uses app.js's el; adds only app.office.
 'use strict';
 
 (() => {
@@ -33,18 +35,18 @@
     pizza: { courier: 'Pizza delivery', called: 'Pizza delivery!', cheer: ['Pizza!', 'Yum!', 'Thanks, boss!'], going: 'Off to the kitchen: pizza!', having: 'Having pizza in the kitchen', holding: 'a slice of pizza' },
     donuts: { courier: 'Donut delivery', called: 'Donuts!', cheer: ['Donuts!', 'Sprinkles!', 'Thanks, boss!'], going: 'Off to the kitchen: donuts!', having: 'Having a donut in the kitchen', holding: 'a donut' },
   };
-  /** The coffee cart on the sand outside, right of the front door, while a coffee round is on; the queue on the path. */
-  const CART = { x: 676, y: 824, w: 70, h: 30 };
-  const CART_SPOTS = [690, 718, 746, 774, 802, 830, 858, 886].map(x => [x, 806, 'south']);
-  /** How long a coffee round lasts: whoever is busy now goes for theirs when they stop, within this time (seconds). */
-  const COFFEE_SECONDS = 600;
-  /** How long a coffee is held once fetched (seconds). */
-  const COFFEE_HELD = 90;
+  /** How long a delivered coffee is held (seconds). */
+  const COFFEE_HELD = 120;
   /** The gym in the lounge once bought: a treadmill and a weights bench, and the spots in front of them. */
   const GYM = [{ x: 778, y: 566, w: 70, h: 36 }, { x: 872, y: 566, w: 64, h: 36 }];
-  const FURNITURE = [FRAME, { x: 760, y: 145, w: 290, h: 100 }, { x: 80, y: 475, w: 180, h: 43 }, { x: 465, y: 480, w: 60, h: 65 }, { x: 230, y: 600, w: 150, h: 45 }, { x: 680, y: 475, w: 110, h: 35 }, { x: 950, y: 485, w: 160, h: 50 }, { x: 920, y: 720, w: 200, h: 32 }];
+  /** What is always there to walk round (the frame and the kitchen), and the pieces bought for the boardroom and lounge. */
+  const FIXED = [FRAME, { x: 80, y: 475, w: 180, h: 43 }, { x: 465, y: 480, w: 60, h: 65 }, { x: 230, y: 600, w: 150, h: 45 }];
+  const PIECES = { table: { x: 760, y: 145, w: 290, h: 100 }, bookcase: { x: 680, y: 475, w: 110, h: 35 }, tv: { x: 950, y: 485, w: 160, h: 50 }, sofa: { x: 920, y: 720, w: 200, h: 32 } };
+  /** Round the boardroom table; a pair of chairs bought is one seat each side (0 and 3, then 1 and 4, then 2 and 5). */
   const MEETING = [[790, 110, 'south'], [890, 110, 'south'], [990, 110, 'south'], [790, 285, 'north'], [890, 285, 'north'], [990, 285, 'north']];
-  /** Where resting happens, and the words for it. */
+  /** Where staff whose PC's owner is using it wait while the lounge is empty. */
+  const WINDOW = { id: 'window', x: 1135, y: 606, face: 'east', area: 'lounge', words: 'looking out of the lounge window' };
+  /** Where resting happens, and the words for it (the lounge's only once its piece is bought: src/home.ts roomsOf). */
   const REST = [
     { id: 'coffee', x: 170, y: 548, face: 'north', area: 'kitchen', words: 'having a coffee' },
     { id: 'vending', x: 495, y: 572, face: 'north', area: 'kitchen', words: 'at the vending machine' },
@@ -61,8 +63,13 @@
   const STEP_OUT = [600, 805];
   /** Where someone leaving the team walks off, along the path. */
   const GONE = [-60, 805];
-  /** Towels on the beach, each under an umbrella: where the staff of a PC that is off lie in the sun. */
-  const BEACH = [130, 270, 410, 790, 930, 1070].map((x, i) => [x, 868 + (i % 2) * 10]);
+  /** Towels on the sand, left of the front door: where the staff of a PC that is off lie in the sun. */
+  const BEACH = [70, 160, 250, 340, 430, 520].map((x, i) => [x, 868 + (i % 2) * 10]);
+  /** The deck chairs bought (each under its umbrella), right of the front door: where a break is taken. Bought in this
+   * order, so the first three stand well apart. */
+  const DECK = [800, 940, 1080, 870, 1010, 1150].map(x => [x, 866]);
+  /** Seconds with nothing to do before a break in a deck chair (after the lounge stage). */
+  const BREAK_IDLE = 600;
   const outdoors = (x, y) => y > 785;
   const MAX_DESKS = 12;
   /** Seconds: thinking this long goes to the boardroom; idle this long stands up; idle this long leaves the room. */
@@ -76,7 +83,11 @@
   /** Walking to work: quicker. */
   const HURRY = 160;
 
-  const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', coffeeUntil: 0, gym: false, purse: null, shop: [], awards: [], weekBoard: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [] };
+  /** Every office starts empty: what is bought comes from the server (GET /api/office `rooms`). */
+  const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0 };
+  const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', rooms: EMPTY, roomsKey: '', purse: null, shop: [], awards: [], weekBoard: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [], blocks: FIXED };
+  /** The pieces in the way now: the fixed ones and whatever is bought (kept in world.blocks: walkable runs often). */
+  const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : [])];
   const views = [];
   let background = null;
   let ownerLook = null;
@@ -95,7 +106,7 @@
       if (Math.abs(x - edge) < 22 && Math.abs(y - dy) < 30) free = true;
     });
     const blocked = r => x >= r.x - 7 && x <= r.x + r.w + 7 && y >= r.y - 7 && y <= r.y + r.h + 7;
-    return free && !FURNITURE.some(blocked) && !(world.gym && GYM.some(blocked)) && !world.desks.some(d => blocked(deskBlock(d)));
+    return free && !world.blocks.some(blocked) && !world.desks.some(d => blocked(deskBlock(d)));
   }
   const cellX = i => (i % COLS) * 20 + 10;
   const cellY = i => Math.floor(i / COLS) * 20 + 10;
@@ -196,39 +207,41 @@
     const now = clock();
     const idle = now - (p.idleSince ?? -Infinity);
     const longThink = s.doing === 'thinking' && now - (p.doingSince ?? now) >= THINK_AWAY;
+    const table = world.rooms.boardroom.table;
     // Connected in the chat open now (their model loaded, nothing asked yet): at their PC, ready. Pressing Connect sends
     // them there (arriving while it loads); a PC its owner is using keeps them away ('owner').
     const ready = s.doing === 'resting' && s.state === 'on' && !!s.active;
-    const atDesk = ['typing', 'working', 'drawing', 'researching', 'arriving', 'waiting'].includes(s.doing) || (s.doing === 'thinking' && !longThink) || (s.doing === 'resting' && idle < SIT_IDLE) || ready;
+    // No boardroom table yet: a long think stays at the desk.
+    const atDesk = ['typing', 'working', 'drawing', 'researching', 'arriving', 'waiting'].includes(s.doing) || (s.doing === 'thinking' && (!longThink || !table)) || (s.doing === 'resting' && idle < SIT_IDLE) || ready;
     if (p.leaving) return { key: 'gone', x: GONE[0], y: GONE[1], face: 'west', area: 'gone' };
     if (s.doing === 'off') {
       const i = world.staff.filter(x => x.doing === 'off').findIndex(x => x.id === s.id);
       const [x, y] = BEACH[i % BEACH.length];
       return { key: `beach:${i}`, x: x + Math.floor(i / BEACH.length) * 30, y, face: 'south', area: 'beach' };
     }
-    if (longThink || (s.doing === 'thinking' && !desk)) {
-      const i = world.staff.filter(x => x.doing === 'thinking').findIndex(x => x.id === s.id);
-      const seat = MEETING[i] ?? [1090, 140 + (i - MEETING.length) * 30, 'east'];
-      return { key: `think:${i}`, x: seat[0], y: seat[1], face: seat[2], area: 'boardroom' };
+    if (table && (longThink || (s.doing === 'thinking' && !desk))) {
+      // The chairs bought are sat in first; past them, they stand at the table.
+      const i = boardroomThinkers().findIndex(x => x.id === s.id);
+      const seat = MEETING[seatOrder()[i]] ?? [1090, 140 + (i - MEETING.length) * 30, 'east'];
+      return { key: `think:${i}`, x: seat[0], y: seat[1], face: seat[2], area: 'boardroom', chair: i < world.rooms.boardroom.chairs };
+    }
+    if (s.doing === 'thinking' && !desk) {
+      // No desk and no boardroom: thinking on their feet, along the computer room's wall.
+      const [x, y] = STRETCH[p.seed % STRETCH.length];
+      return { key: `stretch:${x}:${y}`, x, y, face: 'south', area: 'stretch' };
     }
     // A long think in the boardroom: up to two with nothing to do (away from their PC, no desk, or idle long enough to
-    // have left it) join in and help.
+    // have left it) join in and help, one to each chair left over.
     const helper = helperIndex(p);
     if (helper >= 0) {
-      const seat = MEETING[Math.min(MEETING.length - 1, thinkersNow().length + helper)];
-      return { key: `help:${helper}`, x: seat[0], y: seat[1], face: seat[2], area: 'boardroom', helping: true };
+      const seat = MEETING[seatOrder()[boardroomThinkers().length + helper]];
+      return { key: `help:${helper}`, x: seat[0], y: seat[1], face: seat[2], area: 'boardroom', helping: true, chair: true };
     }
     // Pizza on the kitchen table: everyone with nothing to do gathers round it (whoever works, works on).
     if (world.pizzaOn && ['resting', 'nodesk', 'owner'].includes(s.doing)) {
       const i = world.staff.filter(x => ['resting', 'nodesk', 'owner'].includes(x.doing)).findIndex(x => x.id === s.id);
       const [x, y, face] = PIZZA[i % PIZZA.length];
       return { key: `pizza:${i}`, x: x + Math.floor(i / PIZZA.length) * 12, y, face, area: 'kitchen', pizza: true };
-    }
-    // A coffee round: each with nothing to do goes out to the cart for theirs; whoever is busy goes when they stop.
-    if (p.coffee === 'fetch' && world.time < world.coffeeUntil && ['resting', 'nodesk', 'owner'].includes(s.doing)) {
-      const i = world.staff.filter(x => world.people.get(x.id)?.coffee === 'fetch' && ['resting', 'nodesk', 'owner'].includes(x.doing)).findIndex(x => x.id === s.id);
-      const [x, y, face] = CART_SPOTS[Math.max(0, i) % CART_SPOTS.length];
-      return { key: `cart:${i}`, x: x + Math.floor(Math.max(0, i) / CART_SPOTS.length) * 14, y, face, area: 'cart', cart: true };
     }
     if (desk && atDesk) {
       const i = Math.min(desk.crew.indexOf(s.id), desk.seats.length - 1);
@@ -239,9 +252,16 @@
       const [x, y] = STRETCH[p.seed % STRETCH.length];
       return { key: `stretch:${x}:${y}`, x, y, face: 'south', area: 'stretch', desk };
     }
-    // Resting, no desk: a spot in the kitchen or the lounge, a new one now and then. Away (their PC's owner is using
-    // it): the lounge only, often asleep in the armchair.
-    const spots = (s.doing === 'owner' ? REST.filter(r => r.area === 'lounge') : REST).filter(r => !r.gym || world.gym);
+    // A break: nothing to do for BREAK_IDLE seconds and a deck chair free on the beach (none bought, or all taken: the
+    // kitchen or the lounge, as before).
+    const brk = breakIndex(p);
+    if (brk >= 0) {
+      const [x, y] = DECK[brk];
+      return { key: `break:${brk}`, x, y, face: 'south', area: 'break' };
+    }
+    // Resting, no desk: a spot in the kitchen or the lounge (what it has), a new one now and then. Away (their PC's
+    // owner is using it): the lounge only, often asleep in the armchair; by its window while it is empty.
+    const spots = s.doing === 'owner' ? [...REST, WINDOW].filter(r => world.rooms.away.includes(r.id)) : REST.filter(r => world.rooms.rest.includes(r.id));
     if (!p.rest || !spots.includes(p.rest) || (world.time > p.restUntil && !p.path.length)) {
       const taken = new Set([...world.people.values()].filter(o => o !== p && o.rest).map(o => o.rest.id));
       const free = spots.filter(r => !taken.has(r.id) && r.id !== p.rest?.id);
@@ -253,28 +273,59 @@
     return { key: `rest:${r.id}`, x: r.x + ((p.seed % 5) - 2) * 10, y: r.y + ((p.seed >> 3) % 3) * 6, face: r.face, area: r.area, rest: r };
   }
 
-  /** Who is in the boardroom thinking now (thinking for THINK_AWAY seconds or more), in team order. */
+  /** Who is in the boardroom thinking now (thinking for THINK_AWAY seconds or more), in team order; nobody without a table. */
   function thinkersNow() {
     const now = clock();
+    if (!world.rooms.boardroom.table) return [];
     return world.staff.filter(x => x.doing === 'thinking' && now - (world.people.get(x.id)?.doingSince ?? now) >= THINK_AWAY);
   }
-  /** 0 or 1: the first two free to help a long think, in team order; -1 for anyone else. */
+  /** Who thinks in the boardroom: a long think, or any think by someone with no desk (once there is a table). */
+  function boardroomThinkers() {
+    const now = clock();
+    if (!world.rooms.boardroom.table) return [];
+    return world.staff.filter(x => x.doing === 'thinking' && (now - (world.people.get(x.id)?.doingSince ?? now) >= THINK_AWAY || !deskOf(x.pcId ?? '')));
+  }
+  /** The boardroom's places in the order they are taken: the chairs bought (a pair at a time), then standing room. */
+  function seatOrder() {
+    const pairs = world.rooms.boardroom.chairs / 2;
+    const chairs = [0, 3, 1, 4, 2, 5].filter(i => i % 3 < pairs);
+    return [...chairs, ...[0, 1, 2, 3, 4, 5].filter(i => !chairs.includes(i))];
+  }
+  /** 0 or 1: the first two free to help a long think, while chairs are left over, in team order; -1 for anyone else. */
   function helperIndex(p) {
-    if (!thinkersNow().length || p.firing || p.leaving) return -1;
+    const thinking = boardroomThinkers().length;
+    const room = Math.min(2, world.rooms.boardroom.chairs - thinking);
+    if (!thinkersNow().length || room <= 0 || p.firing || p.leaving) return -1;
     const now = clock();
     const free = world.staff.filter(x => {
       const o = world.people.get(x.id);
       return o && !o.firing && (x.doing === 'owner' || x.doing === 'nodesk' || (x.doing === 'resting' && now - (o.idleSince ?? -Infinity) >= SIT_IDLE));
     });
     const i = free.findIndex(x => x.id === p.id);
-    return i >= 0 && i < 2 ? i : -1;
+    return i >= 0 && i < room ? i : -1;
   }
+  /** A deck chair for p (its index), or -1: resting BREAK_IDLE seconds, in team order, while chairs last. */
+  function breakIndex(p) {
+    if (!world.rooms.deckchairs || p.firing || p.leaving) return -1;
+    const now = clock();
+    const free = world.staff.filter(x => {
+      const o = world.people.get(x.id);
+      // Resting at a desk of their own (no desk yet stays "No desk yet": the card says a model is needed).
+      return o && !o.firing && !o.leaving && x.doing === 'resting' && !(x.state === 'on' && x.active) && now - (o.idleSince ?? -Infinity) >= BREAK_IDLE;
+    });
+    const i = free.findIndex(x => x.id === p.id);
+    return i >= 0 && i < Math.min(world.rooms.deckchairs, DECK.length) ? i : -1;
+  }
+  /** On a break (in or walking to a deck chair) or on holiday (PC off): the two are never said the same way. */
+  const breakOf = p => p?.target?.area === 'break';
 
   function retarget(p, snap = false) {
     const t = targetOf(p);
     // A rest spot is let go once they work: another person may take it.
     if (!t.rest) p.rest = null;
     if (t.key === p.targetKey && !snap) return;
+    // Where they come from ("Back in from a break").
+    p.from = p.target?.area ?? '';
     p.targetKey = t.key;
     p.target = t;
     if (snap) {
@@ -471,8 +522,17 @@
     return true;
   }
   /** Where a delivery is handed over: the kitchen table, or beside the desk of whoever the folder is for. */
+  /** Beside the next one on a coffee delivery's list who is still here (job.at moves on past anyone gone), or null. */
+  function coffeeStop(job) {
+    for (; job.at < job.who.length; job.at++) {
+      const p = world.people.get(job.who[job.at]);
+      if (p && !p.out && !p.leaving && !p.firing && p.row.doing !== 'off') return [p.x + (p.x > 1100 ? -26 : 26), p.y + 4];
+    }
+    return null;
+  }
   function dropOf(job) {
     if (FOOD[job.kind]) return [305, 668];
+    if (job.kind === 'coffee') return coffeeStop(job);
     const p = world.people.get(job.who);
     if (!p || p.out || p.leaving) return null;
     const d = deskOf(p.row.pcId ?? '');
@@ -484,9 +544,10 @@
       const at = dropOf(job);
       if (!at) continue;
       const food = FOOD[job.kind];
-      const look = app.look?.ready() ? { ...app.look.fromId('courier', ''), top: food ? 'coral' : 'mustard', headwear: 'cap', glasses: 'none' } : null;
-      courier = { id: 'courier', row: { name: food?.courier ?? 'Courier', doing: 'courier' }, job, x: GONE[0], y: GONE[1], face: 'east', look, seed: 5, phase: 'coming', carry: food ? job.kind : 'folder', bubble: '', bubbleUntil: 0, path: route(GONE[0], GONE[1], at[0], at[1]) };
-      say(courier, food?.called ?? 'Work for you!', 3);
+      const coffee = job.kind === 'coffee';
+      const look = app.look?.ready() ? { ...app.look.fromId('courier', ''), top: food ? 'coral' : coffee ? 'mint' : 'mustard', headwear: 'cap', glasses: 'none' } : null;
+      courier = { id: 'courier', row: { name: food?.courier ?? (coffee ? 'Coffee delivery' : 'Courier'), doing: 'courier' }, job, x: GONE[0], y: GONE[1], face: 'east', look, seed: 5, phase: 'coming', carry: food ? job.kind : coffee ? 'coffee' : 'folder', bubble: '', bubbleUntil: 0, path: route(GONE[0], GONE[1], at[0], at[1]) };
+      say(courier, food?.called ?? (coffee ? 'Coffee delivery!' : 'Work for you!'), 3);
     }
   }
   function stepCourier(dt) {
@@ -494,6 +555,31 @@
     const k = courier;
     if (k) {
       if (k.path.length && !move(k, dt, HURRY)) return;
+      if (k.phase === 'coming' && k.job.kind === 'coffee') {
+        // A coffee for each, wherever they are (busy or not); someone who walked off meanwhile is followed.
+        const at = coffeeStop(k.job);
+        if (at && Math.hypot(at[0] - k.x, at[1] - k.y) > 40) {
+          k.path = route(k.x, k.y, at[0], at[1]);
+          return;
+        }
+        const got = at ? world.people.get(k.job.who[k.job.at]) : null;
+        if (got) {
+          got.coffee = 'have';
+          got.coffeeUntil = world.time + COFFEE_HELD;
+          k.face = got.x < k.x ? 'west' : 'east';
+          say(k, 'Here you go!', 2);
+          say(got, ['Thanks for the coffee!', 'Flat white, perfect!', 'Just what I needed.'][got.seed % 3], 3);
+          k.job.at++;
+        }
+        const next = coffeeStop(k.job);
+        if (next) k.path = route(k.x, k.y, next[0], next[1]);
+        else {
+          k.phase = 'leaving';
+          k.carry = null;
+          k.path = route(k.x, k.y, GONE[0], GONE[1]);
+        }
+        return;
+      }
       if (k.phase === 'coming') {
         k.phase = 'leaving';
         k.carry = null;
@@ -565,16 +651,22 @@
   function officeData(d) {
     world.purse = d.purse ?? null;
     world.shop = d.shop ?? [];
-    // The gym, once bought, is part of the lounge: drawn in, walked round, and two more places to rest.
-    const gym = !!world.shop.find(i => i.id === 'gym')?.owned;
-    if (gym !== world.gym) {
-      world.gym = gym;
+    // What is bought is part of the office: drawn in, walked round, places to sit, rest and think.
+    const rooms = d.rooms ?? world.rooms;
+    const key = JSON.stringify(rooms);
+    if (key !== world.roomsKey) {
+      world.rooms = rooms;
+      world.roomsKey = key;
+      world.blocks = blocksOf();
       background = null;
       regrid();
+      // Everyone works out again where to be (a spot taken away by a piece, a chair to sit in now).
+      for (const p of world.people.values()) if (!p.firing && !p.leaving) p.targetKey = '';
     }
     drawShop();
     world.awards = d.awards ?? [];
     world.weekBoard = d.week?.board ?? [];
+    world.monthBoard = d.month?.board ?? [];
     world.monthName = d.month?.name ?? '';
     world.monthKey = d.month?.key ?? '';
     world.behind = d.month?.behind ?? null;
@@ -604,6 +696,59 @@
       button.disabled = false;
     }
   }
+  // ---- The frame pressed: who won, and this month's tokens by person (a pie) ----
+
+  const monthDlg = el('dialog', { class: 'small-dlg month-dlg', 'aria-labelledby': 'month-title' });
+  document.body.append(monthDlg);
+  const PIE = ['#3f7fd9', '#e0a030', '#4fa77a', '#c8507a', '#7b62c9', '#3aa6b9', '#9aa5b1'];
+  function openMonth() {
+    const a = world.awards.at(-1);
+    const when = key => {
+      const [y, m] = String(key).split('-').map(Number);
+      return y && m ? new Date(y, m - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' }) : key;
+    };
+    const rows = (world.monthBoard ?? []).filter(r => r.out > 0).sort((x, y) => y.out - x.out);
+    const total = rows.reduce((n, r) => n + r.out, 0);
+    // Six slices at most: the rest together as "Everyone else".
+    const slices = rows.length > 6 ? [...rows.slice(0, 5), { name: 'Everyone else', out: rows.slice(5).reduce((n, r) => n + r.out, 0) }] : rows;
+    const pct = n => (total ? Math.round((n / total) * 100) : 0);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 120');
+    svg.setAttribute('width', '150');
+    svg.setAttribute('height', '150');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', `Tokens written in ${world.monthName}, by person: ${slices.map(s => `${s.name} ${pct(s.out)}%`).join(', ')}`);
+    let from = -Math.PI / 2;
+    for (const [i, s] of slices.entries()) {
+      const turn = (s.out / total) * Math.PI * 2;
+      const to = from + turn;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', slices.length === 1 ? 'circle' : 'path');
+      if (slices.length === 1) {
+        path.setAttribute('cx', '60');
+        path.setAttribute('cy', '60');
+        path.setAttribute('r', '56');
+      } else path.setAttribute('d', `M60 60 L${60 + 56 * Math.cos(from)} ${60 + 56 * Math.sin(from)} A56 56 0 ${turn > Math.PI ? 1 : 0} 1 ${60 + 56 * Math.cos(to)} ${60 + 56 * Math.sin(to)} Z`);
+      path.setAttribute('fill', PIE[i % PIE.length]);
+      path.setAttribute('stroke', 'var(--panel, #fff)');
+      path.setAttribute('stroke-width', '1.5');
+      svg.append(path);
+      from = to;
+    }
+    const won = a ? el('p', {}, el('strong', { text: a.name }), ` won ${when(a.month)} with ${a.out.toLocaleString()} tokens written.`)
+      : el('p', { text: 'Nobody has been made employee of the month yet. Award employee of the month (at the top of Staff overview) picks whoever wrote the most this month.' });
+    monthDlg.replaceChildren(el('div', { class: 'help-body' },
+      el('h2', { id: 'month-title', text: 'Employee of the month' }),
+      won,
+      el('h3', { text: `${world.monthName || 'This month'} so far: ${total.toLocaleString()} tokens written` }),
+      total ? el('div', { class: 'month-pie' }, svg, el('ul', { class: 'month-legend' }, ...slices.map((s, i) => {
+        const sw = el('span', { class: 'month-swatch', 'aria-hidden': 'true' });
+        sw.style.background = PIE[i % PIE.length];
+        return el('li', {}, sw, el('span', { text: s.name }), el('span', { class: 'hint', text: `${s.out.toLocaleString()} (${pct(s.out)}%)` }));
+      }))) : el('p', { class: 'hint', text: 'Nobody has written anything this month yet.' }),
+      el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => monthDlg.close() }))));
+    monthDlg.showModal();
+  }
+
   /** Undo award: this month's award is taken off (the server keeps one per month; the frame shows the newest left). */
   async function undoLastAward(button) {
     button.disabled = true;
@@ -634,7 +779,8 @@
     else if (p.target?.rest?.id === 'vending' && still) items.push('a can from the vending machine');
     else if (p.target?.rest?.id === 'library' && still) items.push('a book from the library');
     else if (p.target?.rest?.id === 'tv' && still) items.push('the TV remote');
-    else if (p.target?.area === 'beach' && still) items.push('a cold drink');
+    else if (p.target?.area === 'beach' && still) items.push('a towel and sunglasses');
+    else if (p.target?.area === 'break' && still) items.push('a cold drink');
     else if (p.target?.area === 'stretch' && still) items.push('a dumbbell');
     const n = vouchersOf(p.id);
     if (n) items.push(n === 1 ? 'a 20% off voucher (employee of the month)' : `${n} × 20% off voucher (employee of the month ${n} times)`);
@@ -643,12 +789,6 @@
   function arrived(p) {
     p.face = p.target?.face ?? 'south';
     if (p.targetKey === 'gone') p.out = true;
-    // At the coffee cart: a coffee in hand, and back to whatever they were doing.
-    if (p.target?.cart && p.coffee === 'fetch') {
-      p.coffee = 'have';
-      p.coffeeUntil = world.time + COFFEE_HELD;
-      say(p, ['Thanks for the coffee!', 'Flat white, please!', 'Just what I needed.'][p.seed % 3], 3);
-    }
     // The box is put down on arriving: at the new desk with a word, anywhere else (the move fell through) without.
     if (p.carry) {
       p.carry = false;
@@ -662,21 +802,26 @@
     const t = p.target;
     if (p.firing) return BOSS_WORDS[p.firing];
     if (t?.pizza) return p.path.length ? FOOD[world.food].going : FOOD[world.food].having;
-    if (t?.cart) return p.path.length ? 'Off out to the coffee cart: your treat' : 'Getting a coffee at the cart';
     if (t?.helping) {
       const lead = thinkersNow()[0]?.name ?? 'someone';
       return p.path.length ? `Off to the boardroom to help ${lead} think` : `Helping ${lead} brainstorm`;
     }
     if (s.doing === 'owner' && t?.rest && !p.path.length) return `Away (their PC's owner is using it): ${t.rest.words}`;
+    const thinkHere = s.doing === 'thinking' && !world.rooms.boardroom.table;
     if (p.path.length && !p.out) {
       if (t?.area === 'gone') return 'Leaving the office';
-      if (t?.area === 'beach') return 'Off on holiday: their PC is off';
-      if (outdoors(p.x, p.y)) return p.coffee === 'have' && world.time < p.coffeeUntil ? 'Back in with a coffee' : 'Back from holiday';
+      if (t?.area === 'beach') return 'PC off: off to the beach on holiday';
+      if (t?.area === 'break') return 'Off out for a break in a deck chair';
+      if (outdoors(p.x, p.y)) return p.from === 'break' ? 'Back in from a break' : 'Back from holiday: their PC is on';
       if (t?.area === 'boardroom') return 'Walking to the boardroom to think';
-      if (t?.area === 'stretch') return 'Getting up to stretch their legs';
+      if (t?.area === 'stretch') return thinkHere ? 'Thinking on their feet (no boardroom table yet)' : 'Getting up to stretch their legs';
       if (t?.area === 'desk') return `Walking to ${t.desk?.name ?? 'their desk'}${p.carry ? ', carrying a box' : ''}`;
       return `Walking to the ${t?.area ?? 'kitchen'}`;
     }
+    if (t?.area === 'beach') return 'PC off: on holiday, lying on a towel';
+    if (t?.area === 'break') return 'On a break: in a deck chair on the beach';
+    if (thinkHere && t?.area === 'stretch') return 'Thinking on their feet (no boardroom table yet)';
+    if (thinkHere && t?.area === 'desk' && clock() - (p.doingSince ?? clock()) >= THINK_AWAY) return 'Thinking at the desk (no boardroom table yet)';
     if (s.doing === 'resting' && t?.area === 'desk') return 'At the desk, ready for the next message';
     if (s.doing === 'resting' && t?.area === 'stretch') return 'Stretching their legs: nothing to do for 2 minutes';
     if (s.doing === 'resting' && t?.rest) return `Resting: ${t.rest.words}`;
@@ -736,7 +881,11 @@
       c.fillRect(xx - 5, dy - 25, 10, 50);
       line(c, xx, dy - 25, xx + (i % 2 === 0 ? 30 : -30), dy - 45, '#7b8b9a', 3);
     });
-    // Outside: the path past the front door, the sand, the sea; an umbrella and a towel for each place on the beach.
+    // The lounge's window on its outside wall (staff wait by it while the lounge is empty).
+    box(c, 1172, 566, 14, 82, 3, '#cfe8f5', INK, 2);
+    line(c, 1179, 570, 1179, 644, '#fff', 1.5);
+    // Outside: the path past the front door, the sand, the sea; a towel for each place on the beach, and the deck chairs
+    // bought, each under its umbrella.
     c.fillStyle = '#b9c9a4';
     c.fillRect(0, 786, W, 38);
     c.fillStyle = '#d9cfb8';
@@ -749,16 +898,8 @@
     BEACH.forEach(([x, y], i) => {
       box(c, x - 34, y - 4, 68, 24, 4, PALETTE[i % PALETTE.length], INK, 1.5);
       line(c, x - 30, y + 2, x + 30, y + 2, '#fff', 1.5);
-      line(c, x + 44, y + 22, x + 44, y - 22, '#7b6a55', 3);
-      c.beginPath();
-      c.arc(x + 44, y - 20, 24, Math.PI, 0);
-      c.closePath();
-      c.fillStyle = i % 2 ? '#ef8a91' : '#efbd72';
-      c.fill();
-      c.strokeStyle = INK;
-      c.lineWidth = 2;
-      c.stroke();
     });
+    DECK.slice(0, world.rooms.deckchairs).forEach(([x, y], i) => deckChair(c, x, y, i));
     // The front door.
     box(c, 574, 750, 52, 28, 4, '#a4b8c3');
     line(c, 570, 790, 570, 762, '#667e94', 4);
@@ -769,11 +910,14 @@
       box(c, d.x + 38, d.y - 16, 9, 30, 2, '#5d7084', INK, 2);
       if (!d.dead) for (const off of d.seats) box(c, d.x + off - 15, d.y + 26, 30, 21, 7, '#9eb3c8');
     }
-    // Boardroom: the table, the chairs, the whiteboard.
-    box(c, 760, 145, 290, 100, 22, '#e8bb80');
-    for (const [x, y] of MEETING) box(c, x - 19, y - 8, 38, 26, 8, '#a6aacb');
-    box(c, 1110, 105, 40, 160, 7, INK);
-    box(c, 1116, 112, 28, 146, 3, '#fff7ed');
+    // Boardroom (what is bought): the table, the chairs round it, the whiteboard.
+    const br = world.rooms.boardroom;
+    if (br.table) box(c, 760, 145, 290, 100, 22, '#e8bb80');
+    for (const i of seatOrder().slice(0, br.chairs)) box(c, MEETING[i][0] - 19, MEETING[i][1] - 8, 38, 26, 8, '#a6aacb');
+    if (br.whiteboard) {
+      box(c, 1110, 105, 40, 160, 7, INK);
+      box(c, 1116, 112, 28, 146, 3, '#fff7ed');
+    }
     // Kitchen: counter with the coffee machine, the vending machine, the table, the sink.
     box(c, 80, 475, 180, 43, 9, '#e8bb80');
     box(c, 110, 480, 45, 33, 5, INK);
@@ -786,26 +930,55 @@
     box(c, 230, 600, 150, 45, 15, '#e8bb80');
     box(c, 80, 690, 55, 40, 7, '#a4b8c3');
     oval(c, 106, 707, 17, 10, '#d5e3e8');
-    // Lounge: the bookcase, an armchair, the sofa, the TV.
-    box(c, 680, 475, 110, 35, 5, '#b78966');
-    for (let i = 0; i < 11; i++) box(c, 686 + i * 9, 480, 7, 23, 1, PALETTE[i % 6], INK, 1.5);
-    box(c, 683, 641, 55, 39, 12, '#a4bac9');
-    box(c, 920, 720, 200, 32, 10, '#9ab4c9');
-    box(c, 925, 684, 190, 40, 12, '#b8cddd');
-    box(c, 950, 485, 160, 50, 7, INK);
-    box(c, 957, 492, 146, 36, 4, '#182638');
-    if (world.gym) drawGym(c);
+    // Lounge (what is bought): the bookcase, the armchair, the sofa, the TV, the gym.
+    const lo = world.rooms.lounge;
+    if (lo.bookcase) {
+      box(c, 680, 475, 110, 35, 5, '#b78966');
+      for (let i = 0; i < 11; i++) box(c, 686 + i * 9, 480, 7, 23, 1, PALETTE[i % 6], INK, 1.5);
+    }
+    if (lo.armchair) box(c, 683, 641, 55, 39, 12, '#a4bac9');
+    if (lo.sofa) {
+      box(c, 920, 720, 200, 32, 10, '#9ab4c9');
+      box(c, 925, 684, 190, 40, 12, '#b8cddd');
+    }
+    if (lo.tv) {
+      box(c, 950, 485, 160, 50, 7, INK);
+      box(c, 957, 492, 146, 36, 4, '#182638');
+    }
+    if (lo.gym) drawGym(c);
     return cv;
   }
 
-  /** The coffee cart: a counter under a striped awning, a machine and cups. */
-  function drawCart(c) {
-    const { x, y, w, h } = CART;
-    box(c, x, y + 8, w, h - 8, 5, '#c98f5a');
-    for (let i = 0; i < 5; i++) box(c, x - 4 + (i * (w + 8)) / 5, y - 4, (w + 8) / 5, 12, 2, i % 2 ? '#fff6e4' : '#ef8a91', INK, 1.2);
-    box(c, x + 8, y + 12, 18, 14, 3, INK);
-    mug(c, x + 42, y + 19);
-    mug(c, x + 56, y + 19);
+  /** The boardroom and the lounge while nothing is bought for them (the gym alone still leaves the lounge's seats empty). */
+  function emptyRooms() {
+    const b = world.rooms.boardroom;
+    const l = world.rooms.lounge;
+    return ROOMS.filter(r => (r.name === 'Boardroom' && !b.table && !b.chairs && !b.whiteboard) || (r.name === 'Lounge and library' && !l.armchair && !l.bookcase && !l.sofa && !l.tv && !l.gym));
+  }
+  /** A deck chair seen from above (striped, its back to the path) under a beach umbrella. */
+  function deckChair(c, x, y, i) {
+    box(c, x - 17, y - 30, 34, 50, 6, '#c98f5a', INK, 2);
+    for (let k = 0; k < 4; k++) box(c, x - 13, y - 26 + k * 11, 26, 9, 2, k % 2 ? '#fff6e4' : PALETTE[i % PALETTE.length], null);
+    line(c, x + 27, y + 18, x + 27, y - 20, '#7b6a55', 3);
+    c.beginPath();
+    c.arc(x + 27, y - 22, 19, Math.PI, 0);
+    c.closePath();
+    c.fillStyle = i % 2 ? '#ef8a91' : '#efbd72';
+    c.fill();
+    c.strokeStyle = INK;
+    c.lineWidth = 2;
+    c.stroke();
+  }
+
+  /** The coffee delivery's tray: a cup holder with takeaway cups. */
+  function coffeeTray(c, p) {
+    const dx = p.face === 'east' ? 22 : p.face === 'west' ? -22 : 0;
+    const dy = p.face === 'north' ? -30 : 9;
+    box(c, p.x + dx - 18, p.y + dy - 9, 36, 20, 4, '#c98f5a', INK, 2);
+    for (let i = 0; i < 4; i++) {
+      oval(c, p.x + dx - 12 + (i % 2) * 24, p.y + dy - 3 + Math.floor(i / 2) * 9, 5, 5, '#fff9eb', INK, 1.2);
+      oval(c, p.x + dx - 12 + (i % 2) * 24, p.y + dy - 3 + Math.floor(i / 2) * 9, 2.5, 2.5, '#8a6a4c', null);
+    }
   }
   /** The gym in the lounge, once bought: a treadmill, and a weights bench with its bar and plates. */
   function drawGym(c) {
@@ -835,7 +1008,6 @@
     }
     // A small gold star under it.
     oval(c, FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h - 7, 5, 5, '#f2b733', INK, 1.5);
-    if (full) text(c, a ? `${a.name}, employee of the month` : 'Employee of the month', FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h + 16, labelSize(c), '#56677b', 'center');
   }
 
   /** Each desk's screens (what the person at it is doing), and a PC that is off or in use by its owner. */
@@ -855,7 +1027,6 @@
     for (const d of world.desks) {
       if (world.installing.has(d.key)) {
         // Waiting for IT: an empty desk.
-        if (full) text(c, `${d.name} (IT is bringing it)`, d.x, d.y + 64, labelSize(c), '#776446', 'center');
         continue;
       }
       const n = d.seats.length;
@@ -882,8 +1053,6 @@
         cobweb(c, d.x + 49, d.y - 19, -1);
         cobweb(c, d.x + 49, d.y + 17, -1, -1);
       }
-      // Under the chairs; a PC that is off (no chairs, in the bottom corner) has its name over it.
-      if (full) text(c, d.dead ? `${d.name} (off)` : d.name, d.x, d.dead ? d.y - 28 : d.y + 64, labelSize(c), d.dead ? '#7b8794' : '#41546b', 'center');
     }
   }
   /** A cobweb in a corner at (x, y), spreading right (sx 1) or left (-1), down (sy 1) or up (-1). */
@@ -967,12 +1136,10 @@
       c.stroke();
       c.restore();
     } else if (s === 'off') {
-      // The sun over someone on holiday.
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2 + world.time * 0.6;
-        line(c, x + Math.cos(a) * 10, y - 4 + Math.sin(a) * 10, x + Math.cos(a) * 15, y - 4 + Math.sin(a) * 15, '#f2b733', 2);
-      }
-      oval(c, x, y - 4, 7, 7, '#f7cd50', INK, 1.5);
+      // PC off: a power symbol, grey (never the same shape or colour as a break's cup).
+      powerMark(c, x, y - 4);
+    } else if (breakOf(p)) {
+      cupMark(c, x, y - 4);
     } else if (p.target?.helping) {
       // A small bulb: helping someone think.
       oval(c, x, y - 2, 6, 6, `rgba(247, 205, 80, ${0.5 + 0.5 * Math.sin(world.time * 3 + p.seed) ** 2})`, INK, 1.5);
@@ -992,6 +1159,44 @@
       text(c, 'z', x + 6 + k * 3, y + 4 - k * 4, 13, '#56677b');
       c.globalAlpha = 1;
     }
+  }
+
+  /** PC off: a grey disc with the power symbol (a broken ring and a bar). */
+  function powerMark(c, x, y) {
+    oval(c, x, y, 11, 11, '#8a96a3', INK, 1.5);
+    c.beginPath();
+    c.arc(x, y + 1, 5.5, -Math.PI / 2 + 0.75, -Math.PI / 2 - 0.75 + Math.PI * 2);
+    c.strokeStyle = '#fff';
+    c.lineWidth = 2;
+    c.lineCap = 'round';
+    c.stroke();
+    line(c, x, y - 6, x, y, '#fff', 2);
+  }
+  /** On a break: a green disc with a cup. */
+  function cupMark(c, x, y) {
+    oval(c, x, y, 11, 11, '#4fa77a', INK, 1.5);
+    box(c, x - 5, y - 4, 8, 9, 2, '#fff', null);
+    c.beginPath();
+    c.arc(x + 4, y, 3, -Math.PI / 2, Math.PI / 2);
+    c.strokeStyle = '#fff';
+    c.lineWidth = 1.6;
+    c.stroke();
+  }
+  /** Under the name in the full view: "On a break" (green, a cup) or "PC off" (grey, the power symbol). */
+  function stateTag(c, p, y) {
+    const off = p.target?.area === 'beach';
+    if (!off && !breakOf(p)) return;
+    const words = off ? 'PC off' : 'On a break';
+    const size = labelSize(c) * 0.9;
+    c.font = `600 ${size}px Segoe UI, system-ui, sans-serif`;
+    const w = c.measureText(words).width + size * 2.6;
+    // Worded only where it has room (or for the person picked): next to each other, the mark over each head says it.
+    const near = [...world.people.values()].some(o => o !== p && !o.path.length && (o.target?.area === 'beach' || breakOf(o)) && Math.abs(o.x - p.x) < w + 4 && Math.abs(o.y - p.y) < 40);
+    if (near && world.selected !== p.id) return;
+    const h = size * 1.6;
+    box(c, p.x - w / 2, y, w, h, h / 2, off ? '#e6e9ed' : '#dff2e7', off ? '#7b8794' : '#3c8a64', 1.5);
+    (off ? powerMark : cupMark)(c, p.x - w / 2 + size * 0.95, y + h / 2);
+    text(c, words, p.x - w / 2 + size * 1.9, y + h * 0.7, size, off ? '#4a5563' : '#24603f');
   }
 
   function bubble(c, p, size) {
@@ -1035,11 +1240,17 @@
     oval(c, x, y, r * 0.72, r * 0.72, icing, null);
     oval(c, x, y, r * 0.3, r * 0.3, '#fff6e4', INK, 1);
   }
-  /** A takeaway coffee in hand, from the cart. */
+  /** A takeaway coffee in hand, delivered. */
   function coffeeHeld(c, p) {
     const dx = p.face === 'west' ? -15 : 15;
     box(c, p.x + dx - 4, p.y - 6, 8, 11, 2, '#fff9eb', INK, 1.5);
     box(c, p.x + dx - 5, p.y - 8, 10, 3, 1, '#8a6a4c', INK, 1);
+  }
+
+  /** A cold drink with a straw, on a break. */
+  function drinkHeld(c, p) {
+    box(c, p.x + 13, p.y - 4, 8, 12, 2, '#bfe6f2', INK, 1.5);
+    line(c, p.x + 18, p.y - 4, p.x + 21, p.y - 11, '#ef8a91', 1.8);
   }
 
   /** The box of belongings carried to a new desk. */
@@ -1068,22 +1279,28 @@
       if (lifted) oval(c, p.x, p.y + 12, 18, 8, 'rgba(39, 54, 78, .2)', null);
       const look = ready ? p.look ?? app.look.fromId(p.id, p.row.roleId ?? '') : null;
       if (look && !walk && p.target?.area === 'beach') {
-        // On holiday: lying on the towel in the sun.
+        // On holiday: lying on the towel in the sun (head to the left; the middle of the body over the towel's).
         c.save();
-        c.translate(p.x, y + 8);
+        c.translate(p.x + 4, y + 8);
         c.rotate(-Math.PI / 2);
         app.look.sprite(c, look, 0, 0, 'south', { time: world.time });
+        // Sunglasses.
+        oval(c, -5, -12, 4.5, 3.2, '#1d2633', null);
+        oval(c, 5, -12, 4.5, 3.2, '#1d2633', null);
+        line(c, -1, -12, 1, -12, '#1d2633', 1.5);
         c.restore();
       } else if (look && !walk && (p.target?.area === 'stretch' || p.target?.rest?.gym)) {
         // Stretching or at the gym: hopping on the spot.
         app.look.sprite(c, look, p.x, y - Math.abs(Math.sin(world.time * 5 + p.seed)) * 6, 'south', { walk: true, time: world.time, seed: p.seed % 10 });
       } else if (look) app.look.sprite(c, look, p.x, y, p.face, { walk, time: world.time, seed: p.seed % 10 });
       else oval(c, p.x, y, 14, 18, PALETTE[p.seed % 6]);
-      if (FOOD[p.carry]) pizzaBox(c, { ...p, y }, p.carry);
+      if (p.carry === 'coffee') coffeeTray(c, { ...p, y });
+      else if (FOOD[p.carry]) pizzaBox(c, { ...p, y }, p.carry);
       else if (p.carry === 'folder') folderCarried(c, { ...p, y });
       else if (p.carry === 'pc') pcCarried(c, { ...p, y });
       else if (p.carry) carried(c, { ...p, y });
       else if (p.coffee === 'have' && world.time < p.coffeeUntil) coffeeHeld(c, { ...p, y });
+      else if (breakOf(p) && !walk) drinkHeld(c, { ...p, y });
       if (full && p.bubbleUntil > world.time) bubble(c, { ...p, y }, labelSize(c));
       else drawIcon(c, { ...p, y });
       if (world.selected === p.id) {
@@ -1100,7 +1317,14 @@
         c.lineWidth = 2;
         c.stroke();
       }
-      if (full) text(c, p.row.name, p.x, p.target?.area === 'beach' && !walk ? y + 46 : y + 34, labelSize(c), INK, 'center');
+      // At their desk a name would sit over the computers: only the one picked has it there.
+      const atDesk = !walk && p.targetKey?.startsWith('seat:');
+      if (full && (!atDesk || world.selected === p.id)) {
+        const ny = p.target?.area === 'beach' && !walk ? y + 46 : y + 34;
+        text(c, p.row.name, p.x, ny, labelSize(c), INK, 'center');
+        // Lying on a towel near the sea's edge: the tag goes above them, clear of the bottom.
+        if (!walk) stateTag(c, p, p.target?.area === 'beach' ? y - 36 : ny + labelSize(c) * 0.4);
+      }
     }
   }
 
@@ -1132,6 +1356,12 @@
       const room = cv.parentElement.getBoundingClientRect();
       ch = Math.min(room.height, (cw * H) / W);
       cw = (ch * W) / H;
+      // The window only as wide as the office and the menu need (no empty bands either side of the office), up to the
+      // 96% of the screen it may take; a phone keeps the whole width.
+      const wide = window.matchMedia?.('(min-width: 800px)').matches;
+      const want = Math.max(760, Math.ceil(cw + (full.offsetWidth - cv.parentElement.clientWidth)));
+      if (!wide || want >= window.innerWidth * 0.96) full.style.width = '';
+      else if (Math.abs(full.offsetWidth - want) > 2) full.style.width = `${want}px`;
     }
     if (!cw) return false;
     const pw = Math.round(cw * ratio);
@@ -1159,7 +1389,8 @@
     c.drawImage(background, 0, 0);
     // Names are written only where they can be read at 12 px or more without crowding the rooms (not on a phone).
     const full = view.kind === 'full' && labelSize(c) <= 24;
-    if (full) ROOMS.forEach(r => text(c, r.name, r.x + 18, r.y + 30, labelSize(c), '#56677b'));
+    // A room with nothing bought for it yet says so (and how it fills).
+    if (full) for (const r of emptyRooms()) text(c, 'Empty: furnish it from Look after the team', r.x + r.w / 2, r.y + r.h / 2 + 30, labelSize(c), '#7b8794', 'center');
     drawDesks(c, full);
     drawFrame(c, full);
     if (world.pizzaOn && world.food === 'donuts') {
@@ -1170,15 +1401,13 @@
       oval(c, 303, 622, 26, 14, '#f2bc66');
       for (let i = 0; i < 6; i++) oval(c, 285 + i * 7, 618 + (i % 2) * 7, 3, 3, '#dc776e', null);
     }
-    // The coffee cart on the sand while a coffee round is on.
-    if (world.time < world.coffeeUntil) drawCart(c);
     // The desk a person is dragged over: green when they can move there, red when not.
     if (view.hover) {
       const d = deskOf(view.hover.key);
       if (d) box(c, d.x - 54, d.y - 24, 108, 76, 12, view.hover.ok ? 'rgba(120, 198, 163, .35)' : 'rgba(239, 138, 145, .35)', view.hover.ok ? '#3c8a64' : '#a8322a', 3);
     }
-    // The whiteboard fills with notes while someone thinks.
-    if (world.staff.some(s => s.doing === 'thinking')) for (let i = 0; i < 4; i++) line(c, 1122, 140 + i * 23, 1122 + 16 * ((Math.sin(world.time + i) + 1) / 2) + 2, 140 + i * 23, PALETTE[i], 4);
+    // The whiteboard (once bought) fills with notes while someone thinks in the boardroom.
+    if (world.rooms.boardroom.whiteboard && thinkersNow().length) for (let i = 0; i < 4; i++) line(c, 1122, 140 + i * 23, 1122 + 16 * ((Math.sin(world.time + i) + 1) / 2) + 2, 140 + i * 23, PALETTE[i], 4);
     drawPeople(c, full, view);
   }
 
@@ -1243,6 +1472,7 @@
     return [cam.x + ((e.clientX - r.left) / r.width) * cam.w, cam.y + ((e.clientY - r.top) / r.height) * cam.h];
   }
   const personAt = (x, y) => [...world.people.values()].filter(p => !p.out).sort((a, b) => b.y - a.y).find(p => Math.hypot(p.x - x, p.y - 10 - y) < 28);
+  const onFrame = (x, y) => x > FRAME.x && x < FRAME.x + FRAME.w && y > FRAME.y && y < FRAME.y + FRAME.h;
   const deskUnder = (x, y) => world.desks.find(d => x > d.x - 60 && x < d.x + 60 && y > d.y - 30 && y < d.y + 55);
   /** Whether `s` can be moved to desk d: not the one they sit at, not a PC that is off or in use by its owner. */
   const canMove = (s, d) => !!d && d.key !== (s.pcId ?? '') && d.activity !== 'offline' && d.activity !== 'owner';
@@ -1259,7 +1489,7 @@
       const [x, y] = at(view, e);
       const press = view.press;
       if (!press) {
-        cv.style.cursor = personAt(x, y) ? 'grab' : deskUnder(x, y) ? 'pointer' : '';
+        cv.style.cursor = personAt(x, y) ? 'grab' : deskUnder(x, y) || onFrame(x, y) ? 'pointer' : '';
         return;
       }
       if (!press.p) return;
@@ -1299,6 +1529,7 @@
         return;
       }
       if (press.desk) app.openPc?.(press.desk.key || 'here');
+      else if (onFrame(press.x, press.y)) openMonth();
     };
     cv.addEventListener('pointerup', end);
     cv.addEventListener('pointercancel', () => {
@@ -1331,7 +1562,7 @@
   }
 
   function addView(kind, holder, dialog = null) {
-    const canvas = el('canvas', { class: 'office-canvas', role: 'img', 'aria-label': 'The office: each hire as a little person, at their PC\'s desk when they work, in the boardroom when they think, in the kitchen or the lounge when they rest. The list below says the same in words.' });
+    const canvas = el('canvas', { class: 'office-canvas', role: 'img', 'aria-label': 'The office: each hire as a little person, at their PC\'s desk when they work, in the boardroom when they think a long time (once it has a table), in the kitchen, the lounge or a deck chair on the beach when they rest, on a towel on the beach when their PC is off. The list below says the same in words.' });
     const strip = el('div', { class: 'office-strip', 'aria-live': 'off' });
     const view = { kind, canvas, ctx: canvas.getContext('2d'), strip, dialog, seen: kind === 'full' };
     holder.append(el('div', { class: 'office-stage' }, canvas), strip);
@@ -1351,62 +1582,165 @@
   const awardBtn = el('button', { class: 'btn', type: 'button', text: 'Award employee of the month', title: 'Most tokens written this month wins (a 20% off voucher)', onclick: () => award(awardBtn) });
   const undoAwardBtn = el('button', { class: 'btn', type: 'button', text: 'Undo award', title: "Takes this month's award off again", hidden: true, onclick: () => undoLastAward(undoAwardBtn) });
   const pizzaBtn = el('button', { class: 'btn', type: 'button', text: 'Buy them pizza', title: 'A pizza comes to the kitchen; whoever has nothing to do gathers round it', onclick: () => {
-    if (orderFood('pizza')) {
-      fullSay('Pizza ordered: it comes in by the front door.');
-      wake();
-    } else fullSay('A pizza is on its way, or on the table already.');
+    if (orderFood('pizza')) wake();
+    else fullSay('A pizza is on its way, or on the table already.');
   } });
+  const purseLine = el('p', { class: 'office-purse' });
   const fullHead = el('div', { class: 'office-full-head' },
-    el('h2', { id: 'office-full-title', text: 'Staff overview' }),
+    el('div', { class: 'office-full-title' }, el('h2', { id: 'office-full-title', text: 'Staff overview' }), purseLine),
     el('span', { class: 'office-full-tools' }, awardBtn, undoAwardBtn, pizzaBtn, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => full.close() })));
   const fullSaid = el('p', { class: 'hint office-said', 'aria-live': 'polite' });
-  const fullSay = words => { fullSaid.textContent = words; };
+  /** What the window has to say (a purchase, an award, why not): at the foot of the menu, where the buying is done. */
+  const fullSay = words => {
+    fullSaid.textContent = words;
+    if (words) shopPanel.open = true;
+  };
 
   // ---- The shop: rewards paid from the team's tokens written (the server keeps the purse: src/home.ts buy) ----
 
-  const shopLine = el('div', { class: 'office-shop' });
+  // The menu beside the office: each thing to buy as a picture card with its price.
+  // On a phone it sits under the office (the window scrolls to it). It can be folded away.
+  const shopTiles = el('div', { class: 'office-shop-groups' });
+  const shopPanel = el('details', { class: 'office-shop-panel' },
+    el('summary', {}, el('h3', { id: 'office-shop-title', text: 'Look after the team' }), el('span', { class: 'hint', text: 'Gain tokens from work done' })),
+    shopTiles, fullSaid);
+  shopPanel.open = true;
+  /** Each item's button (short) and what it does (the title); `done`: said once it is bought. */
   const SHOP_WORDS = {
-    coffee: { label: 'Buy them coffee', title: 'Whoever has nothing to do heads out to the coffee cart for one; anyone busy goes when they stop (within 10 minutes)' },
-    donuts: { label: 'Buy them donuts', title: 'A box of donuts comes to the kitchen table; whoever has nothing to do gathers round it' },
-    gym: { label: 'Buy gym equipment', title: 'A treadmill and a weights bench for the lounge, kept for good: staff with nothing to do work out there' },
+    pizza: { label: 'Pizza', title: 'A pizza comes to the kitchen; whoever has nothing to do gathers round it (free)' },
+    coffee: { label: 'Coffee', title: 'A coffee delivery comes in by the front door and hands each of them a coffee, wherever they are, busy or not' },
+    donuts: { label: 'Donuts', title: 'A box of donuts comes to the kitchen table; whoever has nothing to do gathers round it' },
+    table: { label: 'Table', title: 'Opens the boardroom: a think over 15 seconds goes to the table (until then it stays at the desk)', done: 'the boardroom is open: a think over 15 seconds goes to the table now. Buy chairs to seat them, and a helper in each chair left over' },
+    chairs: { label: 'Chairs', each: 'a pair', title: 'Two chairs round the boardroom table, up to six: the thinkers sit first, and each chair left over seats someone with nothing to do who joins in to help (up to two)', done: 'two more chairs round the boardroom table' },
+    whiteboard: { label: 'Whiteboard', title: 'Fills with notes while someone thinks in the boardroom', done: 'it fills with notes while someone thinks in the boardroom' },
+    armchair: { label: 'Armchair', title: 'Staff with nothing to do nap in it', done: 'staff with nothing to do nap in it' },
+    bookcase: { label: 'Bookcase', title: 'Staff with nothing to do read there', done: 'staff with nothing to do read there' },
+    sofa: { label: 'Sofa', title: 'Staff with nothing to do chat in the lounge', done: 'staff with nothing to do chat in the lounge' },
+    tv: { label: 'TV', title: 'Staff with nothing to do watch it from the sofa', done: 'staff with nothing to do watch it' },
+    gym: { label: 'Gym', title: 'A treadmill and a weights bench for the lounge, kept for good: staff with nothing to do work out there', done: 'a treadmill and a weights bench in the lounge, kept for good. Staff with nothing to do work out there now and then' },
+    deckchair: { label: 'Deck chair', title: 'A deck chair under an umbrella on the beach, up to six: staff with nothing to do for 10 minutes take a break there (busy staff never go; the staff of a PC that is off lie on towels instead)', done: 'staff with nothing to do for 10 minutes take a break there' },
   };
   const num = n => Number(n || 0).toLocaleString();
+  /** A shop item's picture, drawn with the office's own pencils into a 100 x 75 box. */
+  function drawPic(c, id) {
+    if (id === 'coffee') {
+      box(c, 37, 24, 26, 40, 5, '#fff9eb');
+      box(c, 37, 36, 26, 13, 2, '#c98f5a', INK, 2);
+      box(c, 33, 16, 34, 9, 3, '#8a6a4c');
+    } else if (id === 'donuts') {
+      donut(c, 50, 40, 24, '#ef8a91');
+      for (let i = 0; i < 6; i++) line(c, 40 + i * 4, 28 + (i % 2) * 18, 42 + i * 4, 31 + (i % 2) * 18, PALETTE[i % 6], 2);
+    } else if (id === 'pizza') {
+      c.beginPath();
+      c.moveTo(22, 18);
+      c.lineTo(80, 28);
+      c.lineTo(36, 66);
+      c.closePath();
+      c.fillStyle = '#f2bc66';
+      c.fill();
+      c.strokeStyle = INK;
+      c.lineWidth = 2.5;
+      c.stroke();
+      line(c, 24, 18, 78, 28, '#c98f5a', 6);
+      for (const [x, y] of [[44, 32], [58, 36], [42, 48]]) oval(c, x, y, 5, 5, '#dc776e', null);
+    } else if (id === 'table') {
+      box(c, 14, 24, 72, 30, 12, '#e8bb80');
+    } else if (id === 'chairs') {
+      box(c, 18, 26, 28, 24, 8, '#a6aacb');
+      box(c, 54, 26, 28, 24, 8, '#a6aacb');
+    } else if (id === 'whiteboard') {
+      box(c, 16, 12, 68, 50, 6, INK);
+      box(c, 22, 18, 56, 38, 3, '#fff7ed');
+      for (let i = 0; i < 3; i++) line(c, 28, 26 + i * 10, 52 + i * 8, 26 + i * 10, PALETTE[i], 3);
+    } else if (id === 'armchair') {
+      box(c, 26, 18, 48, 42, 12, '#a4bac9');
+      box(c, 34, 30, 32, 26, 8, '#c6d6e2', INK, 1.5);
+    } else if (id === 'bookcase') {
+      box(c, 12, 22, 76, 32, 5, '#b78966');
+      for (let i = 0; i < 8; i++) box(c, 17 + i * 8.5, 26, 7, 24, 1, PALETTE[i % 6], INK, 1.5);
+    } else if (id === 'sofa') {
+      box(c, 10, 36, 80, 20, 9, '#9ab4c9');
+      box(c, 14, 18, 72, 24, 10, '#b8cddd');
+    } else if (id === 'tv') {
+      box(c, 12, 14, 76, 40, 6, INK);
+      box(c, 17, 19, 66, 30, 3, '#182638');
+      line(c, 50, 54, 50, 62, INK, 3);
+      line(c, 38, 63, 62, 63, INK, 3);
+    } else if (id === 'gym') {
+      line(c, 22, 38, 78, 38, '#56677b', 4);
+      box(c, 16, 24, 10, 28, 3, INK);
+      box(c, 74, 24, 10, 28, 3, INK);
+      box(c, 26, 28, 7, 20, 2, '#9ab6c7', INK, 1.5);
+      box(c, 67, 28, 7, 20, 2, '#9ab6c7', INK, 1.5);
+    } else if (id === 'deckchair') {
+      c.save();
+      c.translate(36, 46);
+      c.scale(0.8, 0.8);
+      deckChair(c, 0, 0, 0);
+      c.restore();
+    }
+  }
+  /** The menu's sections: the treats, then the office by room, each a row of picture cards. */
+  const SECTIONS = [['Treat the team', [['', ['pizza', 'coffee', 'donuts']]]], ['Improve the office', [['Boardroom', ['table', 'chairs', 'whiteboard']], ['Lounge', ['armchair', 'bookcase', 'sofa', 'tv', 'gym']], ['Beach', ['deckchair']]]]];
+  /** Pizza is the boss's treat (free): on the menu beside the paid ones. */
+  const PIZZA_ITEM = { id: 'pizza', name: 'Pizza', price: 0, room: 'treats', keeps: false, most: 0, have: 0, owned: false, waits: false };
+  function tile(i) {
+    const w = SHOP_WORDS[i.id] ?? { label: i.name, title: '' };
+    const pic = el('canvas', { class: 'office-tile-pic', width: 128, height: 96, 'aria-hidden': 'true' });
+    const c = pic.getContext('2d');
+    c.scale(1.28, 1.28);
+    drawPic(c, i.id);
+    const left = world.purse?.left ?? 0;
+    const count = i.most > 1 ? (i.id === 'chairs' ? `${i.have * 2} of 6` : `${i.have} of ${i.most}`) : '';
+    // What the card says under the name: bought, its table first, the price, and how far off it is.
+    const lines = i.owned ? [count ? `✓ All ${i.id === 'chairs' ? 6 : i.most}` : '✓ Bought']
+      : [i.price ? `${num(i.price)}${w.each ? ` ${w.each}` : ''}` : 'Free', count && `${count} bought`, i.waits ? 'Table first' : i.price > left ? `${num(i.price - left)} more to go` : ''].filter(Boolean);
+    const body = [pic, el('span', { class: 'office-tile-name', text: w.label }), ...lines.map((t, k) => el('span', { class: k ? 'office-tile-note' : 'office-tile-price', text: t }))];
+    const said = `${w.label}. ${lines.join('. ')}. ${w.title}`;
+    if (i.owned) return el('div', { class: 'office-tile owned', title: `${i.name}: bought. ${w.title}`, role: 'img', 'aria-label': said }, ...body);
+    // Short of tokens or before its table: still pressable, and the shop says why (a greyed card explains nothing).
+    const short = i.waits || i.price > left;
+    return el('button', { class: `office-tile${short ? ' short' : ''}`, type: 'button', title: `${w.title}${i.price ? ` (${num(i.price)} tokens)` : ''}`, 'aria-label': said, onclick: e => (i.id === 'pizza' ? pizzaBtn.click() : buyItem(i, e.currentTarget)) }, ...body);
+  }
   function drawShop() {
     const p = world.purse;
-    shopLine.replaceChildren(
-      el('span', { class: 'office-purse', text: p ? `To spend: ${num(p.left)} tokens` : 'To spend: …', title: p ? `Your staff have written ${num(p.earned)} tokens in all, and ${num(p.spent)} went on treats. Every token they write adds to it.` : 'Not read yet' }),
-      ...world.shop.map(i => i.owned
-        ? el('span', { class: 'hint', text: `${i.name}: in the lounge` })
-        : el('button', { class: 'btn', type: 'button', text: `${SHOP_WORDS[i.id]?.label ?? i.name} · ${num(i.price)} tokens`, title: SHOP_WORDS[i.id]?.title ?? '', onclick: e => buyItem(i, e.currentTarget) })));
+    purseLine.textContent = p ? `To spend: ${num(p.left)} tokens` : 'To spend: …';
+    purseLine.title = p ? `Gain tokens from work done: ${num(p.earned)} tokens written in all, ${num(p.spent)} spent in the shop. Every token they write adds to it.` : 'Not read yet';
+    const item = id => (id === 'pizza' ? PIZZA_ITEM : world.shop.find(i => i.id === id));
+    shopTiles.replaceChildren(...SECTIONS.map(([head, groups]) => el('section', { class: 'office-shop-section' },
+      el('h4', { text: head }),
+      ...groups.flatMap(([room, ids]) => {
+        const items = ids.map(item).filter(Boolean);
+        return items.length ? [...(room ? [el('p', { class: 'office-shop-room', text: room })] : []), el('div', { class: 'office-tiles' }, ...items.map(tile))] : [];
+      }))));
   }
   /** Who can enjoy a treat now: in the office, not leaving or being fired. */
   const present = () => [...world.people.values()].filter(p => !p.out && !p.leaving && !p.firing);
   async function buyItem(item, button) {
-    // Nothing is paid for that cannot happen: nobody to buy for, or the table taken.
-    if (!present().length) return fullSay('Nobody is in the office to buy for: hire someone first.');
+    // Nothing is paid for that cannot happen: nobody to buy a treat for, or the table taken.
+    if (item.room === 'treats' && !present().length) return fullSay('Nobody is in the office to buy for: hire someone first.');
     if (item.id === 'donuts' && tableBusy()) return fullSay('Food is on the table, or on its way: buy the donuts once it is eaten.');
-    if (item.id === 'coffee' && world.time < world.coffeeUntil && present().some(p => p.coffee === 'fetch')) return fullSay('A coffee round is on already: some are still to fetch theirs.');
+    if (item.id === 'coffee' && (courier?.job.kind === 'coffee' || deliveries.some(d => d.kind === 'coffee'))) return fullSay('A coffee delivery is on its way already: buy another once it has been round.');
     button.disabled = true;
     try {
       const d = await api('/api/office/buy', { item: item.id });
       officeData(d);
       const left = `${num(d.purse?.left)} tokens left to spend.`;
       if (item.id === 'coffee') {
-        world.coffeeUntil = world.time + COFFEE_SECONDS;
-        for (const p of present()) {
-          p.coffee = 'fetch';
-          p.targetKey = '';
-        }
-        fullSay(`Coffee round bought (${num(item.price)} tokens): whoever has nothing to do heads out to the coffee cart now; anyone busy goes when they stop. ${left}`);
+        deliveries.push({ kind: 'coffee', who: present().filter(p => p.row.doing !== 'off').map(p => p.id), at: 0 });
+        fullSay(`Coffee ordered (${num(item.price)} tokens): a coffee delivery comes in by the front door with one for each of them, wherever they are. ${left}`);
       } else if (item.id === 'donuts') {
         orderFood('donuts');
         fullSay(`Donuts ordered (${num(item.price)} tokens): they come in by the front door to the kitchen table. ${left}`);
       } else {
+        const now = d.shop?.find(i => i.id === item.id);
+        const cheer = item.id === 'gym' ? ['A gym!', 'New treadmill!', 'Time to lift!'] : item.room === 'beach' ? ['A deck chair!', 'Beach time!', 'Sun lounger!'] : ['New furniture!', 'Nice!', 'Very smart!'];
         for (const p of present()) {
-          say(p, ['A gym!', 'New treadmill!', 'Time to lift!'][p.seed % 3], 4);
+          say(p, cheer[p.seed % 3], 4);
           if (p.target?.rest) p.restUntil = 0;
         }
-        fullSay(`Gym equipment bought (${num(item.price)} tokens): a treadmill and a weights bench in the lounge, kept for good. Staff with nothing to do work out there now and then. ${left}`);
+        const count = item.id === 'chairs' ? `, ${(now?.have ?? 0) * 2} of 6` : item.most > 1 ? `, ${now?.have ?? 0} of ${item.most}` : '';
+        fullSay(`${item.name} bought${count} (${num(item.price)} tokens): ${SHOP_WORDS[item.id]?.done ?? 'it is in the office now'}. ${left}`);
       }
       wake();
     } catch (e) {
@@ -1426,7 +1760,7 @@
     boardLine.textContent = ((rows.length ? `This week's leaderboard (tokens written since Monday): ${rows.map((r, i) => `${i + 1}. ${r.name} ${r.out.toLocaleString()}`).join(' · ')}.` : '') + behind).trim();
   }
   const fullBody = el('div', { class: 'office-full-body' });
-  full.append(fullHead, shopLine, fullSaid, fullBody);
+  full.append(fullHead, el('div', { class: 'office-full-main' }, fullBody, shopPanel));
   document.body.append(full);
   addView('full', fullBody, full);
   fullBody.append(boardLine);
@@ -1487,6 +1821,8 @@
     },
     /** The person followed now (their id), or null. */
     picked: () => world.selected,
+    /** Who is on a break in a deck chair now (ids): Staff overview's cards say so (a PC that is off says PC off). */
+    breaks: () => [...world.people.values()].filter(breakOf).map(p => p.id),
     /** Where someone is in the office (units of the 1200 x 940 picture) and the words said for them. */
     where: id => {
       const visitor = { boss, courier, it }[id];

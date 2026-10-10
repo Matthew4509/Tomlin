@@ -271,7 +271,7 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;
   }
-  if (p === '/api/home/pcs') return d.json(res, 200, { pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), activity: r.ok ? (r.away ? 'owner' : 'available') : 'offline', backupsOnly: r.backupsOnly === true, disk: r.ok ? r.disk ?? null : null, ...home.pcState(r) })) }), true;
+  if (p === '/api/home/pcs') return d.json(res, 200, { pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), activity: r.ok ? (r.away ? 'owner' : 'available') : 'offline', backupsOnly: r.backupsOnly === true, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, ...home.pcState(r) })) }), true;
   return false;
 }
 

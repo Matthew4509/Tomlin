@@ -21,7 +21,7 @@ export const NEXT_COPY_FILE = 'next-copy.txt';
 // ---- What an app copy is: the same list the release zip is made from (tools/pack.ts) ----
 
 export const PARTS = ['src', 'public', 'tools', 'test', 'registry', 'runtime/node', 'runtime/llama-cpu', 'runtime/sd-cpu', 'runtime/llama-vulkan', 'runtime/sd-vulkan', 'node_modules', 'package.json', 'package-lock.json',
-  'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd', 'models/helpers/u2netp.onnx'];
+  'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd', 'Welcome to TOMLIN.html', 'models/helpers/u2netp.onnx'];
 // Other platforms' copies of the ONNX runtime and image library are left out (Windows x64 only).
 // Paths are matched with either slash ("\" on Windows, "/" elsewhere).
 // PDF.js (documents in a chat) ships only its Node text reader and its font tables: its drawing add-on
@@ -51,11 +51,32 @@ export interface AppFile {
  */
 export function forOlderNode(files: AppFile[]): AppFile[] {
   const launcher = files.find(f => f.path === 'Start TOMLIN.cmd');
-  if (!launcher) return files;
-  return [...files.filter(f => !['Start TOMLIN.cmd', 'Start Shelby.cmd', 'Install TOMLIN.cmd'].includes(f.path)), { ...launcher, path: 'Start Shelby.cmd', from: launcher.path }];
+  if (!launcher) return withoutNewer(files);
+  return [...withoutNewer(files).filter(f => !['Start TOMLIN.cmd', 'Start Shelby.cmd', 'Install TOMLIN.cmd'].includes(f.path)), { ...launcher, path: 'Start Shelby.cmd', from: launcher.path }];
 }
+/**
+ * Files at the top of the folder that newer copies list in PARTS and older ones do not (each older copy refuses a copy
+ * that names one, before anything is kept): left out for such a PC. Its next update from a newer copy brings them.
+ * "Welcome to TOMLIN.html": 2.0.50.
+ */
+export const NEWER_FILES = ['Welcome to TOMLIN.html'];
+export const withoutNewer = (files: AppFile[]) => files.filter(f => !NEWER_FILES.includes(f.path));
+/** The file name an older PC refused the copy for ("…not named as an app file (<name>)…"), or null. */
+const refusedName = (e: unknown) => /not named as an app file \(([^)]+)\)/.exec(String((e as Error)?.message ?? e))?.[1] ?? null;
 /** That PC refused the copy for a name it does not know from the TOMLIN name: sent again with forOlderNode. */
-export const refusedNewNames = (e: unknown) => /not named as an app file \((Start|Install) TOMLIN\.cmd\)/.test(String((e as Error)?.message ?? e));
+export const refusedNewNames = (e: unknown) => /^(Start|Install) TOMLIN\.cmd$/.test(refusedName(e) ?? '');
+/** That PC refused the copy for a file newer than it (NEWER_FILES): sent again without them. */
+export const refusedNewerFile = (e: unknown) => NEWER_FILES.includes(refusedName(e) ?? '');
+/**
+ * The same copy again for a PC that refused this one for a name it does not know, or null when the refusal was for
+ * something else. Tried in turn: without the newer files (a TOMLIN-named PC before 2.0.50), then with the launcher
+ * under its old name as well (a PC from before the TOMLIN name).
+ */
+export function retryFor(files: AppFile[], sent: AppFile[], e: unknown): AppFile[] | null {
+  if (refusedNewNames(e)) return sent.some(f => f.from) ? null : forOlderNode(files);
+  if (refusedNewerFile(e)) return sent.some(f => NEWER_FILES.includes(f.path)) ? withoutNewer(sent) : null;
+  return null;
+}
 
 /** The launcher in a copy's folder: Start TOMLIN.cmd, or Start Shelby.cmd in a copy an older PC took under that name. */
 export function launcherIn(root: string): string {
@@ -497,4 +518,19 @@ export async function pushUpdate(w: Wire, o: { version: string; root: string; fi
     o.waiting?.(r.busy);
     await wait(10_000);
   }
+}
+
+// ---- A TOMLIN zip uploaded on this PC ----
+
+/**
+ * Why a TOMLIN zip uploaded under Nodes and memory (src/server/selfupdate.ts) cannot be this PC's next copy ('' when
+ * it can): its package.json, the key files missing from it, its build id; then this copy's version and build.
+ */
+export function zipWhy(pkg: { name?: unknown; version?: unknown }, missing: string[], build: string, mine: string, mineBuild: string): string {
+  if (pkg.name !== 'tomlin' || !isVersion(pkg.version)) return 'That zip is not a TOMLIN release: its package.json is not TOMLIN\'s. Pick the tomlin-<version>.zip file.';
+  if (missing.length) return `That zip is not a whole TOMLIN: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing from it. Download the zip again, then upload it here.`;
+  const version = pkg.version;
+  if (newer(mine, version)) return `That zip holds TOMLIN ${version}, older than the ${mine} this PC runs, so it was not used. Only a newer version is taken here (or the same one with other files).`;
+  if (!newer(version, mine) && (!isBuild(build) || !isBuild(mineBuild) || build === mineBuild)) return `This PC already runs TOMLIN ${mine}${isBuild(build) && build === mineBuild ? ' with the same files' : ''}: there is nothing to update.`;
+  return '';
 }

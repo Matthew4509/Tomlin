@@ -45,12 +45,22 @@ function begin(what: Omit<home.Running, 'stage' | 'startedAt'>, write: Send): { 
   };
 }
 
+/** "Another job action is still running", saying which: its job by its goal, and what it is doing. */
+export function busyWordsFor(r: Pick<home.Running, 'kind' | 'jobId' | 'goal' | 'n'> | null): string {
+  if (!r) return 'Another job action is still running. Wait for it, or press Stop.';
+  const goal = r.goal.length > 80 ? `${r.goal.slice(0, 77)}…` : r.goal;
+  const doing = { plan: 'making its plan', step: r.n === null ? 'working on a step' : `working on step ${r.n + 1}`, run: 'running', review: r.n === null ? 'checking a step' : `checking step ${r.n + 1}`, final: 'writing its report' }[r.kind];
+  return r.jobId ? `Another job is still running: "${goal}" (${doing}). Wait for it, or open it and press Stop.` : `Another job is still running: "${goal}" (${doing}). Wait for it to finish, or press Stop under it.`;
+}
+
 /** Opens an event stream for a long job action; one at a time. Null (already answered) when busy. */
-function stream(res: ServerResponse, what: Omit<home.Running, 'stage' | 'startedAt'>, busyWords = 'Another job action is still running. Wait for it, or press Stop.'): { send: Send; signal: AbortSignal; end: () => void } | null {
+function stream(res: ServerResponse, what: Omit<home.Running, 'stage' | 'startedAt'>, busyWords = ''): { send: Send; signal: AbortSignal; end: () => void } | null {
+  const was = running;
   const b = begin(what, (event, data) => { if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); });
   if (!b) {
-    // LETS GO!!! while another project works: the page offers to add it to the queue (src/server/queue.ts).
-    d.json(res, 409, { error: busyWords, ...(what.kind === 'run' ? { queue: true } : {}) });
+    // LETS GO!!! while another project works: the page offers to add it to the queue (src/server/queue.ts). The job
+    // that is working is named, and sent, so the page can offer to open it (its Stop is there).
+    d.json(res, 409, { error: busyWords || busyWordsFor(was), ...(was?.jobId ? { running: { jobId: was.jobId, goal: was.goal } } : {}), ...(what.kind === 'run' ? { queue: true } : {}) });
     return null;
   }
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', ...d.headers });
