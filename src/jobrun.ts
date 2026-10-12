@@ -24,7 +24,7 @@ import type { RunOptions, Settings, Store } from './store.ts';
 import { d, useDeps } from './jobrun/shared.ts';
 import { canKeep, canThink, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
-import { laneOfRef, nextLane, planLane, setup } from './jobrun/sizing.ts';
+import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
 import { backupTo, bringBack, copyFrom, keptOn, network, projectsBack, projectsOn, projectsTo, sendTo, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
@@ -249,7 +249,7 @@ export function createJobs(deps: JobDeps) {
   startNode();
   startLinks();
   startProjectBackups();
-  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on };
+  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on };
 }
 
 // ---- Routes ----

@@ -44,10 +44,10 @@ function pcAskCard(x, key) {
       el('button', { class: 'btn quiet', type: 'button', text: 'Not now', 'data-key': `${key}:no`, onclick: answer(false) })));
 }
 
-/** One of the recent projects: its name, how far it is, and Open (or Make the plan, for one saved without a plan). */
+/** One of the recent projects: its name, how far it is, and Open (Make the plan for one saved without a plan; Open the chat for one started with Lets go!). */
 function recentCard(x, key) {
   const go = el('button', { class: 'btn', type: 'button', text: x.action, 'data-key': key });
-  go.addEventListener('click', () => (x.plan ? app.planProject(x.job, x.goal) : app.openJob(x.job)));
+  go.addEventListener('click', () => (x.chat ? app.openChat(x.chat) : x.plan ? app.planProject(x.job, x.goal) : app.openJob(x.job)));
   return el('article', { class: 'home-item k-recent' },
     el('div', { class: 'home-item-text' },
       el('strong', { text: x.name }),
@@ -355,11 +355,22 @@ $('#home-ask').addEventListener('submit', async e => {
   const go = $('#home-go');
   go.disabled = true;
   try {
-    const r = await api('/api/projects/create', { name: $('#home-name').value, about, prompt, pm: homeAsk.pm });
+    // Lets go!: the project, then the prompt sent to one hire in a chat in it, as a normal message (no plan).
+    const r = await api('/api/projects/create', { name: $('#home-name').value, about, prompt, pm: homeAsk.pm, go: true });
+    say.hidden = true;
+    // A TOMLIN still running older code (started before an update) makes the project but no chat.
+    if (!r.chat) {
+      sayHere(say, 'The project was made (it is in Recent projects), but TOMLIN is still running an older version that does not start a chat for it. Close TOMLIN and open it again, then press Lets go! again.');
+      return;
+    }
+    await app.openChat(r.chat);
+    if (app.chatId !== r.chat) {
+      sayHere(say, `The project was made, but its chat with ${r.hire} did not open. Open it from the Chats list, then copy the prompt below into it.`);
+      return;
+    }
+    app.sendNow(prompt || about);
     for (const id of ['#home-name', '#home-about', '#home-goal']) $(id).value = '';
     drawHomeAsk();
-    say.hidden = true;
-    await app.planProject(r.id, prompt || about);
   } catch (err) {
     sayHere(say, err.message);
   } finally {

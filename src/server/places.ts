@@ -107,6 +107,28 @@ export async function handInTo(project: string, prompt: string, file: string | n
   }
 }
 
+/**
+ * The first answer of a chat started by Lets go! on Home, kept as a file where Save puts this chat's work (the project
+ * folder, or a writer's specialists\writer), named with the date and time and the prompt's first words; never over
+ * another file. Its workspace path, or '' when it was not kept (the answer is in the chat either way).
+ */
+export async function keepFirstAnswer(c: ChatInfo, prompt: string, text: string): Promise<string> {
+  if (!c.saveAnswer || !c.project || !text.trim()) return '';
+  await chats.mark(c.id, { saveAnswer: undefined });
+  try {
+    const to = await saveToOf(c);
+    if (!to) return '';
+    const root = await workspaceDir();
+    const first = folders.answerPath(to.dir, prompt);
+    let rel = first;
+    for (let n = 2; await ws.read(root, rel).then(r => !('error' in r)); n++) rel = first.replace(/\.md$/, ` ${n}.md`);
+    const r = await ws.save(root, rel, `${text.trim()}\n`);
+    return 'error' in r ? '' : r.path;
+  } catch {
+    return '';
+  }
+}
+
 export const placesGet: Routes = {
   '/api/project/handed': async ({ res, url }) => {
     // ?id=<project>: the work its specialists handed in, newest first (src/folders.ts).

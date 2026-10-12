@@ -106,8 +106,8 @@
       <label class="home-staff-label" for="home-staff">Staff:</label>
       <select class="home-staff-select" id="home-staff"></select>
       <div class="staff-pick" id="home-hire" role="group" aria-label="Hire staff" hidden></div>
-      <button class="btn home-advanced" type="button" id="project-open" title="A few questions, then the colours, layout and type, before the plan">Advanced project setup</button>
-      <button class="btn primary home-go" type="submit" id="home-go">Lets go!</button>
+      <button class="btn home-advanced" type="button" id="project-open" title="A few questions, then the colours, layout and type, then a plan in steps (Jobs)">Advanced / job planner</button>
+      <button class="btn primary home-go" type="submit" id="home-go" title="Sends the prompt to the hire under Staff (Default: the strongest worker available) in a chat in the new project, as a normal message: no plan">Lets go!</button>
     </div>
     <p class="hint" id="home-staff-line"></p>
     <div id="home-ask-say" hidden></div>
@@ -487,7 +487,7 @@
     <h3 class="help-part" id="help-part-more">More</h3>
 
     <h4 id="help-jobs">Jobs</h4>
-    <p class="hint">A job turns a goal into small steps you read and change before anything runs. On Home, Lets create a project takes a project name, a mini description (optional) and the prompt, and makes the project's folder inside the workspace folder, named with the date and time; Staff, a list of each hire as name - software - PC, picks who leads it (Default is the strongest worker available; a hire on a Backups only PC is not listed), and Lets go! has them make the plan. Advanced project setup, under it, asks a few questions and lets you pick the look first. Each step sees only its brief and its files, and code checks every answer.</p>
+    <p class="hint">A job turns a goal into small steps you read and change before anything runs. On Home, Lets create a project takes a project name, a mini description (optional) and the prompt, and makes the project's folder inside the workspace folder, named with the date and time; Staff, a list of each hire as name - software - PC, picks who gets it (Default is the strongest worker available; a hire on a Backups only PC is not listed), and Lets go! sends them the prompt as a normal message, in a chat in the new project: no plan, and the first answer is also saved as a file in the project folder. Advanced / job planner, beside it, asks a few questions and lets you pick the look, then makes a plan in steps. Each step sees only its brief and its files, and code checks every answer.</p>
     <p class="hint">In Jobs, the left column has each job's Overview, its steps (press one to read and change it) and See all. The Overview holds the Scope card and the design brief (the copy icon copies one; the pencil changes it, with Cancel and Save), Choose a Project manager, and Roles: for the Coder and the Writer, assigned is the hire you pick, not assigned means the project manager does those steps, and default is a hire in that role, else the project manager; for Auditing (the reviewer and the end-of-job report), assigned is the hire you pick, not assigned means nobody audits, and default is the strongest worker available. What you expect of the final audit goes to the auditor with the end-of-job report. Run the next step saves nothing until you press Save; LETS GO!!! runs the rest, saving each step that passes the checks and stopping at the first that does not.</p>
 
     <h4 id="help-queue">The queue</h4>
@@ -1266,7 +1266,7 @@
 <dialog id="project" class="project-dlg" aria-labelledby="project-title">
   <div class="help-body">
     <div class="dlg-top">
-      <div><h2 id="project-title">Advanced project setup</h2><span class="hint" id="project-step"></span></div>
+      <div><h2 id="project-title">Advanced / job planner</h2><span class="hint" id="project-step"></span></div>
       <form method="dialog"><button class="btn" type="submit">Close</button></form>
     </div>
     <div class="fault" id="project-fault" role="alert" hidden></div>

@@ -123,10 +123,11 @@ export function sortItems(items: HomeItem[]): { waiting: HomeItem[]; paused: Hom
 }
 
 /** One of Home's "Recent projects": a job, or a project saved without a plan (plan: true). */
-export interface Recent { job: string; name: string; goal: string; detail: string; action: string; plan: boolean; at: string }
+/** `chat`: a project started with Lets go! (a prompt sent to one hire, no plan): Open the chat opens it. */
+export interface Recent { job: string; name: string; goal: string; detail: string; action: string; plan: boolean; at: string; chat?: string }
 
 /** Home's "Recent projects", newest first: each with how far it is, in words written by code. At most `max`. */
-export function recentProjects(list: Job[], unplanned: { id: string; name: string; goal: string; at: string }[], runningId: string | null, max = 6): Recent[] {
+export function recentProjects(list: Job[], unplanned: { id: string; name: string; goal: string; at: string; chat?: string }[], runningId: string | null, max = 6): Recent[] {
   const out: Recent[] = list.map(job => {
     const total = job.steps.length;
     const done = job.steps.filter(s => s.status !== 'todo').length;
@@ -136,7 +137,11 @@ export function recentProjects(list: Job[], unplanned: { id: string; name: strin
       : `Not started · ${total} step${total === 1 ? '' : 's'} planned`;
     return { job: job.id, name: short(job.name || job.goal, 80), goal: short(job.goal), detail, action: 'Open', plan: false, at: job.updated || job.created };
   });
-  for (const p of unplanned) out.push({ job: p.id, name: short(p.name || p.goal || 'A project', 80), goal: short(p.goal), detail: 'No plan yet', action: 'Make the plan', plan: true, at: p.at });
+  for (const p of unplanned) {
+    const name = short(p.name || p.goal || 'A project', 80);
+    out.push(p.chat ? { job: p.id, name, goal: short(p.goal), detail: 'Sent as a prompt, no plan', action: 'Open the chat', plan: false, at: p.at, chat: p.chat }
+      : { job: p.id, name, goal: short(p.goal), detail: 'No plan yet', action: 'Make the plan', plan: true, at: p.at });
+  }
   return out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, max);
 }
 

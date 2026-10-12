@@ -284,7 +284,7 @@ async function openProject() {
   try {
     pj.setup = await api('/api/projects/setup');
   } catch (e) {
-    sayHere($('#home-ask-say'), `Advanced project setup could not open: ${e.message}`);
+    sayHere($('#home-ask-say'), `Advanced / job planner could not open: ${e.message}`);
     return;
   }
   const goal = $('#home-goal').value.trim().slice(0, 120);

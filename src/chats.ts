@@ -32,6 +32,8 @@ export interface ChatInfo {
   project?: string;
   /** Its own folder in the workspace while it is in Default, "chats/2026-10-07-1530" (src/folders.ts), named once. */
   folder?: string;
+  /** Started by Lets go! on Home: its first answer is also saved into the project folder as a file, then this is cleared. */
+  saveAnswer?: boolean;
 }
 
 export const NEW_TITLE = 'New chat';
@@ -180,7 +182,7 @@ export class Chats {
   }
 
   /** Changes a chat's own facts (fill, the handoff answer); the title and count are kept by saved(). */
-  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'pinned'>>): Promise<ChatInfo | null> {
+  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'pinned' | 'saveAnswer'>>): Promise<ChatInfo | null> {
     const c = (await this.index()).find(x => x.id === id);
     if (!c) return null;
     Object.assign(c, patch);

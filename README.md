@@ -412,7 +412,9 @@ rather than misread it.
   goes to `data\logs`, one file a day, the last 7 days kept. It holds where and what, never chats or files. Help >
   **Open the log** opens today's.
 - **Projects and Jobs:** Home's **Lets create a project** takes a name, a folder, a mini description, the prompt and
-  who leads it; **Lets go!** has them plan it. In Jobs, each job's Overview says who plans and who does the code, the
+  who gets it; **Lets go!** sends the prompt to that hire (Default: the strongest worker available) as a normal message
+  in a chat in the new project, with no plan, and keeps the first answer as a file in the project folder. **Advanced /
+  job planner** asks a few questions and the look, then plans it in steps. In Jobs, each job's Overview says who plans and who does the code, the
   words and the audit (Roles), with the Scope card and the design brief to copy or change; **LETS GO!!!** runs the
   steps. Every job keeps its events in `jobs/<id>/events.jsonl` in the workspace (job rooms were dropped in 2.0.36).
 - **Nodes and memory** (Set up, in the left list; also a card on Home while nothing is set up): this PC as a node,
@@ -549,6 +551,10 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.53:** Home's **Lets go!** no longer plans: it sends the prompt to the hire under Staff (Default: the hire on
+  the strongest worker available) as a normal message, in a chat in the new project, and keeps the first answer as a
+  file in the project folder. Recent projects opens that chat. **Advanced project setup** is now **Advanced / job
+  planner**: the questions, the look, then the plan in steps.
 - **2.0.52:** Help, this README and the welcome page say what TOMLIN backs up and what it does not: your workspace
   (what it is, and that all of it goes with no tick), the projects you select, restore points, what is left out, that
   every copy stays in your home and is not locked on the PC that keeps it, and free tools made by other people for

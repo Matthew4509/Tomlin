@@ -1,7 +1,7 @@
 // Where work goes in the workspace (src/folders.ts). Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatFolder, firstWords, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
+import { answerPath, chatFolder, firstWords, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
 import { cleanFiles, cleanProjectFolder, cleanStep, folderStamp } from '../src/jobs.ts';
 import { cleanPath } from '../src/workspace.ts';
 
@@ -20,6 +20,9 @@ test('every name starts with the same date and time as a project folder', () => 
 test('a note is saved in notes, or in the project\'s admin notes, named by when and its first words', () => {
   assert.equal(notePath('Video cards: 12 GB for 1440p, check the PSU!', null, NOW), 'notes/2026-10-07-1530 Video cards 12 GB for 1440p check the.md');
   assert.equal(notePath('Ask about the cover', 'clients/acme', NOW), 'clients/acme/admin notes/2026-10-07-1530 Ask about the cover.md');
+  // Lets go!'s first answer: where Save puts the chat's work, named with the date and time and the prompt's first words.
+  assert.equal(answerPath('2026-10-07-1116', 'A one-page tip calculator, please!', NOW), '2026-10-07-1116/2026-10-07-1530 A one-page tip calculator please.md');
+  assert.equal(answerPath('', 'tips', NOW), '2026-10-07-1530 tips.md');
   assert.equal(notePath('Top of the workspace', '', NOW), 'admin notes/2026-10-07-1530 Top of the workspace.md');
   assert.equal(firstWords('???'), 'note');
   assert.ok(firstWords('a '.repeat(80)).length <= 40);

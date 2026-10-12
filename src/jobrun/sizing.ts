@@ -8,7 +8,7 @@ import { nowModel, paramsB, roleOf, type StaffMember } from '../staff.ts';
 import * as seats from '../seats.ts';
 import { workAs } from '../meter.ts';
 import { type Send, d } from './shared.ts';
-import { hello, seen, sharedWhy } from './links.ts';
+import { backupsOnly, hello, seen, sharedWhy } from './links.ts';
 import { brainForRef, candidate, hireBrain } from './who.ts';
 import { addEvent, jobRoot, jobView, packetFront, saveJob } from './jobfiles.ts';
 import { shareView } from './node.ts';
@@ -78,6 +78,17 @@ async function hireSeat(hire: StaffMember, cached = false): Promise<seats.Seat |
   if (!refs.length) return seatOf('', cached);
   const xs = (await Promise.all(refs.map(r => seatOf(r, cached)))).filter((x): x is seats.Seat => !!x);
   return xs.find(x => x.ready) ?? xs[0] ?? null;
+}
+
+/**
+ * The hire who chats on the strongest worker available (Lets go! on Home with Staff left on Default): most parameters,
+ * then most context, then one that answers now, as seats.strongest. A hire on a PC set to Backups only takes no work.
+ */
+export async function strongestHire(cached = false): Promise<StaffMember | null> {
+  const hires = chatHires().filter(m => { const now = nowModel(m) ?? m.model ?? ''; return !(now.startsWith('remote:') && backupsOnly(now.slice(7))); });
+  const sat = (await Promise.all(hires.map(async h => ({ h, seat: await hireSeat(h, cached) })))).filter((x): x is { h: StaffMember; seat: seats.Seat } => !!x.seat);
+  const best = seats.strongest(sat.map(x => x.seat));
+  return sat.find(x => x.seat === best)?.h ?? null;
 }
 
 /**

@@ -182,7 +182,7 @@ async function loadJobs() {
   if (hidden.length) box.append(el('details', { class: 'sub' }, el('summary', { text: `Hidden jobs (${hidden.length})` }), ...hidden.map(item)));
   // Projects saved with no plan yet are found here too, not only inside Start project.
   const saved = (await api('/api/projects/setup').catch(() => null))?.saved ?? [];
-  if (saved.length) box.append(el('p', { class: 'hint' }, `${saved.length} project${saved.length > 1 ? 's' : ''} saved without a plan. `, el('button', { class: 'link', type: 'button', text: 'Open Advanced project setup', onclick: () => {
+  if (saved.length) box.append(el('p', { class: 'hint' }, `${saved.length} project${saved.length > 1 ? 's' : ''} saved without a plan. `, el('button', { class: 'link', type: 'button', text: 'Open Advanced / job planner', onclick: () => {
     $('#jobs').close();
     app.startProject?.();
   } }), ' lists them, to make the plan.'));

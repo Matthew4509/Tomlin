@@ -20,7 +20,7 @@ import { namedChat } from '../chats.ts';
 import { jobRoutes } from './jobs.ts';
 import { newRid, owedLine, type Owed } from '../outbox.ts';
 import { addOwed, dropOwed, notLive } from './owed.ts';
-import { saveToOf } from './places.ts';
+import { keepFirstAnswer, saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
 import * as Q from '../queue.ts';
@@ -560,7 +560,10 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   if (shown.trim() && !(await store.changeChat(file, lines => [...lines.filter(l => !rid || l.waiting?.rid !== rid), line], mark))) return gone();
   // How full the chat is now (with this answer): the page offers a handoff from 75%.
   const marked = await chats.mark(openId, { fill: built.fill + Math.round((shown.length / built.room) * 100) });
-  send('done', { text: shown, perSecond, ran, cut, sources, thought, large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note });
+  // Lets go! on Home: the first answer is also kept as a file in the project (a stopped one is not).
+  const kept = mode === 'message' && marked?.saveAnswer && !(ac.signal.aborted && !looped) ? await keepFirstAnswer(marked, message, shown) : '';
+  const said = [note, kept ? `Also saved as ${kept.replace(/\//g, '\\')} in the workspace folder${cut ? ' (as far as it got: the rest, after Continue, is in this chat only)' : ''}.` : ''].filter(Boolean).join(' ');
+  send('done', { text: shown, perSecond, ran, cut, sources, thought, large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said });
   res.end();
 }
 

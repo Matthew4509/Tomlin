@@ -89,6 +89,11 @@ test('recent projects: newest first, each with how far it is, and a project neve
   assert.equal(recentProjects(list, [], null, 2).length, 2);
 });
 
+test('recent projects: one started with Lets go! opens its chat, never the planner', () => {
+  const r = recentProjects([], [{ id: '20261012-0900-eeee', name: 'Tips', goal: 'a tip calculator', at: '2026-10-12T09:00:00Z', chat: 'a1b2c3d4e5f6' }], null);
+  assert.deepEqual(r.map(x => [x.name, x.detail, x.action, x.plan, x.chat]), [['Tips', 'Sent as a prompt, no plan', 'Open the chat', false, 'a1b2c3d4e5f6']]);
+});
+
 test('the dot on a hire: red when the owner uses their PC, grey offline, yellow busy (or waking), else green', () => {
   assert.equal(activityOf({ state: 'off', busy: false, away: true }), 'owner');
   assert.equal(activityOf({ state: 'off', busy: false, away: false }), 'offline');

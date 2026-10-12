@@ -432,14 +432,14 @@ export async function tests(b: Record<string, unknown>): Promise<{ status: numbe
 // ---- Home ----
 
 /** Projects saved (Start project, or "Lets create a project" on Home) whose plan was never made: newest first. */
-export async function unplanned(): Promise<{ id: string; name: string; goal: string; at: string }[]> {
+export async function unplanned(): Promise<{ id: string; name: string; goal: string; at: string; chat?: string }[]> {
   const root = await d.workspaceDir();
-  const out: { id: string; name: string; goal: string; at: string }[] = [];
+  const out: { id: string; name: string; goal: string; at: string; chat?: string }[] = [];
   for (const id of (await readdir(join(root, 'jobs')).catch(() => [] as string[])).filter(jobs.validId)) {
     if (await stat(join(root, 'jobs', id, 'plan.json')).then(() => true, () => false)) continue;
     const p = await readFile(join(root, 'jobs', id, 'project.json'), 'utf8').then(t => JSON.parse(t) as Record<string, unknown> & { answers?: { statement?: unknown } }, () => null);
     if (!p) continue;
-    out.push({ id, name: String(p.name ?? ''), goal: String(p.prompt || p.about || p.answers?.statement || ''), at: String(p.created ?? '') });
+    out.push({ id, name: String(p.name ?? ''), goal: String(p.prompt || p.about || p.answers?.statement || ''), at: String(p.created ?? ''), ...(typeof p.chat === 'string' && p.chat ? { chat: p.chat } : {}) });
   }
   return out.sort((a, b) => b.at.localeCompare(a.at));
 }

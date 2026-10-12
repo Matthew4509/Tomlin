@@ -260,8 +260,19 @@ async function projectPlace(b: Record<string, unknown>): Promise<{ folder: strin
   return { folder, team: cleanTeam({ pm: String(b.pm ?? '') }, chatHireIds()) };
 }
 
-/** "Lets create a project" on Home: the project's folder, its Scope card (the person's own words, by code) and the default design brief. */
+/**
+ * "Lets create a project" on Home, Lets go!: the project's folder, its Scope card (the person's own words, by code) and
+ * the default design brief, then a chat in it with the hire picked under Staff (Default: the hire on the strongest worker
+ * available). The page sends the prompt in that chat as a normal message, and its first answer is also kept as a file
+ * in the project. No plan is made: Advanced / job planner makes one. Without {go: true} (Claude's own calls) only the
+ * project is made, as before.
+ */
 async function projectCreate(b: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+  const go = b.go === true;
+  const picked = go && typeof b.pm === 'string' && b.pm ? staff.get(b.pm) : undefined;
+  if (go && b.pm && (!picked || roleOf(picked.role).kind)) return { status: 400, body: { error: 'That hire is not on the staff any more (or only draws). Pick another under Staff, or Default, then press Lets go! again.' } };
+  const hire = go ? picked ?? (await jobRoutes.strongestHire()) : null;
+  if (go && !hire) return { status: 409, body: { error: 'Nobody can take the prompt now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
   const place = await projectPlace(b);
   if ('error' in place) return { status: 400, body: place };
   const q = project.cleanQuick(b, place.folder);
@@ -276,11 +287,20 @@ async function projectCreate(b: Record<string, unknown>): Promise<{ status: numb
   const scope = project.quickScope(q, hope);
   const brief = project.designBrief(project.DESIGN_DEFAULT);
   const root = await workspaceDir();
-  for (const [file, text] of [['project.json', JSON.stringify({ id, created: now.toISOString(), ...q, team: place.team, wish }, null, 2)], ['scope.md', scope], ['design.md', brief]] as const) {
+  // The chat the prompt goes into: made first, so the project file names it (Recent projects opens it).
+  const made = hire ? await chats.create(`staff:${hire.id}`) : null;
+  for (const [file, text] of [['project.json', JSON.stringify({ id, created: now.toISOString(), ...q, team: place.team, wish, ...(made && hire ? { chat: made.id, hire: hire.id } : {}) }, null, 2)], ['scope.md', scope], ['design.md', brief]] as const) {
     const r = await ws.save(root, project.projectPath(id, file), text);
-    if ('error' in r) return { status: 500, body: { error: `The project could not be saved in the workspace folder (${r.error}).` } };
+    if ('error' in r) {
+      if (made) await chats.remove(made.id);
+      return { status: 500, body: { error: `The project could not be saved in the workspace folder (${r.error}).` } };
+    }
   }
-  return { status: 200, body: { id, name: q.name, folder: q.folder, path: join(root, ...q.folder.split('/')) } };
+  if (made) {
+    await chats.setProject(made.id, id);
+    await chats.mark(made.id, { saveAnswer: true });
+  }
+  return { status: 200, body: { id, name: q.name, folder: q.folder, path: join(root, ...q.folder.split('/')), ...(made && hire ? { chat: made.id, hire: hire.name } : {}) } };
 }
 
 /** The pencil on the Scope card or the design brief: the person's own text replaces the card the planner and the steps read. */

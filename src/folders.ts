@@ -71,6 +71,11 @@ export function notePath(text: string, projectFolder: string | null, now = new D
   return projectFolder === null ? `${NOTES}/${name}` : inProject(projectFolder, ADMIN_NOTES, name);
 }
 
+/** Where the first answer of a chat started by Lets go! is kept: <dir>\<stamp> <the prompt's first words>.md. */
+export function answerPath(dir: string, prompt: string, now = new Date()): string {
+  return [dir, `${stamp(now)} ${firstWords(prompt)}.md`].filter(Boolean).join('/');
+}
+
 /** A quick chat's folder, from when it was started: chats/2026-10-07-1530, with -2, -3 when another chat has that minute. */
 export function chatFolder(created: string, taken: Iterable<string>): string {
   const t = Date.parse(created);
