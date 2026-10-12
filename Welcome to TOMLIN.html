@@ -175,7 +175,7 @@
         <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><h3>Uses what you have</h3><p>It runs on the processor first and uses a graphics chip when there is one. An old laptop can run the small models.</p></div>
         <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/></svg></div><h3>All your PCs as one</h3><p>Link the other PCs in your home and spread the team across them. Each PC does its own work, side by side.</p></div>
         <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h6l2 2h8v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></svg></div><h3>Work that is kept</h3><p>Projects, saved code, notes, snippets and prompts, in folders you can open. Git and a built-in audit for your sites.</p></div>
-        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 7.9 8 9 4.6-1.1 8-4.6 8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></div><h3>Backups across your PCs</h3><p>Your other PCs can keep copies of your projects and restore points, over your home network, with no internet needed.</p></div>
+        <div class="card"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 7.9 8 9 4.6-1.1 8-4.6 8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></div><h3>Backups across your PCs</h3><p>Your other PCs can keep copies of your projects and restore points, over your home network, with no internet needed. It is not a full backup of your PC: <a href="#backups">what it covers</a>.</p></div>
       </div>
     </div>
   </section>
@@ -291,6 +291,22 @@
           </tbody>
         </table></div>
         <p class="note">"Memory it needs" is the model's file, its working memory for an 8K-token context (about 6,000 words) and the runner, as TOMLIN works it out; a model also fits when a graphics card's own memory holds it. Measured: Qwen 3.5 0.8B wrote 17.7 tokens a second on an Intel HD 520 laptop, and Qwen 3.5 35B-A3B 5.2 tokens a second on a 32 GB desktop with no graphics card. A token is about three quarters of a word. Inside TOMLIN, <b>What can my PC run?</b> works it out for your own PC.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="backups">
+    <div class="wrap">
+      <h2>What TOMLIN backs up, and what it doesn't</h2>
+      <p class="intro">TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs. It is not a full backup of your PC.</p>
+      <div class="panel">
+        <table>
+          <tr><th scope="row">Your workspace</th><td>The folder TOMLIN keeps its own work in: every project made with Lets create a project, and the files your staff write and save. It is inside TOMLIN's data folder unless you choose another one. The whole workspace is backed up with no tick: everything in it except <code>.git</code> and <code>node_modules</code> folders.</td></tr>
+          <tr><th scope="row">Backed up</th><td>Your workspace, and each project ticked <b>Copy this project to my other PCs</b>, every 10 minutes when something changed; every version is kept. Your chats, staff and settings as a restore point, only when you press <b>Back up to it now</b>; the newest 3 are kept on each PC.</td></tr>
+          <tr><th scope="row">Not backed up</th><td>Anything else on your PC (Documents, Desktop, Pictures, email, other folders). Files over 256 MB inside a ticked project. A project's git history: only its files go. Models: they are copied only to the PCs you send them to.</td></tr>
+          <tr><th scope="row">Good to know</th><td>Backups go only to your own PCs on your home network, never to the cloud, so a fire, flood or theft at home can take every copy. Backups are not locked on the PC that keeps them: whoever uses that PC can open them.</td></tr>
+          <tr><th scope="row">For everything else</th><td>These free tools are made by other people. We don't make, check or support them, so read about each one and choose for yourself. <b>Syncthing</b> keeps a folder the same on several PCs, like Dropbox without the cloud (deleting a file deletes it everywhere unless you turn on its old versions). <b>Kopia</b> or <b>restic</b>: versioned backups of the folders you choose, to another drive, PC or network folder. <b>UrBackup</b> makes one PC a backup server for your others. <b>Windows File History</b> is already in Windows and keeps old versions of your files on another drive or network folder.</td></tr>
+        </table>
       </div>
     </div>
   </section>

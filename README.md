@@ -22,6 +22,42 @@ Push live (off until you turn it on), which sends a project to your own web host
 - **Models are not ours.** You download each model yourself; each has its own licence and its own limits. Check them.
 - **Windows.** Made for 64-bit Windows (tested on Windows 11). The zip carries its own Node.js.
 
+## What TOMLIN backs up, and what it doesn't
+
+TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs. It is not a full backup
+of your PC.
+
+**Your workspace** is the folder TOMLIN keeps its own work in: every project made with **Lets create a project**, and
+the files your staff write and save. It is inside TOMLIN's data folder unless you chose another one (Set up, **Files
+and blog writer**, Workspace folder). The whole workspace is backed up with no tick: everything in it except `.git`
+and `node_modules` folders.
+
+**Backed up**
+- Your workspace, and each project ticked **Copy this project to my other PCs**, every 10 minutes when something
+  changed. Every version is kept.
+- Your chats, staff and settings, as a restore point, only when you press **Back up to it now**. The newest 3 are
+  kept on each PC.
+
+**Not backed up**
+- Anything else on your PC: Documents, Desktop, Pictures, email, other folders.
+- Files over 256 MB inside a ticked project.
+- A project's git history. Only its files go.
+- Models. They are copied only to the PCs you send them to.
+
+**Good to know**
+- Backups go only to your own PCs on your home network, never to the cloud. A fire, flood or theft at home can take
+  every copy.
+- Backups are not locked on the PC that keeps them. Whoever uses that PC can open them.
+
+**For everything else.** These free tools are made by other people. We don't make, check or support them, so read
+about each one and choose for yourself.
+- **Syncthing**: keeps a folder the same on several PCs, like Dropbox without the cloud. Deleting a file deletes it
+  everywhere unless you turn on its old versions.
+- **Kopia** or **restic**: versioned backups of the folders you choose, to another drive, PC or network folder.
+- **UrBackup**: makes one PC a backup server for your others.
+- **Windows File History**: already in Windows. It keeps old versions of your files on another drive or network
+  folder.
+
 ## What it does
 
 **Chat and pictures on your own PC**
@@ -513,6 +549,10 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.52:** Help, this README and the welcome page say what TOMLIN backs up and what it does not: your workspace
+  (what it is, and that all of it goes with no tick), the projects you select, restore points, what is left out, that
+  every copy stays in your home and is not locked on the PC that keeps it, and free tools made by other people for
+  everything else.
 - **2.0.51:** Moving someone to a PC refuses a model only when it needs more than 5% over all that PC's memory (the
   need is an estimate and runs high); just over, it is a tight fit. A PC's card in the left panel has a yellow (!) when
   95% or more of its RAM is in use (this PC and linked PCs), with the figures on the (!).
