@@ -230,6 +230,8 @@ function projectFolders(settings, opts = {}) {
 // keyed by folder name or by full path, and wins over the project's own project.json.
 function listProjects(settings, opts = {}) {
   const overrides = ((opts.overridesFile ? readJson(opts.overridesFile) : null) || {}).projects || {};
+  // Keys are matched by folder name or full path, in any letter case (Windows folders are not case-sensitive).
+  const overridesLower = Object.fromEntries(Object.keys(overrides).map(k => [/[\\/]/.test(k) ? keyOf(k) : k.toLowerCase(), overrides[k]]));
   const found = projectFolders(settings, opts);
   const launchCache = new Map();
   const launchOf = root => { if (!launchCache.has(root)) launchCache.set(root, readJson(path.join(root, '.claude', 'launch.json'))); return launchCache.get(root); };
@@ -241,7 +243,7 @@ function listProjects(settings, opts = {}) {
     // One folder's odd files must never take the list (or the Bridge) down with them: a row that cannot be read is
     // still listed, by its folder name, with no start command and a note saying why.
     try {
-    const ov = obj(overrides[f.dir] || overrides[folder]);
+    const ov = obj(overrides[f.dir] || overrides[folder] || overridesLower[keyOf(f.dir)] || overridesLower[folder.toLowerCase()]);
     if (ov.hide) continue;
     const pj = { ...obj(readJson(path.join(f.dir, 'project.json'))), ...ov };
     const root = f.working || path.dirname(f.dir);

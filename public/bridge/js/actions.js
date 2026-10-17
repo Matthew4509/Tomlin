@@ -87,7 +87,7 @@ function faultsText(r, a) {
   return 'Audit of ' + oneLine(r.name) + ' (folder ' + oneLine(r.folder) + '), ' + a.ranAt + '\n' + a.findings.map(f => '- [' + f.sev + '] ' + f.rule + ' ' + oneLine(f.title) + ' - ' + oneLine(f.where) + (f.also && f.also.length ? ' (also: ' + oneLine(f.also.join('; ')) + ')' : '') + (f.knownAs ? ' - already known as ' + oneLine(f.knownAs) : '') + (f.evidence ? ' - seen: ' + oneLine(f.evidence) : '') + ' - fix: ' + oneLine(f.fix)).join('\n');
 }
 function showAudit(r, a, lead) {
-  const c = a.counts;
+  const c = a.counts || {};
   const head = c.Critical || c.High ? 'Fix the Critical and High faults before this goes live.' : c.Medium ? 'No Critical or High faults. Medium ones are warnings.' : (c.Low || c.Info) ? 'Passed: only low-priority findings (below).' : 'Passed every rule that ran.';
   const liveNote = a.url ? (a.liveReached ? 'Checked ' + a.url + ' as well as the code.' : a.url + ' did not answer, so it was not checked.') : 'The local copy was not running, so localhost was not checked.';
   const cmp = a.compare;
@@ -199,6 +199,7 @@ function judgeDialog(r, a, f) {
       pref.set('judgedBy', by.value.trim());
       const d = await api('/api/audit/judge', { id: r.id, rule: f.rule, where: f.where, fp: f.fp || null, why: why.value, by: by.value });
       if (d.ok === false) { err.textContent = d.error; ok.disabled = false; return; }
+      load(); // the row's audit chip and the Audits page show the new counts
       showAudit(r, d.audit, f.rule + ' at ' + f.where + ' is set aside. It comes back if that line changes.');
     } catch (e) { err.textContent = e.message; ok.disabled = false; }
   } }, 'Set aside');
@@ -214,6 +215,7 @@ async function unjudge(r, entry) {
   try {
     const d = await api('/api/audit/unjudge', { id: r.id, entry });
     if (d.ok === false) return info(d.error, true);
+    load();
     showAudit(r, d.audit, 'Brought back: it counts again.');
   } catch (e) { info(e.message, true); }
 }
@@ -239,6 +241,7 @@ function importDialog(r, a) {
       if (d.ok === false) { err.textContent = d.error; ok.disabled = false; return; }
       const good = d.results.filter(x => x.ok).length, bad = d.results.filter(x => !x.ok);
       const after = d.audit || a;
+      load();
       const fr = d.findings || { added: 0, again: 0, refused: [] };
       dialog('Report-back imported', [
         d.results.length ? h('p', null, 'False flags: ' + good + ' of ' + d.results.length + ' row' + (d.results.length > 1 ? 's' : '') + ' judged.' + (bad.length ? ' Not imported:' : '')) : null,

@@ -113,7 +113,7 @@ async function main() {
   check('import: "real but elsewhere" is not a judgement and is left alone', () => assert(!out[6].ok && /not "false"/.test(out[6].error)));
   check('import: a "false" for "*" is refused as project-wide', () => assert(!out[5].ok && /whole project/.test(out[5].error)));
   let r8 = await runAudit(app, null, { judged: J.entriesFor(store2, key) });
-  check('imported rows set the findings aside, by the project thread', () => assert(!r8.findings.some(f => f.rule === 'INJ-003') && r8.setAside.filter(f => f.judged.by === 'project thread').length === 2));
+  check('imported rows set the findings aside, by the project thread', () => assert(!r8.findings.some(f => f.rule === 'INJ-003') && r8.setAside.filter(f => f.judged.by === 'project thread').length === 3)); // ui.js:2, two.js:1 and two.js:2 (a set-aside place does not stop the rule)
 
   // ---------- a project cannot vouch for itself ----------
   const root = path.join(tmp, 'work');

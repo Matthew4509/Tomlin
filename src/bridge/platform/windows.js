@@ -52,9 +52,12 @@ function onPath(name) {
 // A plain terminal in the folder. The folder is passed to `wt` as one argument, and to the cmd fallback only as the
 // child's working directory (cwd) — never inside the command line, so a folder name with cmd metacharacters
 // (& ^ ( ) which Windows allows) cannot break out into another command. `start ""` gives the window an empty title.
-function terminalCommand(dir) { return (onPath('wt') ? 'wt' : 'start') + ' cmd.exe /k (in ' + dir + ')'; }
+// `wt` reads a ; anywhere in its arguments as the start of another command, so a folder with ; in its name gets the
+// cmd fallback.
+const useWt = dir => onPath('wt') && !String(dir).includes(';');
+function terminalCommand(dir) { return (useWt(dir) ? 'wt' : 'start') + ' cmd.exe /k (in ' + dir + ')'; }
 function openTerminal(dir) {
-  if (onPath('wt')) detached('wt.exe', ['-d', dir, 'cmd.exe', '/k']);
+  if (useWt(dir)) detached('wt.exe', ['-d', dir, 'cmd.exe', '/k']);
   else detached('cmd.exe', ['/c', 'start', '', 'cmd.exe', '/k'], { cwd: dir });
 }
 

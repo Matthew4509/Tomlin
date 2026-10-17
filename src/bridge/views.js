@@ -74,10 +74,10 @@ function settingsView() {
 
 // Scan folders: reread every working folder and say what is new or gone since the last scan.
 // fresh=false: the folders were read a moment ago (start-up), so the cached read is used.
-function scanFolders(fresh = true) {
+async function scanFolders(fresh = true) {
   const { settings } = state;
   const before = new Set(settings.known.map(keyOf));
-  const projects = refreshProjects(fresh);
+  const projects = await refreshProjectsAsync(fresh); // the "last updated" walk of every folder, off the request thread
   const nowKeys = new Set(projects.map(p => keyOf(p.dir)));
   const added = projects.filter(p => !before.has(keyOf(p.dir))).map(p => p.name);
   const gone = settings.known.filter(d => !nowKeys.has(keyOf(d))).map(d => path.basename(d));

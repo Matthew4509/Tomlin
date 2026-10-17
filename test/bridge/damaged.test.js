@@ -75,6 +75,23 @@ const asides = (dir, base) => fs.readdirSync(dir).filter(n => n.startsWith(base 
     assert.deepStrictEqual(await readBody(Readable.from(['{"a":1}'])), { a: 1 });
   });
 
+  await check('the judged list, a fault list and the private-details list: a damaged one is moved aside, never written over', async () => {
+    const judged = require('../../src/bridge/judged'), review = require('../../src/bridge/review'), disclosure = require('../../src/bridge/disclosure');
+    const d = path.join(tmp, 'stores');
+    fs.mkdirSync(path.join(d, 'faults'), { recursive: true });
+    const jf = path.join(d, 'judged.json');
+    fs.writeFileSync(jf, '{"projects":{"x":[{"rule":"A"');
+    assert.deepStrictEqual(judged.entriesFor(jf, 'x'), []);
+    assert(!fs.existsSync(jf) && fs.readdirSync(d).some(n => /^judged\.damaged-.*\.json$/.test(n)), fs.readdirSync(d).join(', '));
+    const pf = path.join(d, 'private-details.json');
+    fs.writeFileSync(pf, '{"details":[');
+    assert.deepStrictEqual(disclosure.readPrivateList(pf), []);
+    assert(fs.readdirSync(d).some(n => /^private-details\.damaged-.*\.json$/.test(n)));
+    const P = await disclosure.disclosurePass(path.join(tmp, 'stores', 'faults'), { details: [], others: [], own: [] });
+    assert(P.notes.some(n => /private-details list could not be read/.test(n)), P.notes.join(' | '));
+    assert.deepStrictEqual(review.readFaults(d, 'some project'), []);
+  });
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(failures ? failures + ' FAILED' : 'all passed');
   process.exit(failures ? 1 : 0);

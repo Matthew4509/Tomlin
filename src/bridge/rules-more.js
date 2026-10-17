@@ -46,8 +46,9 @@ function insideScript(lines, i, col) {
   return false;
 }
 // INJ-013: does any PHP file of the project check (or add) the scheme of an address field as it is saved?
-// Read once per project folder and kept for the rest of the run.
+// Read once per project folder in each audit (newRun starts the next one, so an edited project is read again).
 const schemeChecked = new Map();
+const newRun = () => schemeChecked.clear();
 function projectChecksScheme(dir) {
   if (schemeChecked.has(dir)) return schemeChecked.get(dir);
   const RE = /preg_match\s*\(\s*['"][#~\/!@]\^https\?:?\\?\/\\?\/[^\n]{0,60}\$\w*(site|website|homepage|url|link)|(website|homepage)[^\n]{0,80}FILTER_VALIDATE_URL[^\n]{0,80}(scheme|https?)/i;
@@ -89,13 +90,26 @@ const KEY_WORD = /['"][\w:.-]*(rl|rate|limit|throttle|attempt|fail|tries|lock|bu
 // UX-010: tags a JSX file uses must be imported or declared in it.
 // A name that appears in the file ONLY as a tag (<Modal>, </Modal>) was never imported, declared, passed in or
 // renamed ({ icon: Icon }, const Tag = as || 'div'): any other mention counts as its source.
+// Per file, counted once: how often each word appears, and how often as a tag (<Name or </Name).
+const perFile = new WeakMap();
+function fileMemo(ctx) { let m = perFile.get(ctx); if (!m) perFile.set(ctx, m = {}); return m; }
+function wordCounts(ctx) {
+  const memo = fileMemo(ctx);
+  if (!memo.words) {
+    const all = new Map(), tags = new Map();
+    for (const m of ctx.text.matchAll(/\w+/g)) all.set(m[0], (all.get(m[0]) || 0) + 1);
+    for (const m of ctx.text.matchAll(/<\/?(\w+)/g)) tags.set(m[1], (tags.get(m[1]) || 0) + 1);
+    memo.words = { all, tags };
+  }
+  return memo.words;
+}
 function jsxUnknownTag(line, ctx) {
   for (const m of line.matchAll(/(?:^|[^\w$.<])<([A-Z][\w$]+)(?=[\s/>])/g)) {
     const name = m[1];
     if (/^\s*(extends|,)/.test(line.slice(m.index + m[0].length))) continue; // a type parameter, not a tag
-    const all = (ctx.text.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length;
-    const tags = (ctx.text.match(new RegExp('</?' + name + '\\b', 'g')) || []).length;
-    if (all === tags && !/^(React|Fragment)$/.test(name)) return true;
+    if (name.includes('$')) continue;
+    const { all, tags } = wordCounts(ctx);
+    if ((all.get(name) || 0) === (tags.get(name) || 0) && !/^(React|Fragment)$/.test(name)) return true;
   }
   return false;
 }
@@ -133,7 +147,7 @@ function repeatedCheckbox(line, ctx, lines, i) {
   const re = new RegExp('<input\\b(?=[^>]*type\\s*=\\s*["\']?checkbox)[^>]*\\bname\\s*=\\s*["\']' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
   // only inside the same form: stop at the form's own start (another form further up is another request)
   if (/<form\b/i.test(line.slice(0, line.search(re)))) return false; // this checkbox opens its own form
-  for (let k = i - 1; k >= 0; k--) {
+  for (let k = i - 1; k >= Math.max(0, i - 500); k--) { // a form's checkboxes sit within a few hundred lines
     if (/<\/form>/i.test(lines[k])) return false; // a form closed above: that one is another request
     if (re.test(lines[k])) return true;
     if (/<form\b/i.test(lines[k])) return false;
@@ -145,7 +159,12 @@ function repeatedCheckbox(line, ctx, lines, i) {
 function locationFromRequestVar(line, ctx) {
   const v = (/Location:\s*['"]\s*\.\s*\$(\w+)/i.exec(line) || [])[1];
   if (!v || v.startsWith('_')) return true; // the request array itself (the old form)
-  return new RegExp('\\$' + v + '\\s*=\\s*[^;]*\\$_(GET|POST|REQUEST)\\b').test(ctx.text);
+  const memo = fileMemo(ctx);
+  if (!memo.fromRequest) { // every $name the file fills from the request, found once per file
+    memo.fromRequest = new Set();
+    for (const m of ctx.text.matchAll(/\$(\w+)\s*=\s*[^;]{0,300}?\$_(?:GET|POST|REQUEST)\b/g)) memo.fromRequest.add(m[1]);
+  }
+  return memo.fromRequest.has(v);
 }
 
 // CORS-002: the Origin is matched by a pattern that lets in subdomains (or anything ending in the name).
@@ -274,7 +293,12 @@ const RULES_MORE = [
       const v = (/setItem\s*\(\s*['"][^'"]*['"]\s*,\s*([^)]*)\)/.exec(line) || [])[1] || '';
       if (/\.get\s*\(|location\.(search|hash)|searchParams/.test(v)) return true;
       const name = (/^\s*([\w$]+)\s*$/.exec(v) || [])[1];
-      return !!name && new RegExp('\\b(const|let|var)\\s+' + name.replace(/\$/g, '\\$') + '\\s*=[^;\\n]*(URLSearchParams|searchParams|location\\.(search|hash)|params\\.get)').test(ctx.text);
+      const memo = fileMemo(ctx);
+      if (!memo.fromAddress) { // every variable the file fills from the address, found once per file
+        memo.fromAddress = new Set();
+        for (const m of ctx.text.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=[^;\n]{0,300}?(?:URLSearchParams|searchParams|location\.(?:search|hash)|params\.get)/g)) memo.fromAddress.add(m[1]);
+      }
+      return !!name && memo.fromAddress.has(name);
     },
     fix: 'Exchange the token with the server for an HttpOnly cookie, and remove it from the address (history.replaceState).' },
   { id: 'CORS-002', sev: 'Medium', area: 'config', title: 'CORS lets any subdomain (or any name ending the same way) call with the visitor\'s cookies', file: SERVER,
@@ -530,4 +554,4 @@ const RULES_MORE = [
     fix: 'Add for="the field\'s id", or put the field inside the label.' },
 ];
 
-module.exports = { RULES_MORE, insideTry, insideScript, locationFromRequestVar };
+module.exports = { RULES_MORE, insideTry, insideScript, locationFromRequestVar, newRun };

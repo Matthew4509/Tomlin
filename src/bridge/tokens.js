@@ -4,6 +4,9 @@
 // cache write + cache read + output. A reply is credited to the last project folder a tool call touched.
 // Results are cached per file by size+mtime, so a refresh only rereads transcripts that grew.
 'use strict';
+// Months are this PC's own calendar months, not UTC ones: east of Greenwich the first hours of a month are still last
+// month in UTC. A stamp that cannot be read keeps its first seven characters.
+const monthOf = ts => { const d = new Date(ts); return isNaN(d) ? String(ts).slice(0, 7) : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -85,7 +88,7 @@ function scanClaude(file, match, dirHint) {
     if (msg.id) { if (seen.has(msg.id)) return; seen.add(msg.id); }
     const n = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
     per[current] = (per[current] || 0) + n;
-    if (o.timestamp) { const k = current + '|' + String(o.timestamp).slice(0, 7); months[k] = (months[k] || 0) + n; }
+    if (o.timestamp) { const k = current + '|' + monthOf(o.timestamp); months[k] = (months[k] || 0) + n; }
   });
   return per;
 }
@@ -99,7 +102,7 @@ function scanCodex(file, match) {
     const p = o.payload || {};
     if (p.cwd && !proj) proj = match(p.cwd);
     const t = p.info && p.info.total_token_usage;
-    if (o.timestamp) stamp = String(o.timestamp).slice(0, 7);
+    if (o.timestamp) stamp = monthOf(o.timestamp);
     if (p.type === 'token_count' && t) total = t.total_tokens || ((t.input_tokens || 0) + (t.output_tokens || 0));
   });
   if (proj && total) { per[proj] = total; if (stamp) per[MONTHS] = { [proj + '|' + stamp]: total }; }
@@ -138,7 +141,7 @@ function tokenTotals(projects) {
     }
     add(hit.per);
   }
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = monthOf(new Date());
   const month = {};
   for (const mk in byMonth) { const [id, m] = mk.split('|'); if (m === thisMonth) month[id] = byMonth[mk]; }
   return { total: totals, month };

@@ -12,7 +12,7 @@ const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { execFile, execFileSync, spawn } = require('child_process');
-const { gitConfigRisky } = require('./gitstate');
+const { gitConfigRisky, fenced } = require('./gitstate');
 const { fingerprint: fp } = require('./judged');
 
 // Never what a person writes: third-party code and tool caches.
@@ -30,6 +30,7 @@ const MAX_ZIP = 200 * 1024 * 1024;      // one zip on disk
 const MAX_HISTORY = 300 * 1024 * 1024;  // all past file versions together
 const UNPACK_BUDGET = 300 * 1024 * 1024; // everything unpacked from zips in one pass (a 96 KB zip can unpack to 8 GB)
 const MAX_ENTRIES = 20000;               // zip entries looked at in one pass
+const MAX_LISTED = 50000;                // zip entries listed in one pass, read or passed over (a small zip can list millions)
 const ZIP_DEPTH = 3;
 const SLICE = 4000, OVERLAP = 400;       // a very long line (minified code) is read in overlapping slices
 
@@ -57,7 +58,7 @@ function autoDetails(workingFolders = []) {
   const out = [];
   const add = (label, value, extra) => { if (value && String(value).length >= 4) out.push({ label, value: String(value), auto: true, ...extra }); };
   const home = os.homedir();
-  // A short name is often a word or a brand as well ("Dell's support page", Italian "dell'"): it only counts written
+  // A short name is often a word or a brand as well (a user called "Rose" on a page about a rose garden): it only counts written
   // against a path or an @ (C:/Users/<name>, <name>@host); the home folder above catches the usual place.
   const short = v => String(v || '').length < 6 ? { near: true } : {};
   add('your user name on this PC', os.userInfo().username, short(os.userInfo().username));
@@ -76,11 +77,13 @@ function autoDetails(workingFolders = []) {
 }
 
 // The person's own list, in the Bridge's ignored data folder: [{ id, label, value }].
+// A damaged file is moved aside (private-details.damaged-<time>.json) and remembered, so the next audit says so.
+let privateListDamaged = null;
 function readPrivateList(file) {
-  try {
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return (Array.isArray(j.details) ? j.details : []).filter(d => d && typeof d.label === 'string' && typeof d.value === 'string' && d.value.trim());
-  } catch { return []; }
+  const r = require('./settings').readData(file);
+  if (r.damaged) privateListDamaged = r.damaged;
+  const j = r.json;
+  return (j && Array.isArray(j.details) ? j.details : []).filter(d => d && typeof d.label === 'string' && typeof d.value === 'string' && d.value.trim());
 }
 // rows: [{ id?, label, value? }]. A row with an id and no new value keeps the value already saved.
 function savePrivateList(file, rows) {
@@ -95,8 +98,8 @@ function savePrivateList(file, rows) {
     if (value.length < 3) return { ok: false, error: '"' + label + '" is too short to look for: at least 3 characters, or every file would match.' };
     details.push({ id: (r && old.has(r.id) && r.id) || crypto.randomBytes(6).toString('hex'), label, value: value.slice(0, 300) });
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ note: 'Private details the audit looks for. Kept on this PC only; the audit prints the labels, never these values.', details }, null, 2));
+  require('./settings').save(file, { note: 'Private details the audit looks for. Kept on this PC only; the audit prints the labels, never these values.', details });
+  privateListDamaged = null;
   return { ok: true, details };
 }
 // What the page may see: labels and lengths, never the values.
@@ -278,14 +281,19 @@ const RULE = {
   'DISC-004': { sev: 'Medium', title: 'A local folder path (C:\\Users\\<name>\\…, /home/<name>/…)', fix: 'Use a relative path, or one that does not name a user.' },
 };
 const labelsText = h => h.labels.size ? ': ' + [...h.labels].join(', ') : '';
+// What a finding holds (its kinds of detail, its number of lines), as a fingerprint kept with a judgement: a finding
+// set aside stays aside only while it holds the same, so a new detail in the same file brings it back (its first
+// line, the finding's own fingerprint, would not change).
+const holdsFp = h => (h.labels.size || h.lines > 1 ? fp([...h.labels].sort().join('|') + '|' + h.lines) : undefined);
 
 // ---------- what would be published ----------
 
 function git(dir, args, opts = {}) {
   return new Promise(resolve => {
-    execFile('git', ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '-c', 'core.quotePath=false', ...(dir ? ['-C', dir] : []), ...args], {
+    const fence = dir ? fenced(dir) : { args: [], env: {} };
+    execFile('git', ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '-c', 'core.quotePath=false', ...fence.args, ...(dir ? ['-C', dir] : []), ...args], {
       timeout: opts.timeout || 60000, windowsHide: true, maxBuffer: opts.maxBuffer || 64 * 1024 * 1024, encoding: opts.encoding || 'utf8',
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...fence.env },
     }, (err, stdout, stderr) => resolve({ ok: !err, out: stdout || '', err: String(stderr || (err && err.message) || ''), missing: !!(err && err.code === 'ENOENT') }));
   });
 }
@@ -386,7 +394,8 @@ function releaseZips(dir, skip) {
 
 // ---------- zips (no packages: stored and deflated entries, zip64 sizes) ----------
 
-function readZip(buf) {
+// max: the most entries listed (a zip's own count is never trusted: a small zip can list millions).
+function readZip(buf, max = Infinity) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('not a zip');
@@ -397,7 +406,7 @@ function readZip(buf) {
   }
   const out = [];
   let p = cd;
-  for (let n = 0; n < count && p + 46 <= buf.length && buf.readUInt32LE(p) === 0x02014b50; n++) {
+  for (let n = 0; n < count && n < max && p + 46 <= buf.length && buf.readUInt32LE(p) === 0x02014b50; n++) {
     const flags = buf.readUInt16LE(p + 8), method = buf.readUInt16LE(p + 10);
     let csize = buf.readUInt32LE(p + 20), size = buf.readUInt32LE(p + 24), off = buf.readUInt32LE(p + 42);
     const nl = buf.readUInt16LE(p + 28), xl = buf.readUInt16LE(p + 30), cl = buf.readUInt16LE(p + 32);
@@ -419,7 +428,7 @@ function readZip(buf) {
       if (buf.readUInt32LE(off) !== 0x04034b50) throw new Error('bad entry');
       const start = off + 30 + buf.readUInt16LE(off + 26) + buf.readUInt16LE(off + 28);
       const raw = buf.subarray(start, start + csize);
-      if (method === 0) return raw;
+      if (method === 0) { if (raw.length !== size) throw new Error('its stored size does not match the size it gives'); return raw; }
       if (method === 8) {
         try { return zlib.inflateRawSync(raw, { maxOutputLength: Math.max(1, Math.min(size, cap)) }); }
         catch (e) { throw new Error(/buffer|length|range/i.test(e.message) ? 'unpacks to more than it says, or more than the budget left' : e.message); }
@@ -437,6 +446,7 @@ async function disclosurePass(dir, ctx = {}) {
   const scan = makeMatcher(ctx);
   const skip = (ctx.skip || []).map(s => String(s).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
   const findings = [], notes = [];
+  if (privateListDamaged) notes.push('Your private-details list could not be read, so it was kept aside as ' + path.basename(privateListDamaged) + ' in the Bridge\'s data folder, and this audit looked only for the details it reads from this PC. Add yours again under Audits › Private details.');
   const read = { files: 0, zips: 0, commits: 0, versions: 0 };
   const seen = new Set(); // rule|file|line fingerprint: the same line in history and in the file is reported once
   const report = (h, where, place) => {
@@ -445,7 +455,7 @@ async function disclosurePass(dir, ctx = {}) {
     seen.add(k);
     const r = RULE[h.rule];
     const more = (h.more || []).map(n => where.replace(/:\d+$/, '') + ':' + n);
-    findings.push({ rule: h.rule, sev: r.sev, area: 'disclosure', title: r.title + labelsText(h) + (h.lines > 1 ? ' (' + h.lines + ' lines)' : '') + (place ? ' — ' + place : ''), where, fix: r.fix, fp: h.fp, ...(more.length ? { also: more } : {}) });
+    findings.push({ rule: h.rule, sev: r.sev, area: 'disclosure', title: r.title + labelsText(h) + (h.lines > 1 ? ' (' + h.lines + ' lines)' : '') + (place ? ' — ' + place : ''), where, fix: r.fix, fp: h.fp, holds: holdsFp(h), ...(more.length ? { also: more } : {}) });
   };
   const trailFiles = new Map(); // AI tool folder, or the folder holding working-notes files -> { files:Set, place }
   const trailFile = (rel, place) => {
@@ -499,10 +509,10 @@ async function disclosurePass(dir, ctx = {}) {
     }
   };
   // Unpacking zips has one budget per pass (bytes and entries), and the Bridge keeps answering while it runs.
-  const budget = { bytes: 0, entries: 0, hit: false };
+  const budget = { bytes: 0, entries: 0, listed: 0, hit: false };
   const overBudget = (where, size) => {
-    if (!budget.hit && budget.entries < MAX_ENTRIES && budget.bytes + size <= UNPACK_BUDGET) return false;
-    if (!budget.hit) notes.push('Zips were read up to ' + (UNPACK_BUDGET >> 20) + ' MB unpacked / ' + MAX_ENTRIES + ' entries; the rest (from ' + where + ') was not read. A zip that unpacks to far more than its size can be a "zip bomb".');
+    if (!budget.hit && budget.entries < MAX_ENTRIES && budget.listed <= MAX_LISTED && budget.bytes + size <= UNPACK_BUDGET) return false;
+    if (!budget.hit) notes.push('Zips were read up to ' + (UNPACK_BUDGET >> 20) + ' MB unpacked / ' + MAX_ENTRIES + ' entries (' + MAX_LISTED + ' listed); the rest (from ' + where + ') was not read. A zip that unpacks to far more than its size can be a "zip bomb".');
     budget.hit = true;
     return true;
   };
@@ -553,10 +563,14 @@ async function disclosurePass(dir, ctx = {}) {
   if (older > 0) notes.push(older + ' older zip' + (older > 1 ? 's' : '') + ' beside a newer one in the same folder were not read (the newest is taken as the one you share; one a page links to is read).');
   // office: an Word/Excel/PowerPoint file read as the zip it is (its XML text only, no file names reported).
   const openZip = async (buf, chain, depth, place = 'inside a zip', office = false) => {
-    let entries; try { entries = readZip(buf); } catch (e) { notes.push(chain + ' could not be read as a zip (' + e.message + ').'); return; }
+    let entries; try { entries = readZip(buf, MAX_LISTED - budget.listed + 1); } catch (e) { notes.push(chain + ' could not be read as a zip (' + e.message + ').'); return; }
     for (const e of entries) {
       if (budget.hit) return;
       const where = chain + ' > ' + e.name;
+      // Every entry counts as listed, read or passed over, and the Bridge gets a turn now and then.
+      budget.listed++;
+      if (overBudget(where, 0)) return;
+      if (budget.listed % 500 === 0) await new Promise(setImmediate);
       if (office && !/\.xml$/i.test(e.name)) continue;
       const trail = office ? null : trailFile(where, place);
       if (!office) nameCheck(where, place);
@@ -785,7 +799,8 @@ async function historyPass(dir, ctx, scan, out) {
 function batch(dir, args, input) {
   return new Promise(resolve => {
     const chunks = [];
-    const c = spawn('git', ['-c', 'core.fsmonitor=false', '-C', dir, ...args], { windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } });
+    const fence = fenced(dir);
+    const c = spawn('git', ['-c', 'core.fsmonitor=false', ...fence.args, '-C', dir, ...args], { windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...fence.env } });
     c.stdout.on('data', d => chunks.push(d));
     c.on('error', () => resolve(Buffer.alloc(0)));
     c.on('close', () => resolve(Buffer.concat(chunks)));

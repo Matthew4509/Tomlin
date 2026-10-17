@@ -177,7 +177,7 @@ span.df-add{color:var(--ok)} span.df-del{color:var(--bad)} .df-lines span.df-add
 .rings{display:flex;flex-wrap:wrap;justify-content:center;row-gap:6px;text-align:center}
 .ring{position:relative;flex:0 0 50%;min-width:0}
 button.ring{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;border-radius:6px}
-button.ring:hover .ring-k{color:var(--text);text-decoration:underline}
+button.ring:hover .ring-k{color:var(--ink);text-decoration:underline}
 .ring.off .ring-v{color:var(--muted);font-weight:400}
 .ring svg{width:60px;height:60px;display:block;margin:0 auto}
 .ring .trk{stroke:var(--off-soft)}

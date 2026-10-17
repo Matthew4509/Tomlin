@@ -27,12 +27,15 @@ function send(res, code, body, type = 'application/json; charset=utf-8') {
 
 function readBody(req, limit = 10000) {
   return new Promise((resolve, reject) => {
-    let b = '';
+    // Chunks are kept as bytes and decoded once at the end: a character split between two chunks must come through whole.
+    const chunks = [];
+    let size = 0;
     // Too big: the rest is read and dropped, then a 413 with a reason (dropping the connection showed as Connection lost).
     let over = false;
-    req.on('data', c => { if (over) return; b += c; if (b.length > limit) { over = true; b = ''; } });
+    req.on('data', c => { if (over) return; const b = Buffer.isBuffer(c) ? c : Buffer.from(String(c), 'utf8'); chunks.push(b); size += b.length; if (size > limit * 4) { over = true; chunks.length = 0; } });
     req.on('end', () => {
-      if (over) return reject(Object.assign(new Error('That is more than the Bridge takes in one go (' + limit.toLocaleString('en') + ' characters). Make it shorter and try again.'), { status: 413 }));
+      const b = over ? '' : Buffer.concat(chunks).toString('utf8');
+      if (over || b.length > limit) return reject(Object.assign(new Error('That is more than the Bridge takes in one go (' + limit.toLocaleString('en') + ' characters). Make it shorter and try again.'), { status: 413 }));
       // Only an object is a request: null, a number or a list is read as an empty one, so each route refuses it plainly.
       try { const v = b ? JSON.parse(b) : {}; resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : {}); } catch { reject(Object.assign(new Error('The request was not readable (not JSON). Reload the page and try again.'), { status: 400 })); }
     });

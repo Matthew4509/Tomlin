@@ -42,6 +42,27 @@ async function snapshot(p, force) {
   return job;
 }
 
+// Reads at most max bytes of a reply (after unzipping), stopping the download there. cut: keep the first max bytes;
+// otherwise a longer reply gives null.
+async function readUpTo(r, max, cut) {
+  if (!cut && Number(r.headers.get('content-length')) > max) { r.body?.cancel().catch(() => {}); return null; }
+  if (!r.body) return Buffer.alloc(0);
+  const reader = r.body.getReader(), parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (n + value.length > max) {
+      reader.cancel().catch(() => {});
+      if (!cut) return null;
+      parts.push(value.subarray(0, max - n)); n = max;
+      break;
+    }
+    parts.push(value); n += value.length;
+  }
+  return Buffer.concat(parts, n);
+}
+
 // The icon the running site itself uses: the <link rel="icon"> on its page, else /favicon.ico. Only fetched from the
 // site's own local address (same host and port as its page); images only, under 512 KB.
 async function fetchSiteIcon(p, pageUrl) {
@@ -49,7 +70,7 @@ async function fetchSiteIcon(p, pageUrl) {
   const get = u => fetch(u, { signal: AbortSignal.timeout(4000), redirect: 'manual' });
   const found = [];
   try {
-    const html = (await (await get(pageUrl)).text()).slice(0, 200000);
+    const html = (await readUpTo(await get(pageUrl), 200000, true)).toString('utf8');
     for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
       if (!/\brel\s*=\s*["']?[^"'>]*\bicon\b/i.test(m[0])) continue;
       const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(m[0]);
@@ -63,8 +84,8 @@ async function fetchSiteIcon(p, pageUrl) {
       const r = await get(u.href);
       const type = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
       if (!r.ok || !/^image\/(png|x-icon|vnd\.microsoft\.icon|svg\+xml|gif|jpeg|webp)$/.test(type)) continue;
-      const buf = Buffer.from(await r.arrayBuffer());
-      if (!buf.length || buf.length > 512 * 1024) continue;
+      const buf = await readUpTo(r, 512 * 1024, false);
+      if (!buf || !buf.length) continue;
       fs.writeFileSync(siteIconFile(p), buf);
       fs.writeFileSync(siteIconFile(p) + '.type', type);
       return true;
@@ -90,4 +111,4 @@ function iconOf(p) {
   return null;
 }
 
-module.exports = { snapshot, snapFile, iconOf };
+module.exports = { snapshot, snapFile, iconOf, readUpTo };

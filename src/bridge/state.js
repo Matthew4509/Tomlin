@@ -46,9 +46,12 @@ function demoTokens() {
   }
   state.tokens = { per, month, at: new Date().toISOString(), busy: false, error: null };
 }
+// A count asked for while one is under way (a folder added during the start-up count, Recount pressed twice) runs
+// again when the worker answers, over the list as it is then, so no project is left showing 0 as a finished count.
+let countAgain = false;
 function refreshTokens() {
   if (cfg.DEMO) return demoTokens();
-  if (state.tokens.busy) return;
+  if (state.tokens.busy) { countAgain = true; return; }
   // No projects (a new home, a test copy): nothing to count, so the transcripts are not read at all.
   if (!state.projects.length) { state.tokens = { per: {}, month: {}, at: new Date().toISOString(), busy: false, error: null }; return; }
   state.tokens.busy = true;
@@ -56,6 +59,7 @@ function refreshTokens() {
     tokenWorker = new Worker(path.join(__dirname, 'tokens-worker.js'));
     tokenWorker.on('message', m => {
       state.tokens = m.error ? { ...state.tokens, busy: false, error: m.error } : { per: m.total, month: m.month, at: new Date().toISOString(), busy: false, error: null };
+      if (countAgain) { countAgain = false; refreshTokens(); }
     });
     tokenWorker.on('error', e => { state.tokens = { ...state.tokens, busy: false, error: String(e.message || e) }; tokenWorker = null; });
     tokenWorker.unref();

@@ -12,7 +12,7 @@ const { disclosurePass, publishedFiles, RULE: DISC_RULES } = require('./disclosu
 const { gitConfigRisky } = require('./gitstate');
 const { fingerprint, applyJudged } = require('./judged');
 const { findRoots } = require('./roots');
-const { RULES_MORE, locationFromRequestVar } = require('./rules-more');
+const { RULES_MORE, locationFromRequestVar, newRun } = require('./rules-more');
 const { crossAudit, CROSS_RULES } = require('./cross');
 
 // Build output and release copies are skipped: a fault in the source would otherwise be counted once per copy
@@ -38,7 +38,7 @@ function taintedNames(text) {
   let m;
   while ((m = re.exec(text))) {
     const name = m[1] || m[3], rhs = m[2] != null ? m[2] : m[4];
-    if (!name) continue;
+    if (!name || rhs.length > 2000) continue; // a minified or generated line: not read, like the line rules
     if (OUTSIDE.test(String(rhs).replace(ESCAPED, '').replace(NUMERIC, ''))) dirty.set(name, true);
     else clean.add(name);
   }
@@ -54,7 +54,7 @@ const HTML_SINK = /\.(innerHTML|outerHTML)\s*\+?=(?!=)|\.insertAdjacentHTML\s*\(
 // Words inside fixed text are not variables: 'Drag out a <b>Room</b>' names no `out` or `a`. Quoted strings are
 // blanked; a template literal keeps only its ${...} parts.
 function codeOnly(s) {
-  return String(s).replace(/`(?:\\.|\$\{[^}]*\}|[^`\\])*`/g, t => ' ' + (t.match(/\$\{[^}]*\}/g) || []).join(' + ') + ' ')
+  return String(s).replace(/`(?:\\.|\$\{[^}]*\}|\$(?!\{)|[^`\\$])*`/g, t => ' ' + (t.match(/\$\{[^}]*\}/g) || []).join(' + ') + ' ')
     .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""');
 }
 function innerHtmlFromOutside(line, ctx) {
@@ -155,6 +155,7 @@ function notBehindConsent(line, ctx, lines, i) {
 }
 const MAX_FILES = 6000;
 const MAX_BYTES = 800 * 1024;
+const MAX_TOTAL = 150 * 1024 * 1024; // all the code read in one scan: every file is held for the cross-file checks
 
 // Pattern rules. `test` runs per line; `file` limits which files; `except` drops obvious placeholders/tests.
 const RULES = [
@@ -271,6 +272,7 @@ function listFiles(dir, skip) {
 }
 
 function codeAudit(dir, skipList, opts = {}) {
+  newRun();
   const loads = new Map(); // outside host -> first file:line that loads from it (PRIV-002)
   const privacy = [];     // text of the privacy page(s)
   const findings = [];
@@ -278,7 +280,7 @@ function codeAudit(dir, skipList, opts = {}) {
   const files = listFiles(dir, skip);
   const exposed = new Map(); // rule|folder -> finding (one per folder, with a count)
   const read = [], docs = []; // every file read, and the notes (.md), for the cross-file checks (lib/cross.js)
-  let scanned = 0;
+  let scanned = 0, readBytes = 0, overTotal = 0;
   for (const f of files) {
     const rel = path.relative(dir, f.p).replace(/\\/g, '/');
     if (f.oldCopy) {
@@ -311,6 +313,8 @@ function codeAudit(dir, skipList, opts = {}) {
     if (/\.min\.js$|package-lock\.json$|\.map$/i.test(f.name)) continue;
     let st; try { st = fs.statSync(f.p); } catch { continue; }
     if (st.size > MAX_BYTES) continue;
+    if (readBytes + st.size > MAX_TOTAL) { overTotal++; continue; }
+    readBytes += st.size;
     let text; try { text = fs.readFileSync(f.p, 'utf8'); } catch { continue; }
     scanned++;
     const lines = text.split(/\r?\n/);
@@ -353,12 +357,17 @@ function codeAudit(dir, skipList, opts = {}) {
           const near = lines.slice(Math.max(0, i - 40), i + 40).join('\n');
           if (r.needsNear.test(near)) continue;
         }
-        findings.push({ rule: r.id, sev: r.sev, area: r.area, title: r.title, where: rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(line) });
-        break; // one finding per rule per file keeps the list readable
+        const hit = { rule: r.id, sev: r.sev, area: r.area, title: r.title, where: rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(line) };
+        findings.push(hit);
+        // One finding per rule per file keeps the list readable. A place set aside as not a fault does not count:
+        // the rule goes on, so a real one further down the same file is still found.
+        if (opts.judged && applyJudged([hit], opts.judged).setAside.length) continue;
+        break;
       }
     }
   }
   const notes = [];
+  if (overTotal) notes.push('The scan reads up to ' + (MAX_TOTAL >> 20) + ' MB of code in all: ' + overTotal + ' more files were not read.');
   let has = null;
   for (const e of exposed.values()) {
     // An archive a page of the project links to (a download, an update feed) is published on purpose.
@@ -627,12 +636,12 @@ async function runAudit(dir, url, opts = {}) {
   // pass unless git would publish them. opts.root === false scans everything; opts.include brings folders back.
   const roots = opts.root === false ? { left: [], app: null, notes: [] } : findRoots(dir, { include: opts.include });
   const skip = [...(opts.skip || []), ...roots.left.map(l => l.rel)];
-  const code = codeAudit(dir, skip, { ownHost });
+  const code = codeAudit(dir, skip, { ownHost, judged: opts.judged });
   code.notes.unshift(...roots.notes);
   // opts.disclosure: { details, others, own } (lib/disclosure.js). What publishing would give away about the maker.
   if (opts.disclosure) {
     const hs = historySecrets();
-    const d = await disclosurePass(dir, { ...opts.disclosure, historyHook: hs.hook, skip: [...(opts.skip || []), ...roots.left.filter(l => !l.publishes).map(l => l.rel)] });
+    const d = await disclosurePass(dir, { ...opts.disclosure, historyHook: hs.hook, skip: [...(opts.skip || []).filter(s => !(opts.skipOwn || []).includes(s)), ...roots.left.filter(l => !l.publishes).map(l => l.rel)] });
     code.findings.push(...d.findings, ...hs.findings());
     code.notes.push(...d.notes);
   }

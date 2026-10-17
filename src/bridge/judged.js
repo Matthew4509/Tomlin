@@ -16,18 +16,18 @@ const fileOf = where => String(where || '').replace(/:\d+$/, '').replace(/\\/g, 
 const lineOf = where => { const m = /:(\d+)$/.exec(String(where || '')); return m ? +m[1] : null; };
 const sameFile = (a, b) => fileOf(a).toLowerCase() === fileOf(b).toLowerCase();
 // The disclosure rules' lines can hold a private detail, so their text is never stored; the fingerprint is enough.
-const textIsPrivate = rule => /^DISC-/.test(rule);
+const textIsPrivate = rule => /^(DISC|SEC)-/.test(rule); // a private detail or a key: only its fingerprint is kept
 
 // ---------- the file ----------
 
+// A damaged file is moved aside (judged.damaged-<time>.json) by readData, never written over.
 function readAll(file) {
-  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j.projects === 'object' && j.projects ? j : { projects: {} }; }
-  catch { return { projects: {} }; }
+  const j = require('./settings').readData(file).json;
+  return j && typeof j.projects === 'object' && j.projects ? j : { projects: {} };
 }
 function writeAll(file, all) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   all.note = 'Findings checked by a person and judged wrong (or already known), per project. Kept on this PC only. An entry matches one line by its fingerprint; editing that line brings the finding back.';
-  fs.writeFileSync(file, JSON.stringify(all, null, 2));
+  require('./settings').save(file, all);
 }
 const entriesFor = (file, key) => (readAll(file).projects[key] || []).filter(e => e && typeof e === 'object');
 
@@ -47,7 +47,7 @@ function matches(e, f) {
   if (e.rule !== f.rule) return false;
   if (e.verdict === 'duplicate' && (!e.file || e.file === '*')) return true; // a duplicate may cover every place
   if (!sameFile(e.file, f.where)) return false;
-  if (e.fp) return e.fp === f.fp;
+  if (e.fp) return e.fp === f.fp && (!e.holds || e.holds === f.holds);
   return String(e.where).trim().toLowerCase() === String(f.where).trim().toLowerCase(); // a place with no line text
 }
 
@@ -90,8 +90,10 @@ function addEntry(file, key, e, dir) {
   if (entry.verdict === 'duplicate') entry.duplicateOf = clip(e.duplicateOf, 12).toUpperCase();
   if (e.ruleShould) entry.ruleShould = clip(e.ruleShould, 300);
   let text = null;
-  if (e.fp) entry.fp = String(e.fp).slice(0, 40);
-  else if (lineOf(e.where) && dir) {
+  if (e.fp) {
+    entry.fp = String(e.fp).slice(0, 40);
+    if (e.holds) entry.holds = String(e.holds).slice(0, 40); // what the finding held when it was judged
+  } else if (lineOf(e.where) && dir) {
     text = lineAt(dir, e.where);
     if (text == null) return { ok: false, error: fileOf(e.where) + ' has no line ' + lineOf(e.where) + ' now, so there is no line to judge.' };
     entry.fp = fingerprint(text);
@@ -135,7 +137,7 @@ function lineAt(dir, where) {
 // text has no such heading, every table row in it. Rows with no usable verdict are skipped with a reason.
 function parseReportBack(text) {
   const t = String(text || '');
-  const sec = /^#{1,4}\s*\d*\.?\s*False flags.*$([\s\S]*?)(?=^#{1,4}\s|(?![\s\S]))/im.exec(t);
+  const sec = /^#{1,4}[ \t]*(?:\d+\.?[ \t]+|\d*\.[ \t]*)?False flags.*$([\s\S]*?)(?=^#{1,4}\s|(?![\s\S]))/im.exec(t);
   const body = sec ? sec[1] : t;
   const rows = [];
   for (const raw of body.split(/\r?\n/)) {
@@ -165,7 +167,7 @@ function importRows(file, key, rows, lastFindings, dir, by, source) {
     // No line given: it must point at exactly one finding of the last audit, or it would judge a whole file.
     if (!lineOf(r.where) && found.length !== 1) { out.push({ rule: r.rule, where: r.where, ok: false, error: (found.length ? 'the last audit has ' + found.length : 'the last audit has no') + ' ' + r.rule + ' finding' + (found.length === 1 ? '' : 's') + ' there: name the line (file:line)' }); continue; }
     const f = found[0];
-    const res = addEntry(file, key, { rule: r.rule, where: f ? f.where : r.where, fp: f ? f.fp : null, verdict: r.verdict, duplicateOf: r.duplicateOf, why: r.why, ruleShould: r.ruleShould, by, source }, dir);
+    const res = addEntry(file, key, { rule: r.rule, where: f ? f.where : r.where, fp: f ? f.fp : null, holds: f ? f.holds : null, verdict: r.verdict, duplicateOf: r.duplicateOf, why: r.why, ruleShould: r.ruleShould, by, source }, dir);
     out.push({ rule: r.rule, where: r.where, ok: res.ok, error: res.error });
   }
   return out;

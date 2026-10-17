@@ -84,7 +84,7 @@ const tokensCounting = () => stats && stats.tokensBusy && !stats.tokensAt;
 
 function auditLabel(a) {
   if (!a) return null;
-  const c = a.counts, when = fmtWhen(Date.parse(a.ranAt));
+  const c = a.counts || {}, when = fmtWhen(Date.parse(a.ranAt));
   if (c.Critical || c.High) return { cls: 'a-bad', text: '▲ ' + [c.Critical && c.Critical + ' Critical', c.High && c.High + ' High'].filter(Boolean).join(', '), when };
   if (c.Medium) return { cls: 'a-warn', text: '■ ' + c.Medium + ' Medium', when };
   return { cls: 'a-ok', text: '✓ Passed', when };

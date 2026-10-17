@@ -108,10 +108,12 @@ async function takeSnapshot({ edge, url, out, profile, settleMs = 3000, timeoutM
   const lock = path.join(profile, 'lockfile');
   for (let i = 0; i < 40; i++) { try { fs.rmSync(lock, { force: true }); break; } catch { await sleep(150); } }
   const child = spawn(edge, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--mute-audio', '--no-first-run',
-    '--no-default-browser-check', '--disable-extensions', '--disable-sync', '--remote-debugging-port=0',
+    '--no-default-browser-check', '--disable-extensions', '--disable-sync',
+    '--disable-background-networking', '--disable-component-update', '--no-pings', '--remote-debugging-port=0',
     '--user-data-dir=' + profile, '--window-size=1280,800', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   const deadline = Date.now() + timeoutMs;
   let port = null;
+  current = child;
   try {
     while (!port) {
       if (Date.now() > deadline) throw new Error('Edge did not start');
@@ -127,7 +129,13 @@ async function takeSnapshot({ edge, url, out, profile, settleMs = 3000, timeoutM
     if (!port) { try { port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0].trim() || null; } catch {} }
     await stopBrowser(port);
     killTree(child.pid);
+    if (current === child) current = null;
   }
 }
 
-module.exports = { takeSnapshot, stopBrowser };
+// The Edge taking a picture right now, so that Quit (lifecycle.js) can stop it: without this a TOMLIN stopped
+// mid-picture left the hidden browser running until the next picture in a later run.
+let current = null;
+function stopCurrent() { if (current) { killTree(current.pid); current = null; } }
+
+module.exports = { takeSnapshot, stopBrowser, stopCurrent };

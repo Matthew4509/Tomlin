@@ -5,6 +5,7 @@ const fs = require('fs');
 const cfg = require('./config');
 const Sensors = require('./sensors');
 const { stopAllProjects } = require('./runner');
+const { stopCurrent } = require('./snapshot');
 
 let stopped = false;
 function stopEverything() {
@@ -12,6 +13,7 @@ function stopEverything() {
   stopped = true;
   stopAllProjects();
   Sensors.stopGpu();
+  stopCurrent(); // a picture being taken: its hidden Edge goes too
   try { if (JSON.parse(fs.readFileSync(cfg.RUN_FILE, 'utf8')).pid === process.pid) fs.unlinkSync(cfg.RUN_FILE); } catch {}
 }
 function shutdown() {

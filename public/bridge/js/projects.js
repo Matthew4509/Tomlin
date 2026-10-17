@@ -117,6 +117,7 @@ function renderList() {
   renderStopAll();
   const visible = rows.filter(r => showHidden || !r.hiddenView);
   const list = sorted(visible.filter(r => !q || (r.name + ' ' + r.description + ' ' + r.folder).toLowerCase().includes(q)));
+  lastList = list;
   const L = $('list');
   L.className = 'list' + (view === 'tiles' ? ' tiles' : '');
   $('list-head').hidden = view === 'tiles';
@@ -176,11 +177,18 @@ async function copyPrompt(r) {
 async function saveOrder(ids) {
   try { await api('/api/projects/order', { ids }); await load(); } catch (e) { info(e.message, true); }
 }
+let lastList = []; // the rows as shown (hidden ones and search misses left out), so Move up/down swap with a visible neighbour
 function move(r, where) {
   const ids = myOrder(rows).map(x => x.id);
-  const i = ids.indexOf(r.id);
-  ids.splice(i, 1);
-  const j = where === 'top' ? 0 : where === 'bottom' ? ids.length : where === 'up' ? Math.max(0, i - 1) : Math.min(ids.length, i + 1);
+  ids.splice(ids.indexOf(r.id), 1);
+  let j;
+  if (where === 'top') j = 0;
+  else if (where === 'bottom') j = ids.length;
+  else {
+    const shown = lastList.map(x => x.id), k = shown.indexOf(r.id);
+    const nb = where === 'up' ? shown[k - 1] : shown[k + 1];
+    j = nb === undefined ? (where === 'up' ? 0 : ids.length) : ids.indexOf(nb) + (where === 'up' ? 0 : 1);
+  }
   ids.splice(j, 0, r.id);
   if ($('sort').value !== 'mine') { $('sort').value = 'mine'; pref.set('sort', 'mine'); info('Sorted by My order, so you can see where ' + r.name + ' went.'); }
   saveOrder(ids);
@@ -217,8 +225,9 @@ async function setHidden(r, hidden) {
 function toggleHidden() { showHidden = !showHidden; pref.set('showHidden', showHidden ? '1' : '0'); renderList(); }
 
 // ---- flyouts: the "..." menu and the Run local copy choice ----
-let menuFor = null;
+let menuFor = null, menuAnchor = null;
 function placeMenu(items, anchor) {
+  menuAnchor = anchor;
   const m = $('menu');
   m.replaceChildren(...items);
   m.hidden = false;
@@ -227,7 +236,7 @@ function placeMenu(items, anchor) {
   m.style.top = (b.bottom + 4 + mh > innerHeight - 8 ? Math.max(8, b.top - mh - 4) : b.bottom + 4) + 'px';
   const first = m.querySelector('button'); if (first) first.focus();
 }
-const menuItem = (cp, label, small, fn, cls) => h('button', { type: 'button', role: 'menuitem', class: cls, onclick: () => { closeMenu(); fn(); } }, icon(cp), label, small ? h('small', null, small) : null);
+const menuItem = (cp, label, small, fn, cls) => h('button', { type: 'button', role: 'menuitem', class: cls, onclick: () => { closeMenu(true); fn(); } }, icon(cp), label, small ? h('small', null, small) : null);
 function openRunMenu(r, anchor) {
   if (menuFor === 'run:' + r.id && !$('menu').hidden) return closeMenu();
   menuFor = 'run:' + r.id;
@@ -259,9 +268,11 @@ function openMenu(r, anchor) {
   items.push(menuItem(0xE738, 'Remove from list…', null, () => removeProjectDialog(r), 'danger'));
   placeMenu(items, anchor);
 }
-function closeMenu() { $('menu').hidden = true; menuFor = null; }
+// Escape and a chosen item put the focus back on the … button that opened the menu; a Tab out of it closes it.
+function closeMenu(refocus) { const was = !$('menu').hidden; $('menu').hidden = true; menuFor = null; if (refocus && was && menuAnchor) menuAnchor.focus(); }
 document.addEventListener('click', e => { if (!$('menu').hidden && !e.target.closest('#menu') && !e.target.closest('[aria-haspopup="menu"]')) closeMenu(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(true); });
+$('menu').addEventListener('focusout', e => { if (!$('menu').hidden && !$('menu').contains(e.relatedTarget)) closeMenu(); });
 $('menu').addEventListener('keydown', e => {
   const items = [...$('menu').querySelectorAll('button')], i = items.indexOf(document.activeElement);
   if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }

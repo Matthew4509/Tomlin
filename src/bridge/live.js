@@ -8,14 +8,22 @@ const https = require('https');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns');
+const net = require('net');
 
 const UA = 'TOMLIN/1 (site check)';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const LOCAL_HOST = /^(localhost|.*\.localhost|.*\.local|127\.\d+\.\d+\.\d+|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|\[.*\])$/i;
 // An address a name resolved to that is this PC, the home network or a cloud's own internal address: a public-looking
 // name (127.0.0.1.nip.io, localtest.me, or a domain someone points at 192.168.x) must not aim the Bridge there.
+// An IPv6 address that carries an IPv4 one (::ffff:a.b.c.d in any spelling, ::a.b.c.d, 64:ff9b::a.b.c.d) is judged
+// by the IPv4 address inside it.
 function isPrivateIp(a) {
-  a = String(a || '').toLowerCase().replace(/^::ffff:/, '');
+  a = String(a || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  if (a.includes(':')) {
+    try { a = new URL('http://[' + a + ']/').hostname.slice(1, -1); } catch { return true; } // not an address: refused
+    const m = /^(?:::ffff:|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(a);
+    if (m) { const x = parseInt(m[1], 16), y = parseInt(m[2], 16); a = [x >> 8, x & 255, y >> 8, y & 255].join('.'); }
+  }
   if (/^(127|10|0)\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\.|^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a)) return true;
   return a === '::' || a === '::1' || /^f[cd][0-9a-f]{2}:|^fe[89ab][0-9a-f]:/.test(a);
 }
@@ -31,6 +39,9 @@ function publicLookup(host, opts, cb) {
   });
 }
 
+// A path read from a page stays on the site it came from: "//other.host/x" is a path there, not another address.
+const onSite = (p, base) => new URL('/' + String(p).replace(/^[\/\\]+/, ''), base).href;
+
 // ---------- the address ----------
 // "example.com" becomes https://example.com/. An address on this PC or the home network is not a hosted site
 // (unless opts.allowLocal, for tests); the local copy has its own button.
@@ -44,7 +55,8 @@ function parseLiveUrl(text, opts = {}) {
   if (!/^https?:$/.test(u.protocol)) return { error: 'Only http:// and https:// addresses can be checked.' };
   if (u.username || u.password) return { error: 'Leave the user name and password out of the address: the Bridge only opens the public page.' };
   if (!opts.allowLocal) {
-    if (LOCAL_HOST.test(u.hostname)) return { error: u.hostname + ' is this PC or your own network, not a hosted site. The local copy is started with Run local copy.' };
+    const bare = u.hostname.replace(/^\[|\]$/g, '');
+    if (LOCAL_HOST.test(u.hostname) || (net.isIP(bare) && isPrivateIp(bare))) return { error: u.hostname + ' is this PC or your own network, not a hosted site. The local copy is started with Run local copy.' };
     if (!u.hostname.includes('.')) return { error: '"' + u.hostname + '" is not a full domain name. Type it like example.com.' };
   }
   u.hash = '';
@@ -64,6 +76,9 @@ function requestOnce(url, o = {}) {
     const opts = { method: 'GET', hostname: u.hostname.replace(/^\[|\]$/g, ''), port: u.port || undefined, path: u.pathname + u.search,
       agent: false, timeout: o.timeout || 10000, servername: u.hostname,
       headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8', 'Accept-Encoding': 'gzip, deflate, br', Connection: 'close' } };
+    // A request for a hosted site (publicOnly) never goes to this PC or the private network, whatever the address.
+    if (!target && o.publicOnly && (net.isIP(opts.hostname) ? isPrivateIp(opts.hostname) : LOCAL_HOST.test(u.hostname)))
+      return resolve({ error: { code: 'BLOCKED', message: u.hostname + ' is this PC or a private network, which the Bridge does not check' } });
     if (target) { lib = http; opts.hostname = target.host; opts.port = target.port; opts.headers.Host = u.host; delete opts.servername; }
     else if (!o.allowLocal && !LOCAL_HOST.test(u.hostname)) opts.lookup = publicLookup;
     let settled = false;
@@ -191,6 +206,8 @@ function judge(url, r, o = {}) {
 
 // One site: one GET (redirects followed); a timeout or cut connection is asked once more, 5 s later.
 async function checkSite(url, o = {}) {
+  let host = ''; try { host = new URL(url).hostname; } catch {}
+  o = { publicOnly: !o.resolve && !o.allowLocal && !isLocalHost(host), ...o };
   const at = new Date().toISOString();
   let r = await get(url, o);
   if (r.error && /^(TIMEOUT|ETIMEDOUT|ECONNRESET|EPIPE)$/.test(r.error.code)) {
@@ -392,7 +409,7 @@ async function compareLive(o) {
   const liveGet = async (url, extra) => {
     const wait = last + gap - Date.now();
     if (last && wait > 0) await sleep(wait);
-    const r = await get(url, { resolve: o.resolve, timeout: 15000, ...extra });
+    const r = await get(url, { resolve: o.resolve, timeout: 15000, publicOnly: !o.resolve && !isLocalHost(liveHost), ...extra });
     last = Date.now();
     report.requests += r.chain ? r.chain.length : 1;
     return r;
@@ -430,11 +447,11 @@ async function compareLive(o) {
   const seenHosts = new Map(); // host -> finding already made (one finding per host)
   const scriptPairs = [];
   for (const pg of pageList) {
-    const lu = new URL(pg.path, liveUrl).href;
+    const lu = onSite(pg.path, liveUrl);
     if (!pg.live) {
       pg.live = await liveGet(lu);
       if (looksBlocked(pg.live)) return stop(lu + ' answered with a firewall or security-check page; nothing after it was fetched.');
-      if (localBase) { const r = await localGet(new URL(pg.path, localBase).href); pg.local = localOk(r) ? r : null; }
+      if (localBase) { const r = await localGet(onSite(pg.path, localBase)); pg.local = localOk(r) ? r : null; }
     }
     const lv = pg.live;
     if (pg.path !== pageList[0].path && !lv.error && lv.status >= 200 && lv.status < 300) {
@@ -445,7 +462,7 @@ async function compareLive(o) {
     if (lv.error || !(lv.status >= 200 && lv.status < 300)) { notes.push(lu + ': ' + (lv.error ? 'no answer' : 'answered ' + lv.status) + ', not compared.'); continue; }
     if (localBase && !pg.local) notes.push(pg.path + ' is on the live site but the local copy gave no page for it; checked against the project\'s files only.');
     const liveRefs = pageRefs(lv.body, lv.finalUrl || lu);
-    const localRefs = pg.local ? pageRefs(pg.local.body, new URL(pg.path, localBase).href) : [];
+    const localRefs = pg.local ? pageRefs(pg.local.body, onSite(pg.path, localBase)) : [];
     const localHosts = new Set(localRefs.map(r => r.host));
     const localText = pg.local ? pg.local.body.toLowerCase() : '';
 
@@ -489,7 +506,7 @@ async function compareLive(o) {
       for (const r of liveRefs) {
         if (r.kind !== 'script' || !isOwn(r.host, liveHost)) continue;
         const p = new URL(r.url).pathname;
-        if (localSrc.has(p) && !scriptPairs.some(x => x.path === p)) scriptPairs.push({ path: p, liveUrl: r.url, localUrl: new URL(p, localBase).href });
+        if (localSrc.has(p) && !scriptPairs.some(x => x.path === p)) scriptPairs.push({ path: p, liveUrl: r.url, localUrl: onSite(p, localBase) });
       }
     }
   }
@@ -584,9 +601,9 @@ async function siteChecks(o, c) {
   // 3. Folder listings: the folders those files sit in.
   const folders = [...new Set(files.map(r => new URL(r.url).pathname.replace(/[^/]*$/, '')).filter(p => p !== '/'))].slice(0, 2);
   for (const p of folders) {
-    const res = await liveGet(new URL(p, liveUrl).href, { follow: false });
+    const res = await liveGet(onSite(p, liveUrl), { follow: false });
     const b = blocked(res, p); if (b) return b;
-    if (ok(res) && /<title>\s*Index of \//i.test(res.body || '')) add('LIVE-007', 'Medium', 'Folder listing is switched on for ' + p + ' (anyone can see every file in it)', new URL(p, liveUrl).href, 'Turn off directory listing (Options -Indexes in .htaccess).');
+    if (ok(res) && /<title>\s*Index of \//i.test(res.body || '')) add('LIVE-007', 'Medium', 'Folder listing is switched on for ' + p + ' (anyone can see every file in it)', onSite(p, liveUrl), 'Turn off directory listing (Options -Indexes in .htaccess).');
   }
 
   // 4. A made-up address must not answer 200 with a page (a "soft 404").
@@ -608,7 +625,7 @@ async function siteChecks(o, c) {
   if (canon) {
     let cu = null; try { cu = new URL(canon[1], homeUrl); } catch {}
     if (cu && isOwn(cu.hostname, liveHost) && cu.pathname !== new URL(homeUrl).pathname) {
-      const res = await liveGet(new URL(cu.pathname + cu.search, liveUrl).href, { follow: true });
+      const res = await liveGet(onSite(cu.pathname + cu.search, liveUrl), { follow: true });
       const b = blocked(res, cu.pathname); if (b) return b;
       if (!res.error && res.status >= 400) add('LIVE-031', 'Medium', 'The home page names ' + cu.pathname + ' as its canonical address, and that answers ' + res.status, homeUrl, 'Point the canonical link at the address that serves the page (usually the page itself).');
     }
@@ -629,9 +646,9 @@ async function siteChecks(o, c) {
   if (o.projectHas) {
     const gone = locs.filter(u => /\.(html?|php)$/i.test(u.pathname) && !o.projectHas(u.pathname.split('/').pop())).slice(0, 2);
     for (const u of gone) {
-      const res = await liveGet(new URL(u.pathname, liveUrl).href, { follow: false });
+      const res = await liveGet(onSite(u.pathname, liveUrl), { follow: false });
       const b = blocked(res, u.pathname); if (b) return b;
-      if (ok(res)) add('LIVE-027', 'Medium', u.pathname + ' still answers on the host (the sitemap lists it), but no project file has it: an old page with its old code', new URL(u.pathname, liveUrl).href, 'Delete the old file on the server (and take it out of the sitemap), or bring it back into the project if it is still wanted.');
+      if (ok(res)) add('LIVE-027', 'Medium', u.pathname + ' still answers on the host (the sitemap lists it), but no project file has it: an old page with its old code', onSite(u.pathname, liveUrl), 'Delete the old file on the server (and take it out of the sitemap), or bring it back into the project if it is still wanted.');
     }
   }
 

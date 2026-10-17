@@ -16,33 +16,49 @@ let gitMissing = false;
 // command; `git log` on a signed commit can run gpg.program; include/hooksPath/sshCommand/pager/editor can each
 // name a program. There is no single flag that turns clean/smudge filters off, so the Bridge refuses to run git in
 // a folder whose repo-local config sets any of these, rather than run a program from a folder it only means to read.
+// A section header counts in every spelling git reads: [filter "x"], [filter.x] (the older form) and [Filter.X].
+// Git reads a header or a key anywhere a new one may begin, not only at the start of a line (after another header
+// on the same line, after a lone carriage return), so these are matched anywhere: a word in a comment that matches
+// too only means the Bridge leaves that folder's git alone.
 const RISKY_GIT = [
-  /(^|\n)\s*\[\s*filter[\s"\]]/i,        // clean/smudge/process filters run during `git status`
-  /(^|\n)\s*\[\s*include(if)?[\s"\]]/i,  // pulls in another config file
-  /(^|\n)\s*\[\s*credential[\s"\]]/i,
-  /(^|\n)\s*(fsmonitor|hookspath|sshcommand|pager|editor|askpass|program|external|command)\s*=/i,
+  /\[\s*filter\b/i,                      // clean/smudge/process filters run during `git status`
+  /\[\s*include(if)?\b/i,                // pulls in another config file
+  /\[\s*credential\b/i,
+  /(^|[\s\]])(fsmonitor|hookspath|sshcommand|pager|editor|askpass|program|external|command|textconv|process|clean|smudge|gitproxy|uploadpack|receivepack|packobjectshook|alternaterefscommand)\s*([=#;]|$)/im,
 ];
+// Every config file git would read for this repository: its own config, config.worktree, and the config of the
+// folder named in "commondir" (a linked worktree's shared settings), wherever "gitdir:" points.
+function gitDirOf(dir) {
+  const dotgit = path.resolve(dir, '.git');
+  if (fs.statSync(dotgit).isDirectory()) return dotgit;
+  const m = /gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotgit, 'utf8')); // ".git" as a file points at a folder its author chose
+  return m ? path.resolve(dir, m[1]) : null;
+}
+// Git finds the repository itself, but only the folder's own .git, whose settings were read above: never the folder
+// itself taken as a bare repository, never a folder above it. Git's own check of who owns the folder still applies.
+function fenced(dir) {
+  return { args: ['-c', 'safe.bareRepository=explicit'], env: { GIT_CEILING_DIRECTORIES: path.dirname(path.resolve(dir)) } };
+}
+function gitConfigFiles(dir) {
+  const gitDir = gitDirOf(dir);
+  if (!gitDir) return null;
+  const files = [path.join(gitDir, 'config'), path.join(gitDir, 'config.worktree')];
+  try { files.push(path.join(path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()), 'config')); } catch {}
+  return files;
+}
 function gitConfigRisky(dir) {
-  try {
-    const dotgit = path.join(dir, '.git');
-    const st = fs.statSync(dotgit);
-    let configPath;
-    if (st.isDirectory()) configPath = path.join(dotgit, 'config');
-    else { // ".git" as a file ("gitdir: <path>") can point at a config the folder's author controls: read that one.
-      const m = /gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotgit, 'utf8'));
-      if (!m) return true;
-      configPath = path.join(path.resolve(dir, m[1]), 'config');
-    }
-    const cfg = fs.readFileSync(configPath, 'utf8');
-    return RISKY_GIT.some(re => re.test(cfg));
-  } catch { return false; } // no readable config: an ordinary or empty repo, nothing to run
+  let files;
+  try { files = gitConfigFiles(dir); } catch { return false; } // no .git: nothing to run
+  if (!files) return true;
+  return files.some(f => { try { return RISKY_GIT.some(re => re.test(fs.readFileSync(f, 'utf8'))); } catch { return false; } });
 }
 
 function git(dir, args, big) {
   return new Promise(resolve => {
-    execFile('git', ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '-C', dir, ...args], {
+    const fence = fenced(dir);
+    execFile('git', ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', ...fence.args, '-C', dir, ...args], {
       timeout: big ? 20000 : 8000, windowsHide: true, maxBuffer: (big ? 32 : 4) * 1024 * 1024,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...fence.env },
     }, (err, stdout, stderr) => {
       if (err && err.code === 'ENOENT') gitMissing = true;
       resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || (err && err.message) || '') });
@@ -61,7 +77,7 @@ function safeRemote(url) {
 async function read(dir) {
   if (!fs.existsSync(path.join(dir, '.git'))) return { state: 'none' };
   if (gitConfigRisky(dir)) return { state: 'error', reason: 'This folder\'s git settings could run a program (a filter, hook or similar), so the Bridge did not read its git state.' };
-  const st = await git(dir, ['status', '--porcelain=v2', '--branch']);
+  const st = await git(dir, ['status', '--porcelain=v2', '--branch', '--ignore-submodules=all']);
   if (!st.ok) {
     if (gitMissing) return { state: 'error', reason: 'git is not installed on this PC.' };
     return { state: 'error', reason: /dubious ownership/.test(st.err) ? 'git refuses this folder: it belongs to another user account.' : 'git could not read this folder: ' + st.err.split('\n')[0].slice(0, 160) };
@@ -124,7 +140,7 @@ async function changes(dir) {
   if (gitConfigRisky(dir)) return { ok: false, error: 'This folder\'s git settings could run a program (a filter, hook or similar), so the Bridge did not read it.' };
   // A new folder is one entry (git's own default), not every file in it: a folder link that points back up (a
   // junction loop) or a fresh node_modules would otherwise list without end and push the real changes out of view.
-  const st = await git(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=normal'], true);
+  const st = await git(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=normal', '--ignore-submodules=all'], true);
   if (!st.ok) return { ok: false, error: gitMissing ? 'git is not installed on this PC.' : 'git could not read this folder: ' + st.err.split('\n')[0].slice(0, 160) };
   const files = [];
   const parts = st.out.split('\0');
@@ -143,7 +159,7 @@ async function changes(dir) {
   const shown = files.slice(0, MAX_FILES);
   const head = (await git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])).ok;
   // Against the last commit; before the first commit, what is staged is all there is to compare.
-  const d = await git(dir, ['-c', 'core.quotePath=false', 'diff', ...(head ? ['HEAD'] : ['--cached']), '--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'], true);
+  const d = await git(dir, ['-c', 'core.quotePath=false', 'diff', ...(head ? ['HEAD'] : ['--cached']), '--ignore-submodules=all', '--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'], true);
   if (!d.ok) return { ok: false, error: /maxBuffer/i.test(d.err) ? 'The changes are too big to show here (over 32 MB). Use a git program to read them.' : 'git could not compare this folder: ' + d.err.split('\n')[0].slice(0, 160) };
   const byPath = new Map(shown.map(f => [f.path, f]));
   for (const chunk of d.out.split(/^diff --git /m).slice(1)) {
@@ -177,4 +193,4 @@ async function changes(dir) {
   return { ok: true, files: shown, more: files.length - shown.length, against: head ? 'last save' : 'nothing saved yet' };
 }
 
-module.exports = { gitState, changes, safeRemote, gitConfigRisky, isMissing: () => gitMissing };
+module.exports = { gitState, changes, safeRemote, gitConfigRisky, fenced, isMissing: () => gitMissing };

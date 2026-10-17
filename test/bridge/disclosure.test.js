@@ -171,6 +171,15 @@ async function main() {
   const acc = [{ id: 'x1', rule: 'DISC-001', file: 'email.txt', fp: fingerprint('Write to ' + EMAIL + ' today'), verdict: 'false', why: 'test', by: 'test' }];
   const A2 = await runAudit(path.join(tmp, 'plain'), null, { disclosure: ctx, judged: acc });
   check('a set-aside disclosure finding moves to setAside', () => assert(A2.setAside.some(f => f.where.startsWith('email.txt')) && !A2.findings.some(f => f.where.startsWith('email.txt'))));
+  // Judged from the audit window (with what the finding held), it comes back when another detail joins the file.
+  w('holds/notes.txt', 'Write to ' + EMAIL + ' today\n');
+  const H1 = await runAudit(path.join(tmp, 'holds'), null, { disclosure: ctx });
+  const hf = H1.findings.find(f => f.rule === 'DISC-001' && f.where.startsWith('notes.txt'));
+  const hj = hf ? [{ id: 'h1', rule: 'DISC-001', file: 'notes.txt', fp: hf.fp, holds: hf.holds, verdict: 'false', why: 'test', by: 'test' }] : [];
+  const H2 = await runAudit(path.join(tmp, 'holds'), null, { disclosure: ctx, judged: hj });
+  w('holds/notes.txt', 'Write to ' + EMAIL + ' today\nor ring ' + PHONE + '\n');
+  const H3 = await runAudit(path.join(tmp, 'holds'), null, { disclosure: ctx, judged: hj });
+  check('a set-aside private-detail finding comes back when another detail joins the file', () => assert(hf && hf.holds && H2.setAside.some(f => f.where.startsWith('notes.txt')) && H3.findings.some(f => f.rule === 'DISC-001' && f.where.startsWith('notes.txt'))));
   check('no planted value in the saved audit', () => noValues(A1));
 
   // ---- 7. The list the person fills in ----
@@ -342,6 +351,20 @@ async function main() {
     const h2 = (await runAudit(kr, null, { disclosure: ctx, root: false })).findings.filter(f => f.rule === 'SEC-012');
     check('SEC-012: once pushed it is Critical and says so', () => assert(h2.length === 1 && h2[0].sev === 'Critical' && /already on the remote/.test(h2[0].title), JSON.stringify(h2)));
   }
+
+  // A zip that lists far more entries than the pass looks at: every entry counts as listed, read or passed over.
+  fs.mkdirSync(path.join(tmp, 'many-entries'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'many-entries', 'pics-1.0.zip'), makeZip(Array.from({ length: 60000 }, (_, i) => ({ name: 'p' + i + '.png', data: '' }))));
+  const tZip = Date.now();
+  const Many = await disclosurePass(path.join(tmp, 'many-entries'), ctx);
+  check('a zip listing 60,000 entries stops at the listing limit, quickly', () => assert(Many.notes.some(n => /50000 listed/.test(n)) && Date.now() - tZip < 15000, (Date.now() - tZip) + ' ms; ' + Many.notes.join(' | ')));
+  // A stored entry must hold exactly the size it gives.
+  const odd = makeZip([{ name: 'notes.txt', data: 'ring the shop on Monday\n' }]);
+  odd.writeUInt32LE(1, odd.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 24);
+  fs.mkdirSync(path.join(tmp, 'odd-size'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'odd-size', 'kit-1.0.zip'), odd);
+  const OddSize = await disclosurePass(path.join(tmp, 'odd-size'), ctx);
+  check('a stored zip entry whose size does not match is not read', () => assert(OddSize.notes.some(n => /notes\.txt could not be read \(its stored size/.test(n)), OddSize.notes.join(' | ')));
 
   // The Bridge part's own files (its four folders inside TOMLIN), copied out so only they are read: no names of
   // the other projects beside it, no private detail of this PC, no AI trail.

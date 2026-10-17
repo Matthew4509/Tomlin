@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { gitConfigRisky, fenced } = require('./gitstate');
 
 const NOT_WALKED = new Set(['node_modules', '.git', 'vendor', 'bower_components', '__pycache__', '.venv', 'venv', '.claude', 'coverage']);
 const CODE_FILE = /\.(php|m?js|cjs|tsx?|jsx|py|html?|vue|svelte|rb|go|java|cs)$/i;
@@ -65,10 +66,14 @@ function launchFolders(dir) {
   return [...out];
 }
 
-// Would git publish this folder? Tracked in HEAD, or not ignored (so the next commit takes it). No repo: no.
+// Would git publish this folder? Tracked in HEAD, or not ignored (so the next commit takes it). No repo: no. A repo
+// whose settings could run a program is not asked at all: the folder counts as published, so it is still read.
 function gitPublishes(dir, rel) {
   if (!fs.existsSync(path.join(dir, '.git'))) return false;
-  const run = args => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', windowsHide: true, timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+  if (gitConfigRisky(dir)) return true;
+  const fence = fenced(dir);
+  const run = args => execFileSync('git', ['-c', 'core.fsmonitor=false', ...fence.args, '-C', dir, ...args], { encoding: 'utf8', windowsHide: true, timeout: 8000,
+    stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', ...fence.env } });
   try { if (run(['ls-tree', '-d', '--name-only', 'HEAD', '--', rel]).trim()) return true; } catch {}
   try { run(['check-ignore', '-q', '--', rel + '/']); return false; } catch (e) { return e.status === 1; } // 1 = not ignored
 }

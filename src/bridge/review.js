@@ -27,6 +27,7 @@ function walk(dir, max = 4000) {
     if (out.length >= max || depth > 10) return;
     let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
+      if (out.length >= max) return; // one folder with a great many files stops here too
       const p = path.join(d, e.name), rel = path.relative(dir, p).replace(/\\/g, '/');
       if (SKIP.test(rel) || e.name.startsWith('.') && e.name !== '.htaccess') continue;
       if (e.isDirectory()) go(p, depth + 1); else if (e.isFile() && (CODE.test(e.name) || e.name === '.htaccess')) out.push(rel);
@@ -41,8 +42,9 @@ function fileGroups(dir, skip = []) {
   const files = walk(dir).filter(f => !left.some(s => f.toLowerCase() === s || f.toLowerCase().startsWith(s + '/')) && !/(^|\/)(tests?|spec|__tests__|fixtures?)\//i.test(f));
   const groups = GROUPS.map(([name, re], gi) => ({ name, files: files.filter(f => (gi === GROUPS.length - 1 || !HELPER.test(f)) && wordsOf(f).some(w => re.test(w))).sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b)).slice(0, 15) })).filter(g => g.files.length);
   const forms = [];
+  let looked = 0; // the forms search reads at most 300 files
   for (const f of files.filter(x => /\.(php|html?|vue|jsx|tsx|twig)$/i.test(x))) {
-    if (forms.length >= 12) break;
+    if (forms.length >= 12 || ++looked > 300) break;
     try { if (fs.statSync(path.join(dir, f)).size < 512 * 1024 && /<form\b/i.test(fs.readFileSync(path.join(dir, f), 'utf8'))) forms.push(f); } catch {}
   }
   if (forms.length) groups.splice(2, 0, { name: 'Forms visitors send', files: forms });
@@ -124,7 +126,7 @@ const PLACE = /^[^\s|:*?"<>]+(?:[ \w.\/()-]*[^\s|:*?"<>])?:\d+(?:-\d+)?$/;
 function parseFindings(text) {
   // a Unicode line or paragraph separator inside a cell is a space, not a new line (or a new heading)
   const t = String(text || '').replace(/[\u2028\u2029]/g, ' ');
-  const sec = /^#{1,4}\s*\d*\.?\s*Findings\b.*$([\s\S]*?)(?=^#{1,4}\s|(?![\s\S]))/im.exec(t);
+  const sec = /^#{1,4}[ \t]*(?:\d+\.?[ \t]+|\d*\.[ \t]*)?Findings\b.*$([\s\S]*?)(?=^#{1,4}\s|(?![\s\S]))/im.exec(t);
   if (!sec) return { rows: [], refused: [] };
   const rows = [], refused = [];
   for (const raw of sec[1].split(/\r?\n/)) {
@@ -134,7 +136,7 @@ function parseFindings(text) {
     if (/^(id|none)?$/i.test(c[0]) || /^none\b/i.test(c.join(' '))) continue;
     if (c.length < 6) { refused.push({ id: c[0], error: 'the row has ' + c.length + ' columns; it needs Id | Severity | Category | Where | Evidence | Fix' }); continue; }
     const where = c[3].replace(/^\.?\//, '').replace(/\\/g, '/');
-    if (!PLACE.test(where)) { refused.push({ id: c[0], error: 'a finding must name one place as file:line; "' + oneLine(c[3]).slice(0, 60) + '" does not' }); continue; }
+    if (where.length > 300 || !PLACE.test(where)) { refused.push({ id: c[0], error: 'a finding must name one place as file:line; "' + oneLine(c[3]).slice(0, 60) + '" does not' }); continue; }
     if (/(^|\/)\.\.(\/|$)/.test(where) || /^[a-z]:/i.test(where)) { refused.push({ id: c[0], error: '"' + oneLine(where).slice(0, 60) + '" is outside the project' }); continue; }
     const sev = SEVS[c[1].toLowerCase().replace(/[^a-z]/g, '')];
     if (!sev) { refused.push({ id: c[0], error: 'severity "' + oneLine(c[1]).slice(0, 20) + '" is not Critical, High, Medium or Low' }); continue; }
@@ -146,12 +148,12 @@ function parseFindings(text) {
 // ---------- the fault list (data/faults/<project key hash>.json) ----------
 const fileFor = (dataDir, key) => path.join(dataDir, 'faults', crypto.createHash('sha1').update(String(key).toLowerCase()).digest('hex').slice(0, 16) + '.json');
 function readFaults(dataDir, key) {
-  try { const j = JSON.parse(fs.readFileSync(fileFor(dataDir, key), 'utf8')); return Array.isArray(j.faults) ? j.faults : []; } catch { return []; }
+  const j = require('./settings').readData(fileFor(dataDir, key)).json; // a damaged file is moved aside, never written over
+  return j && Array.isArray(j.faults) ? j.faults : [];
 }
 function writeFaults(dataDir, key, faults) {
   const f = fileFor(dataDir, key);
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, JSON.stringify({ note: 'Faults a reviewer reported for one project (Review with AI, then Import report-back). Kept on this PC.', faults }, null, 2));
+  require('./settings').save(f, { note: 'Faults a reviewer reported for one project (Review with AI, then Import report-back). Kept on this PC.', faults });
 }
 // The same place and the same evidence is the same fault: imported again, it keeps its status and id.
 const same = (a, b) => a.where === b.where && a.evidence.toLowerCase() === b.evidence.toLowerCase();

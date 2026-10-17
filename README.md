@@ -107,8 +107,9 @@ about each one and choose for yourself.
 - Your staff drawn as little people in an office: at their desk while they work, in the boardroom while they think,
   in the kitchen or the lounge while they rest, at the beach when their PC is off. The boardroom and the lounge start
   empty: the tokens your staff write buy the furniture piece by piece, and deck chairs on the beach for their breaks.
-- Rewards paid from the tokens your staff have written: **coffee** (delivered to each of them), **donuts**, and
-  **gym equipment** (500,000 tokens, kept). Free pizza, employee of the month, and a weekly leaderboard.
+- Rewards paid from the tokens your staff have written: treats (coffee, donuts, ice creams, cake), desk friends,
+  furniture, **gym equipment** and an **arcade machine** you can play yourself. Buy everything for a trophy case. Free
+  pizza, employee of the month, and a weekly leaderboard.
 
 ## Install (2.0.37)
 
@@ -226,6 +227,9 @@ rather than misread it.
   **Deck chair and umbrella** 50,000 each, up to six: a hire resting 10 minutes at a desk of their own takes a break in a
   free one (On a break: sitting up, a drink, a green cup mark) and walks back when work comes (the work never waits);
   the staff of a PC that is off lie on towels (PC off: sunglasses, a grey power mark); Staff overview's card says which.
+  **2.0.54:** ice creams 15,000, cake 30,000, pet rocks 10,000, rubber ducks 15,000, cacti 12,500 (named; point at one),
+  wall clock 20,000, water cooler 35,000, arcade machine 125,000 (click it to play; public/arcade.js), flamingo 40,000;
+  a trophy case once everything is bought and every treat given (src/home.ts trophyOf).
   POST /api/office/buy {item} (src/home.ts buy: refuses an unknown item, one bought already, chairs before the table, or
   more than the purse holds, and says why); GET /api/office sends `rooms` (src/home.ts roomsOf: what each room offers);
   purchases kept in data/office.json beside the awards (every kept piece for good, the last 1000 treats).
@@ -551,6 +555,8 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.54:** New office rewards: ice creams, cake, desk friends, wall clock, water cooler, an arcade machine with three
+  games, a flamingo and a trophy case. The Bridge part takes the stand-alone Bridge's later fixes.
 - **2.0.53:** Home's **Lets go!** no longer plans: it sends the prompt to the hire under Staff (Default: the hire on
   the strongest worker available) as a normal message, in a chat in the new project, and keeps the first answer as a
   file in the project folder. Recent projects opens that chat. **Advanced project setup** is now **Advanced / job

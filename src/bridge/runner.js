@@ -14,22 +14,24 @@ function readTail(file) {
   try { return fs.readFileSync(file, 'utf8').trim().slice(-400); } catch { return ''; }
 }
 
-// Projects being started now: a second press (another tab, a double click) while the first is still starting is
-// refused, so one project never gets two copies racing for its port.
-const starting = new Set();
-
 async function startProject(p, key, open = true) {
   const { running } = state;
-  if (running.has(p.id)) return { ok: true, already: true, url: running.get(p.id).url };
-  if (starting.has(p.id)) return { ok: false, starting: true, error: p.name + ' is starting already. Wait a moment: it opens when it answers.' };
-  starting.add(p.id);
-  try { return await startNow(p, key, open); } finally { starting.delete(p.id); }
-}
-async function startNow(p, key, open) {
-  const { running } = state;
+  if (running.has(p.id)) {
+    const r = running.get(p.id);
+    return r.starting ? { ok: false, starting: true, error: p.name + ' is starting already. Wait a moment: it opens when it answers.' } : { ok: true, already: true, url: r.url };
+  }
   const entry = p.commands.find(c => c.key === String(key));
   if (!entry) return { ok: false, error: 'No start command for ' + p.name + '. Nothing in its .claude/launch.json or project.json tells the Bridge how to run it. Add a "start" to project.json (see README), then try again.' };
   if (!entry.port) return { ok: false, error: '"' + entry.name + '" has no port in ' + entry.from + ', so the Bridge cannot check it is free or open it. Add "port" there.' };
+  // The place is taken before the first await, so a second press (another tab, a double click) is refused and Stop
+  // can cancel a start still under way. A start only ever acts on its own place: after Stop and a new Run, the new
+  // start's place is not this one.
+  const place = { starting: true, pid: null, port: entry.port, name: entry.name, started: new Date().toISOString(), url: localUrl(entry) };
+  running.set(p.id, place);
+  try { return await startNow(p, entry, open, place); } finally { if (running.get(p.id) === place) running.delete(p.id); }
+}
+async function startNow(p, entry, open, place) {
+  const { running } = state;
   // One entry, or the same app on several ports (merged duplicates): the first free port wins.
   let cmd = null, note = '';
   for (const alt of entry.alts || [entry]) {
@@ -37,7 +39,7 @@ async function startNow(p, key, open) {
   }
   if (!cmd) {
     const all = (entry.alts || [entry]).map(a => a.port);
-    const mine = all.map(ownPortUser).find(Boolean);
+    const mine = all.map(ownPortUser).find(u => u && u.id !== p.id); // not this project's own "starting" place
     if (mine) return { ok: false, error: 'Port ' + mine.port + ' is used by ' + mine.name + ', which the Bridge is running. Both projects start on that port, so stop ' + mine.name + ' first, then run ' + p.name + '.' };
     return { ok: false, portInUse: all[0], url: localUrl(entry), error: (all.length > 1 ? 'Ports ' + all.join(', ') + ' are all in use' : 'Port ' + all[0] + ' is already in use') + ', so ' + p.name + ' was not started. If it is already running, use Open in browser; otherwise stop whatever holds the port.' };
   }
@@ -49,6 +51,7 @@ async function startNow(p, key, open) {
     const local = await require('./hosting/secrets').values(p.dir, 'local');
     if (Object.keys(local).length) env = { ...process.env, ...local };
   } catch (e) { note = (note ? note + ' ' : '') + 'Its Local secrets could not be opened (' + e.message + '), so it started without them.'; }
+  if (running.get(p.id) !== place) return { ok: false, error: p.name + ' was stopped before it started.' }; // Stop pressed during the checks
   const log = path.join(cfg.DATA, 'logs', p.id + '.log');
   const out = fs.openSync(log, 'w');
   let child;
@@ -65,15 +68,21 @@ async function startNow(p, key, open) {
   const url = localUrl(cmd);
   const rec = { child, pid: child.pid, port: cmd.port, name: cmd.name, started: new Date().toISOString(), log, url };
   running.set(p.id, rec);
-  let spawnError = null;
-  child.on('error', e => { spawnError = e; });
-  child.on('exit', () => { if (running.get(p.id) === rec) running.delete(p.id); try { fs.closeSync(out); } catch {} });
-  const up = await waitForPort(cmd.port, 20000, () => !!spawnError);
+  let spawnError = null, exited = false;
+  // A program that cannot start fires "error" and never "exit", so the log handle is closed in both places.
+  child.on('error', e => { spawnError = e; try { fs.closeSync(out); } catch {} });
+  child.on('exit', code => { exited = true; rec.exitCode = code; if (running.get(p.id) === rec) running.delete(p.id); try { fs.closeSync(out); } catch {} });
+  // Stops waiting as soon as the program fails to start, exits, or is stopped from the page.
+  const up = await waitForPort(cmd.port, 20000, () => !!spawnError || exited || running.get(p.id) !== rec);
   if (!up) {
     const tail = readTail(log);
-    os.killTree(child.pid);
-    running.delete(p.id);
-    return { ok: false, error: (spawnError ? 'Could not start "' + cmd.exe + '" (' + spawnError.code + '). Check the path in ' + cmd.from + '.' : p.name + ' started but nothing answered on port ' + cmd.port + ' within 20 seconds, so it was stopped.') + (tail ? ' Last output: ' + tail : ''), log };
+    if (running.get(p.id) !== rec && !exited && !spawnError) return { ok: false, error: p.name + ' was stopped before it answered.', log };
+    if (!exited && !spawnError) os.killTree(child.pid);
+    if (running.get(p.id) === rec) running.delete(p.id);
+    const why = spawnError ? 'Could not start "' + cmd.exe + '" (' + spawnError.code + '). Check the path in ' + cmd.from + '.'
+      : exited ? p.name + ' ended by itself' + (rec.exitCode ? ' with exit code ' + rec.exitCode : '') + ' before anything answered on port ' + cmd.port + '.'
+      : p.name + ' started but nothing answered on port ' + cmd.port + ' within 20 seconds, so it was stopped.';
+    return { ok: false, error: why + (tail ? ' Last output: ' + tail : ''), log };
   }
   return { ok: true, url, note, ...(open ? openBrowser(url) : {}) };
 }
@@ -82,7 +91,7 @@ async function startNow(p, key, open) {
 function stopProject(id) {
   const r = state.running.get(id);
   if (!r) return false;
-  os.killTree(r.pid);
+  if (r.pid) os.killTree(r.pid); // a copy still starting has no process yet: its start sees the record go and gives up
   state.running.delete(id);
   return true;
 }

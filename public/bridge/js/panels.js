@@ -182,7 +182,7 @@ function liveDialog(r) {
       const d = await api('/api/live/set', { id: r.id, url });
       if (!d.ok) { err.textContent = d.error; state.replaceChildren(liveStateView(r.live, r.liveUrl) || ''); }
       else if (!d.url) { closeDialog(); info('Live address removed from ' + r.name + '.'); }
-      else { r.liveUrl = d.url; r.live = d.live; input.value = d.url; state.replaceChildren(liveStateView(d.live, d.url)); if (closing) closeDialog(); }
+      else { r.liveUrl = d.url; r.live = d.live; closeDialog(); liveDialog(r); } // opened again, so its buttons fit the new state (Check now, Open live site, Remove address)
       load();
     } catch (e) { err.textContent = e.message; }
     busy(false);

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, LOUNGE_SPOTS, phasesByWho, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Bought } from '../src/home.ts';
+import { awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, LOUNGE_SPOTS, phasesByWho, purseOf, roomsOf, SHOP, shopView, trophyOf, undoAward, winnerOf, type Bought } from '../src/home.ts';
 import { ByStaff } from '../src/meter.ts';
 
 const at = (o: Partial<Parameters<typeof doingOf>[0]>) => doingOf({ state: 'on', away: false, remoteBusy: false, phase: null, picture: false, job: false, ...o });
@@ -184,8 +184,11 @@ function bought(...items: string[]): Bought[] {
 test('every office starts empty: no boardroom, nothing in the lounge, no deck chairs, the kitchen only to rest in', () => {
   // Nothing bought (a new office, or one made before 2.0.50: nothing counts as owned already).
   const none = roomsOf(cleanBought({}));
-  assert.deepEqual(none.boardroom, { table: false, chairs: 0, whiteboard: false });
-  assert.deepEqual(none.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: false });
+  assert.deepEqual(none.boardroom, { table: false, chairs: 0, whiteboard: false, clock: false, cooler: false });
+  assert.deepEqual(none.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false });
+  assert.deepEqual(none.desks, { rocks: false, ducks: false, cactus: false });
+  assert.equal(none.flamingo, false);
+  assert.equal(none.trophy, null);
   assert.deepEqual(none.rest, ['coffee', 'vending', 'lunch']);
   // Away staff (their PC's owner is using it) wait by the lounge window while the lounge is empty.
   assert.deepEqual(none.away, ['window']);
@@ -193,7 +196,7 @@ test('every office starts empty: no boardroom, nothing in the lounge, no deck ch
   // An office.json from before (awards only, or a gym bought) keeps what it had and nothing more.
   const old = roomsOf(cleanBought({ awards: [], bought: [{ item: 'gym', price: 100_000, at: '2026-10-09' }, { item: 'coffee', price: 2000, at: '2026-10-09' }] }));
   assert.equal(old.boardroom.table, false);
-  assert.deepEqual(old.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: true });
+  assert.deepEqual(old.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: true, arcade: false });
   assert.deepEqual(old.rest, ['coffee', 'vending', 'lunch', 'treadmill', 'weights']);
   assert.deepEqual(old.away, ['treadmill', 'weights']);
 });
@@ -201,14 +204,16 @@ test('every office starts empty: no boardroom, nothing in the lounge, no deck ch
 test('what each room offers with some and with all of it bought', () => {
   // Some: a table and one pair of chairs; the armchair.
   const some = roomsOf(bought('table', 'chairs', 'armchair'));
-  assert.deepEqual(some.boardroom, { table: true, chairs: 2, whiteboard: false });
+  assert.deepEqual(some.boardroom, { table: true, chairs: 2, whiteboard: false, clock: false, cooler: false });
   assert.deepEqual(some.rest, ['coffee', 'vending', 'lunch', 'nap']);
   assert.deepEqual(some.away, ['nap']);
   // All: three pairs (six chairs), the whiteboard, every lounge piece, the gym, six deck chairs.
-  const all = roomsOf(bought('table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', ...Array(6).fill('deckchair')));
-  assert.deepEqual(all.boardroom, { table: true, chairs: 6, whiteboard: true });
-  assert.deepEqual(all.lounge, { armchair: true, bookcase: true, sofa: true, tv: true, gym: true });
-  assert.deepEqual([...all.rest].sort(), ['chat', 'coffee', 'library', 'lunch', 'nap', 'treadmill', 'tv', 'vending', 'weights']);
+  const all = roomsOf(bought('table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'flamingo', 'rocks', 'ducks', 'cactus'));
+  assert.deepEqual(all.boardroom, { table: true, chairs: 6, whiteboard: true, clock: true, cooler: true });
+  assert.deepEqual(all.lounge, { armchair: true, bookcase: true, sofa: true, tv: true, gym: true, arcade: true });
+  assert.deepEqual(all.desks, { rocks: true, ducks: true, cactus: true });
+  assert.equal(all.flamingo, true);
+  assert.deepEqual([...all.rest].sort(), ['arcade', 'chat', 'coffee', 'library', 'lunch', 'nap', 'treadmill', 'tv', 'vending', 'weights']);
   assert.ok(!all.away.includes('window'));
   assert.equal(all.deckchairs, 6);
   // Every lounge place the page draws needs a piece the shop sells.
@@ -240,6 +245,37 @@ test('furniture is bought once (chairs a pair at a time to six, deck chairs to s
   assert.equal(shopView([]).find(i => i.id === 'chairs')?.waits, true);
   // Each piece is paid for: the purse goes down by its price.
   assert.equal(purseOf(200_000, bought('table', 'chairs', 'whiteboard')).left, 200_000 - 75_000 - 25_000 - 40_000);
+});
+
+test("the new treats, desk friends and pieces are sold at the shop's rate, each kept piece once, said where it stays", () => {
+  const now = new Date(2026, 9, 17, 12);
+  const price = (id: string) => SHOP.find(i => i.id === id)?.price;
+  assert.deepEqual(['icecream', 'cake', 'rocks', 'ducks', 'cactus', 'clock', 'cooler', 'arcade', 'flamingo'].map(price), [15_000, 30_000, 10_000, 15_000, 12_500, 20_000, 35_000, 125_000, 40_000]);
+  // Treats again and again; a desk friend, the clock, the arcade and the flamingo once, with where it stays.
+  assert.ok('bought' in buy('cake', 1e9, bought('cake', 'cake'), now));
+  const ducks = buy('ducks', 1e9, bought('ducks'), now);
+  assert.ok('error' in ducks && /the rubber ducks already: it stays on the desks\./.test(ducks.error), JSON.stringify(ducks));
+  const flamingo = buy('flamingo', 1e9, bought('flamingo'), now);
+  assert.ok('error' in flamingo && /it stays on the beach\./.test(flamingo.error), JSON.stringify(flamingo));
+  const clock = buy('clock', 1e9, bought('clock'), now);
+  assert.ok('error' in clock && /it stays in the boardroom\./.test(clock.error), JSON.stringify(clock));
+  // The arcade is a place to rest in the lounge once bought.
+  assert.deepEqual(roomsOf(bought('arcade')).away, ['arcade']);
+});
+
+test('the trophy case comes by itself with the purchase that finishes everything, dated by it', () => {
+  const everything = ['table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'flamingo', 'rocks', 'ducks', 'cactus'];
+  // Every piece but no treats yet: not earned.
+  assert.equal(trophyOf(bought(...everything)), null);
+  // Every treat but the cake: still not.
+  assert.equal(trophyOf(bought(...everything, 'coffee', 'donuts', 'icecream')), null);
+  // The cake finishes it: earned, dated by the cake; a coffee after it does not move the date.
+  const list = bought(...everything, 'coffee', 'donuts', 'icecream', 'cake');
+  const done = [...list, { item: 'coffee' as const, price: 10_000, at: '2027-01-01T00:00:00.000Z' }];
+  assert.deepEqual(trophyOf(done), { at: list.at(-1)?.at });
+  assert.deepEqual(roomsOf(done).trophy, { at: list.at(-1)?.at });
+  // The trophy is never sold.
+  assert.ok(!SHOP.some(i => (i.id as string) === 'trophy'));
 });
 
 test('furniture kept on the list for good, however many treats are bought after it', () => {

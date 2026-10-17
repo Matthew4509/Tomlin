@@ -160,8 +160,8 @@ function fillSat(el, x) {
   b.querySelector('.tx b').textContent = x.r.name;
   b.querySelector('.tx span').textContent = (x.mine ? '● :' : '◐ :') + x.port;
   picsFor(x);
-  b.title = x.mine ? 'Shoot to stop ' + x.r.name + ' (its local copy on :' + x.port + ')' : 'Another program holds :' + x.port + '. Shoot to see what it is and choose whether to stop it.';
-  b.setAttribute('aria-label', 'Shoot down ' + x.r.name + ' on port ' + x.port + (x.mine ? ' (stops it)' : ' (asks first)'));
+  b.title = x.mine ? 'Shoot to stop ' + x.r.name + ' (its local copy on :' + x.port + ')' : 'Another program holds :' + x.port + '. Shoot to stop it: that ends the program, with no question asked.';
+  b.setAttribute('aria-label', 'Shoot down ' + x.r.name + ' on port ' + x.port + (x.mine ? ' (stops it)' : ' (ends that program)'));
   b.onclick = e => { e.stopPropagation(); shoot(x); };
   const o = el.querySelector('.sat-open');
   o.title = 'Open localhost:' + x.port + ' in your browser'; o.setAttribute('aria-label', 'Open ' + x.r.name + ' in your browser');

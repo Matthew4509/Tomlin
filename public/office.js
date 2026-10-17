@@ -30,18 +30,31 @@
   const PIZZA = [[250, 588, 'south'], [295, 588, 'south'], [340, 588, 'south'], [250, 668, 'north'], [295, 668, 'north'], [340, 668, 'north'], [205, 625, 'east'], [405, 625, 'west']];
   /** How long a pizza (or the donuts) lasts on the table (seconds). */
   const PIZZA_SECONDS = 45;
-  /** What can come to the kitchen table: pizza (free) and donuts (from the shop), with their words. */
+  /** What can come to the kitchen table: pizza (free), and donuts, ice creams and cake (from the shop), with their words. */
   const FOOD = {
     pizza: { courier: 'Pizza delivery', called: 'Pizza delivery!', cheer: ['Pizza!', 'Yum!', 'Thanks, boss!'], going: 'Off to the kitchen: pizza!', having: 'Having pizza in the kitchen', holding: 'a slice of pizza' },
     donuts: { courier: 'Donut delivery', called: 'Donuts!', cheer: ['Donuts!', 'Sprinkles!', 'Thanks, boss!'], going: 'Off to the kitchen: donuts!', having: 'Having a donut in the kitchen', holding: 'a donut' },
+    icecream: { courier: 'Ice cream delivery', called: 'Ice creams!', cheer: ['Ice cream!', 'Brain freeze!', 'Thanks, boss!'], going: 'Off to the kitchen: ice cream!', having: 'Having an ice cream in the kitchen', holding: 'an ice cream cone' },
+    cake: { courier: 'Cake delivery', called: 'Cake!', cheer: ['Cake!', "Is it someone's birthday?", 'Thanks, boss!'], going: 'Off to the kitchen: cake!', having: 'Having cake in the kitchen', holding: 'a slice of cake' },
   };
+  /** Ice cream flavours: vanilla, strawberry, chocolate, mint. */
+  const SCOOPS = ['#fff1d6', '#ef8a91', '#8a5a3c', '#a5e0ad'];
   /** How long a delivered coffee is held (seconds). */
   const COFFEE_HELD = 120;
   /** The gym in the lounge once bought: a treadmill and a weights bench, and the spots in front of them. */
   const GYM = [{ x: 778, y: 566, w: 70, h: 36 }, { x: 872, y: 566, w: 64, h: 36 }];
   /** What is always there to walk round (the frame and the kitchen), and the pieces bought for the boardroom and lounge. */
   const FIXED = [FRAME, { x: 80, y: 475, w: 180, h: 43 }, { x: 465, y: 480, w: 60, h: 65 }, { x: 230, y: 600, w: 150, h: 45 }];
-  const PIECES = { table: { x: 760, y: 145, w: 290, h: 100 }, bookcase: { x: 680, y: 475, w: 110, h: 35 }, tv: { x: 950, y: 485, w: 160, h: 50 }, sofa: { x: 920, y: 720, w: 200, h: 32 } };
+  const PIECES = { table: { x: 760, y: 145, w: 290, h: 100 }, bookcase: { x: 680, y: 475, w: 110, h: 35 }, tv: { x: 950, y: 485, w: 160, h: 50 }, sofa: { x: 920, y: 720, w: 200, h: 32 }, arcade: { x: 1120, y: 452, w: 46, h: 52 } };
+  /** The boardroom's water cooler (once bought), in the corner by the door, and its wall clock over the table. */
+  const COOLER = { x: 652, y: 300, w: 30, h: 42 };
+  const CLOCK = { x: 905, y: 42, r: 15 };
+  /** The inflatable flamingo (once bought): where it floats on the sea, drifting a little either side. */
+  const FLAMINGO = { x: 560, y: 924 };
+  /** The trophy case (World's Best Boss), once earned: at the far end of the corridor between the computer room and the kitchen. */
+  const TROPHY = { x: 24, y: 366, w: 48, h: 68 };
+  /** Less motion asked for (Windows' animation setting): the flamingo and the TV picture keep still. */
+  const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   /** Round the boardroom table; a pair of chairs bought is one seat each side (0 and 3, then 1 and 4, then 2 and 5). */
   const MEETING = [[790, 110, 'south'], [890, 110, 'south'], [990, 110, 'south'], [790, 285, 'north'], [890, 285, 'north'], [990, 285, 'north']];
   /** Where staff whose PC's owner is using it wait while the lounge is empty. */
@@ -57,6 +70,7 @@
     { id: 'nap', x: 712, y: 700, face: 'north', area: 'lounge', words: 'having a nap in the armchair' },
     { id: 'treadmill', x: 813, y: 618, face: 'north', area: 'lounge', words: 'running on the treadmill', gym: true },
     { id: 'weights', x: 904, y: 618, face: 'north', area: 'lounge', words: 'lifting weights', gym: true },
+    { id: 'arcade', x: 1143, y: 534, face: 'north', area: 'lounge', words: 'playing on the arcade machine' },
   ];
   const DOOR = [600, 768];
   /** Just outside the front door, on the path. */
@@ -84,10 +98,10 @@
   const HURRY = 160;
 
   /** Every office starts empty: what is bought comes from the server (GET /api/office `rooms`). */
-  const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0 };
+  const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false, clock: false, cooler: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false }, desks: { rocks: false, ducks: false, cactus: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0, flamingo: false, trophy: null };
   const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', rooms: EMPTY, roomsKey: '', purse: null, shop: [], awards: [], weekBoard: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [], blocks: FIXED };
   /** The pieces in the way now: the fixed ones and whatever is bought (kept in world.blocks: walkable runs often). */
-  const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : [])];
+  const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : []), ...(world.rooms.boardroom.cooler ? [COOLER] : []), ...(world.rooms.trophy ? [TROPHY] : [])];
   const views = [];
   let background = null;
   let ownerLook = null;
@@ -430,6 +444,7 @@
   let lookedAt = 0;
   function step(dt) {
     world.time += dt;
+    if (!calm() && world.rooms.lounge.tv) stepDvd(dt);
     // Once a second, each person standing still checks whether time has moved them on (sat long enough, thought long
     // enough): the same rule as a new list.
     if (world.time - lookedAt > 1) {
@@ -653,6 +668,10 @@
     world.shop = d.shop ?? [];
     // What is bought is part of the office: drawn in, walked round, places to sit, rest and think.
     const rooms = d.rooms ?? world.rooms;
+    // The trophy case arrives with the purchase that finished everything: everyone in cheers (once, while watched).
+    if (rooms.trophy && !world.rooms.trophy && world.roomsKey) {
+      for (const p of world.people.values()) if (!p.out && !p.leaving && !p.firing) say(p, TROPHY_CHEER[p.seed % TROPHY_CHEER.length], 5);
+    }
     const key = JSON.stringify(rooms);
     if (key !== world.roomsKey) {
       world.rooms = rooms;
@@ -779,6 +798,8 @@
     else if (p.target?.rest?.id === 'vending' && still) items.push('a can from the vending machine');
     else if (p.target?.rest?.id === 'library' && still) items.push('a book from the library');
     else if (p.target?.rest?.id === 'tv' && still) items.push('the TV remote');
+    else if (p.target?.rest?.id === 'arcade' && still) items.push('the arcade joystick');
+    else if (p.target?.area === 'boardroom' && still && world.rooms.boardroom.cooler) items.push('a cup of water from the cooler');
     else if (p.target?.area === 'beach' && still) items.push('a towel and sunglasses');
     else if (p.target?.area === 'break' && still) items.push('a cold drink');
     else if (p.target?.area === 'stretch' && still) items.push('a dumbbell');
@@ -918,6 +939,8 @@
       box(c, 1110, 105, 40, 160, 7, INK);
       box(c, 1116, 112, 28, 146, 3, '#fff7ed');
     }
+    if (br.cooler) waterCooler(c, COOLER.x, COOLER.y);
+    if (world.rooms.trophy) trophyCase(c);
     // Kitchen: counter with the coffee machine, the vending machine, the table, the sink.
     box(c, 80, 475, 180, 43, 9, '#e8bb80');
     box(c, 110, 480, 45, 33, 5, INK);
@@ -946,6 +969,7 @@
       box(c, 957, 492, 146, 36, 4, '#182638');
     }
     if (lo.gym) drawGym(c);
+    if (lo.arcade) drawArcade(c);
     return cv;
   }
 
@@ -953,7 +977,7 @@
   function emptyRooms() {
     const b = world.rooms.boardroom;
     const l = world.rooms.lounge;
-    return ROOMS.filter(r => (r.name === 'Boardroom' && !b.table && !b.chairs && !b.whiteboard) || (r.name === 'Lounge and library' && !l.armchair && !l.bookcase && !l.sofa && !l.tv && !l.gym));
+    return ROOMS.filter(r => (r.name === 'Boardroom' && !b.table && !b.chairs && !b.whiteboard && !b.clock && !b.cooler) || (r.name === 'Lounge and library' && !l.armchair && !l.bookcase && !l.sofa && !l.tv && !l.gym && !l.arcade));
   }
   /** A deck chair seen from above (striped, its back to the path) under a beach umbrella. */
   function deckChair(c, x, y, i) {
@@ -992,6 +1016,171 @@
     oval(c, b.x + 4, b.y + 6, 4, 8, INK, null);
     oval(c, b.x + b.w - 4, b.y + 6, 4, 8, INK, null);
     for (let i = 0; i < 3; i++) oval(c, b.x + 16 + i * 16, b.y + b.h - 2, 5, 3, '#56677b', INK, 1);
+  }
+
+  /** A water cooler seen from above at (x, y) (its top-left corner): the stand, the big blue bottle, the two taps. */
+  function waterCooler(c, x, y) {
+    const { w, h } = COOLER;
+    box(c, x, y, w, h, 5, '#e3e9ee');
+    oval(c, x + w / 2, y + 16, 11, 11, '#9fd3ef', INK, 1.5);
+    oval(c, x + w / 2, y + 16, 5, 5, '#d4eefa', null);
+    box(c, x + 6, y + h - 10, 7, 6, 2, '#69bfe9', INK, 1);
+    box(c, x + w - 13, y + h - 10, 7, 6, 2, '#ef8a91', INK, 1);
+  }
+  /** A clock face at (x, y), `r` across from the middle, its hands at the time given. */
+  function wallClock(c, x, y, r, when) {
+    oval(c, x, y, r, r, '#fffaf0', INK, Math.max(2, r / 7));
+    for (let i = 0; i < 12; i++) {
+      const a = (i * Math.PI) / 6;
+      line(c, x + Math.cos(a) * r * 0.72, y + Math.sin(a) * r * 0.72, x + Math.cos(a) * r * 0.86, y + Math.sin(a) * r * 0.86, INK, i % 3 ? r / 15 : r / 8);
+    }
+    const m = when.getMinutes() + when.getSeconds() / 60;
+    const hour = (when.getHours() % 12) + m / 60;
+    const hand = (turn, len, wide) => {
+      const a = turn * Math.PI * 2 - Math.PI / 2;
+      line(c, x, y, x + Math.cos(a) * len, y + Math.sin(a) * len, INK, wide);
+    };
+    hand(hour / 12, r * 0.48, r / 6);
+    hand(m / 60, r * 0.7, r / 9);
+    oval(c, x, y, r / 9, r / 9, '#ef8a91', null);
+  }
+  /** An inflatable flamingo floating at (x, y), seen from above: a pink ring with its neck and head. `s` times its sea size. */
+  function flamingo(c, x, y, s = 1) {
+    oval(c, x, y + 3 * s, 18 * s, 5 * s, 'rgba(255, 255, 255, 0.35)', null);
+    oval(c, x, y, 14 * s, 9 * s, '#f59ab8', INK, 1.5 * s);
+    oval(c, x, y, 6 * s, 3.5 * s, '#7fc4e0', INK, 1 * s);
+    c.beginPath();
+    c.moveTo(x + 9 * s, y - 4 * s);
+    c.quadraticCurveTo(x + 20 * s, y - 12 * s, x + 13 * s, y - 20 * s);
+    c.strokeStyle = INK;
+    c.lineWidth = 6.5 * s;
+    c.lineCap = 'round';
+    c.stroke();
+    c.strokeStyle = '#f59ab8';
+    c.lineWidth = 4 * s;
+    c.stroke();
+    oval(c, x + 13 * s, y - 21 * s, 4.5 * s, 3.8 * s, '#f59ab8', INK, 1.2 * s);
+    line(c, x + 16 * s, y - 21 * s, x + 21 * s, y - 19 * s, INK, 2.2 * s);
+    oval(c, x + 12.5 * s, y - 22.5 * s, 0.9 * s, 0.9 * s, INK, null);
+  }
+  /** A cactus in its pot, seen from above: the pot's rim, the ribbed cactus, a pink flower. `s` times its desk size. */
+  function cactus(c, x, y, s = 1) {
+    oval(c, x, y + 0.6 * s, 4.6 * s, 4.6 * s, '#c9774f', INK, Math.min(2, 1.1 * s));
+    oval(c, x, y, 3.3 * s, 3.3 * s, '#5aa469', INK, Math.min(1.6, 0.9 * s));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      line(c, x, y, x + Math.cos(a) * 2.6 * s, y + Math.sin(a) * 2.6 * s, '#8fd294', 0.45 * s);
+    }
+    oval(c, x + 0.9 * s, y - 1.2 * s, 1.1 * s, 1.1 * s, '#ef8a91', null);
+  }
+  /** A pet rock at (x, y): a grey pebble with two googly eyes. `s` times the size of one on a desk. */
+  function petRock(c, x, y, s = 1) {
+    oval(c, x, y, 5.5 * s, 3.8 * s, '#9aa1a8', INK, 1.2);
+    for (const dx of [-1.8, 1.8]) {
+      oval(c, x + dx * s, y - 1 * s, 1.5 * s, 1.5 * s, '#ffffff', INK, 0.8);
+      oval(c, x + dx * s + 0.4 * s, y - 0.8 * s, 0.6 * s, 0.6 * s, INK, null);
+    }
+  }
+  /** A rubber duck at (x, y), `s` times the size of one on a desk, looking east or west. */
+  function duck(c, x, y, s = 1, face = 'east') {
+    const d = face === 'west' ? -1 : 1;
+    oval(c, x, y, 6 * s, 4.2 * s, '#ffd23f', INK, 1.2);
+    oval(c, x + d * 3.6 * s, y - 4.4 * s, 3.2 * s, 3 * s, '#ffd23f', INK, 1.2);
+    c.beginPath();
+    c.moveTo(x + d * 6.4 * s, y - 5 * s);
+    c.lineTo(x + d * 9.4 * s, y - 4 * s);
+    c.lineTo(x + d * 6.4 * s, y - 3 * s);
+    c.closePath();
+    c.fillStyle = '#f08a24';
+    c.fill();
+    oval(c, x + d * 4.4 * s, y - 5.2 * s, 0.7 * s, 0.7 * s, INK, null);
+  }
+  /** The trophy case: wood, glass, a gold cup and a plaque. */
+  function trophyCase(c) {
+    const { x, y, w, h } = TROPHY;
+    box(c, x, y, w, h, 4, '#9a6a3c', INK, 2);
+    box(c, x + 5, y + 5, w - 10, h - 22, 3, '#dfeef5', INK, 1.2);
+    oval(c, x + w / 2, y + 22, 9, 8, '#f2c230', INK, 1.4);
+    box(c, x + w / 2 - 2, y + 29, 4, 8, 1, '#e0ad1c', INK, 1);
+    box(c, x + w / 2 - 8, y + 37, 16, 4, 1, '#e0ad1c', INK, 1);
+    oval(c, x + w / 2 - 10, y + 20, 3, 5, 'rgba(0, 0, 0, 0)', '#e0ad1c', 1.6);
+    oval(c, x + w / 2 + 10, y + 20, 3, 5, 'rgba(0, 0, 0, 0)', '#e0ad1c', 1.6);
+    box(c, x + 8, y + h - 14, w - 16, 8, 2, '#f2c230', INK, 1);
+  }
+  /** The arcade machine against the lounge wall, seen from above: the cabinet, its screen and the stick and buttons. */
+  function drawArcade(c) {
+    const a = PIECES.arcade;
+    box(c, a.x, a.y, a.w, a.h, 5, '#5b4b8a');
+    box(c, a.x + 6, a.y + 6, a.w - 12, 24, 3, '#182638', INK, 1.5);
+    box(c, a.x + 4, a.y + 34, a.w - 8, 16, 3, '#2f3d4f', INK, 1.5);
+    oval(c, a.x + 12, a.y + 42, 3.5, 3.5, '#ef8a91', INK, 1);
+    oval(c, a.x + 24, a.y + 42, 2.5, 2.5, '#f7cd50', INK, 1);
+    oval(c, a.x + 31, a.y + 42, 2.5, 2.5, '#69bfe9', INK, 1);
+  }
+  /** The TV's picture: a DVD logo bouncing round the screen, changing colour at each wall. It comes within a whisker
+   * of a corner now and then, but never quite hits one: a bounce that would land in a corner is nudged aside. */
+  const dvd = { x: 20, y: 6, vx: 13.1, vy: 7.3, col: 0 };
+  const DVD_W = 26;
+  const DVD_H = 12;
+  function stepDvd(dt) {
+    const t = PIECES.tv;
+    const maxX = t.w - 14 - DVD_W;
+    const maxY = t.h - 14 - DVD_H;
+    dvd.x += dvd.vx * dt;
+    dvd.y += dvd.vy * dt;
+    const hitX = dvd.x <= 0 || dvd.x >= maxX;
+    const hitY = dvd.y <= 0 || dvd.y >= maxY;
+    if (hitX) {
+      dvd.x = Math.max(0, Math.min(maxX, dvd.x));
+      dvd.vx = -dvd.vx;
+    }
+    if (hitY) {
+      dvd.y = Math.max(0, Math.min(maxY, dvd.y));
+      dvd.vy = -dvd.vy;
+    }
+    if (hitX || hitY) {
+      dvd.col = (dvd.col + 1) % PALETTE.length;
+      // So close, yet never: a wall reached with the other wall under 1.5 away would be the corner, so it turns early.
+      if (hitX && !hitY && Math.min(dvd.y, maxY - dvd.y) < 1.5) dvd.y = dvd.y < maxY / 2 ? 1.5 : maxY - 1.5;
+      if (hitY && !hitX && Math.min(dvd.x, maxX - dvd.x) < 1.5) dvd.x = dvd.x < maxX / 2 ? 1.5 : maxX - 1.5;
+      if (hitX && hitY) dvd.x = dvd.x < maxX / 2 ? 1.5 : maxX - 1.5;
+    }
+  }
+  function drawDvd(c) {
+    const t = PIECES.tv;
+    const x = t.x + 7 + dvd.x;
+    const y = t.y + 7 + dvd.y;
+    const col = PALETTE[dvd.col];
+    oval(c, x + DVD_W / 2, y + DVD_H - 2.2, DVD_W / 2 - 1, 2, col, null);
+    c.font = 'italic 900 9px Segoe UI, system-ui, sans-serif';
+    c.textAlign = 'center';
+    c.fillStyle = col;
+    c.fillText('DVD', x + DVD_W / 2, y + 7.5);
+    c.textAlign = 'left';
+  }
+
+  /** A desk's pet rocks, rubber ducks and cactus (once bought): a rock and a duck for each seat, on top of its screen,
+   * the rock on the left and the duck on the right; the duck goes with its owner to the boardroom. The cactus sits on
+   * the PC tower, one per desk. Each has a name of its own, kept by the desk and seat, shown when the pointer is on it. */
+  const DUCK_NAMES = ['Sir Quacks-a-lot', 'Quackers', 'Duckworth', 'Captain Quack', 'Puddles', 'Professor Paddles', 'Waddles', 'Bill'];
+  const ROCK_NAMES = ['Rocky', 'Pebbles', 'Dwayne', 'Sandy', 'Boulder', 'Rockefeller', 'Stoney', 'Flint'];
+  const CACTUS_NAMES = ['Spike', 'Prickles', 'Needles', 'Sir Pokes-a-lot', 'Thorny', 'Spud', 'Pointy Pete', 'Captain Ouch'];
+  const friendName = (kind, deskKey, i) => ({ duck: DUCK_NAMES, rock: ROCK_NAMES, cactus: CACTUS_NAMES })[kind][hash(`${kind}:${deskKey}:${i}`) % 8];
+  const FRIEND_WORDS = { duck: 'Rubber duck', rock: 'Pet rock', cactus: 'Desk cactus' };
+  function friendsOf(d) {
+    const fr = world.rooms.desks ?? EMPTY.desks;
+    if (d.dead || world.installing.has(d.key)) return [];
+    const n = d.seats.length;
+    const mw = n === 1 ? 40 : n === 2 ? 36 : 28;
+    const out = [];
+    d.seats.forEach((off, i) => {
+      const x = d.x + off;
+      const who = world.people.get(d.crew[i]);
+      if (fr.rocks) out.push({ kind: 'rock', x: x - mw / 2 + 5, y: d.y - 19, who, name: friendName('rock', d.key, i) });
+      if (fr.ducks && who?.target?.area !== 'boardroom') out.push({ kind: 'duck', x: x + mw / 2 - 5, y: d.y - 20, who, name: friendName('duck', d.key, i) });
+    });
+    if (fr.cactus) out.push({ kind: 'cactus', x: d.x + 42.5, y: d.y + 8, who: null, desk: d.name, name: friendName('cactus', d.key, 0) });
+    return out;
   }
 
   /** The employee of the month on the lounge wall: their portrait in a gold frame (empty until the first award). */
@@ -1041,6 +1230,7 @@
         // The folders of project work delivered to whoever sits here.
         for (let j = 0; j < (who?.folders ?? 0); j++) box(c, x - mw / 2 - 16, d.y + 4 - j * 4, 14, 7, 1, PALETTE[j % PALETTE.length], INK, 1.5);
       });
+      for (const fr of friendsOf(d)) (fr.kind === 'duck' ? duck(c, fr.x, fr.y, 1, 'west') : fr.kind === 'cactus' ? cactus(c, fr.x, fr.y, 1.45) : petRock(c, fr.x, fr.y, 1));
       if (d.activity === 'owner') {
         // Its owner sits at it: the staff wait in the lounge.
         ownerLook ??= app.look?.ready() ? app.look.fromId('pc-owner', '') : null;
@@ -1230,8 +1420,10 @@
   function pizzaBox(c, p, kind = 'pizza') {
     const dx = p.face === 'east' ? 24 : p.face === 'west' ? -24 : 0;
     const dy = p.face === 'north' ? -32 : 9;
-    box(c, p.x + dx - 22, p.y + dy - 10, 44, 20, 4, kind === 'donuts' ? '#ffe3ef' : '#fff2d8', INK, 2);
+    box(c, p.x + dx - 22, p.y + dy - 10, 44, 20, 4, { donuts: '#ffe3ef', icecream: '#bfe6f2', cake: '#fff2f6' }[kind] ?? '#fff2d8', INK, 2);
     if (kind === 'donuts') for (let i = 0; i < 3; i++) donut(c, p.x + dx - 12 + i * 12, p.y + dy, 4.5, PALETTE[i + 1]);
+    else if (kind === 'icecream') for (let i = 0; i < 3; i++) oval(c, p.x + dx - 12 + i * 12, p.y + dy, 4.5, 4.5, SCOOPS[i], INK, 1);
+    else if (kind === 'cake') oval(c, p.x + dx, p.y + dy, 12, 7, '#f7d6e0', INK, 1.2);
     else oval(c, p.x + dx, p.y + dy, 12, 6, '#e6a64c', null);
   }
   /** A donut seen from above: the dough, the icing, the hole. */
@@ -1396,6 +1588,16 @@
     if (world.pizzaOn && world.food === 'donuts') {
       box(c, 268, 603, 70, 38, 4, '#ffe3ef', INK, 2);
       for (let i = 0; i < 6; i++) donut(c, 281 + (i % 3) * 22, 613 + Math.floor(i / 3) * 18, 7, PALETTE[i % 6]);
+    } else if (world.pizzaOn && world.food === 'icecream') {
+      box(c, 264, 603, 78, 38, 6, '#bfe6f2', INK, 2);
+      for (let i = 0; i < 5; i++) oval(c, 279 + i * 12, 622 + (i % 2 ? 6 : -5), 6, 6, SCOOPS[i % SCOOPS.length], INK, 1.2);
+    } else if (world.pizzaOn && world.food === 'cake') {
+      oval(c, 303, 622, 31, 17, '#f6f1e6', INK, 2);
+      oval(c, 303, 621, 24, 13, '#f7d6e0', INK, 2);
+      for (let i = 0; i < 3; i++) {
+        box(c, 292 + i * 10, 614, 3, 8, 1, PALETTE[i], INK, 1);
+        oval(c, 293.5 + i * 10, 611, 2, 3, '#f7cd50', null);
+      }
     } else if (world.pizzaOn) {
       box(c, 268, 603, 70, 38, 4, '#fff6e4', INK, 2);
       oval(c, 303, 622, 26, 14, '#f2bc66');
@@ -1408,6 +1610,16 @@
     }
     // The whiteboard (once bought) fills with notes while someone thinks in the boardroom.
     if (world.rooms.boardroom.whiteboard && thinkersNow().length) for (let i = 0; i < 4; i++) line(c, 1122, 140 + i * 23, 1122 + 16 * ((Math.sin(world.time + i) + 1) / 2) + 2, 140 + i * 23, PALETTE[i], 4);
+    // The wall clock keeps the real time; the flamingo bobs on the sea; the TV shows its bouncing logo.
+    if (world.rooms.boardroom.clock) wallClock(c, CLOCK.x, CLOCK.y, CLOCK.r, new Date());
+    if (world.rooms.flamingo) flamingo(c, FLAMINGO.x + (calm() ? 0 : 40 * Math.sin(world.time / 23)), FLAMINGO.y + (calm() ? 0 : 1.5 * Math.sin(world.time * 1.6)));
+    if (world.rooms.lounge.tv) drawDvd(c);
+    if (world.rooms.lounge.arcade && [...world.people.values()].some(p => p.target?.rest?.id === 'arcade' && !p.path.length)) {
+      // Someone is playing: the screen flickers.
+      const a = PIECES.arcade;
+      const k = Math.floor(world.time * 5) % 4;
+      box(c, a.x + 9 + k * 5, a.y + 10 + (k % 2) * 6, 5, 4, 1, '#ffffff', null);
+    }
     drawPeople(c, full, view);
   }
 
@@ -1466,6 +1678,21 @@
 
   // ---- Pointer: press a person to pick them, a desk to open its PC window; drag a person onto another desk ----
 
+  const TROPHY_CHEER = ["World's best boss!", 'Speech! Speech!', 'You earned it, boss.', 'Best office ever.', 'Three cheers for the boss!'];
+  /** A desk's rock, duck or cactus under the pointer (its name shows), the trophy case, the arcade machine. */
+  const friendUnder = (x, y) => world.desks.flatMap(friendsOf).find(fr => Math.hypot(fr.x - x, fr.y - 3 - y) < 9) ?? null;
+  const trophyUnder = (x, y) => !!world.rooms.trophy && x > TROPHY.x - 4 && x < TROPHY.x + TROPHY.w + 4 && y > TROPHY.y - 4 && y < TROPHY.y + TROPHY.h + 4;
+  const arcadeUnder = (x, y) => {
+    const a = PIECES.arcade;
+    return !!world.rooms.lounge.arcade && x > a.x - 4 && x < a.x + a.w + 4 && y > a.y - 4 && y < a.y + a.h + 4;
+  };
+  function showTrophy() {
+    const t = world.rooms.trophy;
+    if (!t) return;
+    const day = new Date(t.at).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+    fullSay(`🏆 World's Best Boss, earned ${day}: every piece bought, and the team treated to every treat.`);
+  }
+
   function at(view, e) {
     const r = view.canvas.getBoundingClientRect();
     const cam = view.cam ?? { x: 0, y: 0, w: W, h: H };
@@ -1489,7 +1716,12 @@
       const [x, y] = at(view, e);
       const press = view.press;
       if (!press) {
-        cv.style.cursor = personAt(x, y) ? 'grab' : deskUnder(x, y) || onFrame(x, y) ? 'pointer' : '';
+        const who = personAt(x, y);
+        cv.style.cursor = who ? 'grab' : trophyUnder(x, y) || arcadeUnder(x, y) || deskUnder(x, y) || onFrame(x, y) ? 'pointer' : '';
+        // Point at a desk friend to read its name; the trophy case and the arcade machine say what a click does.
+        const fr = !who && friendUnder(x, y);
+        const tip = trophyUnder(x, y) ? "Trophy case: World's Best Boss (click to read it)" : !who && arcadeUnder(x, y) ? 'Arcade machine: click to play' : fr ? `${FRIEND_WORDS[fr.kind]}: ${fr.name}${fr.who?.row?.name ? ` (${fr.who.row.name}'s)` : fr.desk ? ` (on the ${fr.desk} desk)` : ''}` : '';
+        if (cv.title !== tip) cv.title = tip;
         return;
       }
       if (!press.p) return;
@@ -1528,7 +1760,9 @@
         view.told = '';
         return;
       }
-      if (press.desk) app.openPc?.(press.desk.key || 'here');
+      if (trophyUnder(press.x, press.y)) showTrophy();
+      else if (arcadeUnder(press.x, press.y)) app.arcade?.open();
+      else if (press.desk) app.openPc?.(press.desk.key || 'here');
       else if (onFrame(press.x, press.y)) openMonth();
     };
     cv.addEventListener('pointerup', end);
@@ -1610,15 +1844,24 @@
     pizza: { label: 'Pizza', title: 'A pizza comes to the kitchen; whoever has nothing to do gathers round it (free)' },
     coffee: { label: 'Coffee', title: 'A coffee delivery comes in by the front door and hands each of them a coffee, wherever they are, busy or not' },
     donuts: { label: 'Donuts', title: 'A box of donuts comes to the kitchen table; whoever has nothing to do gathers round it' },
+    icecream: { label: 'Ice creams', title: 'A cool box of ice creams comes to the kitchen table; whoever has nothing to do gathers round it' },
+    cake: { label: 'Cake', title: 'A celebration cake with three candles comes to the kitchen table; whoever has nothing to do gathers round it' },
+    rocks: { label: 'Pet rocks', title: 'A pet rock with googly eyes on every seat of every desk, each with a name of its own (point at it to read it)', done: 'every seat has a pet rock now: point at one to read its name' },
+    ducks: { label: 'Rubber ducks', title: 'A rubber duck on every seat of every desk, each with a name; it goes with its owner to the boardroom', done: 'every seat has a rubber duck now, and it goes with its owner to the boardroom' },
+    cactus: { label: 'Desk cacti', title: 'A cactus on every PC tower, each with a name of its own (point at it to read it)', done: 'every desk has a cactus now: point at one to read its name' },
     table: { label: 'Table', title: 'Opens the boardroom: a think over 15 seconds goes to the table (until then it stays at the desk)', done: 'the boardroom is open: a think over 15 seconds goes to the table now. Buy chairs to seat them, and a helper in each chair left over' },
     chairs: { label: 'Chairs', each: 'a pair', title: 'Two chairs round the boardroom table, up to six: the thinkers sit first, and each chair left over seats someone with nothing to do who joins in to help (up to two)', done: 'two more chairs round the boardroom table' },
     whiteboard: { label: 'Whiteboard', title: 'Fills with notes while someone thinks in the boardroom', done: 'it fills with notes while someone thinks in the boardroom' },
+    clock: { label: 'Wall clock', title: 'A clock on the boardroom wall that keeps the real time', done: 'it keeps the real time on the boardroom wall' },
+    cooler: { label: 'Water cooler', title: 'A water cooler in the boardroom corner: whoever is in the boardroom has a cup of water to hand', done: 'whoever is in the boardroom has a cup of water to hand' },
     armchair: { label: 'Armchair', title: 'Staff with nothing to do nap in it', done: 'staff with nothing to do nap in it' },
     bookcase: { label: 'Bookcase', title: 'Staff with nothing to do read there', done: 'staff with nothing to do read there' },
     sofa: { label: 'Sofa', title: 'Staff with nothing to do chat in the lounge', done: 'staff with nothing to do chat in the lounge' },
     tv: { label: 'TV', title: 'Staff with nothing to do watch it from the sofa', done: 'staff with nothing to do watch it' },
     gym: { label: 'Gym', title: 'A treadmill and a weights bench for the lounge, kept for good: staff with nothing to do work out there', done: 'a treadmill and a weights bench in the lounge, kept for good. Staff with nothing to do work out there now and then' },
+    arcade: { label: 'Arcade', title: 'An arcade machine in the lounge corner: staff with nothing to do play on it, and you can too (click the machine): Tetris, Lunar Lander and Moon Rover', done: 'staff with nothing to do play on it now. Click the machine (or Play on its card) to have a go yourself' },
     deckchair: { label: 'Deck chair', title: 'A deck chair under an umbrella on the beach, up to six: staff with nothing to do for 10 minutes take a break there (busy staff never go; the staff of a PC that is off lie on towels instead)', done: 'staff with nothing to do for 10 minutes take a break there' },
+    flamingo: { label: 'Flamingo', title: 'An inflatable flamingo that floats and drifts on the sea', done: 'it floats and drifts on the sea' },
   };
   const num = n => Number(n || 0).toLocaleString();
   /** A shop item's picture, drawn with the office's own pencils into a 100 x 75 box. */
@@ -1678,10 +1921,60 @@
       c.scale(0.8, 0.8);
       deckChair(c, 0, 0, 0);
       c.restore();
+    } else if (id === 'rocks') {
+      petRock(c, 34, 46, 2.4);
+      petRock(c, 66, 50, 2);
+    } else if (id === 'ducks') {
+      duck(c, 30, 50, 2, 'east');
+      duck(c, 70, 50, 2, 'west');
+      duck(c, 50, 34, 1.6, 'east');
+    } else if (id === 'cactus') {
+      cactus(c, 50, 38, 5.5);
+    } else if (id === 'icecream') {
+      for (const [x, k] of [[36, 1], [64, 2]]) {
+        c.beginPath();
+        c.moveTo(x - 10, 34);
+        c.lineTo(x + 10, 34);
+        c.lineTo(x, 68);
+        c.closePath();
+        c.fillStyle = '#e9b872';
+        c.fill();
+        c.strokeStyle = INK;
+        c.lineWidth = 2;
+        c.stroke();
+        line(c, x - 5, 42, x + 3, 54, '#c98f5a', 1.5);
+        line(c, x + 5, 42, x - 3, 54, '#c98f5a', 1.5);
+        oval(c, x, 28, 12, 11, SCOOPS[k], INK, 2);
+      }
+    } else if (id === 'cake') {
+      line(c, 14, 64, 86, 64, INK, 3);
+      box(c, 22, 34, 56, 28, 6, '#f7d6e0');
+      box(c, 20, 30, 60, 9, 4, '#fff6f9', INK, 2);
+      for (let i = 0; i < 3; i++) {
+        box(c, 36 + i * 12, 16, 4, 14, 1, PALETTE[i], INK, 1.2);
+        oval(c, 38 + i * 12, 12, 2.5, 4, '#f7cd50', null);
+      }
+    } else if (id === 'clock') {
+      wallClock(c, 50, 38, 30, new Date(2026, 0, 1, 10, 10));
+    } else if (id === 'cooler') {
+      box(c, 36, 38, 28, 30, 4, '#e3e9ee');
+      box(c, 38, 6, 24, 34, 9, '#9fd3ef');
+      box(c, 40, 50, 6, 6, 2, '#69bfe9', INK, 1.2);
+      box(c, 54, 50, 6, 6, 2, '#ef8a91', INK, 1.2);
+    } else if (id === 'flamingo') {
+      flamingo(c, 44, 52, 1.9);
+    } else if (id === 'arcade') {
+      box(c, 28, 8, 44, 60, 6, '#5b4b8a');
+      box(c, 34, 14, 32, 24, 3, '#182638', INK, 1.5);
+      for (const [x, y, k] of [[38, 30, 0], [44, 30, 0], [50, 30, 0], [44, 24, 1]]) box(c, x, y, 5, 5, 1, PALETTE[k], null);
+      box(c, 32, 44, 36, 14, 3, '#2f3d4f', INK, 1.5);
+      oval(c, 40, 51, 3.5, 3.5, '#ef8a91', INK, 1);
+      oval(c, 52, 51, 2.5, 2.5, '#f7cd50', INK, 1);
+      oval(c, 60, 51, 2.5, 2.5, '#69bfe9', INK, 1);
     }
   }
   /** The menu's sections: the treats, then the office by room, each a row of picture cards. */
-  const SECTIONS = [['Treat the team', [['', ['pizza', 'coffee', 'donuts']]]], ['Improve the office', [['Boardroom', ['table', 'chairs', 'whiteboard']], ['Lounge', ['armchair', 'bookcase', 'sofa', 'tv', 'gym']], ['Beach', ['deckchair']]]]];
+  const SECTIONS = [['Treat the team', [['', ['pizza', 'coffee', 'donuts', 'icecream', 'cake']]]], ['Improve the office', [['Desks', ['rocks', 'ducks', 'cactus']], ['Boardroom', ['table', 'chairs', 'whiteboard', 'clock', 'cooler']], ['Lounge', ['armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade']], ['Beach', ['deckchair', 'flamingo']]]]];
   /** Pizza is the boss's treat (free): on the menu beside the paid ones. */
   const PIZZA_ITEM = { id: 'pizza', name: 'Pizza', price: 0, room: 'treats', keeps: false, most: 0, have: 0, owned: false, waits: false };
   function tile(i) {
@@ -1697,6 +1990,7 @@
       : [i.price ? `${num(i.price)}${w.each ? ` ${w.each}` : ''}` : 'Free', count && `${count} bought`, i.waits ? 'Table first' : i.price > left ? `${num(i.price - left)} more to go` : ''].filter(Boolean);
     const body = [pic, el('span', { class: 'office-tile-name', text: w.label }), ...lines.map((t, k) => el('span', { class: k ? 'office-tile-note' : 'office-tile-price', text: t }))];
     const said = `${w.label}. ${lines.join('. ')}. ${w.title}`;
+    if (i.owned && i.id === 'arcade') return el('button', { class: 'office-tile owned', type: 'button', title: `${i.name}: bought. Click to play`, 'aria-label': `${said} Click to play.`, onclick: () => app.arcade?.open() }, ...body, el('span', { class: 'office-tile-note', text: 'Play' }));
     if (i.owned) return el('div', { class: 'office-tile owned', title: `${i.name}: bought. ${w.title}`, role: 'img', 'aria-label': said }, ...body);
     // Short of tokens or before its table: still pressable, and the shop says why (a greyed card explains nothing).
     const short = i.waits || i.price > left;
@@ -1719,22 +2013,23 @@
   async function buyItem(item, button) {
     // Nothing is paid for that cannot happen: nobody to buy a treat for, or the table taken.
     if (item.room === 'treats' && !present().length) return fullSay('Nobody is in the office to buy for: hire someone first.');
-    if (item.id === 'donuts' && tableBusy()) return fullSay('Food is on the table, or on its way: buy the donuts once it is eaten.');
+    if (FOOD[item.id] && tableBusy()) return fullSay(`Food is on the table, or on its way: buy ${item.the} once it is eaten.`);
     if (item.id === 'coffee' && (courier?.job.kind === 'coffee' || deliveries.some(d => d.kind === 'coffee'))) return fullSay('A coffee delivery is on its way already: buy another once it has been round.');
     button.disabled = true;
     try {
       const d = await api('/api/office/buy', { item: item.id });
+      const hadTrophy = !!world.rooms.trophy;
       officeData(d);
       const left = `${num(d.purse?.left)} tokens left to spend.`;
       if (item.id === 'coffee') {
         deliveries.push({ kind: 'coffee', who: present().filter(p => p.row.doing !== 'off').map(p => p.id), at: 0 });
         fullSay(`Coffee ordered (${num(item.price)} tokens): a coffee delivery comes in by the front door with one for each of them, wherever they are. ${left}`);
-      } else if (item.id === 'donuts') {
-        orderFood('donuts');
-        fullSay(`Donuts ordered (${num(item.price)} tokens): they come in by the front door to the kitchen table. ${left}`);
+      } else if (FOOD[item.id]) {
+        orderFood(item.id);
+        fullSay(`${item.name} ordered (${num(item.price)} tokens): ${item.id === 'cake' ? 'it comes' : 'they come'} in by the front door to the kitchen table. ${left}`);
       } else {
         const now = d.shop?.find(i => i.id === item.id);
-        const cheer = item.id === 'gym' ? ['A gym!', 'New treadmill!', 'Time to lift!'] : item.room === 'beach' ? ['A deck chair!', 'Beach time!', 'Sun lounger!'] : ['New furniture!', 'Nice!', 'Very smart!'];
+        const cheer = item.id === 'gym' ? ['A gym!', 'New treadmill!', 'Time to lift!'] : item.id === 'arcade' ? ['An arcade!', 'Bagsy first go!', 'High score time!'] : item.id === 'flamingo' ? ['A flamingo!', 'Look at it float!', 'Beach goals!'] : item.room === 'desks' ? ['A desk buddy!', 'I shall name it…', 'Too cute!'] : item.room === 'beach' ? ['A deck chair!', 'Beach time!', 'Sun lounger!'] : ['New furniture!', 'Nice!', 'Very smart!'];
         for (const p of present()) {
           say(p, cheer[p.seed % 3], 4);
           if (p.target?.rest) p.restUntil = 0;
@@ -1742,6 +2037,8 @@
         const count = item.id === 'chairs' ? `, ${(now?.have ?? 0) * 2} of 6` : item.most > 1 ? `, ${now?.have ?? 0} of ${item.most}` : '';
         fullSay(`${item.name} bought${count} (${num(item.price)} tokens): ${SHOP_WORDS[item.id]?.done ?? 'it is in the office now'}. ${left}`);
       }
+      // The purchase that finished everything brings the trophy case.
+      if (!hadTrophy && d.rooms?.trophy) fullSay(`${fullSaid.textContent} That finishes everything: every piece is bought and the team has had every treat, so a trophy case now stands in the corridor (World's Best Boss).`);
       wake();
     } catch (e) {
       fullSay(e.message);

@@ -27,7 +27,7 @@ async function warmUp() {
   if (Sensors.CPU_TEMP) Sensors.tempStats();
   try {
     await refreshProjectsAsync();
-    if (!state.settings.lastScan) scanFolders(false); // first run: today's folders are the baseline, so nothing shows as "New"
+    if (!state.settings.lastScan) await scanFolders(false); // first run: today's folders are the baseline, so nothing shows as "New"
     refreshTokens();
   } catch (e) { logFault('reading the projects', e); }
   // Live addresses: checked a few seconds after start, then every 5, 10 or 15 minutes (Live sites panel).

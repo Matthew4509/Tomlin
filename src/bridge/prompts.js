@@ -24,7 +24,9 @@ function setAside(file) {
 }
 function read(file) {
   let s = null, exists = true;
-  try { s = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); } catch (e) { if (e.code === 'ENOENT') exists = false; else setAside(file); }
+  let text = null;
+  try { text = require('./settings').readText(file); } catch (e) { if (e.code === 'ENOENT') exists = false; else throw e; }
+  if (text !== null) try { s = JSON.parse(text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text); } catch { setAside(file); }
   if (s !== null && (typeof s !== 'object' || Array.isArray(s))) { setAside(file); s = null; }
   if (exists && !s) s = {};
   const prompts = s && Array.isArray(s.prompts) ? s.prompts.filter(isPrompt) : [];
@@ -52,7 +54,7 @@ function save(file, st) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify({ categories: st.categories, prompts: st.prompts }, null, 2));
-  fs.renameSync(tmp, file);
+  require('./settings').swapIn(tmp, file);
 }
 
 // Line endings are kept as \n so a copied prompt pastes the same everywhere; nothing else in the text is changed.

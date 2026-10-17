@@ -13,10 +13,37 @@ function setAside(file) {
   try { fs.copyFileSync(file, file.replace(/\.json$/i, '') + '.damaged-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); } catch {}
 }
 const isPlain = v => !!v && typeof v === 'object' && !Array.isArray(v);
+const noBom = t => (t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t);
+
+// A file's text. A virus scanner or an editor can hold a file for a moment (EBUSY/EPERM/EACCES): it is read again a
+// few times. Still held, the error is thrown: a file that could not be read is never taken as empty and written over.
+function readText(file) {
+  for (let i = 0; ; i++) {
+    try { return fs.readFileSync(file, 'utf8'); }
+    catch (e) {
+      if (!/^(EBUSY|EPERM|EACCES)$/.test(e.code) || i >= 9) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
+// A data file (judged list, fault list, private details): { json } (null when there is none). One that cannot be
+// parsed is moved aside as <name>.damaged-<time>.json, so nothing in it is lost, and { json: null, damaged } says where.
+function readData(file) {
+  let text;
+  try { text = readText(file); } catch (e) { if (e.code === 'ENOENT') return { json: null }; throw e; }
+  try { return { json: JSON.parse(noBom(text)) }; }
+  catch {
+    const damaged = file.replace(/\.json$/i, '') + '.damaged-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    try { fs.renameSync(file, damaged); } catch { setAside(file); }
+    return { json: null, damaged };
+  }
+}
 
 function load(file, defaultRoot) {
   let s = null;
-  try { s = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); } catch (e) { if (e.code !== 'ENOENT') setAside(file); }
+  let text = null;
+  try { text = readText(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (text !== null) try { s = JSON.parse(noBom(text)); } catch { setAside(file); }
   if (s !== null && !isPlain(s)) { setAside(file); s = null; }
   if (!s) {
     s = { workingFolders: [], extraProjects: [], hidden: [], known: [], hiddenView: [], order: [], lastScan: null };
@@ -42,11 +69,22 @@ function isGeneralFolder(dir) {
     || /^(downloads|desktop|documents|onedrive.*|pictures|music|videos)$/i.test(path.basename(abs));
 }
 
+// Written whole to a .tmp file, then swapped in. On Windows the swap can be refused for a moment while a virus
+// scanner or an editor holds the file (EPERM/EBUSY): it is tried again a few times before the save is reported failed.
+function swapIn(tmp, file) {
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(tmp, file); return; }
+    catch (e) {
+      if (i >= 10 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
 function save(file, s) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
-  fs.renameSync(tmp, file);
+  swapIn(tmp, file);
 }
 
 // A folder the person may add: must exist, be a folder, and not be a whole drive or a Windows system folder
@@ -65,4 +103,4 @@ function checkFolder(p, what) {
   return null;
 }
 
-module.exports = { load, save, checkFolder, norm };
+module.exports = { load, save, swapIn, checkFolder, norm, readText, readData };

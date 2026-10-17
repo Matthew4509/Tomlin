@@ -55,9 +55,16 @@ const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Only the code of a line: quoted text blanked (a word inside a message is not a call).
 const codeOf = l => String(l).replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, '""');
 
+// A path a rule built from the project's own code: read only when it is inside the project ("../../" is not).
+const inProject = (idx, p) => { if (!idx.dir) return true; const r = path.relative(idx.dir, p); return !r.startsWith('..') && !path.isAbsolute(r); };
+
 // ---- the index ----
 function buildIndex(files, extra = {}) {
   const idx = { files, fns: new Map(), docs: extra.docs || [], dir: extra.dir, loads: extra.loads || [], blocked: extra.blocked || (() => false), all: extra.all || [] };
+  // Function bodies kept for the checks, up to 40 MB in all: past that a definition keeps only its first line (a file
+  // of thousands of unclosed definitions would otherwise hold a copy of the rest of the file for each one).
+  let bodyBytes = 0;
+  const MAX_BODIES = 40 * 1024 * 1024;
   for (const f of files) {
     f.code = f.lines.map(l => (l.length > 2000 || COMMENT_LINE.test(l) ? '' : l));
     f.codeText = f.code.join('\n');
@@ -67,13 +74,16 @@ function buildIndex(files, extra = {}) {
       const m = DEF.exec(l);
       if (!m) return;
       const name = m[1] || m[2] || m[3];
-      const body = m[3] ? pyBlock(f.code, i) : blockFrom(f.code, i);
+      let body = m[3] ? pyBlock(f.code, i) : blockFrom(f.code, i);
+      f.fnRanges.push([i, i + body.split('\n').length - 1]);
+      if (bodyBytes + body.length > MAX_BODIES) body = l;
+      bodyBytes += body.length;
       if (!idx.fns.has(name)) idx.fns.set(name, []);
       idx.fns.get(name).push({ f, i, body });
-      f.fnRanges.push([i, i + body.split('\n').length - 1]);
     });
   }
-  idx.bodyOf = name => (idx.fns.get(name) || []).map(d => d.body).join('\n');
+  const bodies = new Map();
+  idx.bodyOf = name => { if (!bodies.has(name)) bodies.set(name, (idx.fns.get(name) || []).map(d => d.body).join('\n')); return bodies.get(name); };
   idx.defined = name => idx.fns.has(name);
   return idx;
 }
@@ -97,11 +107,15 @@ function guarded(idx, f) {
 // Limiter calls in a file: a project function that counts and refuses, or one named for it. perCaller: keyed on the
 // visitor (address, session, user); site: keyed on a fixed value (a cap for everyone together).
 const LIMIT_NAME = /rate|limit|throttle|attempt|quota|budget|cap_?ok|allow_?request/i;
-const LIMIT_BODY = /(apcu_(fetch|inc|store)|redis|memcache|\bcount\b|attempts?|hits|COUNT\s*\(\s*\*\s*\))[\s\S]*(>=|>|return\s+false)/i;
+// A body that counts something and then compares or refuses after it. Two plain searches, not one pattern that spans
+// the body: that one went back over the whole body for every place a counting word appeared.
+const LIMIT_COUNTS = /apcu_(fetch|inc|store)|redis|memcache|\bcount\b|attempts?|hits|COUNT\s*\(\s*\*\s*\)/i;
+const LIMIT_BODY = { test(body) { const m = LIMIT_COUNTS.exec(body); return !!m && /(>=|>|return\s+false)/i.test(body.slice(m.index + m[0].length)); } };
 function limiterCalls(idx, f) {
   const out = [];
-  // the arguments are read in a lookahead, so a call inside another call's brackets (if (!rate_ok(...))) is seen too
-  for (const m of f.codeText.matchAll(/(?<![\w$>:.])([A-Za-z_$][\w$]*)\s*\((?=([^;{}]*?)\)\s*(\)|\|\||&&|;|\{|,|$))/gm)) {
+  // the arguments are read in a lookahead, so a call inside another call's brackets (if (!rate_ok(...))) is seen too;
+  // the arguments are read up to 400 characters, so a call that never closes does not send it to the end of the file
+  for (const m of f.codeText.matchAll(/(?<![\w$>:.])([A-Za-z_$][\w$]*)\s*\((?=([^;{}]{0,400}?)\)\s*(\)|\|\||&&|;|\{|,|$))/gm)) {
     const name = m[1];
     if (KEYWORDS.has(name.toLowerCase()) || !(LIMIT_NAME.test(name) || (idx.defined(name) && LIMIT_BODY.test(idx.bodyOf(name))))) continue;
     if (idx.defined(name) && !LIMIT_BODY.test(idx.bodyOf(name)) && !LIMIT_NAME.test(name)) continue;
@@ -266,7 +280,7 @@ rule({ id: 'REL-002', sev: 'High', area: 'release', title: 'The release build co
         if (/\bfilter\s*[:=]|\bignore\s*=|ignore_patterns|--exclude|\s-x\s|\/X[FD]\b|-Exclude\b/i.test(stmt)) continue;
         const lit = literalOf(f, m[2] || m[3] || m[4] || m[5] || m[7] || m[8]);
         if (!lit || /^[.\/]*$/.test(lit) && lit !== '.') continue;
-        const src = [path.join(idx.dir, lit), path.join(idx.dir, path.dirname(f.rel), lit)].find(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+        const src = [path.join(idx.dir, lit), path.join(idx.dir, path.dirname(f.rel), lit)].find(p => { try { return inProject(idx, p) && fs.statSync(p).isDirectory(); } catch { return false; } });
         if (!src) continue;
         const bad = walkNames(src).map(p => path.basename(p)).filter(n => NOTE_FILE.test(n));
         if (!bad.length) continue;
@@ -293,15 +307,17 @@ rule({ id: 'REL-003', sev: 'Medium', area: 'release', title: 'The release leaves
       const roots = [...f.codeText.matchAll(/['"`]([\w.-]+(?:\/[\w.-]+)*)\/['"`]\s*\+\s*\w+|join\(\s*['"]([\w.\/-]+)['"]\s*,\s*\w+\s*\)/g)].map(m => m[1] || m[2]);
       const pagesIn = r => list.some(e => /\.(html?|php)$/i.test(e) && fs.existsSync(path.join(idx.dir, r, e)));
       const base = path.join(idx.dir, roots.find(pagesIn) || '');
+      if (!inProject(idx, base)) continue;
       // listed, under a listed folder, or named anywhere in the builder as text ('pillar.css' in an inline list)
       const shipped = rel => list.some(e => e === rel || (!path.extname(e) && rel.startsWith(e.replace(/\/?$/, '/')))) || new RegExp('[\'"`/]' + esc(rel) + '[\'"`]').test(f.codeText);
       for (const page of list.filter(e => /\.(html?|php)$/i.test(e))) {
+        if (!inProject(idx, path.join(base, page))) continue;
         let text = ''; try { text = fs.readFileSync(path.join(base, page), 'utf8'); } catch { continue; }
         for (const m of text.matchAll(/<(?:link|script|img|source)\b[^>]*?\b(?:href|src)\s*=\s*["']([^"'#?]+)/gi)) {
           const ref = m[1];
           if (/^([a-z]+:|\/\/)/i.test(ref) || /<\?|\{\{/.test(ref) || !path.extname(ref)) continue;
           const rel = ref.startsWith('/') ? ref.slice(1) : path.posix.normalize(path.posix.join(path.posix.dirname(page), ref));
-          if (shipped(rel) || !fs.existsSync(path.join(base, rel))) continue;
+          if (shipped(rel) || !inProject(idx, path.join(base, rel)) || !fs.existsSync(path.join(base, rel))) continue;
           // a folder the builder names on its own ('fonts', copied by a loop over its files) ships too
           const top = rel.split('/')[0];
           if (rel.includes('/') && new RegExp('[\'"`/]' + esc(top) + '/?[\'"`]').test(f.codeText)) continue;
@@ -760,7 +776,7 @@ rule({ id: 'HTA-004', sev: 'High', area: 'exposed files', title: 'Code writes a 
         if (!m) continue;
         const folder = m[2], ext = m[3];
         const roots = [path.join(idx.dir, path.dirname(f.rel), m[1].replace(/^\.?\/?/, '').split(new RegExp('\\/' + folder + '\\/', 'i'))[0], folder), path.join(idx.dir, folder)];
-        const web = roots.find(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+        const web = roots.find(p => { try { return inProject(idx, p) && fs.statSync(p).isDirectory(); } catch { return false; } });
         if (!web || idx.blocked(path.join(web, 'probe.' + ext))) continue;
         out.push({ f, i, title: 'Code writes .' + ext + ' files into ' + path.relative(idx.dir, web).replace(/\\/g, '/') + '/, and no deny rule there covers .' + ext + ' (they can be downloaded)' });
         break;

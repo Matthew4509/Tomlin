@@ -40,7 +40,7 @@ function judgedFor(p) {
 function ownNotes(p) {
   const out = [];
   if (p.auditAcceptOwn) out.push('The project\'s own project.json asks to set aside ' + p.auditAcceptOwn + ' finding' + (p.auditAcceptOwn > 1 ? 's' : '') + ': not done. A project cannot vouch for itself; judge them in this window instead.');
-  if (p.auditSkipOwn && p.auditSkipOwn.length) out.push('Left out at the request of the project\'s own project.json: ' + p.auditSkipOwn.slice(0, 8).join(', ') + '. Check that is only vendored or generated code.');
+  if (p.auditSkipOwn && p.auditSkipOwn.length) out.push('Left out at the request of the project\'s own project.json: ' + p.auditSkipOwn.slice(0, 30).join(', ') + (p.auditSkipOwn.length > 30 ? ' and ' + (p.auditSkipOwn.length - 30) + ' more' : '') + ' (the code rules only: the check for private details still read them). Check that is only vendored or generated code.');
   return out;
 }
 
@@ -63,7 +63,7 @@ function withRecords(p, a) {
 
 // target: the local copy's address when one is running (null: the project's files only).
 async function auditProject(p, target) {
-  const opts = { skip: p.auditSkip, include: p.auditInclude, judged: judgedFor(p), notes: ownNotes(p), disclosure: disclosureContext(p), ...(p.liveUrl ? { liveUrl: p.liveUrl, ...liveOpts(p.liveUrl) } : {}) };
+  const opts = { skip: p.auditSkip, skipOwn: p.auditSkipOwn, include: p.auditInclude, judged: judgedFor(p), notes: ownNotes(p), disclosure: disclosureContext(p), ...(p.liveUrl ? { liveUrl: p.liveUrl, ...liveOpts(p.liveUrl) } : {}) };
   const a = withRecords(p, await runAudit(p.dir, target, opts));
   fs.writeFileSync(file(p.id), JSON.stringify(a, null, 2));
   return a;
@@ -87,7 +87,7 @@ function judge(p, body) {
   const a = lastAudit(p.id);
   const f = a && a.findings.find(x => x.rule === body.rule && x.where === body.where && (x.fp || null) === (body.fp || null));
   if (!f) return { ok: false, error: 'That finding is not in the last audit any more. Scan again, then judge it.' };
-  const r = judged.addEntry(cfg.JUDGED_FILE, keyOf(p.dir), { rule: f.rule, where: f.where, fp: f.fp, verdict: 'false', why: body.why, by: body.by, source: 'audit window' }, p.dir);
+  const r = judged.addEntry(cfg.JUDGED_FILE, keyOf(p.dir), { rule: f.rule, where: f.where, fp: f.fp, holds: f.holds, verdict: 'false', why: body.why, by: body.by, source: 'audit window' }, p.dir);
   return r.ok ? { ok: true, audit: rejudge(p) } : r;
 }
 function unjudge(p, id) {
@@ -101,8 +101,8 @@ function importReportBack(p, body) {
   const text = String(body.text || '');
   const found = review.parseFindings(text);
   // the false flags: from the "False flags" section, or every table row when there is no Findings section either
-  const hasFindings = /^#{1,4}\s*\d*\.?\s*Findings\b/im.test(text);
-  const rows = hasFindings && !/^#{1,4}\s*\d*\.?\s*False flags/im.test(text) ? [] : judged.parseReportBack(text);
+  const hasFindings = /^#{1,4}[ \t]*(?:\d+\.?[ \t]+|\d*\.[ \t]*)?Findings\b/im.test(text);
+  const rows = hasFindings && !/^#{1,4}[ \t]*(?:\d+\.?[ \t]+|\d*\.[ \t]*)?False flags/im.test(text) ? [] : judged.parseReportBack(text);
   if (!rows.length && !found.rows.length && !found.refused.length) return { ok: false, error: 'No table rows found. Paste the "Findings" table (| Id | Severity | Category | Where | Evidence | Fix |) or the "False flags" table (| Rule | Where | Verdict | Why | What the rule should do |).' };
   if (rows.length + found.rows.length > 300) return { ok: false, error: 'That is ' + (rows.length + found.rows.length) + ' rows; import at most 300 at a time.' };
   const by = String(body.by || '').trim() || 'report-back', source = 'report-back' + (body.source ? ' (' + String(body.source).slice(0, 80) + ')' : '');

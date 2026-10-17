@@ -18,14 +18,14 @@ const get = {
 };
 
 const post = {
-  '/api/folders/add': ({ body }) => {
+  '/api/folders/add': async ({ body }) => {
     const bad = Settings.checkFolder(body.path, 'a working folder');
     if (bad) return { ok: false, error: bad };
     const dir = path.resolve(body.path.trim());
     if (has(state.settings.workingFolders, dir)) return { ok: false, error: dir + ' is already a working folder.' };
     state.settings.workingFolders.push(dir);
     saveSettings();
-    const scan = scanFolders();
+    const scan = await scanFolders();
     return { ok: true, path: dir, projects: state.projects.filter(p => p.workingFolder && keyOf(p.workingFolder) === keyOf(dir)).length, scan };
   },
   '/api/folders/open': ({ body }) => {
@@ -33,13 +33,13 @@ const post = {
     if (!f) return { ok: false, error: 'That folder is not on the list any more. Reload the page.' };
     return { ok: true, ...desktop.openFolder(f) };
   },
-  '/api/folders/remove': ({ body }) => {
+  '/api/folders/remove': async ({ body }) => {
     if (!has(state.settings.workingFolders, String(body.path || ''))) return { ok: false, error: 'That folder is not on the list any more. Reload the page.' };
     state.settings.workingFolders = drop(state.settings.workingFolders, body.path);
     saveSettings();
-    return { ok: true, scan: scanFolders() };
+    return { ok: true, scan: await scanFolders() };
   },
-  '/api/projects/add': ({ body }) => {
+  '/api/projects/add': async ({ body }) => {
     const bad = Settings.checkFolder(body.path, 'a project');
     if (bad) return { ok: false, error: bad };
     const dir = path.resolve(body.path.trim());
@@ -51,7 +51,7 @@ const post = {
     if (!wasHidden && projects.some(p => keyOf(p.dir) === keyOf(dir))) return { ok: false, error: path.basename(dir) + ' is already on the list.' };
     if (!projects.some(p => keyOf(p.dir) === keyOf(dir))) settings.extraProjects.push(dir);
     saveSettings();
-    scanFolders();
+    await scanFolders();
     const p = state.projects.find(x => keyOf(x.dir) === keyOf(dir));
     return { ok: true, id: p && p.id, name: p ? p.name : path.basename(dir) };
   },
@@ -73,11 +73,11 @@ const post = {
     saveSettings();
     return { ok: true };
   },
-  '/api/projects/show': ({ body }) => {
+  '/api/projects/show': async ({ body }) => {
     if (!has(state.settings.hidden, String(body.path || ''))) return { ok: false, error: 'That project is not in the removed list any more. Reload the page.' };
     state.settings.hidden = drop(state.settings.hidden, body.path);
     saveSettings();
-    scanFolders();
+    await scanFolders();
     return { ok: true };
   },
 };
