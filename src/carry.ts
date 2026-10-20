@@ -1,39 +1,42 @@
 // Copies between linked PCs (2.0.32). A model one PC shares can be copied to another, so it is not downloaded from
 // Hugging Face again (delete it here to save room, copy it back from a node later); a host can send one of its models
 // to a node (installed there from here); and a host can keep a restore point (a backup of its data) on a node. The
-// owner of each PC ticks what linked PCs may do there (Nodes and memory, "Sharing permissions"): nothing until
-// ticked, and only the models ticked under "Models to share with others" are ever seen or copied.
+// owner of each PC ticks what linked PCs may do there (Network: connect PCs, "Sharing permissions"): nothing until
+// ticked; every model on a node is seen by linked PCs, and copied only with "Sharing of models" ticked.
 // Files cross the encrypted link (src/link.ts) in pieces of 16 MB, each one a request of its own, sealed with the
 // link's keys and tied to that request: a piece changed on the way, sent twice or out of place is refused, and a copy
-// cut short carries on from where it stopped. The parts (both sides) are here, tested in test/carry.test.ts; the doors
-// are in src/jobrun/copies.ts (this PC asking) and src/jobrun/node.ts (a node answering).
+// cut short carries on from where it stopped. Sending a model to a node needs no tick there (2.0.56): every linked PC
+// may. The parts (both sides) are here, tested in test/carry.test.ts; the doors are in src/jobrun/copies.ts (this PC
+// asking) and src/jobrun/node.ts (a node answering).
 import { open, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { SharedModel } from './nodestaff.ts';
+import type { RunnerHello } from './runnerpush.ts';
 import * as git from './gitstore.ts';
 
 // ---- What linked PCs may do here ----
 
 export interface Allow {
-  /** "Sharing of models": linked PCs may copy the models ticked to share. */
+  /** "Sharing of models": linked PCs may copy the models on this PC. */
   pull: boolean;
   /** "Enable backups": a linked PC may keep its projects (a git repository) and restore points (its data) here. */
   backup: boolean;
-  /** "Allow host to push models": a linked PC may send one of its models here, installed in this PC's models folder. */
-  push: boolean;
   /** "Allow host to update TOMLIN remotely" (2.0.33): a linked PC with a newer version may install it here (src/update.ts). */
   update: boolean;
+  /** "Allow host to test and change model run settings" (2.0.56): a linked PC may set a model's run settings here (src/runset.ts). */
+  tune: boolean;
 }
 
-export const NO_ALLOW: Allow = { pull: false, backup: false, push: false, update: false };
+export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false };
 
+/** The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read. */
 export function cleanAllow(raw: unknown): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, push: o.push === true, update: o.update === true };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true };
 }
 
 /** "Allow all" is ticked when every one is. */
-export const allowsAll = (a: Allow) => a.pull && a.backup && a.push && a.update;
+export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune;
 
 // ---- Sizes ----
 
@@ -91,6 +94,8 @@ export interface NetPc {
   disk?: { total: number; free: number } | null;
   /** Its memory as its hello said it (RAM, graphics card), to tell PCs apart in a list. */
   memory?: unknown;
+  /** Its NVIDIA card, driver and CUDA runner as its hello said them (null: an older TOMLIN, or off). */
+  runner?: RunnerHello | null;
 }
 
 export interface NetPlace {
@@ -125,8 +130,8 @@ export function copyWhy(pc: NetPc, id: string): string {
 }
 
 /**
- * Every model the linked PCs share (ticked to share with others), once each, with the PCs that have it and whether
- * it can be copied from each; chat models first, then pictures, by name. Nothing a PC has not ticked is ever listed.
+ * Every model on the linked PCs, once each, with the PCs that have it and whether it can be copied from each; chat
+ * models first, then pictures, by name.
  */
 export function networkList(pcs: NetPc[], here: { chatFiles: string[]; pictures: string[] }): NetRow[] {
   const rows = new Map<string, NetRow>();
@@ -150,8 +155,23 @@ export function sendWhy(pc: NetPc): string {
   if (!pc.ok) return `"${pc.name}" is off or not answering now`;
   if (pc.away) return `"${pc.name}" is being used by its owner for now`;
   if (!pc.can.includes('carry') || !pc.allow) return `"${pc.name}" runs an older TOMLIN: update it there first`;
-  if (!pc.allow.push) return `"${pc.name}" does not let other PCs install models on it (its owner can tick "Allow host to push models" there)`;
   return '';
+}
+
+/** Why a linked PC cannot download a model itself now (Download, To that PC, on the Models page): '' when it can. */
+export function fetchWhy(pc: NetPc): string {
+  const why = sendWhy(pc);
+  if (why) return why;
+  if (pc.backupsOnly) return `"${pc.name}" is set to Backups only: no model is downloaded to it (untick Backups only on its card to use it for models)`;
+  if (!pc.can.includes('fetch')) return `"${pc.name}" runs an older TOMLIN that cannot download a model by itself: update it there first`;
+  return '';
+}
+/** fetchWhy as one short word for the To list: off (or busy with its owner), backups, old; '' when it can. */
+export function fetchCode(pc: NetPc): '' | 'off' | 'backups' | 'old' {
+  if (!pc.ok || pc.away) return 'off';
+  if (!pc.can.includes('carry') || !pc.allow) return 'old';
+  if (pc.backupsOnly) return 'backups';
+  return pc.can.includes('fetch') ? '' : 'old';
 }
 
 /** Why this PC's projects cannot be backed up to a linked PC now ('' when they can). */
@@ -322,8 +342,8 @@ export interface FileRef {
 
 export interface NodeDeps {
   allow: () => Allow;
-  /** The model ids ticked to share with others. */
-  ticked: () => string[];
+  /** The model ids linked PCs may use: every model on this PC. */
+  shared: () => string[];
   pcName: () => string;
   /** A chat model's files (all parts) by its id; null when it is not here or cannot be sent (Ollama). */
   chatFiles: (id: string) => FileRef[] | null;
@@ -364,9 +384,9 @@ export function nodeSide(d: NodeDeps) {
 
   /** A shared model's files, when linked PCs may copy it. */
   function shared(b: Record<string, unknown>): FileRef[] | string {
-    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" under Nodes and memory).`;
+    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" under Network: connect PCs).`;
     const id = typeof b.model === 'string' ? b.model : '';
-    if (!d.ticked().includes(id)) return `"${d.pcName()}" does not share that model now.`;
+    if (!d.shared().includes(id)) return `that model is not on "${d.pcName()}" any more.`;
     const files = b.kind === 'image' ? d.pictureFiles(id) : d.chatFiles(id);
     return files?.length ? files : `that model is not on "${d.pcName()}" any more, or it cannot be copied (an Ollama model).`;
   }
@@ -375,7 +395,6 @@ export function nodeSide(d: NodeDeps) {
   // Every file of a model whole on this PC (a split model cut off after its first part is not there yet).
   const allWhole = async (files: { path: string; bytes: number }[]) => (await Promise.all(files.map(f => sizeOf(f.path)))).every((n, k) => n === files[k].bytes);
   async function incoming(b: Record<string, unknown>): Promise<{ files: { name: string; path: string; bytes: number }[]; have: boolean } | string> {
-    if (!d.allow().push) return `"${d.pcName()}" does not let other PCs install models on it now (its owner ticks "Allow host to push models" under Nodes and memory).`;
     const raw = Array.isArray(b.files) ? b.files.slice(0, 64) : [];
     if (b.kind === 'image') {
       const dest = typeof b.model === 'string' ? d.pictureDest(b.model) : null;
@@ -461,7 +480,7 @@ export function nodeSide(d: NodeDeps) {
       case '/worker/backup-list':
         return { status: 200, json: { backups: await listKept(keptFolder(d.keptRoot, who.key)), allowed: d.allow().backup } };
       case '/worker/backup-put': {
-        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" under Nodes and memory).`);
+        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" under Network: connect PCs).`);
         const name = safeBackupName(b.name);
         const bytes = int(b.bytes);
         const from = int(b.from);
@@ -601,7 +620,7 @@ export function nodeSide(d: NodeDeps) {
 /** Ids asked about in one go, and files in one backup. */
 export const MAX_IDS = 2000;
 export const MAX_FILES = 100_000;
-const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Nodes and memory).`;
+const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network: connect PCs).`;
 
 async function exists(file: string): Promise<boolean> {
   try {
@@ -782,16 +801,16 @@ export async function pullBackup(w: Wire, o: { name: string; bytes: number; dest
 
 export interface Transfer {
   id: string;
-  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; backup: a restore point to it; bring: one back; update: this TOMLIN to it; projects: the projects backed up to it; restore: brought back from it. */
-  kind: 'copy' | 'send' | 'backup' | 'bring' | 'update' | 'projects' | 'restore';
+  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; backup: a restore point to it; bring: one back; update: this TOMLIN to it; projects: the projects backed up to it; restore: brought back from it; fetch: a model that PC downloads itself; runner: the CUDA runner sent to it. */
+  kind: 'copy' | 'send' | 'backup' | 'bring' | 'update' | 'projects' | 'restore' | 'fetch' | 'runner';
   what: string;
   pc: string;
   pcName: string;
   done: number;
   bytes: number;
   state: 'working' | 'done' | 'stopped' | 'failed';
-  /** An update only: the step it is on (comparing the files, sending them, starting the new version there, checking it answers). */
-  stage?: 'compare' | 'send' | 'start' | 'check';
+  /** An update: the step it is on (comparing the files, sending them, starting the new version there, checking it answers); a runner: downloading it here first, or sending it. */
+  stage?: 'compare' | 'send' | 'start' | 'check' | 'get';
   /** An update only: what that PC is busy with while the new version waits to start there. */
   wait?: string;
   said: string;
@@ -812,8 +831,10 @@ export class Transfers {
   /** What Stop leaves, said when it is pressed: a copy here carries on; a send was cleared on that PC. */
   static stopped(kind: Transfer['kind'], pcName: string): string {
     if (kind === 'send') return `Stopped. Nothing half-sent is left on "${pcName}": Send a copy starts it again.`;
+    if (kind === 'runner') return `Stopped. Nothing half-sent is left on "${pcName}", and what was downloaded here is kept: send it again to carry on.`;
     if (kind === 'backup' || kind === 'projects') return 'Stopped. Back up again when you are ready.';
     if (kind === 'update') return `Stopped. Nothing was changed on "${pcName}": it still runs its old version.`;
+    if (kind === 'fetch') return `Stopped on "${pcName}". Download it again when you are ready.`;
     return 'Stopped. Press it again to carry on from where it stopped.';
   }
 

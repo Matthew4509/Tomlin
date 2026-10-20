@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, GB, cardFit, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, ramNearlyFull, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
+import { CHAT_MODELS, GB, cardFit, chatNeed, fitsRoom, chatRows, fitOf, moveWontFit, pictureRow, ramFit, ramNearlyFull, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
 
 const laptop: Hardware = { ram: 16 * GB, vram: 0, card: 'builtin', cores: 2 };
 const desktop: Hardware = { ram: 32 * GB, vram: 0, card: 'none', cores: 4 };
@@ -107,4 +107,18 @@ test('a PC memory report: RAM and every card (2.0.50), or one card from an older
   assert.deepEqual(memOfReport({ ram: { total: 16 * GB }, gpu: { total: 6 * GB } }), { ram: 16 * GB, vram: 6 * GB });
   assert.deepEqual(memOfReport({ ram: { total: 8 * GB }, gpu: { total: 2 * GB, shared: true } }), { ram: 8 * GB, vram: 0 });
   assert.deepEqual(memOfReport(null), { ram: 0, vram: 0 });
+});
+
+test('fitsRoom: the Fits drop-down on the Models page judges a model file against any PC, this one or a linked one', () => {
+  // The Worker PC: 32 GB of RAM and a 6 GB card. Room = (32 - 2) + (6 - 1) = 35 GB; need = file x 1.1 + 0.8 GB.
+  assert.equal(fitsRoom(9.2 * GB, 32 * GB, [6 * GB]), 'ok'); // Qwen-Image 2.1's size: plenty of room
+  assert.equal(fitsRoom(20 * GB, 32 * GB, [6 * GB]), 'ok'); // 22.8 needed, under 85% of 35
+  assert.equal(fitsRoom(30 * GB, 32 * GB, [6 * GB]), 'tight'); // 33.8 needed: over 85%, under all of it
+  assert.equal(fitsRoom(32 * GB, 32 * GB, [6 * GB]), 'no'); // 36 needed
+  // This laptop: 16 GB, no card of its own (an empty list). Room 14 GB.
+  assert.equal(fitsRoom(9.2 * GB, 16 * GB, []), 'ok');
+  assert.equal(fitsRoom(11.5 * GB, 16 * GB, []), 'tight'); // 13.45 needed, over 85% of 14
+  assert.equal(fitsRoom(14 * GB, 16 * GB, []), 'no');
+  // A card under 1 GB adds nothing; memory not known (0) fits nothing.
+  assert.equal(fitsRoom(1 * GB, 0, []), 'no');
 });

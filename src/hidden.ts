@@ -1,4 +1,4 @@
-// Models hidden on this PC (Nodes and memory, Models on this PC, Hide). A hidden model stays on the disk with its speed
+// Models hidden on this PC (This PC: models and updates, Models on this PC, Hide). A hidden model stays on the disk with its speed
 // tests, cannot be deleted while hidden, and linked PCs may still use and copy it when it is ticked to share; it is only
 // left out of the lists a model is picked from (hiring, a hire's model, the chat's model) until "Show hidden" is ticked.
 // Kept in data/hidden-models.json as a list of model ids (chat models by their id, picture models by theirs).

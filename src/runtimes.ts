@@ -1,8 +1,8 @@
 // The model runners (runtimes.json): which builds are unpacked, where their server program is, and installing one.
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fetchChecked, type Progress } from './download.ts';
 
@@ -78,28 +78,103 @@ export class Runtimes {
     return this.pins[this.id(engine, device)]?.parts.reduce((n, p) => n + p.bytes, 0) ?? 0;
   }
 
-  /** Downloads every part (checked), unpacks them into runtime/<id>/, deletes the zips. */
-  async install(engine: Engine, device: Device, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+  /** Where part k of a build's zips is kept while it is downloaded or sent here (the home's runtime/_downloads). */
+  zipOf(engine: Engine, device: Device, k: number): string {
+    const part = this.pins[this.id(engine, device)]?.parts[k];
+    if (!part) throw new Error(`There is no part ${k} of the pinned ${this.id(engine, device)} build.`);
+    return join(this.kept, '_downloads', basename(new URL(part.url).pathname));
+  }
+
+  /** Every zip of this build is here at its pinned size (checked by SHA-256 when it was downloaded). */
+  zipsHere(engine: Engine, device: Device): boolean {
+    const pin = this.pins[this.id(engine, device)];
+    if (!pin) return false;
+    return pin.parts.every((p, k) => {
+      try {
+        return statSync(this.zipOf(engine, device, k)).size === p.bytes;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /** Downloads every zip of this build (each checked by SHA-256) and keeps them, not unpacked: gives their paths. */
+  async fetchZips(engine: Engine, device: Device, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<string[]> {
+    const id = this.id(engine, device);
+    const pin = this.pins[id];
+    if (!pin) throw new Error(`There is no pinned ${id} build.`);
+    const total = pin.parts.reduce((n, p) => n + p.bytes, 0);
+    let before = 0;
+    const files: string[] = [];
+    for (const [k, part] of pin.parts.entries()) {
+      const file = this.zipOf(engine, device, k);
+      await fetchChecked(part.url, file, part.bytes, part.sha256, p => onProgress?.({ got: before + p.got, bytes: total, checking: p.checking }), signal);
+      files.push(file);
+      before += part.bytes;
+    }
+    return files;
+  }
+
+  /**
+   * Unpacks this build's zips into runtime/<id>/ in the home (emptied first, so nothing of an older build is left),
+   * writes what it was unpacked from, then deletes the zips. The zips must already be checked against the pin.
+   */
+  async unpack(engine: Engine, device: Device, zips: string[]): Promise<void> {
     const id = this.id(engine, device);
     const pin = this.pins[id];
     if (!pin) throw new Error(`There is no pinned ${id} build.`);
     const target = join(this.kept, id);
-    const zips = join(this.kept, '_downloads');
-    const total = pin.parts.reduce((n, p) => n + p.bytes, 0);
-    let before = 0;
+    await rm(target, { recursive: true, force: true });
     await mkdir(target, { recursive: true });
-    for (const part of pin.parts) {
-      const file = join(zips, part.url.split('/').pop()!);
-      await fetchChecked(part.url, file, part.bytes, part.sha256, p => onProgress?.({ got: before + p.got, bytes: total, checking: p.checking }), signal);
-      // Windows' own tar unpacks zips; named by full path because Git's tar reads "C:\..." as a remote machine.
-      const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-      await run(tar, ['-x', '-f', file, '-C', target], { windowsHide: true });
-      await rm(file, { force: true });
-      before += part.bytes;
-    }
+    // Windows' own tar unpacks zips; named by full path because Git's tar reads "C:\..." as a remote machine.
+    const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    for (const file of zips) await run(tar, ['-x', '-f', file, '-C', target], { windowsHide: true });
     await writeFile(join(target, PIN_FILE), pinKey(pin));
+    for (const file of zips) await rm(file, { force: true });
     if (!this.installed(engine, device)) throw new Error(`The ${pin.name} download unpacked, but its server program was not inside. The release may have changed shape.`);
   }
+
+  /** Downloads every part (checked), unpacks them into runtime/<id>/, deletes the zips. */
+  async install(engine: Engine, device: Device, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+    await this.unpack(engine, device, await this.fetchZips(engine, device, onProgress, signal));
+  }
+
+  /** Takes a downloaded build away (runtime/<id>/ in the home, and its kept zips); never a runner the app folder ships. */
+  async remove(engine: Engine, device: Device): Promise<void> {
+    if (this.kept === this.dir) throw new Error('A runner in the app folder is taken away by hand, not from here.');
+    const pin = this.pins[this.id(engine, device)];
+    await rm(join(this.kept, this.id(engine, device)), { recursive: true, force: true });
+    for (const k of pin?.parts.keys() ?? []) {
+      await rm(this.zipOf(engine, device, k), { force: true });
+      await rm(`${this.zipOf(engine, device, k)}.part`, { force: true });
+    }
+  }
+}
+
+/** The NVIDIA driver a CUDA 12.4 build needs on Windows: an older one cannot compile its code for a Pascal card. */
+export const CUDA_DRIVER_MIN = '551.61';
+
+/** True when driver version `v` (e.g. "581.57") is `min` or newer, compared part by part as numbers. */
+export function driverAtLeast(v: string, min: string): boolean {
+  const a = v.split('.').map(Number);
+  const b = min.split('.').map(Number);
+  for (let k = 0; k < Math.max(a.length, b.length); k++) {
+    const x = a[k] || 0;
+    const y = b[k] || 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+/**
+ * Why a PC cannot use the `device` runner ('' when it can): a CUDA runner needs an NVIDIA card of its own and a driver
+ * new enough (a driver that could not be read is not held against it). `pc` names the PC in the words.
+ */
+export function runnerWhy(device: Device, gpus: { name?: string; vendor: string; integrated: boolean }[], driver: string | null, pc = 'This PC'): string {
+  if (device !== 'cuda') return '';
+  if (!gpus.some(g => g.vendor === 'nvidia' && !g.integrated)) return `"${pc}" has no NVIDIA card of its own, so the CUDA runner cannot help there.`;
+  if (driver && !driverAtLeast(driver, CUDA_DRIVER_MIN)) return `"${pc}" has NVIDIA driver ${driver}; the CUDA runner needs ${CUDA_DRIVER_MIN} or newer. Update the driver (from nvidia.com, or Windows Update) on that PC, then try again.`;
+  return '';
 }
 
 /**

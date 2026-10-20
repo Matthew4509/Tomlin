@@ -9,6 +9,24 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
+/** Where nvidia-smi is: on PATH, then System32 (newer drivers put it there), then the NVSMI folder older drivers use. */
+export const NVIDIA_SMI = [
+  'nvidia-smi',
+  `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\nvidia-smi.exe`,
+  `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe`,
+];
+
+/**
+ * A card's memory when nvidia-smi cannot be run: Windows' AdapterRAM is 32-bit, so a bigger card reads 4 GB (or just
+ * under); a size in its name ("GTX 1060 6GB") is believed over that. Under 4 GB, or no size in the name: as read.
+ */
+export function totalFromName(name: string, total: number | null): number | null {
+  if (total === null || total < 4 * 2 ** 30 - 2 ** 20) return total;
+  const m = /(\d+(?:\.\d+)?)\s*GB\b/i.exec(name);
+  const named = m ? Number(m[1]) * 2 ** 30 : 0;
+  return named > total ? named : total;
+}
+
 export interface Gpu {
   name: string;
   /** 'nvidia' cards can use the CUDA builds; every other chip uses Vulkan. */
@@ -24,6 +42,8 @@ export interface HardwareInfo {
   threads: number;
   ram: number;
   gpus: Gpu[];
+  /** The NVIDIA driver's version (e.g. "581.57"), from nvidia-smi; null with no NVIDIA card, or when it could not be read. */
+  nvidiaDriver?: string | null;
 }
 
 export interface ProcessUse {
@@ -131,12 +151,16 @@ export async function readHardware(): Promise<HardwareInfo> {
   // AdapterRAM stops at 4 GB, so an NVIDIA card's real total comes from nvidia-smi.
   // Each card once: two cards of the same make have the same name, so a card already matched is not matched again.
   const matched = new Set<Gpu>();
-  for (const g of await nvidiaCards()) {
+  const smi = await nvidiaCards();
+  info.nvidiaDriver = smi.find(g => g.driver)?.driver ?? null;
+  for (const g of smi) {
     const known = info.gpus.find(x => x.vendor === 'nvidia' && !matched.has(x) && (x.name.includes(g.name) || g.name.includes(x.name)));
     if (known) matched.add(known);
     if (known) known.total = g.total;
     else info.gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false });
   }
+  // No nvidia-smi answered for a card: its 4 GB-capped report is checked against the size in its name.
+  for (const g of info.gpus) if (g.vendor === 'nvidia' && !matched.has(g)) g.total = totalFromName(g.name, g.total);
   for (const g of info.gpus) if (g.integrated) g.total = null;
   return info;
 }
@@ -147,16 +171,31 @@ export function cardsTogether(cards: Array<{ total: number; used: number }>): { 
   return { count: cards.length, total: cards.reduce((a, c) => a + c.total, 0), used: cards.reduce((a, c) => a + c.used, 0) };
 }
 
-async function nvidiaCards(): Promise<Array<{ name: string; total: number; used: number }>> {
-  try {
-    const { stdout } = await run('nvidia-smi', ['--query-gpu=name,memory.total,memory.used', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 10_000 });
-    return stdout.split(/\r?\n/).filter(Boolean).map(l => {
-      const [name, total, used] = l.split(',').map(s => s.trim());
-      return { name, total: Number(total) * 2 ** 20, used: Number(used) * 2 ** 20 };
-    });
-  } catch {
-    return [];
+/** The nvidia-smi that answered (one of NVIDIA_SMI); null once none did, so the once-a-second reading stops asking. */
+let smiAt: string | null | undefined;
+
+/** nvidia-smi's answer to the query below: each card's name, memory (MB there, bytes here) and the driver's version. */
+export function smiRows(stdout: string): Array<{ name: string; total: number; used: number; driver: string | null }> {
+  return stdout.split(/\r?\n/).filter(Boolean).map(l => {
+    const [name, total, used, driver] = l.split(',').map(s => s.trim());
+    return { name, total: Number(total) * 2 ** 20, used: Number(used) * 2 ** 20, driver: /^\d+(\.\d+)+$/.test(driver ?? '') ? driver : null };
+  });
+}
+
+async function nvidiaCards(): Promise<Array<{ name: string; total: number; used: number; driver: string | null }>> {
+  if (smiAt === null) return [];
+  for (const exe of smiAt ? [smiAt] : NVIDIA_SMI) {
+    try {
+      const { stdout } = await run(exe, ['--query-gpu=name,memory.total,memory.used,driver_version', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 10_000 });
+      smiAt = exe;
+      return smiRows(stdout);
+    } catch {
+      // the next place, if any
+    }
   }
+  // Searched every place and none answered: no NVIDIA card, or no driver tool. One that worked before may answer again.
+  if (smiAt === undefined) smiAt = null;
+  return [];
 }
 
 /** The last good reading per process: on a busy PC tasklist can time out, and a loaded model then read as 0 MB. */

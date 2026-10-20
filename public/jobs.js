@@ -926,7 +926,7 @@ app.planJob = async goal => {
   $('#job-goal').value = goal;
   $('#job-new-form').requestSubmit();
 };
-// Linking other PCs lives in Nodes and memory (home.js opens it).
+// Linking other PCs lives in Network: connect PCs (home.js opens it).
 $('#job-pcs-link').addEventListener('click', () => {
   $('#jobs').close();
   app.openPcs();

@@ -143,8 +143,16 @@ function appNewFault(text) {
   $('#applock-new-fault').textContent = text;
   $('#applock-new-fault').hidden = !text;
 }
+/** The new-PIN window's auto-lock minutes: the choices Settings offers, less Never; 15 unless one is set. */
+function fillAppIdle() {
+  const v = appLockUi.view;
+  const box = $('#applock-idle');
+  box.replaceChildren(...(v?.idleChoices ?? [5, 10, 15, 30, 60]).filter(m => m > 0).map(m => el('option', { value: String(m), text: String(m) })));
+  box.value = String(v?.idleMinutes > 0 ? v.idleMinutes : 15);
+}
 function openAppLockNew() {
   appNewFault('');
+  fillAppIdle();
   $('#applock-pin').value = '';
   $('#applock-pin2').value = '';
   $('#applock-agree').checked = false;
@@ -157,7 +165,7 @@ $('#applock-new-form').addEventListener('submit', async e => {
   if (!$('#applock-agree').checked) return appNewFault('Tick "I confirm if I lose my pin I will be locked out" first: without the PIN the app does not open.');
   $('#applock-save').disabled = true;
   try {
-    await api('/api/applock', { action: 'set', pin: $('#applock-pin').value, pin2: $('#applock-pin2').value, agree: true });
+    await api('/api/applock', { action: 'set', pin: $('#applock-pin').value, pin2: $('#applock-pin2').value, agree: true, idleMinutes: Number($('#applock-idle').value) });
     $('#applock-pin').value = '';
     $('#applock-pin2').value = '';
     location.reload();
@@ -196,6 +204,9 @@ for (const type of ['pointerdown', 'keydown', 'wheel']) {
 }
 
 // ---- The App lock part of the Settings page ----
+
+/** sd-server takes no key (src/picturelock.ts): what the lock does and does not do for picture models, said plainly. */
+const PICTURE_WORDS = 'Picture models: while TOMLIN is locked, a picture model you loaded is unloaded once it has had nothing to draw for 2 minutes (a linked PC drawing here loads one for its pictures, kept 10 minutes after its last one). While TOMLIN is open, a loaded picture model can be used by any program on this PC: its runner takes no key, so TOMLIN cannot lock it. Chat models take a key.';
 
 app.appLockBox = () => {
   const v = appLockUi.view;
@@ -251,6 +262,7 @@ app.appLockBox = () => {
   return el('div', { class: 'notify-box' },
     el('h3', { text: 'App lock' }),
     el('p', { class: 'hint', text: 'On. The padlock in the top bar locks TOMLIN at once; a restart or a new browser also starts locked. It locks the app, not the files on disk.' }),
+    el('p', { class: 'hint', text: PICTURE_WORDS }),
     field('Lock by itself', idle),
     field('Current app lock PIN (to change it or turn the lock off)', current),
     el('div', { class: 'team-actions' }, field('New app lock PIN', pin), field('The new PIN again', pin2)),

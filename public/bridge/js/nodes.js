@@ -66,7 +66,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
       load();
     } catch (er) { e.target.checked = !e.target.checked; e.target.disabled = false; say('The tick did not change: ' + er.message, true); }
   } }), ' Copy this project to my other PCs'));
-  if (!pcs.length) parts.push(h('p', { class: 'warn-line' }, '▲ No other PC is linked yet. In TOMLIN, Link another PC, then tick "Enable backups" on that PC (Nodes and memory, Sharing permissions).'));
+  if (!pcs.length) parts.push(h('p', { class: 'warn-line' }, '▲ No other PC is linked yet. In TOMLIN, Network: connect PCs, link another PC, then tick "Enable backups" on that PC (Network: connect PCs, Sharing permissions).'));
   if (!p) {
     for (const pc of pcs.filter(x => x.why)) parts.push(h('p', { class: 'muted node-why' }, '○ ' + pcLabel(pc.name, pc.where) + ': ' + pc.why + '.'));
     parts.push(status);

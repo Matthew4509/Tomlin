@@ -1,4 +1,4 @@
-// Updates from git (Nodes and memory, Update this install, Check git): the newest GitHub Release of TOMLIN's repo
+// Updates from git (This PC: models and updates, Update this install, Check git): the newest GitHub Release of TOMLIN's repo
 // (package.json `repository`) carries tomlin-<version>.zip and its signature beside it, tomlin-<version>.zip.sig, made
 // by npm run pack with the release key (tools/sign.ts). That key never ships: TOMLIN carries only its public half,
 // below, and a downloaded zip whose signature does not match it is never opened. A zip picked by hand (Check zip) is

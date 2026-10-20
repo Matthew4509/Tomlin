@@ -139,7 +139,7 @@ app.keepBox = () => {
       : el('p', { class: 'hint', text: 'No backups yet. One is made by itself before a new version first uses your data.' });
     box.replaceChildren(
       el('h3', { text: 'Your data and updates' }),
-      el('p', { class: 'hint', text: `Kept in ${k.home} (${keepMb(k.dataBytes)} of chats, pictures and settings, plus your downloaded models). An update keeps all of it: the new version finds this folder, backs your data up first and downloads nothing again. To update, use Update this install (on Nodes and memory): Check git or Check zip.` }),
+      el('p', { class: 'hint', text: `Kept in ${k.home} (${keepMb(k.dataBytes)} of chats, pictures and settings, plus your downloaded models). An update keeps all of it: the new version finds this folder, backs your data up first and downloads nothing again. To update, use Update this install (on This PC: models and updates): Check git or Check zip.` }),
       el('div', { class: 'team-actions' },
         el('button', { class: 'btn quiet', type: 'button', text: 'Update this install', onclick: () => app.openUpdateInstall?.() }),
         el('button', { class: 'btn quiet', type: 'button', text: 'Open the folder', onclick: () => api('/api/keep', { do: 'open' }).catch(err => (note.textContent = err.message)) }),
@@ -153,7 +153,7 @@ app.keepBox = () => {
             note.textContent = err.message;
           }
         } })),
-      el('p', { class: 'hint', text: 'Backups (the last 5 are kept; models are not in them). To keep one on a linked PC too: Nodes and memory, My local LLMs.' }),
+      el('p', { class: 'hint', text: 'Backups (the last 5 are kept; models are not in them). To keep one on a linked PC too: Network: connect PCs, My local LLMs.' }),
       list,
       ask,
       note);

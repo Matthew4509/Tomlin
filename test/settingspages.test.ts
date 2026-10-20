@@ -10,13 +10,13 @@ const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.u
 
 test('the Set up menu stays in the left panel on every page it opens, with that page marked', () => {
   const css = read('style.css');
-  for (const view of ['settings', 'models', 'nodes', 'staff', 'jobs', 'files']) {
-    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
+  for (const view of ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files']) {
+    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
     assert.ok(css.includes(`:not([data-view="${view}"])`), `${view}: the menu is not hidden there`);
   }
   assert.match(css, /\.rail-links \.link\[aria-current="page"\]/);
   const home = read('home.js');
-  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'staff', 'jobs', 'files'\];/);
+  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files'\];/);
   assert.match(home, /b\.setAttribute\('aria-current', 'page'\)/);
   // Settings itself is in the menu, so every page is one press from every other.
   assert.match(read('index.html'), /data-setup="settings"/);

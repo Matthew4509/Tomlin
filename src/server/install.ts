@@ -1,6 +1,6 @@
 // This PC's install, in My PC (the PC window): Repair install (src/repair.ts), Shortcut to desktop, and starting the
 // installed program (TOMLIN.exe) in place of a copy started from a folder. Start with Windows goes through /api/share, as
-// the tick in Nodes and memory does.
+// the tick in Network: connect PCs does.
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { startupDir, startupFileIn } from '../autostart.ts';

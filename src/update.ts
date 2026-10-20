@@ -318,7 +318,7 @@ export function updateSide(d: UpdateNodeDeps) {
   // The same version is taken too when it is other files (both build ids known and different): the build id says what
   // code each copy is, so one number held by two apps no longer stops the update.
   const why = (version: unknown, build?: unknown): string | null => {
-    if (!d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Nodes and memory).`;
+    if (!d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network: connect PCs).`;
     if (!d.restarts) return `TOMLIN on "${d.pcName()}" was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself. Install it there with Install TOMLIN.cmd (or start it with Start TOMLIN.cmd), then update it again.`;
     if (!isVersion(version)) return 'the update did not say its version.';
     if (newer(version, d.version)) return null;
@@ -523,7 +523,7 @@ export async function pushUpdate(w: Wire, o: { version: string; root: string; fi
 // ---- A TOMLIN zip uploaded on this PC ----
 
 /**
- * Why a TOMLIN zip uploaded under Nodes and memory (src/server/selfupdate.ts) cannot be this PC's next copy ('' when
+ * Why a TOMLIN zip uploaded under This PC: models and updates (src/server/selfupdate.ts) cannot be this PC's next copy ('' when
  * it can): its package.json, the key files missing from it, its build id; then this copy's version and build.
  */
 export function zipWhy(pkg: { name?: unknown; version?: unknown }, missing: string[], build: string, mine: string, mineBuild: string): string {

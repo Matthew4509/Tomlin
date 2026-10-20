@@ -16,6 +16,8 @@ export const DEFAULT_APP_IDLE = 0;
 export interface AppLockFile {
   salt: string;
   hash: string;
+  /** scrypt's N the hash was made with (src/lock.ts PIN_COST); a file from before 2.0.56 has none. */
+  cost?: number;
   idleMinutes: number;
 }
 

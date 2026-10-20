@@ -245,38 +245,65 @@ async function useModelOf(m) {
   await api('/api/settings', { pane: 'chat', model: m.model }).catch(() => undefined);
 }
 
-$('#team-open').addEventListener('click', async () => {
+// Staff (Home's Team, New chat's staff button): the Staff menu.
+$('#team-open').addEventListener('click', () => openStaffMenu());
+
+/** The Staff menu's Manage staff tile: how many are hired, and their names. */
+function drawMenu() {
+  const staff = team.data?.staff ?? [];
+  const names = staff.map(s => s.name);
+  $('#sm-count').textContent = !staff.length ? 'Nobody hired yet.'
+    : `${staff.length} hired: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ` and ${names.length - 6} more` : ''}.`;
+}
+
+/** Staff: hire and edit opens this: two tiles, Hire staff (a name, then Create) and Manage staff (See all staff). */
+async function openStaffMenu() {
+  fromMenu = true;
   teamFault(null);
   try {
-    await teamLoad();
+    team.data = await api('/api/staff');
   } catch (e) {
     teamFault(e.message);
   }
-  // The right side shows the person last edited (else the first); nobody yet: a line and Hire staff.
-  const staff = team.data?.staff ?? [];
-  const id = staff.some(s => s.id === editId) ? editId : staff[0]?.id;
-  if (id) return openProfile(id);
-  editId = '';
-  emptyEdit();
+  drawMenu();
+  showMode('menu');
   app.showAsPage(dlg, 'staff');
+  $('#sm-name').focus();
+}
+app.openStaffMenu = openStaffMenu;
+$('#sm-dice').addEventListener('click', () => app.randomName?.($('#sm-name')));
+$('#sm-hire').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#sm-name').value.trim().replace(/\s+/g, ' ');
+  $('#sm-name').value = '';
+  app.openHire({ page: true, name, fromMenu: true });
 });
+$('#sm-manage').addEventListener('click', () => app.seeAllStaff({ fromMenu: true }));
 
 // ---- The right side: one person's Edit Staff (picked with Edit on the left). Hiring is its own window (hire.js) ----
 
 let editId = '';
-// 'one': one person on the screen (them on the left, their settings on the right); 'all': See all staff.
+// 'menu': the Staff menu's two tiles; 'one': one person on the screen (them on the left, their settings on the right);
+// 'all': See all staff.
 let teamMode = 'one';
+// Reached from the Staff menu: Close goes back to the menu (from the menu itself, back to where it was opened from).
+let fromMenu = false;
 // The tab on the right of one person's page: 'look' (Look), 'staff' (Staff settings) or 'pc' (PC settings).
 let settingsTab = 'look';
 // The hire last opened with openProfile: opening someone else (or the window again) starts on their Look.
 let shownId = '';
 function showMode(mode) {
   teamMode = mode;
+  $('#staff-menu').hidden = mode !== 'menu';
   $('#staff-all').hidden = mode !== 'all';
   $('#staff-one').hidden = mode !== 'one';
-  $('#team-all').hidden = mode === 'all';
-  $('#team-title').textContent = mode === 'all' ? `All staff (${team.data?.staff.length ?? 0})` : 'Staff';
+  $('#team-all').hidden = mode !== 'one';
+  $('#team-hire').hidden = mode === 'menu';
+  $('#team-close').title = fromMenu && mode !== 'menu' ? 'Back to the Staff menu' : '';
+  // The title says which page this is (the buttons beside it are all plain, so none looks like the page you are on).
+  $('#team-title').textContent = mode === 'all' ? `All staff (${team.data?.staff.length ?? 0})` : mode === 'one' ? 'Edit staff' : 'Staff';
 }
+$('#team-close').addEventListener('click', () => (fromMenu && teamMode !== 'menu' ? openStaffMenu() : dlg.close()));
 function staffMode() {
   showMode('one');
   $('#staff-edit').scrollTop = 0;
@@ -354,7 +381,10 @@ hiddenRedraws.push(() => {
 });
 
 /** Opens the staff window with one person on its Edit Staff side (the pencil beside them in the left panel). */
-app.editStaff = id => openProfile(id);
+app.editStaff = id => {
+  fromMenu = false;
+  return openProfile(id);
+};
 
 // Choosing a person in "Who TOMLIN is" also picks the model they were given.
 $('#who').addEventListener('change', async e => {
@@ -416,8 +446,10 @@ async function openProfile(id) {
   if (matchMedia('(max-width: 760px)').matches) $('#staff-edit').scrollIntoView({ block: 'start' });
 }
 app.openProfile = openProfile;
-/** The staff window on See all staff (each with Edit), as a page: from the Models page's "downloaded" notice. */
-app.seeAllStaff = async () => {
+/** The staff window on See all staff (each with Edit), as a page: the Staff menu's Manage staff, Hire staff's See all
+ * staff, the Models page's "downloaded" notice. */
+app.seeAllStaff = async ({ fromMenu: menu = false } = {}) => {
+  fromMenu = menu;
   teamFault(null);
   try {
     team.data = await api('/api/staff');
@@ -755,7 +787,7 @@ function pcPicker(m, section) {
     if (here) body = el('p', { class: 'hint', text: `${first} works here now.` });
     else if (x.backupsOnly) body = el('p', { class: 'hint', text: 'Set to Backups only: it takes no staff.' });
     else if (shut) body = el('p', { class: 'hint', text: x.activity === 'owner' ? 'Its owner is using it just now: try again later.' : 'It is not answering just now: switch it on, then try again.' });
-    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It shares no ${m.kind === 'image' ? 'picture' : 'chat'} models with this PC: tick them on that PC (Nodes and memory), or send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
+    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It shares no ${m.kind === 'image' ? 'picture' : 'chat'} models with this PC: tick them on that PC (Network: connect PCs), or send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
     else {
       const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
       // Each model there says whether it fits there; one too big for that PC cannot be picked.
@@ -821,9 +853,11 @@ function drawEdit() {
   const roleSel = pick(d.roles, m.role, async v => {
     const to = d.roles.find(r => r.id === v);
     const had = [m.model, m.fallback].filter(Boolean).map(ref => brainName(m, ref));
-    if (!!to?.kind !== image && had.length) {
+    // Every role has a kind ('chat' or 'image'): only 'image' is a picture role.
+    const toImage = to?.kind === 'image';
+    if (to && toImage !== image && had.length) {
       const first = m.name.split(/\s+/)[0];
-      const ok = await askHere(roleAsk, `${to.name} is a ${to.kind ? 'picture' : 'chat'} role: ${first}'s ${image ? 'picture' : 'chat'} ${had.length > 1 ? 'models' : 'model'} (${had.join(', ')}) cannot ${to.kind ? 'draw' : 'chat'}, so ${had.length > 1 ? 'they come' : 'it comes'} off ${first}. You then give ${first} a ${to.kind ? 'picture' : 'chat'} model under Models.`, `Make ${first} ${/^[aeiou]/i.test(to.name) ? 'an' : 'a'} ${to.name}`, `Keep ${first} as ${role?.name ?? m.role}`, false);
+      const ok = await askHere(roleAsk, `${to.name} is a ${toImage ? 'picture' : 'chat'} role: ${first}'s ${image ? 'picture' : 'chat'} ${had.length > 1 ? 'models' : 'model'} (${had.join(', ')}) cannot ${toImage ? 'draw' : 'chat'}, so ${had.length > 1 ? 'they come' : 'it comes'} off ${first}. You then give ${first} a ${toImage ? 'picture' : 'chat'} model under Models.`, `Make ${first} ${/^[aeiou]/i.test(to.name) ? 'an' : 'a'} ${to.name}`, `Keep ${first} as ${role?.name ?? m.role}`, false);
       if (!ok) {
         roleSel.value = m.role;
         return;

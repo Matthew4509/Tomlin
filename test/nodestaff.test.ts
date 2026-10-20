@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RETIRED_NODE_HIRE, cleanShared, cleanStats, cleanTicks, modelRefusal, parseNodeWho, sharedList } from '../src/nodestaff.ts';
+import { RETIRED_NODE_HIRE, cleanShared, cleanStats, modelRefusal, parseNodeWho, sharedList } from '../src/nodestaff.ts';
 import { modelsOf, nowModel } from '../src/staff.ts';
 
 test('an old chat with a hire who lived on a linked PC is still recognised, and the retirement says the way on', () => {
@@ -27,25 +27,22 @@ test("a linked PC's meters are kept only as numbers and a short name", () => {
   assert.equal(cleanStats({ cpu: 3, gpu: { busy: -1 } })!.gpu!.busy, null);
 });
 
-test('a node shares only the models its owner ticked that are still on it', () => {
-  const onPc = ['a.gguf', 'b.gguf', 'sub/c.gguf'];
-  assert.deepEqual(cleanTicks(['b.gguf', 'gone.gguf', 'b.gguf', 7, 'sub/c.gguf'], onPc), ['b.gguf', 'sub/c.gguf']);
-  assert.deepEqual(cleanTicks('a.gguf', onPc), []);
+test('a node shares every model on it, nothing to tick', () => {
   const models = [{ id: 'a.gguf', name: 'A-9B', bytes: 5e9 }, { id: 'b.gguf', name: 'B-2B', bytes: 1e9 }, { id: 'sub/c.gguf', name: 'C', bytes: 2e9 }];
-  const list = sharedList(['sub/c.gguf', 'a.gguf', 'deleted.gguf'], { models, ctxOf: id => (id === 'a.gguf' ? 16384 : 8192), loaded: id => id === 'a.gguf', busy: () => true });
-  // In the PC's own order; a ticked model deleted since is left out; only a loaded model can be busy.
+  const list = sharedList({ models, ctxOf: id => (id === 'a.gguf' ? 16384 : 8192), loaded: id => id === 'a.gguf', busy: () => true, hidden: id => id === 'b.gguf' });
+  // In the PC's own order; only a loaded model can be busy; a hidden one is still lent, marked hidden.
   assert.deepEqual(list, [
     { id: 'a.gguf', name: 'A-9B', kind: 'chat', bytes: 5e9, ctx: 16384, loaded: true, busy: true },
+    { id: 'b.gguf', name: 'B-2B', kind: 'chat', bytes: 1e9, ctx: 8192, loaded: false, busy: false, hidden: true },
     { id: 'sub/c.gguf', name: 'C', kind: 'chat', bytes: 2e9, ctx: 8192, loaded: false, busy: false },
   ]);
-  assert.deepEqual(sharedList([], { models, ctxOf: () => 8192, loaded: () => true, busy: () => false }), []);
+  assert.deepEqual(sharedList({ models: [], ctxOf: () => 8192, loaded: () => true, busy: () => false }), []);
 });
 
 test('picture models can be shared too: listed after the chat models, with no context size', () => {
   const models = [{ id: 'dream', name: 'DreamShaper 8', bytes: 2e9, kind: 'image' as const }, { id: 'a.gguf', name: 'A-9B', bytes: 5e9, kind: 'chat' as const }];
-  const list = sharedList(['dream', 'a.gguf'], { models, ctxOf: () => 8192, loaded: id => id === 'dream', busy: id => id === 'dream' });
+  const list = sharedList({ models, ctxOf: () => 8192, loaded: id => id === 'dream', busy: id => id === 'dream' });
   assert.deepEqual(list.map(m => [m.id, m.kind, m.ctx, m.busy]), [['a.gguf', 'chat', 8192, false], ['dream', 'image', 0, true]]);
-  assert.deepEqual(cleanTicks(['dream', 'a.gguf'], ['a.gguf', 'dream']), ['dream', 'a.gguf']);
 });
 
 test("the host keeps only safe shapes of a node's shared models", () => {
@@ -70,11 +67,11 @@ test("the host keeps only safe shapes of a node's shared models", () => {
   assert.equal(cleanShared(Array.from({ length: 60 }, (_, i) => ({ id: `m${i}` }))).length, 40);
 });
 
-test('a linked PC may run a model only when it is ticked and still there; busy is said as busy (it waits and asks again)', () => {
-  const o = { ticked: ['a.gguf'], onPc: (id: string) => ({ 'a.gguf': 'A-9B', 'b.gguf': 'B-2B' } as Record<string, string>)[id] ?? null, busy: false, pcName: 'Worker PC' };
+test('a linked PC may run any model still on the node; busy is said as busy (it waits and asks again)', () => {
+  const o = { onPc: (id: string) => ({ 'a.gguf': 'A-9B', 'b.gguf': 'B-2B' } as Record<string, string>)[id] ?? null, busy: false, pcName: 'Worker PC' };
   assert.equal(modelRefusal('a.gguf', o), null);
-  assert.match(modelRefusal('b.gguf', o)!.error, /does not let other PCs use B-2B/);
-  assert.equal(modelRefusal('b.gguf', o)!.busy, undefined);
-  assert.match(modelRefusal('gone.gguf', { ...o, ticked: ['gone.gguf'] })!.error, /not on "Worker PC" any more/);
+  assert.equal(modelRefusal('b.gguf', o), null);
+  assert.match(modelRefusal('gone.gguf', o)!.error, /not on "Worker PC" any more/);
+  assert.equal(modelRefusal('gone.gguf', o)!.busy, undefined);
   assert.deepEqual(modelRefusal('a.gguf', { ...o, busy: true }), { error: 'A-9B is answering something else on "Worker PC" now.', busy: true });
 });

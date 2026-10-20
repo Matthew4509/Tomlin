@@ -1,4 +1,4 @@
-// Update this install (Nodes and memory): Check zip takes a TOMLIN zip uploaded from the page, with its .sig when it
+// Update this install (This PC: models and updates): Check zip takes a TOMLIN zip uploaded from the page, with its .sig when it
 // was picked too; Check git finds the newest GitHub Release of TOMLIN's repo and downloads its zip, which must carry the
 // release signature (src/release.ts). A hand-picked zip whose signature is missing or fails is a warning the person may
 // override (Install anyway); a download is refused. Either way the zip's listing is checked, it is opened beside this

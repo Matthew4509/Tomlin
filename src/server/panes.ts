@@ -176,7 +176,14 @@ void loadShapes().catch(() => undefined);
 export const runOf = (s: Settings, id: string): RunOptions => {
   const r = s.run[id] as (Partial<RunOptions> & { cpuMoe?: boolean }) | undefined;
   // Saved before F8: the "expert weights in RAM" tick.
-  return { ctx: r?.ctx ?? DEFAULT_RUN.ctx, cache: r?.cache ?? DEFAULT_RUN.cache, place: r?.place ?? (r?.cpuMoe ? 'ram' : DEFAULT_RUN.place) };
+  // A guessing model counts only while it is still on this PC (and is not the model itself).
+  const draft = typeof r?.draft === 'string' && r.draft !== id && chatModels.path(r.draft) ? r.draft : '';
+  return { ctx: r?.ctx ?? DEFAULT_RUN.ctx, cache: r?.cache ?? DEFAULT_RUN.cache, place: r?.place ?? (r?.cpuMoe ? 'ram' : DEFAULT_RUN.place), ...(draft ? { draft } : {}) };
+};
+/** The guessing model's file and its own context cache (0 with none): counted wherever the model's memory is. */
+const draftBytes = (run: RunOptions) => {
+  const d = run.draft ? chatModels.list().find(m => m.id === run.draft) : undefined;
+  return d ? d.bytes + contextBytes(d.id, { ...run, draft: '' }) : 0;
 };
 
 /** Graphics cards with memory of their own that chat can use now (CUDA: NVIDIA only); none when Run on is CPU. */
@@ -197,7 +204,9 @@ export function cleanRun(raw: unknown): RunOptions {
   const ctx = CONTEXTS.includes(Number(r.ctx)) ? Number(r.ctx) : DEFAULT_RUN.ctx;
   const cache = r.cache === 'q8_0' || r.cache === 'q4_0' ? r.cache : 'f16';
   const place = r.place === 'card' || r.place === 'ram' || r.place === 'auto' ? r.place : r.cpuMoe === true ? 'ram' : 'auto';
-  return { ctx, cache, place };
+  // A guessing model: another chat model on this PC, by its id; anything else is none.
+  const draft = typeof r.draft === 'string' && r.draft && chatModels.path(r.draft) ? r.draft : '';
+  return { ctx, cache, place, ...(draft ? { draft } : {}) };
 }
 
 /** Bytes the context cache takes for this model and options (0 when its shape is unknown). */
@@ -213,7 +222,7 @@ export function chatList() {
     const shape = shapes.get(m.id);
     // What each context size costs in memory, for the settings hint (only sizes the model was trained for, and 8k).
     const cost = shape ? Object.fromEntries((['f16', 'q8_0', 'q4_0'] as const).map(c => [c, Object.fromEntries(CONTEXTS.filter(n => n <= Math.max(8192, shape.trainedContext || 8192)).map(n => [n, Math.round(cacheBytes(shape, n, c))]))])) : null;
-    return { id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes, where: m.where, fit: fit(m.bytes + contextBytes(m.id, run), 'chat'), run, trained: shape?.trainedContext ?? null, moe: (shape?.experts ?? 0) > 0, places: placesHere(m.id), cost, reading: readSpeedsNow()[m.id] ?? null };
+    return { id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes, where: m.where, fit: fit(m.bytes + contextBytes(m.id, run) + draftBytes(run), 'chat'), run, trained: shape?.trainedContext ?? null, moe: (shape?.experts ?? 0) > 0, places: placesHere(m.id), cost, reading: readSpeedsNow()[m.id] ?? null };
   });
 }
 
@@ -250,7 +259,7 @@ export function chatPlace(id: string): runnersOf.Place {
   if (!entry) return { error: `The model ${id} is not in the models folder any more. Pick another.` };
   const s = store.peek();
   const run = s ? runOf(s, id) : { ...DEFAULT_RUN };
-  return runnersOf.place(id, shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), chatNeed(entry.bytes, contextBytes(id, run)), freemem(), runnerLooks());
+  return runnersOf.place(id, shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), chatNeed(entry.bytes + draftBytes(run), contextBytes(id, run)), freemem(), runnerLooks());
 }
 
 /** The memory a chat model is expected to need: its file and context cache, a tenth more, and 0.8 GB for the runner. */
@@ -283,6 +292,9 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   const ready = async (port: number) => (await fetch(`http://127.0.0.1:${port}/health`)).ok;
   const run = runOf(s, id);
   runnerRun.set(runner, run);
+  const draftPath = run.draft ? chatModels.path(run.draft) : null;
+  const started = { ...run, draft: draftPath ?? undefined };
+  const draftName = draftPath ? draftPath.split(/[\\/]/).pop()!.replace(/\.gguf$/i, '') : '';
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
   const notes = [
     asked !== 'cpu' ? missingCardRunner('llama', hardware.gpus, d => runtimes.installed('llama', d)) : '',
@@ -290,6 +302,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     run.ctx !== DEFAULT_RUN.ctx || run.cache !== 'f16' ? `Context ${run.ctx.toLocaleString()} tokens${run.cache !== 'f16' ? `, ${run.cache} cache` : ''}.` : '',
     asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
     beside.length ? `Loaded beside ${runnersOf.namesOf(beside)}.` : '',
+    draftName ? `Guessing model: ${draftName} (it guesses the next few words, this model checks them; the answer is this model's own).` : '',
   ].filter(Boolean);
   const loading = runner.connect({
     model: id,
@@ -298,8 +311,8 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     threads,
     devices: devicesFor('llama', asked),
     expectedSeconds: expected,
-    build: device => ({ exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, false, run, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
-    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, true, run, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
+    build: device => ({ exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
+    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
     why: whyItFailed,
     note: notes.join(' ') || undefined,
   });

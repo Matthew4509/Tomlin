@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, LOUNGE_SPOTS, phasesByWho, purseOf, roomsOf, SHOP, shopView, trophyOf, undoAward, winnerOf, type Bought } from '../src/home.ts';
+import { chatOfficeKind, officeEventOf, OfficeFeed, awardBehind, awardPeriods, buy, cleanAwards, cleanBought, DOING_WORDS, doingOf, LOUNGE_SPOTS, phasesByWho, purseOf, roomsOf, SHOP, shopView, trophyOf, undoAward, winnerOf, type Bought } from '../src/home.ts';
 import { ByStaff } from '../src/meter.ts';
 
 const at = (o: Partial<Parameters<typeof doingOf>[0]>) => doingOf({ state: 'on', away: false, remoteBusy: false, phase: null, picture: false, job: false, ...o });
@@ -331,4 +331,60 @@ test('the office page reads what is bought from the server, and says On a break 
   assert.match(js, /shopTiles, fullSaid\)/);
   // Every lounge place the server names is a REST spot on the page (and the window).
   for (const spot of [...Object.keys(LOUNGE_SPOTS), 'window']) assert.match(js, new RegExp(`id: '${spot}'`), spot);
+});
+
+// ---- The office chat (public/banter.js says it): what a project's job and a saved answer tell it ----
+
+test('a job event becomes an office event for the hire who did it; nothing for the rest', () => {
+  const at = '2026-10-21T01:00:00.000Z';
+  assert.deepEqual(officeEventOf({ at, type: 'step', n: 2, title: 'Write the contact page.', role: 'coder', worker: 'w', notes: [] }, null), { kind: 'step-start', role: 'coder', n: 2, step: 'Write the contact page' });
+  assert.deepEqual(officeEventOf({ at, type: 'result', n: 2, role: 'coder', files: [], flags: 0, worker: 'w', tries: 1, notes: [] }, null), { kind: 'step-done', role: 'coder', n: 2 });
+  assert.deepEqual(officeEventOf({ at, type: 'failed', n: 2, role: 'coder', error: 'The model stopped answering.' }, null), { kind: 'step-failed', role: 'coder', n: 2 });
+  // Stopped by the user: its own kind, not a failure.
+  assert.deepEqual(officeEventOf({ at, type: 'failed', n: 2, role: 'coder', error: 'Stopped.' }, null), { kind: 'stopped', role: 'coder', n: 2 });
+  // The tests and the end of the job have no role: the last one who worked on the job says it.
+  assert.deepEqual(officeEventOf({ at, type: 'tests', ok: false, label: 'npm test' }, 'coder'), { kind: 'tests-failed', role: 'coder' });
+  assert.equal(officeEventOf({ at, type: 'tests', ok: true, label: 'npm test' }, 'coder'), null);
+  assert.deepEqual(officeEventOf({ at, type: 'saved', n: 4, files: [], auto: false, left: 0 }, 'writer'), { kind: 'job-done', role: 'writer' });
+  assert.equal(officeEventOf({ at, type: 'saved', n: 1, files: [], auto: false, left: 3 }, 'writer'), null);
+  assert.deepEqual(officeEventOf({ at, type: 'review', n: 1, ok: false, problems: 3, notes: [] }, 'coder'), { kind: 'bug', role: 'reviewer', n: 1, problems: 3 });
+  assert.equal(officeEventOf({ at, type: 'review', n: 1, ok: true, problems: 0, notes: [] }, 'coder'), null);
+  assert.equal(officeEventOf({ at, type: 'plan', steps: 3, worker: 'w' }, null), null);
+});
+
+test('a saved answer is an answer, a picture or a failed turn', () => {
+  assert.equal(chatOfficeKind({ role: 'assistant', content: 'Hi', at: '' }), 'answered');
+  assert.equal(chatOfficeKind({ role: 'assistant', content: '', at: '', picture: { output: 'a.png', prompt: 'a cat' } }), 'picture');
+  assert.equal(chatOfficeKind({ role: 'assistant', content: 'It needs 23 GB', at: '', failed: true }), 'chat-failed');
+  assert.equal(chatOfficeKind({ role: 'user', content: 'Hi', at: '' }), null);
+});
+
+test('the office feed keeps each hire\'s last few events for two minutes, numbered so the page tells each once', () => {
+  const feed = new OfficeFeed();
+  const t = Date.parse('2026-10-21T01:00:00.000Z');
+  feed.add('tessa', { kind: 'answered', chat: 'Kitchen quote' }, t);
+  feed.add('owen', { kind: 'step-start', n: 0, job: 'Shop site', step: 'Plan it' }, t + 1000);
+  feed.add('tessa', { kind: 'picture', chat: 'Logo ideas' }, t + 2000);
+  const tessa = feed.forWho('tessa', t + 3000);
+  assert.deepEqual(tessa.map(e => e.kind), ['answered', 'picture']);
+  assert.ok(tessa[0].seq < tessa[1].seq);
+  assert.equal(tessa[0].at, new Date(t).toISOString());
+  assert.deepEqual(feed.forWho('owen', t + 3000).map(e => e.job), ['Shop site']);
+  // Two minutes on: gone. At most five kept per hire.
+  assert.deepEqual(feed.forWho('tessa', t + 123_000), []);
+  for (let i = 0; i < 9; i++) feed.add('rae', { kind: 'step-done', n: i, job: 'J' }, t + i);
+  assert.deepEqual(feed.forWho('rae', t + 10).map(e => e.n), [4, 5, 6, 7, 8]);
+  // The job's last role is remembered for the events that carry none.
+  feed.worked('job1', 'coder');
+  assert.equal(feed.lastRole('job1'), 'coder');
+  assert.equal(feed.lastRole('job2'), null);
+});
+
+test('the office page loads the banter and keeps its chat setting on this PC', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.ok(html.indexOf('src="banter.js"') > 0 && html.indexOf('src="banter.js"') < html.indexOf('src="office.js"'), 'banter.js before office.js');
+  const js = await readFile(new URL('../public/office.js', import.meta.url), 'utf8');
+  for (const words of ['Thoughts', 'Show general chit-chat', 'Everything', 'Work only']) assert.ok(js.includes(words), words);
+  assert.match(js, /officeBanter/);
+  assert.match(js, /localStorage/);
 });

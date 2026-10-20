@@ -32,6 +32,7 @@ import { handInPicture, placesGet, placesPost } from './server/places.ts';
 import { costsGet, costsPost, pcPhotoFile } from './server/costs.ts';
 import { queueGet, queuePost, startQueue } from './server/queue.ts';
 import { installGet, installPost } from './server/install.ts';
+import { runtimesGet, runtimesPost } from './server/runtimes.ts';
 import { selfUpdateGet, selfUpdatePost, takeZip } from './server/selfupdate.ts';
 import { BRIDGE_PATH, bridgeRoute, startBridge } from './server/bridge.ts';
 
@@ -85,8 +86,8 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet);
-const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost);
+const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet);
+const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost);
 
 const server = createServer(async (req, res) => {
   try {
@@ -136,7 +137,7 @@ const server = createServer(async (req, res) => {
     if (paneOff) return await unloadPane(paneOff, res);
 
     if (p === '/api/chat/doc') return void (await addDoc(req, res));
-    // Update this install: the body is a TOMLIN zip (Nodes and memory).
+    // Update this install: the body is a TOMLIN zip (This PC: models and updates).
     if (p === '/api/install/zip') return void (await takeZip(req, res));
     const b = await body(req);
     const route = POST.get(p);

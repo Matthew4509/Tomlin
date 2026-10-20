@@ -407,7 +407,7 @@ test('half-come updates are not kept for ever: old ones go at start, another ver
   assert.deepEqual(left(), ['.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'another version coming in clears the 2.0.31 one');
 });
 
-// A TOMLIN zip uploaded under Nodes and memory (src/server/selfupdate.ts): only a whole, newer TOMLIN is taken.
+// A TOMLIN zip uploaded under This PC: models and updates (src/server/selfupdate.ts): only a whole, newer TOMLIN is taken.
 test('zipWhy takes a whole newer TOMLIN, or the same version with other files, and nothing else', () => {
   const b1 = 'a'.repeat(16);
   const b2 = 'b'.repeat(16);

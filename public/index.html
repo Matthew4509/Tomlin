@@ -77,10 +77,10 @@
       <li><button class="link" type="button" data-setup="settings"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>Settings: colours, alerts, lock, data</button></li>
       <li><button class="link" type="button" data-setup="staff"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Staff: hire and edit</button></li>
       <li><button class="link" type="button" data-setup="models"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Add a model</button></li>
-      <li><button class="link" type="button" data-setup="nodes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg>Nodes and memory</button></li>
+      <li><button class="link" type="button" data-setup="nodes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg>Network: connect PCs</button></li>
+      <li><button class="link" type="button" data-setup="thispc"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC: models and updates</button></li>
       <li><button class="link" type="button" data-setup="jobs"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Jobs</button></li>
       <li><button class="link" type="button" data-setup="files"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>Files and blog writer</button></li>
-      <li><button class="link" type="button" data-setup="pcs"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Link another PC</button></li>
     </ul>
   </details>
 </nav>
@@ -144,7 +144,7 @@
 <section class="nodes" id="nodes" aria-labelledby="nodes-title">
   <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
   <div class="home-head">
-    <h2 id="nodes-title">Nodes and memory</h2>
+    <h2 id="nodes-title">Network: connect PCs</h2>
   </div>
   <div class="fault" id="node-fault" role="alert" hidden></div>
   <section class="home-part node-switch" aria-labelledby="node-on-label">
@@ -157,13 +157,13 @@
         <div class="field"><span>Setup Code</span><div class="node-code-row"><code class="node-code" id="node-code"></code><button class="link" type="button" id="node-code-new">New code</button></div></div>
       </div>
       <div id="node-code-ask" hidden></div>
+      <p class="hint" id="node-link-paused" role="status" hidden></p>
       <fieldset class="pick-set node-share" aria-describedby="node-share-about">
-        <legend>Models to share with others</legend>
-        <p class="hint" id="node-share-about">You can select which models connected PCs can see. Additional models can be pushed from host to allow for remote updating.</p>
+        <legend>Models other PCs can use</legend>
+        <p class="hint" id="node-share-about">Every model on this PC can be used by the PCs linked to it, one at a time. Additional models can be pushed from host to allow for remote updating.</p>
         <p class="node-busy" id="node-busy" role="status" hidden></p>
-        <label class="check node-share-all"><input type="checkbox" id="node-share-all"> Select all</label>
         <div class="node-share-list" id="node-share-list"></div>
-        <div class="team-actions"><button class="btn primary" type="button" id="node-share-save" hidden>Save the list</button><span class="hint" id="node-share-line" role="status"></span></div>
+        <p class="hint" id="node-share-line" role="status"></p>
       </fieldset>
       <fieldset class="pick-set node-allow">
         <legend>Sharing permissions:</legend>
@@ -171,8 +171,8 @@
         <div class="node-allow-grid">
           <div><label class="check"><input type="checkbox" data-allow="pull"> Sharing of models</label><p class="hint">Allows others on the network to pull (the models ticked above) across the network.</p></div>
           <div><label class="check"><input type="checkbox" data-allow="backup"> Enable backups</label><p class="hint">This is a local git, that backs up host's projects to this node.</p></div>
-          <div><label class="check"><input type="checkbox" data-allow="push"> Allow host to push models</label><p class="hint">Allows a host PC to remote install a model: it goes in this PC's models folder.</p></div>
           <div><label class="check"><input type="checkbox" data-allow="update"> Allow host to update TOMLIN remotely</label><p class="hint" id="node-restarts" hidden>This copy was not started by the installed TOMLIN or Start TOMLIN.cmd, so it cannot start a new version by itself: install it with Install TOMLIN.cmd, or start it with Start TOMLIN.cmd.</p></div>
+          <div><label class="check"><input type="checkbox" data-allow="tune"> Allow host to test and change model run settings</label><p class="hint">Lets a linked PC pick the Guessing model of a model here (for speed: the answers stay that model's own). Saved in this PC's settings, as if set here.</p><p class="hint ok" id="node-run-changes" role="status" hidden></p></div>
         </div>
         <p class="hint ok" id="node-updated" role="status" hidden></p>
         <p class="hint" id="node-kept" role="status"></p>
@@ -205,7 +205,7 @@
     </div>
   </section>
   <section class="home-part" id="node-link" aria-labelledby="node-others-title">
-    <h3 id="node-others-title">Other PCs</h3>
+    <h3 id="node-others-title">Find other PCs</h3>
     <p class="hint">On the other PC, tick <strong>Enable this PC as a node</strong>. Then find it here.</p>
     <div class="team-actions">
       <button class="btn primary" type="button" id="node-scan">Find PCs on my network</button>
@@ -221,11 +221,21 @@
         <button class="btn" type="submit">Link</button>
       </form>
     </details>
-    <h4>Linked</h4>
+  </section>
+  <section class="home-part" id="node-linked" aria-labelledby="node-linked-title">
+    <h3 id="node-linked-title">Linked PCs</h3>
     <div class="team-actions"><button class="btn" type="button" data-net>My local LLMs</button><span class="hint">Copy a model a linked PC shares, or keep a restore point there.</span></div>
     <div id="node-others-ask" hidden></div>
     <div class="node-tiles" id="node-others"></div>
+    <div class="team-actions"><button class="btn" type="button" id="node-update-all" disabled>Update all linked PCs</button><span class="hint" id="node-update-all-line" aria-live="polite"></span></div>
   </section>
+</section>
+
+<section class="nodes" id="thispc" aria-labelledby="thispc-title">
+  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <div class="home-head">
+    <h2 id="thispc-title">This PC: models and updates</h2>
+  </div>
   <section class="home-part" aria-labelledby="node-models-title">
     <div class="calc-head"><h3 id="node-models-title">Models on this PC</h3><button class="btn" type="button" data-calc>What can this PC run?</button></div>
     <p class="hint">List of models on this PC. Runs speed tests to see what works well.</p>
@@ -235,7 +245,7 @@
   <section class="home-part" id="node-install" aria-labelledby="node-install-title">
     <h3 id="node-install-title">Update this install</h3>
     <p class="hint" id="node-install-line"></p>
-    <p class="hint"><b>Check git</b> looks for a newer TOMLIN on GitHub and downloads it; it must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, with no internet needed: pick it together with its signature, tomlin-&lt;version&gt;.zip.sig (hold Ctrl to pick both); without one, or with one that fails, you are warned first. Either way TOMLIN checks it is whole and newer, starts it once as a test, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs from here.</p>
+    <p class="hint"><b>Check git</b> looks for a newer TOMLIN on GitHub and downloads it; it must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, with no internet needed: pick it together with its signature, tomlin-&lt;version&gt;.zip.sig (hold Ctrl to pick both); without one, or with one that fails, you are warned first. Either way TOMLIN checks it is whole and newer, starts it once as a test, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs on <b>Network: connect PCs</b> (Update all linked PCs).</p>
     <div class="team-actions">
       <button class="btn primary" type="button" id="node-install-git">Check git</button>
       <label class="btn node-install-pick" id="node-install-pick">Check zip<input type="file" id="node-install-file" accept=".zip,.sig,application/zip" multiple hidden></label>
@@ -250,11 +260,9 @@
         <li>Bring both files to this PC, in one folder.</li>
         <li>Press <b>Check zip</b>, pick the zip and its .sig together (hold Ctrl), then <b>Update now</b>. No internet is needed for this.</li>
         <li>Or wholly by hand: close TOMLIN, unzip the zip into a new folder beside this one (not over the top of it), and run <b>Install TOMLIN.cmd</b> in the new folder. Your staff, chats and models stay where they are: the new version finds them.</li>
-        <li>Linked PCs: <b>Update all linked PCs</b> below, or the same steps on each PC.</li>
+        <li>Linked PCs: <b>Update all linked PCs</b> on <b>Network: connect PCs</b>, or the same steps on each PC.</li>
       </ol>
     </details>
-    <h4>Linked PCs</h4>
-    <div class="team-actions"><button class="btn" type="button" id="node-update-all" disabled>Update all linked PCs</button><span class="hint" id="node-update-all-line" aria-live="polite"></span></div>
   </section>
 </section>
 
@@ -413,7 +421,7 @@
     </ul>
 
     <h4 id="help-staff">2. Hiring staff</h4>
-    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role and level), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Hire staff</b> (Staff: hire and edit, in the left panel or under Set up) is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards (<b>Add new</b>, beside its search, opens Add a model), each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
+    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role and level), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Staff: hire and edit</b> (in the left panel or under Set up) opens the Staff menu: <b>Hire staff</b> (type a name or roll the dice, then Create) or <b>Manage staff</b> (everyone, each with Edit). <b>Hire staff</b> is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards (<b>Add new</b>, beside its search, opens Add a model), each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
     <figure class="help-shot"><img src="help-hire.webp" alt="Hire staff: the profile and the roles on the left; Assign a PC with My PC and Worker PC, then the model cards, then All models with Copy to My PC" width="1000" height="690" loading="lazy"><figcaption>A coder on this PC. All models, at the foot, lists the models your other PCs have and this one has not.</figcaption></figure>
     <ul class="help-tips">
       <li><strong>The role</strong>: Default, Coder, Writer, Project manager, Graphic designer or Artist. Default is the model as it is, with nothing of ours sent (no instructions, no memory, the model's own settings), as in a plain chat window. An artist or a graphic designer draws with a picture model.</li>
@@ -426,6 +434,7 @@
     <h5 id="help-office">The office (Staff overview)</h5>
     <figure class="help-shot"><img src="help-office.webp" alt="The office full screen: staff at their desks typing and drawing, one thinking at the boardroom table, the lounge, the kitchen and the beach, with the Look after the team shop beside it" width="1080" height="752" loading="lazy"><figcaption>Watch: the office full screen, with the shop beside it. Here the boardroom and the lounge have been furnished.</figcaption></figure>
     <p class="hint">On the right of the chat, <b>Chats | Tools | Staff overview</b> (Home's right panel has <b>Waiting for you | Staff overview</b>): Staff overview shows each hire with their role, the model they run and on which PC, how they are now and what they are doing, with Talk and Edit. At its top is the office: each hire as a little person at their PC's desk while their model loads, reads, thinks, types or draws (a long think, over 15 seconds, goes to the boardroom once it has a table; until then it stays at the desk). With nothing to do they stay at the desk for 2 minutes, then stand up and stretch in the room, after 5 minutes go to the kitchen or the lounge (to what it has), and after 10 minutes take a break in a deck chair on the beach if one is free (On a break, a green cup). While their PC is off they are out of the front door on holiday, lying on a towel on the beach (PC off, a grey power mark), and the PC sits in the far corner in cobwebs. Press a person (or their card) to follow them; in a chat it follows the person you are talking to. <b>Watch</b> opens it full screen (Esc closes it). Press a person to see what they are holding. A PC linked while you watch is carried in and set up by IT (and carried out when removed); a project step brings a folder of work to the desk; up to two people with nothing to do join a long think in the boardroom, one to each chair left over; someone whose PC is in use by its owner is away: in the lounge (by its window while it is empty), asleep in the armchair, or helping a brainstorm.</p>
+    <p class="hint"><b>Thoughts</b> (under the small office, and beside the office in Watch, above the shop) is the office chat: a line from a hire each time what they do really changes (an answer started in a chat, a model loading, a step started, finished or stopped, the tests failing, a job done, a picture drawn, their PC off or back on), and on top of that some banter. Each hire has one of six characters for good (pun lover, dry wit, sunny, quiet one, tired lead, bold) with their own lines, and the others sometimes answer. Nothing is made up and no AI model is asked: the banter is fixed lines about what TOMLIN measured. <b>Chat</b> in Watch's header picks <b>Everything</b>, <b>Work only</b> (only what they do) or <b>Off</b>; under the small office, <b>Show general chit-chat</b> switches between Everything and Work only. Kept on this PC.</p>
     <p class="hint">In the full view, <b>Award employee of the month</b> gives it to whoever wrote the most tokens this month (their portrait goes on the lounge wall, with a 20% off voucher; the frame opens who won and this month's tokens by person). <b>Buy them pizza</b> brings a pizza to the kitchen for everyone with nothing to do. <b>Look after the team</b>, beside the office (under it on a phone), is the shop: picture cards, each with its price, a tick once bought, and how many tokens are still to go. It spends the tokens your staff have written ("To spend", under the title). <b>Treat the team</b>: <b>Pizza</b> (free), <b>Donuts</b>, <b>Sandwiches</b>, <b>Ice creams</b> and <b>Cake</b> come to the kitchen table, <b>Coffee</b> is delivered: a courier brings each of them a cup, wherever they are. <b>Energy drinks</b> come from the kitchen's vending machine (click the machine; they have no card, and they are free, like pizza): everyone in gets a can and for a minute walks and talks three times as fast. <b>Improve the office</b>: pet rocks, rubber ducks and cacti for the desks (each with a name: point at one to read it); the boardroom and the lounge start empty in every office and are bought piece by piece, each once: the boardroom table (a long think goes to it), its chairs a pair at a time up to six (the thinkers sit first; each chair left over seats a helper), the whiteboard, indoor plants, a wall clock and a water cooler; the lounge's armchair, bookcase, sofa, TV, gym equipment and arcade machine (each a place to rest; click the arcade machine to play Tetris, Lunar Lander or Moon Rover yourself); and up to six deck chairs with umbrellas on the beach, for breaks, a beach volleyball net (staff with nothing to do for 5 minutes play, two a side) and an inflatable flamingo on the sea. Buy everything and treat the team to every treat once, and a trophy case appears in the corridor. This week's leaderboard is under the office.</p>
 
     <h4 id="help-saving">3. Saving your work</h4>
@@ -447,25 +456,25 @@
     <p class="hint">Another PC in your home can lend its models and its memory: a node. Your staff, their memory and their chats stay on this PC; the node only loads the model and answers (or draws).</p>
 
     <h4 id="help-nodes">4. Adding a node</h4>
-    <p class="hint">On the other PC, install TOMLIN, then <b>Set up</b>, <b>Nodes and memory</b>, tick <b>Enable this PC as a node</b> (a node must have the app lock, so it asks for that PIN first). Give it a name, tick the models to share with others (chat models answer, picture models draw) and press Save the list. Its <b>Setup Code</b> is shown there.</p>
+    <p class="hint">On the other PC, install TOMLIN, then <b>Set up</b>, <b>Network: connect PCs</b>, tick <b>Enable this PC as a node</b> (a node must have the app lock, so it asks for that PIN first). Give it a name. Every model on it can be used by the PCs linked to it (chat models answer, picture models draw): nothing to tick. Several PCs can link to one node; it answers one at a time. Its <b>Setup Code</b> is shown there.</p>
     <figure class="help-shot"><img src="help-node.webp" alt="Nodes and memory on the node: Enable this PC as a node ticked, Node name Worker PC, the setup code, the models to share, the sharing permissions and this PC's address" width="1003" height="680" loading="lazy"><figcaption>On the node: its name, setup code, the models it shares and what linked PCs may do.</figcaption></figure>
-    <p class="hint">Then on this PC: Nodes and memory (or <b>Link another PC</b>), <b>Find PCs on my network</b>, and type the setup code beside the PC it finds. Not found? <b>Not found? Type its address instead</b> takes the address shown on the node ("This PC's address"); on the node, <b>Can other PCs reach this one?</b> Check says whether its network type or firewall is in the way, and gives the lines to fix it. <b>Also ask for a PIN</b> on the node adds a link PIN (never its app lock PIN) to type as well. The link is encrypted and the node keeps no history of the work, except a finished answer this PC has not collected yet (kept encrypted for up to 3 days) and token counts for each project, by its name.</p>
+    <p class="hint">Then on this PC: <b>Network: connect PCs</b>, <b>Find PCs on my network</b>, and type the setup code beside the PC it finds. Not found? <b>Not found? Type its address instead</b> takes the address shown on the node ("This PC's address"); on the node, <b>Can other PCs reach this one?</b> Check says whether its network type or firewall is in the way, and gives the lines to fix it. <b>Also ask for a PIN</b> on the node adds a link PIN (never its app lock PIN) to type as well. The link is encrypted and the node keeps no history of the work, except a finished answer this PC has not collected yet (kept encrypted for up to 3 days) and token counts for each project, by its name.</p>
     <figure class="help-shot"><img src="help-linked.webp" alt="Linked: two cards, Worker PC with its memory bar, the models it lets this PC use and its speed, and Backup PC with Backups only ticked" width="1003" height="630" loading="lazy"><figcaption>Linked PCs on this PC: what each has loaded, its memory, and what it lets this PC use.</figcaption></figure>
-    <p class="hint">Then hire staff on this PC as usual and pick the node under Assign a PC and one of its models under Choose a model (or change it later in Edit Staff): each reads like Qwen3.5-9B on "Worker PC". An artist picks one of its picture models the same way. Two PCs can use the same node: while its model works for one, the other waits. On the node, Nodes and memory says which models linked PCs are using now, and someone at the node is asked first ("Using this can impact connected users", I agree) before using one of them. Staff hired on a node and lent out are retired: their old chats are kept to read.</p>
-    <p class="hint">What linked PCs may do on a node is ticked there, under <b>Sharing permissions</b> (each tick asks the app lock PIN; Allow all ticks all four): <b>Sharing of models</b> lets them copy the shared models, <b>Enable backups</b> lets them back their projects up there and keep restore points (6. Backups), <b>Allow host to push models</b> lets them install one of their models there (shared from then on), <b>Allow host to update TOMLIN remotely</b> lets a newer TOMLIN be installed there (7. Models and software).</p>
+    <p class="hint">Then hire staff on this PC as usual and pick the node under Assign a PC and one of its models under Choose a model (or change it later in Edit Staff): each reads like Qwen3.5-9B on "Worker PC". An artist picks one of its picture models the same way. Two PCs can use the same node: while its model works for one, the other waits. On the node, Network: connect PCs says which models linked PCs are using now, and someone at the node is asked first ("Using this can impact connected users", I agree) before using one of them. Staff hired on a node and lent out are retired: their old chats are kept to read.</p>
+    <p class="hint">What linked PCs may do on a node is ticked there, under <b>Sharing permissions</b> (each tick asks the app lock PIN; Allow all ticks all four): <b>Sharing of models</b> lets them copy the shared models, <b>Enable backups</b> lets them back their projects up there and keep restore points (6. Backups), <b>Allow host to update TOMLIN remotely</b> lets a newer TOMLIN be installed there (7. Models and software), <b>Allow host to test and change model run settings</b> lets them pick the Guessing model of a model there, on that PC's card under Linked PCs. Sending a model, or the NVIDIA runner, to a node needs no tick: any linked PC may, while nobody is using that PC.</p>
 
     <h4 id="help-move">5. Moving staff between PCs</h4>
     <p class="hint">Drag a person onto another desk in the office, or drag them from the left panel onto a PC, to move them. The <b>Move</b> window opens: the software they run on there (their own model, when that PC has it), and they carry their box over to the new desk. A PC that is off or in use by its owner does not take a drop; nor, in the left panel, does a Backups only PC.</p>
     <figure class="help-shot help-shot-narrow"><img src="help-move.webp" alt="Move Maya to Worker PC: Qwen3.5-9B picked; a line says Qwen3.5-35B-A3B is not offered because it needs about 27 GB and Worker PC has 16 GB of RAM; Send Qwen3.5-2B to Worker PC; Move them" width="480" height="354" loading="lazy"><figcaption>A model too big for that PC is not offered, and the window says why.</figcaption></figure>
     <p class="hint"><b>Only a model that fits that PC's memory can be picked.</b> TOMLIN works out what each model needs (its file, its working memory and the runner) and compares it with that PC's memory as a whole: its RAM, with 3 GB kept for Windows, and the memory of its graphics cards (every card counts; a model is spread over them and the RAM). The need is an estimate and runs a little high, so a model is called too big only when it needs more than all that memory and 5% on top. A model that will not fit is shown greyed with what it needs, and named under the list; one that only just fits says "tight fit". When none fits, Move them is not offered: send a smaller model there first, or move them to a PC with more memory. TOMLIN checks again when Move them is pressed, so a move never goes through to a PC that cannot hold the model. A PC whose memory is not known (while it is off, for example) is not checked.</p>
     <p class="hint"><b>A yellow (!) on a PC's card</b> in the left panel means its RAM is 95% in use or more right now, so a model may not load there until one is unloaded or other programs are closed (hold the pointer on it for the figures). The same (!) says when a linked PC runs an older TOMLIN.</p>
-    <p class="hint">When that PC has not got their model, <b>Send &lt;model&gt; to &lt;PC&gt;</b> sends a copy first (the node must tick Allow host to push models), and My local LLMs shows it go.</p>
+    <p class="hint">When that PC has not got their model, <b>Send &lt;model&gt; to &lt;PC&gt;</b> sends a copy first, and My local LLMs shows it go.</p>
 
     <h4 id="help-backups">6. Adding backups</h4>
     <p class="hint">Your other PCs can keep copies of your projects and of TOMLIN's own data, over your home network, with no internet needed.</p>
     <ul class="help-tips">
-      <li><strong>Let a PC keep backups</strong>: on that PC, Nodes and memory, Sharing permissions, tick <b>Enable backups</b>.</li>
-      <li><strong>Backups only</strong>: tick it on a linked PC's card on this PC (Nodes and memory, Linked). No staff, chats, jobs or pictures run there, and no model is copied to it; it is first in line for project backups. Its card says what it keeps and how much disk is free.</li>
+      <li><strong>Let a PC keep backups</strong>: on that PC, Network: connect PCs, Sharing permissions, tick <b>Enable backups</b>.</li>
+      <li><strong>Backups only</strong>: tick it on a linked PC's card on this PC (Network: connect PCs, under the linked PCs). No staff, chats, jobs or pictures run there, and no model is copied to it; it is first in line for project backups. Its card says what it keeps and how much disk is free.</li>
       <li><strong>Your workspace</strong> is the folder TOMLIN keeps its own work in: every project made with Lets create a project, and the files your staff write and save. It is inside TOMLIN's data folder unless you chose another one (Set up, Files and blog writer, Workspace folder). The whole workspace is backed up with no tick: everything in it except <code>.git</code> and <code>node_modules</code> folders.</li>
       <li><strong>Project backups</strong>: your workspace, and each Bridge project you tick <b>Copy this project to my other PCs</b> in its git window (8. Git), go to your linked PCs that have Enable backups ticked every 10 minutes when something changed, and only what changed is sent; each PC keeps the older versions too. In My local LLMs, <b>Back up projects now</b> sends them at once and <b>Bring projects back</b> puts a copy in a new folder, never over the project.</li>
       <li><strong>Restore points</strong> (your chats, staff and settings): My local LLMs, <b>Back up to it now</b> beside a PC keeps one there (the newest 3 are kept); <b>Restore points kept there</b> lists them, and Bring back puts one in this PC's backups, which Settings, Your data and updates, <b>Put back</b> uses. A restore point kept on another PC holds no keys to your linked PCs, no sharing code and no PIN, so putting it back keeps this PC's own; one changed on that PC is refused when it comes back.</li>
@@ -486,8 +495,8 @@
     </ul>
 
     <h4 id="help-copies">7. Backing up models and software</h4>
-    <p class="hint"><b>Models</b> are big, so keep them on more than one PC instead of downloading them again. <b>My local LLMs</b> (Nodes and memory, Linked, and the Models page) lists every model the linked PCs share: <b>Get a copy from &lt;PC&gt;</b> brings one here over your home network, so a model you deleted to save room comes back without downloading it again. A copy that was cut short carries on from where it stopped. The other way, Send in the Move window, and Copy to &lt;PC&gt; in Hire staff's All models, put a model on a linked PC (that PC must tick Allow host to push models). A Backups only PC keeps projects and restore points, not models: to keep a spare copy of a model, keep it on another linked PC that shares it.</p>
-    <p class="hint"><b>The software</b>: Nodes and memory, <b>Update this install</b> says which TOMLIN this PC runs. <b>Check git</b> asks GitHub for the newest TOMLIN and, when it is newer, offers to download it; a download must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, picked together with its tomlin-&lt;version&gt;.zip.sig (no internet needed; <b>Update by hand (offline)</b>, under it, lists the steps). A zip whose signature is missing or fails gets a red warning: <b>Cancel</b> is the default, and <b>Install anyway</b> is only for a zip you trust, such as one you made yourself. Either way TOMLIN checks it is whole and newer, starts it once as a test (a version that does not come up is not installed, and nothing changes), then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. This needs TOMLIN started by its installed program or by Start TOMLIN.cmd. Then <b>Update all linked PCs</b> updates each linked PC that is behind and allows it.</p>
+    <p class="hint"><b>Models</b> are big, so keep them on more than one PC instead of downloading them again. On the Models page, <b>To</b> under each <b>Download</b> picks where it goes: This PC, or a linked PC that downloads it itself from the internet (nothing passes through this PC; not to a Backups only PC). My local LLMs shows how far it is, with Stop. <b>My local LLMs</b> (Network: connect PCs, and the Models page) lists every model the linked PCs share: <b>Get a copy from &lt;PC&gt;</b> brings one here over your home network, so a model you deleted to save room comes back without downloading it again. A copy that was cut short carries on from where it stopped. The other way, Send in the Move window, and Copy to &lt;PC&gt; in Hire staff's All models, put a model on a linked PC. <b>Model runners</b> on the Models page sends the NVIDIA (CUDA) runner to a linked PC with an NVIDIA card the same way (<b>Send to</b>): this PC downloads it once (checked), and that PC checks every file against the build its own TOMLIN names before it unpacks it. <b>Remove from &lt;PC&gt;</b> takes it away again. A Backups only PC keeps projects and restore points, not models: to keep a spare copy of a model, keep it on another linked PC that shares it.</p>
+    <p class="hint"><b>The software</b>: This PC: models and updates, <b>Update this install</b> says which TOMLIN this PC runs. <b>Check git</b> asks GitHub for the newest TOMLIN and, when it is newer, offers to download it; a download must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, picked together with its tomlin-&lt;version&gt;.zip.sig (no internet needed; <b>Update by hand (offline)</b>, under it, lists the steps). A zip whose signature is missing or fails gets a red warning: <b>Cancel</b> is the default, and <b>Install anyway</b> is only for a zip you trust, such as one you made yourself. Either way TOMLIN checks it is whole and newer, starts it once as a test (a version that does not come up is not installed, and nothing changes), then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. This needs TOMLIN started by its installed program or by Start TOMLIN.cmd. Then <b>Update all linked PCs</b> updates each linked PC that is behind and allows it.</p>
     <figure class="help-shot"><img src="help-update.webp" alt="Update this install: This PC runs TOMLIN 2.0.55, Check git and Check zip, Update by hand (offline) folded; Linked PCs: Update all linked PCs" width="1003" height="283" loading="lazy"></figure>
     <p class="hint">One linked PC at a time: when it runs an older TOMLIN, its card has a yellow (!) and its window says <b>Outdated: 2.0.32 (this PC 2.0.33)</b> with <b>Update it</b>, or why it cannot be updated from here. On that PC, tick <b>Allow host to update TOMLIN remotely</b> first. Only the files that changed are sent; that PC puts the new version in a folder beside its copy (the old one is kept for going back), backs its data up, and starts the new version in the same window, once nothing is running there. It must run as the installed TOMLIN (Install TOMLIN.cmd) or from Start TOMLIN.cmd. A PC older than 2.0.33 cannot be updated this way: install the new version there by hand once.</p>
 
@@ -499,7 +508,7 @@
 
     <h4 id="help-scan">9. Scanning</h4>
     <ul class="help-tips">
-      <li><strong>Find PCs on my network</strong> (Nodes and memory) looks at every address on your home network for a PC with Enable this PC as a node on, at the port beside it (8741 unless changed there), 64 at a time; a home network takes a few seconds. It lists what it found, each with a box for its setup code. Nothing is linked until you type the code.</li>
+      <li><strong>Find PCs on my network</strong> (Network: connect PCs) looks at every address on your home network for a PC with Enable this PC as a node on, at the port beside it (8741 unless changed there), 64 at a time; a home network takes a few seconds. It lists what it found, each with a box for its setup code. Nothing is linked until you type the code.</li>
       <li><strong>Rescan Hugging Face</strong> (the Models page, beside "File list from …") reads Hugging Face's whole list of GGUF chat models again, most downloaded first, down to the models fewer than 10 people downloaded last month (about 200 pages and 70 MB on 5 Oct 2026). The list from before stays until the new one is whole. A copy ships with TOMLIN, so the first search on a new PC already has one.</li>
       <li><strong>Scan folders</strong> (the Bridge's Projects bar) finds the projects that are new or gone in your working folders since the last scan.</li>
       <li><strong>Scan app (audit)</strong> (a project's … menu in the Bridge) runs the built-in audit: about 140 rules for keys, injection, sign-in and payment gaps, uploads, accessibility and what publishing the project would give away about you. It catches common faults, not everything; Review with AI… builds a prompt for the ones no rule finds.</li>
@@ -525,7 +534,7 @@
     <p class="hint">Memory is what a person keeps between chats: lines you write or pin, read before each answer. Each hire has their own; the team memory is read by everyone. Type <code>remember: …</code> in a chat to add a line without a model (<code>remember for the team: …</code> for the team). Memory, under the chat box, shows each line to change or delete; at its foot, "What they read for the next answer" shows how much of the model's room each part takes (instructions, memory lines, the chat so far) and what was left out.</p>
 
     <h4 id="help-speed">Speed</h4>
-    <p class="hint">Every answer is timed: tokens written a second, and how fast the prompt was read (a token is about three quarters of a word). <b>Test speed</b> runs one example prompt (about 150 words) on a person's model, a linked PC's or a model here, and times it; it is under Edit Staff, on Nodes and memory, and under Staff on other PCs. The left panel shows each person's expected speed ("17 tok/s"): the average of their last answers once there are three, else the test. A person's Speed shows the test as the baseline, the average, and a chart of the recent answers. Only numbers are kept (in <code>speed.json</code>), never what was asked or answered.</p>
+    <p class="hint">Every answer is timed: tokens written a second, and how fast the prompt was read (a token is about three quarters of a word). <b>Test speed</b> runs one example prompt (about 150 words) on a person's model, a linked PC's or a model here, and times it; it is under Edit Staff, on This PC: models and updates, and under Staff on other PCs. The left panel shows each person's expected speed ("17 tok/s"): the average of their last answers once there are three, else the test. A person's Speed shows the test as the baseline, the average, and a chart of the recent answers. Only numbers are kept (in <code>speed.json</code>), never what was asked or answered.</p>
 
     <h4 id="help-pc-costs">Uptime and costs</h4>
     <p class="hint">Press a PC in the left panel (My PC, or a linked PC) for its window: how long TOMLIN has run there and how long the PC has been on, how many of this PC's once-a-minute checks it answered in the last 7 days, and its total tokens (read and written, from every answer its chat models wrote, for anyone; pictures are not counted). Give it, if you like, its power draw while a model works (watts) and the price of a kWh in US dollars: then each project's power cost is worked out (watts × working hours ÷ 1,000 × price), beside the same tokens at the Claude Opus 5.5 API's and the ChatGPT API's list prices, with the least of them marked. Only working time counts, never the PC sitting idle. Tokens are counted three ways: read new, read from the cache (the start of the chat the model read on the turn before: no work, but an API still bills it at its lower cached price), and written; the API figures price them that way, and say what they would be without caching. Each linked PC keeps its own log of the work it did for this PC, per project, and that log is the final tally (read once a minute and when its window opens); a project's Overview shows its tokens and cost over every PC. The prices were checked on the date shown and can be changed there. A linked PC needs 2.0.40 or later for its own log (2.0.39 for uptime and totals).</p>
@@ -535,7 +544,7 @@
     <p class="hint"><b>Repair install</b> (My PC, in the left panel; also in the icon's menu by the clock) puts an installed TOMLIN back in order without a zip: when a copy started from a folder (Start TOMLIN.cmd) ran and took the updates from linked PCs, it copies that copy into the install; it builds TOMLIN's program (TOMLIN.exe) again, points current.txt at the copy to run, and points the Start menu shortcut, the desktop shortcut and Start with Windows at it. It lists what it would do first and never touches your chats, staff, pictures or models. Then <b>Start the installed one now</b> closes the copy started from a folder, and the installed one takes over. In the same place: <b>Shortcut to desktop</b>, and <b>Start on start up</b> (<b>Cancel start on PC start up</b> when it is on). Started while TOMLIN already runs another way, the program by the clock opens that one instead of saying it failed.</p>
 
     <h4 id="help-pins">The app lock PIN</h4>
-    <p class="hint">The app lock PIN (the padlock in the top bar; Settings) locks the whole app. Lost it? Close TOMLIN and delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder: the PIN is gone and the chats stay.</p>
+    <p class="hint">The app lock PIN (the padlock in the top bar; Settings) locks the whole app. Lost it? Close TOMLIN and delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder: the PIN is gone and the chats stay. Picture models: while TOMLIN is locked, a picture model you loaded is unloaded once it has had nothing to draw for 2 minutes (a linked PC drawing here loads one for its pictures, kept 10 minutes after its last one). While TOMLIN is open, a loaded picture model can be used by any program on this PC: its runner takes no key, so TOMLIN cannot lock it. Chat models take a key.</p>
 
     <h4 id="help-log">When something goes wrong</h4>
     <p class="hint">TOMLIN writes what went wrong (a model that would not load, a chat or job step that stopped, a fault in the app) to a log file, one a day, the last 7 days kept, in <code>TOMLIN\data\logs</code> in your user folder. It holds where and what went wrong, never your chats or files, so it can be sent to someone who helps.</p>
@@ -581,6 +590,7 @@
             <label class="field"><span>Context (what it reads at once)</span><select id="ctx-size"></select></label>
             <label class="field"><span>Memory for the context</span><select id="ctx-cache"><option value="f16">Full size (f16)</option><option value="q8_0">Half (q8_0, almost no loss)</option><option value="q4_0">Quarter (q4_0, some loss)</option></select></label>
             <label class="field" id="ctx-place-row" hidden><span>Where it runs on the graphics card</span><select id="ctx-place"></select></label>
+            <label class="field" id="ctx-draft-row" hidden><span>Guessing model (speed)</span><select id="ctx-draft" title="A small model of the same family guesses the next few words and this model checks them in one pass: the answer is this model's own, only the speed changes. It takes memory of its own."></select></label>
             <div class="ctx-try" id="ctx-try-row" hidden><button class="btn quiet" type="button" id="ctx-try">Try each way</button><p class="hint" id="ctx-try-line" role="status"></p></div>
             <p class="hint" id="ctx-hint"></p>
             <label class="field" id="who-row"><span>How the host talks</span><select id="who"></select></label>
@@ -850,7 +860,7 @@
 <dialog id="applock-new" class="small-dlg" aria-labelledby="applock-new-title">
   <form class="help-body private-form" id="applock-new-form">
     <h2 id="applock-new-title">App lock</h2>
-    <p class="hint">A PIN for the whole app. While it is locked, nobody at this PC can open the chats, jobs or files here, from this window or any other.</p>
+    <p class="hint">Set a pin. The app auto locks after <select id="applock-idle" aria-label="Minutes before the app locks by itself"></select> mins. A pin prevents someone using the pc from viewing work in progress.</p>
     <div class="fault" id="applock-new-fault" role="alert" hidden></div>
     <label class="field"><span>Create a new pin</span><input id="applock-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
     <label class="field"><span>Confirm pin</span><input id="applock-pin2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
@@ -861,7 +871,6 @@
       <button class="btn primary" type="submit" id="applock-save">Save pin and lock</button>
       <button class="btn" type="button" id="applock-cancel">Cancel</button>
     </div>
-    <p class="hint">The PIN locks the app; it does not encrypt the files on disk. Lost it? Close TOMLIN, delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder and start it again: the PIN is gone and the chats stay.</p>
   </form>
 </dialog>
 
@@ -1042,11 +1051,29 @@
       <h2 id="team-title">Staff</h2>
       <div class="dlg-top-actions">
         <button class="btn" type="button" id="team-all">See all staff</button>
-        <button class="btn primary" type="button" id="team-hire">Hire staff</button>
-        <form method="dialog"><button class="btn" type="submit">Close</button></form>
+        <button class="btn" type="button" id="team-hire">Hire staff</button>
+        <button class="btn" type="button" id="team-close">Close</button>
       </div>
     </div>
     <div class="fault" id="team-fault" hidden></div>
+    <!-- The Staff menu (what Staff: hire and edit opens): hire someone new, or manage the staff you have. -->
+    <div class="staff-menu" id="staff-menu" hidden>
+      <form class="staff-tile" id="sm-hire" aria-labelledby="sm-hire-title">
+        <h3 id="sm-hire-title">Hire staff</h3>
+        <div class="sm-name-row">
+          <label class="field"><span>Their name</span><input id="sm-name" type="text" maxlength="30" autocomplete="off" placeholder="Type a name, or roll the dice"></label>
+          <button class="btn quiet sm-dice" type="button" id="sm-dice" title="A random name" aria-label="A random name"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/></svg></button>
+        </div>
+        <p class="hint">Next you pick their role and level, the PC (or node) they work on, and the model (LLM) they use.</p>
+        <button class="btn primary" type="submit">Create</button>
+      </form>
+      <section class="staff-tile" aria-labelledby="sm-manage-title">
+        <h3 id="sm-manage-title">Manage staff</h3>
+        <p class="hint" id="sm-count"></p>
+        <p class="hint">See everyone under the PC they work on, then Edit one: their look, role, level, PC and model.</p>
+        <button class="btn primary" type="button" id="sm-manage">Manage staff</button>
+      </section>
+    </div>
     <!-- See all staff: everyone, under the PC they work on. -->
     <div class="staff-all" id="staff-all" hidden>
       <p class="hint">Everyone you have hired, under the PC they work on. Press <b>Edit</b> to open one person.</p>
@@ -1186,7 +1213,7 @@
 
           <h3>Jobs in this workspace</h3>
           <div id="job-list"></div>
-          <p class="hint">Other PCs are linked under <button class="link" type="button" id="job-pcs-link">Nodes and memory</button>; staff hired on their models can then take any seat on a job.</p>
+          <p class="hint">Other PCs are linked under <button class="link" type="button" id="job-pcs-link">Network: connect PCs</button>; staff hired on their models can then take any seat on a job.</p>
         </section>
 
         <div id="job-view" hidden>
@@ -1399,7 +1426,7 @@
     <div id="pc-body"></div>
     <div id="pc-ask" hidden></div>
     <p class="hint" id="pc-said" role="status" hidden></p>
-    <div class="team-actions"><button class="btn quiet" type="button" id="pc-more">Its settings (Nodes and memory, Other PCs)</button></div>
+    <div class="team-actions"><button class="btn quiet" type="button" id="pc-more">Its settings (Network: connect PCs)</button></div>
   </div>
 </dialog>
 
@@ -1500,6 +1527,7 @@
 <script src="memory.js"></script>
 <script src="look.js"></script>
 <script src="faces.js"></script>
+<script src="banter.js"></script>
 <script src="office.js"></script>
 <script src="arcade.js"></script>
 <script src="models.js"></script>

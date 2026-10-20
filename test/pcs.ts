@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { hashPin } from '../src/lock.ts';
+import { scryptSync } from 'node:crypto';
 
 export const freePort = () => new Promise<number>(resolve => {
   const s = createServer().listen(0, '127.0.0.1', () => {
@@ -100,12 +100,14 @@ export const NODE_CODE = 'TEST-NQDE';
 
 /**
  * A home for a node: the app lock set (a node needs one before it shares), sharing on at `workerPort` with a made-up
- * setup code and every tick on. Written before the copy starts, as the PC's own owner would have set it.
+ * setup code and every tick on but "Allow host to test and change model run settings". Written before the copy starts,
+ * as the PC's own owner would have set it.
  */
 export function nodeHome(home: string, workerPort: number, name = 'Test node', id = 'a1b2c3d4'): void {
   const data = join(home, 'data');
   mkdirSync(data, { recursive: true });
-  writeFileSync(join(data, 'app-lock.json'), JSON.stringify({ ...hashPin(NODE_PIN), idleMinutes: 0 }));
+  // As a PIN file from before 2.0.56 (scrypt's default cost, none in the file): the node makes it again at the first right PIN.
+  writeFileSync(join(data, 'app-lock.json'), JSON.stringify({ salt: 'feed', hash: scryptSync(NODE_PIN, 'feed', 32).toString('hex'), idleMinutes: 0 }));
   writeFileSync(join(data, 'share.json'), JSON.stringify({
     on: true, port: workerPort, name, id, code: NODE_CODE, pinOn: false, pin: '', paired: [], models: [],
     allow: { pull: true, backup: true, push: true, update: true },

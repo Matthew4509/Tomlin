@@ -1,5 +1,5 @@
 // The Home view (what is waiting for you, what is working now, set-up links, "Lets create a project", hire from Home)
-// and keeping Home fresh. Moved out of home.js, whose rail, desks and Nodes and memory it uses; loaded right after it.
+// and keeping Home fresh. Moved out of home.js, whose rail, desks and Network page it uses; loaded right after it.
 'use strict';
 
 // ---- The Home view ----
@@ -149,7 +149,7 @@ function setupCards() {
       card(u.chatModels > 0, 'Add a chat model', u.chatModels ? `${u.chatModels} chat model${u.chatModels > 1 ? 's' : ''} found.` : 'TOMLIN needs at least one chat model on this PC. Models shows which ones fit.', 'Models', () => app.openModels()),
       card(u.staff > 0, 'Hire your first staff member', u.staff ? `${u.staff} on the team.` : 'Give a person a name, a role (coder, writer, artist…) and a level. They appear in the list on the left.', 'Team', () => (u.staff ? $('#team-open').click() : app.openHire())),
       card(u.pcs > 0, 'Link another PC (optional)', [u.pcs ? `${u.pcs} PC${u.pcs > 1 ? 's' : ''} linked.` : '', u.pcsBroken?.length ? `${u.pcsBroken.map(n => `"${n}"`).join(', ')} need${u.pcsBroken.length > 1 ? '' : 's'} linking again: its old link no longer works.` : '', !u.pcs && !u.pcsBroken?.length ? 'Use a stronger PC on your home network for some of the work.' : ''].filter(Boolean).join(' '), 'Other PCs', () => app.openPcs()),
-      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Nodes and memory', () => openNodes())));
+      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Network: connect PCs', () => openNodes())));
 }
 
 // The Home title greets by the time of day, with the date under it.
@@ -271,9 +271,10 @@ app.onStatus.push(() => {
 for (const b of document.querySelectorAll('[data-setup]')) {
   b.addEventListener('click', () => {
     if (b.dataset.setup === 'settings') app.openSettings?.();
-    else if (b.dataset.setup === 'staff') app.openHire({ page: true });
+    else if (b.dataset.setup === 'staff') app.openStaffMenu();
     else if (b.dataset.setup === 'models') app.openModels();
     else if (b.dataset.setup === 'nodes') openNodes();
+    else if (b.dataset.setup === 'thispc') openThisPc();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();
     else if (b.dataset.setup === 'files') $('#files-open').click();
     else app.openPcs();

@@ -22,6 +22,13 @@ const mp = {
   moe: false,
   /** Fits my card ticked: only chat models with a size that sits wholly on the graphics cards; cards = {n, total} (/api/models). */
   card: false, cards: null,
+  /** Fits (the drop-down): '' = all sizes, 'here' = fits this PC, or a linked PC's id = fits that PC (its memory). */
+  fitOn: '',
+  /** Download's To list: the linked PCs (/api/network: name, and fetchCode, '' when one can download a model itself now),
+   *  and the PC picked for each Download (by row; none = This PC, or the PC picked under Fits). */
+  net: null, to: new Map(),
+  /** The runners on this PC (/api/runtimes: here, kept files, why not, a download running), and the PC picked for each Send to. */
+  runners: null, runnerTo: new Map(),
   /** The list's order: '' (as it comes: Hugging Face's most downloaded first), size-asc / size-desc, name-asc / name-desc. */
   order: '',
   /** Every list: 'all', 'hide' (only what is not on this PC yet) or 'only' (only what is), from the two ticks. */
@@ -82,6 +89,7 @@ function mpNav() {
             mp.terms.clear();
             mp.moe = false;
             mp.card = false;
+            mp.fitOn = '';
           } else if (e.target.checked) mp.cats.add(id);
           else mp.cats.delete(id);
           mp.importing = false;
@@ -106,10 +114,19 @@ function mpNav() {
           mp.importing = false;
           mpDraw();
           mpHfSearch(true);
-        })),
+        }),
+        el('li', {}, el('label', { class: 'field mp-fits', title: 'Only chat models with a size that could run on that PC: an estimate from its memory (RAM and graphics card), the same as the marks beside each size' },
+          el('span', { text: 'Fits' }),
+          el('select', { id: 'mp-fit-on', onchange: e => {
+            mp.fitOn = e.target.value;
+            mp.importing = false;
+            mpDraw();
+            mpHfSearch(true);
+          } })))),
       el('ul', { class: 'mp-own' }, el('li', {}, el('button', { class: 'mp-cat mp-cat-own', type: 'button', id: 'mp-import', text: 'Import models', onclick: () => { mp.importing = !mp.importing; mpDraw(); } }))));
   }
-  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size && !mp.moe && !mp.card : mp.cats.has(box.dataset.cat);
+  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size && !mp.moe && !mp.card && !mp.fitOn : mp.cats.has(box.dataset.cat);
+  drawFitOn();
   // Fits my card: only on a PC whose chat can use a graphics card with memory of its own.
   const cardBox = nav.querySelector('[data-card]');
   cardBox.checked = mp.card;
@@ -145,20 +162,66 @@ const cardWord = () => (mp.cards.n === 1 ? `${Math.round(mp.cards.total / 2 ** 3
 /** A size's card mark beside "fits this PC" (none when the PC itself is too small, or there is no card). */
 const cardText = m => (!mp.cards?.n || !m.card || m.fits === 'no' ? '' : m.card === 'ok' ? `✓ fits the ${cardWord()}` : `▲ more than the ${cardWord()} holds: part runs on the processor`);
 
-/** True when no size filter is set (Fits my card counts as one). */
-const noFilter = () => !mp.f.minB && !mp.f.maxB && !mp.f.minGB && !mp.f.maxGB && !mp.card;
+// ---- Fits: All, This PC, or a linked PC (by the memory it last reported) ----
+
+/** The linked PCs Home knows (name, address, RAM and card memory; none while one is off). */
+const linkedPcs = () => (typeof homeUi !== 'undefined' ? homeUi.pcs ?? [] : []);
+/** A linked PC's name, with its address when two share the name (two "Worker PC"s). */
+function pcLabel(p, all) {
+  const twin = all.filter(x => x.name === p.name).length > 1;
+  return twin ? `${p.name} (${String(p.url ?? '').replace(/^https?:\/\//, '').replace(/:\d+$/, '')})` : p.name;
+}
+/** The linked PC picked under Fits, while its memory is known (else null: Fits shows all). */
+const fitPc = () => (mp.fitOn && mp.fitOn !== 'here' ? linkedPcs().find(p => p.id === mp.fitOn && p.ram > 0) ?? null : null);
+/** src/calc.ts fitsRoom, the same sum: RAM less 2 GB, plus the card's own memory less 1 GB; the file x 1.1 + 0.8 GB. */
+function fitsThere(bytes, p) {
+  const room = Math.max(0, p.ram - 2 * 2 ** 30) + Math.max(0, (p.vram ?? 0) - 2 ** 30);
+  const need = bytes * 1.1 + 0.8 * 2 ** 30;
+  return need <= room * 0.85 ? 'ok' : need <= room ? 'tight' : 'no';
+}
+/** A size inside Fits: this PC's own mark, or the linked PC's sum. */
+function fitsOn(m) {
+  if (mp.fitOn === 'here') return m.fits !== 'no';
+  const p = fitPc();
+  return !p || fitsThere(m.bytes, p) !== 'no';
+}
+/** A size's mark for the linked PC picked under Fits ("✓ fits Worker PC"). */
+function thereText(m) {
+  const p = fitPc();
+  if (!p || !m.bytes) return '';
+  const f = fitsThere(m.bytes, p);
+  const name = pcLabel(p, linkedPcs());
+  return f === 'ok' ? `✓ fits ${name}` : f === 'tight' ? `▲ tight on ${name}` : `✕ too big for ${name}`;
+}
+/** The Fits drop-down: All, This PC, then each linked PC (one that is off is listed, not pickable: its memory is not known). */
+function drawFitOn() {
+  const box = $('#mp-fit-on');
+  const all = linkedPcs();
+  const opts = [['', 'All', false], ['here', 'This PC', false], ...all.map(p => [p.id, `${pcLabel(p, all)}${p.ram > 0 ? p.backupsOnly ? ' (backups only)' : '' : ' (off: its memory is not known)'}`, !(p.ram > 0)])];
+  const sig = JSON.stringify(opts);
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.replaceChildren(...opts.map(([value, text, off]) => el('option', { value, text, disabled: off })));
+  }
+  // A PC that went off (or was removed) since it was picked: Fits shows all again.
+  if (mp.fitOn && mp.fitOn !== 'here' && !fitPc()) mp.fitOn = '';
+  box.value = mp.fitOn;
+}
+
+/** True when no size filter is set (Fits my card and Fits count as one). */
+const noFilter = () => !mp.f.minB && !mp.f.maxB && !mp.f.minGB && !mp.f.maxGB && !mp.card && !mp.fitOn;
 const inB = p => (!mp.f.minB || p >= mp.f.minB * 0.95e9) && (!mp.f.maxB || p <= mp.f.maxB * 1.05e9);
 const inGB = bytes => (!mp.f.minGB || bytes >= mp.f.minGB * 2 ** 30) && (!mp.f.maxGB || bytes <= mp.f.maxGB * 2 ** 30);
 /** A size filter on an item whose figures are known: false only when a known figure is outside it. Unknown = hidden while a filter is set. */
 function passes(params, sizes) {
   if (noFilter()) return true;
   if ((mp.f.minB || mp.f.maxB) && (params == null || !inB(params))) return false;
-  if ((mp.f.minGB || mp.f.maxGB || mp.card) && !(sizes ?? []).some(sizeOk)) return false;
+  if ((mp.f.minGB || mp.f.maxGB || mp.card || mp.fitOn) && !(sizes ?? []).some(sizeOk)) return false;
   return true;
 }
-/** A size ({bytes, card}) inside the GB filter and, with Fits my card ticked, wholly on the card. */
+/** A size ({bytes, card, fits}) inside the GB filter, with Fits my card ticked wholly on the card, and inside Fits. */
 function sizeOk(m) {
-  return inGB(m.bytes) && (!mp.card || m.card === 'ok');
+  return inGB(m.bytes) && (!mp.card || m.card === 'ok') && fitsOn(m);
 }
 /** The size a row shows and downloads: the recommended one, or, with a filter set and the recommended one outside it, the biggest size inside it. */
 function shownSize(s) {
@@ -168,7 +231,8 @@ function shownSize(s) {
 }
 function filterText() {
   const r = (a, b, unit) => (a && b ? `${a} to ${b}${unit}` : a ? `${a}${unit} or more` : b ? `up to ${b}${unit}` : '');
-  return [r(mp.f.minB, mp.f.maxB, 'B'), r(mp.f.minGB, mp.f.maxGB, ' GB download'), mp.card && mp.cards?.n ? `fits the ${cardWord()}` : ''].filter(Boolean).join(', ');
+  const p = fitPc();
+  return [r(mp.f.minB, mp.f.maxB, 'B'), r(mp.f.minGB, mp.f.maxGB, ' GB download'), mp.card && mp.cards?.n ? `fits the ${cardWord()}` : '', mp.fitOn === 'here' ? 'fits this PC' : p ? `fits ${pcLabel(p, linkedPcs())}` : ''].filter(Boolean).join(', ');
 }
 
 // ---- The download in progress: the button that started it turns into its progress ----
@@ -178,6 +242,10 @@ const busyNow = () => mp.job?.state === 'downloading';
 
 /** What sits where a size's Download button was: the button, its progress (with Stop), or "On this PC". */
 function sizeAction(repo, rev, m, primary) {
+  return withTo(`hf|${repo}|${m.name}`, sizeHere(repo, rev, m, primary), { kind: 'chat', repo, rev, name: m.name, what: `${repo.split('/')[1]} ${shortQuant(m.name)}` }, m.bytes, primary);
+}
+/** Download to This PC (Hugging Face): the button, or the download's progress once it runs. */
+function sizeHere(repo, rev, m, primary) {
   const j = jobFor(repo, m.name);
   if (m.have || j?.state === 'done') return el('span', { class: 'hint ok mp-have', text: j?.state === 'done' ? '✓ Downloaded and checked' : '✓ On this PC' });
   if (j?.state === 'downloading') {
@@ -196,6 +264,186 @@ function sizeAction(repo, rev, m, primary) {
     onclick: e => mpGet(repo, rev, m.name, e.currentTarget),
   });
   return failed ? el('div', { class: 'dl-now' }, btn, el('span', { class: j.state === 'failed' ? 'fault-line' : 'hint', text: j.state === 'failed' ? `It failed: ${j.error}` : 'Stopped. Download it again to carry on from where it stopped.' })) : btn;
+}
+
+// ---- Download's To list: This PC, or a linked PC that downloads the model itself ----
+
+const TO_WHY = { off: ' (off)', backups: ' (backups only)', old: ' (update it first)' };
+/** The PC a row downloads to: picked on it, else the PC picked under Fits; '' (This PC) unless that PC can take it now. */
+function toOf(key) {
+  const v = mp.to.get(key) ?? (fitPc() ? mp.fitOn : '');
+  return v && (mp.net ?? []).some(p => p.id === v && !p.fetchCode) ? v : '';
+}
+/** A linked PC's name in the To list (with its address when two share a name). */
+function toName(id) {
+  const all = (mp.net ?? []).map(p => ({ ...p, url: linkedPcs().find(x => x.id === p.id)?.url }));
+  const p = all.find(x => x.id === id);
+  return p ? pcLabel(p, all) : 'that PC';
+}
+/** The To list under a Download: This PC, then each linked PC (one that cannot take a download now is listed, not pickable, with why). */
+function toPick(key) {
+  const pcs = mp.net ?? [];
+  if (!pcs.length) return null;
+  const sel = el('select', { 'aria-label': 'Download to', onchange: e => { mp.to.set(key, e.target.value); mpDraw(); } },
+    el('option', { value: '', text: 'This PC' }),
+    ...pcs.map(p => el('option', { value: p.id, disabled: !!p.fetchCode, text: `${toName(p.id)}${TO_WHY[p.fetchCode] ?? ''}`, title: p.fetch || '' })));
+  sel.value = toOf(key);
+  return el('label', { class: 'mp-to' }, el('span', { text: 'To' }), sel);
+}
+/** A Download with its To list: on This PC the button it had; on a linked PC, one that asks that PC to download it itself. */
+function withTo(key, here, ask, bytes, primary) {
+  const pick = toPick(key);
+  if (!pick) return here;
+  const to = toOf(key);
+  if (!to) return el('div', { class: 'mp-get' }, here, pick);
+  const name = toName(to);
+  const btn = el('button', {
+    class: `btn${primary ? ' primary' : ''}`, type: 'button', text: `Download ${MP_GB(bytes)} to ${name}`,
+    title: `${name} downloads it itself, from the internet, into its own models folder: nothing passes through this PC. My local LLMs shows how far it is, with Stop.`,
+    onclick: async e => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      b.textContent = 'Starting…';
+      try {
+        await api('/api/network/fetch', { pc: to, ...ask });
+        b.textContent = `Downloading on ${name}`;
+        app.openNet?.();
+      } catch (error) {
+        b.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+      }
+    },
+  });
+  return el('div', { class: 'mp-get' }, btn, pick);
+}
+
+// ---- Model runners: the NVIDIA (CUDA) one downloaded here, or sent to a linked PC with an NVIDIA card ----
+
+/** A linked PC's reason it cannot take the runner now, in a word or two for the list. */
+function runnerWord(why) {
+  if (!why) return '';
+  if (/already has it/.test(why)) return ' (has it)';
+  if (/no NVIDIA card/.test(why)) return ' (no NVIDIA card)';
+  if (/driver/.test(why)) return ' (driver too old)';
+  if (/older TOMLIN/.test(why)) return ' (update it first)';
+  if (/Backups only/.test(why)) return ' (backups only)';
+  if (/being used/.test(why)) return ' (in use)';
+  return ' (off)';
+}
+
+/** Send to a linked PC: the PCs listed (those that cannot take it now with why), and Send, or Remove where it is already. */
+function runnerPick(r) {
+  const pcs = mp.net ?? [];
+  if (!pcs.length) return null;
+  const has = p => p.runner?.cuda === 'installed';
+  const usable = p => !p.runnerWhy || has(p);
+  const chosen = pcs.find(p => p.id === mp.runnerTo.get(r.id) && usable(p)) ?? pcs.find(p => !p.runnerWhy) ?? pcs.find(has);
+  const sel = el('select', { 'aria-label': `Send ${r.name} to`, onchange: e => { mp.runnerTo.set(r.id, e.target.value); mpDraw(); } },
+    ...pcs.map(p => el('option', { value: p.id, disabled: !usable(p), text: `${toName(p.id)}${runnerWord(p.runnerWhy)}`, title: p.runnerWhy || '' })));
+  if (chosen) sel.value = chosen.id;
+  const said = el('span', { class: 'hint', role: 'status' });
+  // No linked PC can take it now: the list says so, and the line beside it says why (one PC) or where to look (several).
+  if (!chosen) {
+    sel.prepend(el('option', { value: '', text: 'No linked PC can take it now' }));
+    sel.value = '';
+    said.textContent = pcs.length === 1 ? pcs[0].runnerWhy : 'Open the list to see why for each PC.';
+  }
+  let btn = null;
+  if (chosen && has(chosen)) {
+    btn = el('button', {
+      class: 'btn quiet', type: 'button', text: `Remove from ${toName(chosen.id)}`,
+      title: 'Takes the NVIDIA runner away from that PC: its models run on the graphics chip (Vulkan) again from their next load. You can send it again.',
+      onclick: async e => {
+        e.currentTarget.disabled = true;
+        try {
+          said.textContent = (await api('/api/network/runner-remove', { pc: chosen.id, id: r.id })).said;
+          mpLoad();
+        } catch (error) {
+          said.textContent = error.message;
+          said.className = 'fault-line';
+        }
+      },
+    });
+  } else if (chosen) {
+    const name = toName(chosen.id);
+    btn = el('button', {
+      class: 'btn primary', type: 'button', text: r.zips ? `Send to ${name}` : `Download ${MP_GB(r.bytes)} here, then send to ${name}`,
+      title: `${r.zips ? 'Sends' : 'Downloads it to this PC (checked), then sends'} it to ${name} over your home network. ${name} checks every file against the build its own TOMLIN names before it unpacks it. Network: connect PCs shows how far it is, with Stop.`,
+      onclick: async e => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = 'Starting…';
+        try {
+          await api('/api/network/runner', { pc: chosen.id, id: r.id });
+          b.textContent = `Sending to ${name}`;
+          app.openNet?.();
+        } catch (error) {
+          b.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+        }
+      },
+    });
+  }
+  return el('div', { class: 'mp-get' }, el('label', { class: 'mp-to' }, el('span', { text: 'Send to' }), sel), btn, said);
+}
+
+/** A runner row's buttons: Download or Remove on this PC (Download only with an NVIDIA card here), and Send to a linked PC. */
+function runnerButtons(r) {
+  if (r.device !== 'cuda') return null;
+  const parts = [];
+  const g = r.getting;
+  if (g && !g.done && !g.error) {
+    const pc = g.bytes ? Math.floor((g.got / g.bytes) * 100) : 0;
+    parts.push(el('div', { class: 'dl-now' },
+      el('div', { class: 'dl-track', role: 'progressbar', 'aria-label': `Downloading ${r.name}`, 'aria-valuenow': String(pc) }, el('span', { class: 'dl-fill', 'data-w': String(pc) })),
+      el('span', { class: 'dl-text', text: `${g.checking ? 'Checking' : 'Downloading'} ${pc}% of ${MP_GB(g.bytes)}` }),
+      el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: async () => { await api('/api/runtimes/stop', { id: r.id }); mpLoad(); } })));
+  } else if (r.installed || r.zips) {
+    parts.push(el('button', {
+      class: 'btn quiet', type: 'button', text: r.installed ? 'Remove from this PC' : 'Remove its files from this PC',
+      title: r.installed ? 'Takes the NVIDIA runner off this PC (and its kept files): models run on the graphics chip (Vulkan) again from their next load.' : `Deletes the ${MP_GB(r.bytes)} of files kept here for sending to another PC.`,
+      onclick: async e => {
+        e.currentTarget.disabled = true;
+        try {
+          await api('/api/runtimes/remove', { id: r.id });
+        } catch (error) {
+          e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+          return;
+        }
+        mpLoad();
+      },
+    }));
+  }
+  if (!r.installed && !r.why && !(g && !g.done && !g.error)) {
+    parts.push(el('button', {
+      class: 'btn primary', type: 'button', text: `Download ${MP_GB(r.bytes)}`,
+      title: 'Downloads it from the llama.cpp release on GitHub, checks each file by SHA-256 and unpacks it for this PC. The next model loaded uses it.',
+      onclick: async e => {
+        e.currentTarget.disabled = true;
+        e.currentTarget.textContent = 'Starting…';
+        try {
+          await api('/api/runtimes/get', { id: r.id });
+        } catch (error) {
+          e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+          return;
+        }
+        mpLoad();
+      },
+    }));
+  }
+  // Sending between PCs: the chat runner only (a node says how its chat runner is, not its picture one).
+  const pick = r.engine === 'llama' ? runnerPick(r) : null;
+  if (pick) parts.push(pick);
+  return parts.length ? el('div', { class: 'mp-get' }, ...parts) : null;
+}
+
+/** What a runner row says under its name. */
+function runnerMore(r) {
+  if (r.device !== 'cuda') return r.installed ? [] : [`To install it, close TOMLIN and run: npm run fetch -- ${r.id}`];
+  const more = ['For NVIDIA cards: usually faster than the graphics chip (Vulkan) runner. Auto uses it once it is here.'];
+  if (r.why) more.push(r.why);
+  if (r.getting?.error) more.push(`✕ ${r.getting.error}`);
+  if (r.zips) more.push(`Its files (${MP_GB(r.bytes)}) are kept here for sending to another PC.`);
+  more.push(`Licence: ${r.licence}.`);
+  return more;
 }
 
 /** The progress bars and percentages on the page, moved on without drawing the list again (a click is never lost). */
@@ -303,11 +551,11 @@ function mpItems() {
     const more = [`Licence: ${x.licence}`];
     if (x.nonCommercial) more.push('▲ Non-commercial licence: not for a business website or blog.');
     if (x.hardwareFit) more.push(`${x.hardwareFit.level === 'ok' ? '✓' : x.hardwareFit.level === 'slow' ? '▲' : '✕'} ${x.hardwareFit.text}`);
-    items.push({ id: `image:${x.id}`, kind: 'image', modes: x.modes ?? [], name: x.name.replace(/\s*\(.*\)$/, ''), tag: (/\((.*)\)$/.exec(x.name) ?? [])[1] ?? '', about: x.about ?? '', more, warn: x.nonCommercial || x.hardwareFit?.level === 'no', state: regState(x), button: downloadBtn(x), bytes: x.bytes });
+    items.push({ id: `image:${x.id}`, kind: 'image', modes: x.modes ?? [], name: x.name.replace(/\s*\(.*\)$/, ''), tag: (/\((.*)\)$/.exec(x.name) ?? [])[1] ?? '', about: x.about ?? '', more, warn: x.nonCommercial || x.hardwareFit?.level === 'no', state: regState(x), button: withTo(`img|${x.id}`, downloadBtn(x), { kind: 'image', id: x.id, what: x.name.replace(/\s*\(.*\)$/, '') }, x.bytes, true), bytes: x.bytes });
   }
   for (const x of d.helpers) items.push({ id: `helper:${x.id}`, kind: 'helper', name: x.name, tag: '', about: x.about ?? '', more: [`Licence: ${x.licence}`], state: regState(x), button: downloadBtn(x), bytes: x.bytes });
   for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`, cardText(c)].filter(Boolean), state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes, card: c.card ?? null, moe: !!c.moe });
-  for (const r of d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: r.installed ? 'Installed: it runs the models.' : `Not installed (${MP_GB(r.bytes)}).`, more: r.installed ? [] : [`To install it, close TOMLIN and run: npm run fetch -- ${r.id}`], state: r.installed ? '✓ Installed' : 'Not installed', button: null });
+  for (const r of mp.runners ?? d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: r.installed ? 'Installed: it runs the models.' : `Not on this PC (${MP_GB(r.bytes)}).`, more: runnerMore(r), state: r.installed ? '✓ Installed' : 'Not installed', button: runnerButtons(r) });
   for (const p of POPULAR) items.push({ id: `popular:${p.repo}`, kind: 'popular', name: p.name, tag: 'Suggested', about: p.about, more: [`From huggingface.co/${p.repo}.`], repo: p.repo });
   return items;
 }
@@ -328,7 +576,7 @@ function hfLine(x) {
   if (!s || s.busy) return `${params ? `${paramsText(params)} · ` : ''}Reading its sizes on Hugging Face…`;
   if (s.error) return `${params ? `${paramsText(params)} · ` : ''}Its sizes could not be read: ${s.error}`;
   const u = shownSize(s);
-  return [params ? paramsText(params) : '', `${shortQuant(u.name)} ${MP_GB(u.bytes)}${u.name === s.usual && s.models.length > 1 ? ' - recommended' : ''}`, fitsText(u.fits), cardText(u)].filter(Boolean).join(' · ');
+  return [params ? paramsText(params) : '', `${shortQuant(u.name)} ${MP_GB(u.bytes)}${u.name === s.usual && s.models.length > 1 ? ' - recommended' : ''}`, fitsText(u.fits), cardText(u), thereText(u)].filter(Boolean).join(' · ');
 }
 /** "Qwen3.5-9B-Q4_K_M" -> "Q4_K_M": the size's own name, when the file names one. */
 const shortQuant = name => ([...name.matchAll(/(?:^|[-_.])((?:UD-)?(?:I?Q\d(?:_[A-Z0-9]+)*|F16|BF16|F32|MXFP4\w*|NVFP4\w*))(?=$|[-_.])/gi)].at(-1)?.[1].toUpperCase() ?? name);
@@ -366,7 +614,7 @@ function mpSizes(repo, name) {
   for (const m of s.models) {
     box.append(el('div', { class: `job-remote${m.name === s.usual ? ' mp-pick' : ''}` },
       el('span', { text: `${name} ${shortQuant(m.name)} ${MP_GB(m.bytes)}${m.name === s.usual ? ' - recommended' : ''}` }),
-      el('span', { class: 'hint', text: [fitsText(m.fits), cardText(m)].filter(Boolean).join(' · ') }),
+      el('span', { class: 'hint', text: [fitsText(m.fits), cardText(m), thereText(m)].filter(Boolean).join(' · ') }),
       sizeAction(repo, s.rev, m, false)));
   }
   return box;
@@ -483,7 +731,9 @@ function mpDraw() {
 
 // ---- Hugging Face: every GGUF chat model matching the words and sizes, a page at a time ----
 
-const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.moe, mp.card, mp.order, mp.list?.scannedAt ?? null]);
+const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.moe, mp.card, fitAsk(), mp.order, mp.list?.scannedAt ?? null]);
+/** Fits as the search asks it: 'here', or the linked PC's memory (the server judges each size with the same sum). */
+const fitAsk = () => (mp.fitOn === 'here' ? 'here' : (p => (p ? { ram: p.ram, vram: p.vram ?? 0 } : undefined))(fitPc()));
 
 const MP_DAY = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const MP_WHEN = iso => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -563,7 +813,7 @@ async function mpHfAsk(key, i, paged = false) {
   mpDraw();
   if (paged) $('#mp-hf-head')?.focus();
   try {
-    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], moe: mp.moe, card: mp.card, order: mp.order, cursor: cursors[i] });
+    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], moe: mp.moe, card: mp.card, fitOn: fitAsk(), order: mp.order, cursor: cursors[i] });
     for (const f of r.found) mp.sizes[f.repo] = f;
     const before = new Set(seen.slice(0, i).flat());
     // Hugging Face's own search (no list on this PC) comes most downloaded first: Size and A to Z order each page here.
@@ -610,8 +860,9 @@ async function mpPopularSizes() {
 }
 
 async function mpLoad() {
-  const [d, m, j, l] = await Promise.all([api('/api/downloads').catch(() => null), api('/api/models').catch(() => null), api('/api/chatmodels/get').catch(() => null), api('/api/hflist').catch(() => null)]);
+  const [d, m, j, l, rt] = await Promise.all([api('/api/downloads').catch(() => null), api('/api/models').catch(() => null), api('/api/chatmodels/get').catch(() => null), api('/api/hflist').catch(() => null), api('/api/runtimes').catch(() => null)]);
   if (d && m) mp.data = { image: d.image, helpers: d.helpers, chat: m.chat, runtimes: m.runtimes };
+  if (rt) mp.runners = rt.runtimes;
   if (m) mp.cards = m.cards ?? null;
   if (m) mpFolderLine(m.folder, m.copies ?? [], m.ownFolder);
   if (l) {
@@ -624,8 +875,14 @@ async function mpLoad() {
   mpSetJob(j);
   mpDraw();
   mpPopularSizes();
+  // The To list asks each linked PC how it is (a PC that is off takes a few seconds): drawn again once it answers.
+  api('/api/network').then(v => {
+    mp.net = v.pcs ?? [];
+    mpDraw();
+  }).catch(() => undefined);
   // A picture-model download running: asked again each second while the page is open.
-  if (d && [...d.image, ...d.helpers].some(x => x.download && !x.download.done && !x.download.error) && homeUi.view === 'models') setTimeout(mpLoad, 1000);
+  const runnerGetting = (rt?.runtimes ?? []).some(r => r.getting && !r.getting.done && !r.getting.error);
+  if (d && ([...d.image, ...d.helpers].some(x => x.download && !x.download.done && !x.download.error) || runnerGetting) && homeUi.view === 'models') setTimeout(mpLoad, 1000);
 }
 
 /** Which folders besides this copy's own are used: the chosen one, and older copies of TOMLIN beside this one. */
@@ -693,6 +950,9 @@ function mpClearFilter() {
     mp.f[k] = null;
     $(sel).value = '';
   }
+  // Fits my card and Fits are filters too (they count in the list's heading): cleared with the sizes.
+  mp.card = false;
+  mp.fitOn = '';
   mpDraw();
 }
 $('#mp-filter-clear').addEventListener('click', () => {

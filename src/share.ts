@@ -13,6 +13,7 @@
 import type { Allow } from './carry.ts';
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 /** True for this PC and the home network: 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, ::1, fc00::/7, fe80::/10. */
 export function isPrivateAddress(raw: string | undefined): boolean {
@@ -39,17 +40,33 @@ export function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** Wrong PINs: after 5 in 10 minutes from one address, that address is refused for 10 minutes. */
+const GUARD_MS = 10 * 60_000;
+/**
+ * Wrong PINs: after 5 in 10 minutes from one address, that address is refused for 10 minutes. After 20 in 10 minutes
+ * from all addresses together (one PC that changes its address, or several), every address is refused for 10 minutes
+ * after the 20th: `pausedFor`. Addresses with no try in the last 10 minutes are not kept.
+ */
 export class PinGuard {
   private tries = new Map<string, number[]>();
+  private all: number[] = [];
   private now: () => number;
   constructor(now = () => Date.now()) {
     this.now = now;
   }
   private recent(ip: string): number[] {
-    const t = (this.tries.get(ip) ?? []).filter(x => this.now() - x < 10 * 60_000);
-    this.tries.set(ip, t);
+    const t = (this.tries.get(ip) ?? []).filter(x => this.now() - x < GUARD_MS);
+    if (t.length) this.tries.set(ip, t);
+    else this.tries.delete(ip);
     return t;
+  }
+  /** Addresses kept (each with a wrong try in the last 10 minutes). */
+  get size(): number {
+    return this.tries.size;
+  }
+  /** Minutes until any address may try again after 20 wrong tries from all addresses, or 0. */
+  pausedFor(): number {
+    this.all = this.all.filter(x => this.now() - x < GUARD_MS);
+    return this.all.length >= 20 ? Math.ceil((GUARD_MS - (this.now() - this.all[this.all.length - 20])) / 60_000) : 0;
   }
   /** Minutes until this address may try again, or 0. */
   lockedFor(ip: string): number {
@@ -57,11 +74,73 @@ export class PinGuard {
     return t.length >= 5 ? Math.ceil((10 * 60_000 - (this.now() - t[t.length - 5])) / 60_000) : 0;
   }
   wrong(ip: string): void {
-    this.recent(ip).push(this.now());
+    for (const k of [...this.tries.keys()]) if (k !== ip) this.recent(k);
+    this.tries.set(ip, [...this.recent(ip), this.now()]);
+    this.all.push(this.now());
+    this.pausedFor();
   }
   right(ip: string): void {
     this.tries.delete(ip);
   }
+}
+
+/**
+ * A worker door reads a sealed request whole before it can tell whether its seal opens, and a link's name (its token's
+ * fingerprint) crosses the home network in the clear. So the bytes being read before the seal is checked are held to a
+ * budget per link and in all: a request that does not fit is refused at once, and its room is given back when it ends.
+ */
+export class BodyBudget {
+  private used = new Map<string, number>();
+  private total = 0;
+  private perLink: number;
+  private all: number;
+  constructor(perLink = 40 << 20, all = 96 << 20) {
+    this.perLink = perLink;
+    this.all = all;
+  }
+  /** Room for `bytes` from `link`: a give-back to call once (more calls do nothing), or null when there is none. */
+  take(link: string, bytes: number): (() => void) | null {
+    const mine = this.used.get(link) ?? 0;
+    if (mine + bytes > this.perLink || this.total + bytes > this.all) return null;
+    this.used.set(link, mine + bytes);
+    this.total += bytes;
+    let given = false;
+    return () => {
+      if (given) return;
+      given = true;
+      const left = (this.used.get(link) ?? 0) - bytes;
+      if (left > 0) this.used.set(link, left);
+      else this.used.delete(link);
+      this.total -= bytes;
+    };
+  }
+}
+
+type Lookup = (host: string) => Promise<{ address: string }[]>;
+const lookupAll: Lookup = host => lookup(host, { all: true });
+
+/**
+ * Why a worker address cannot be used, or null. An address given as a number was checked when it was typed
+ * (cleanWorkerUrl); a name (desk.local) is looked up every time, and every address it gives must be on the home network,
+ * so a name that later points outside it is refused before anything is sent.
+ */
+export async function homeNetworkWhy(url: string, look: Lookup = lookupAll): Promise<string | null> {
+  let host: string;
+  try {
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return `${url} is not a PC's address.`;
+  }
+  if (isIP(host)) return isPrivateAddress(host) ? null : `${host} is not on your home network.`;
+  let found: { address: string }[];
+  try {
+    found = await look(host);
+  } catch (e) {
+    return `${host} could not be found on your home network (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}). Check the name, or use the address shown on that PC under Network: connect PCs.`;
+  }
+  const outside = found.map(f => f.address).filter(a => !isPrivateAddress(a));
+  if (!found.length) return `${host} could not be found on your home network. Use the address shown on that PC under Network: connect PCs.`;
+  return outside.length ? `${host} points to ${outside.join(', ')}, which is not on your home network, so nothing was sent to it. Use the address shown on that PC under Network: connect PCs (for example 192.168.1.20:8741).` : null;
 }
 
 /** A worker address as typed ("192.168.1.20", "192.168.1.20:8741", "http://desk.local:8741/") -> "http://host:port", or null. */
@@ -76,7 +155,7 @@ export function cleanWorkerUrl(input: unknown, defaultPort = 8741): string | nul
   }
   if (u.protocol !== 'http:' || u.username || u.password || (u.pathname !== '/' && u.pathname !== '')) return null;
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  // An address must be on the home network; a name (e.g. desk.local) is allowed, the worker refuses anything not on the LAN.
+  // An address must be on the home network; a name (e.g. desk.local) is allowed, and where it points is checked before each use (homeNetworkWhy).
   if (isIP(host) && !isPrivateAddress(host)) return null;
   if (!isIP(host) && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(host)) return null;
   const port = u.port ? Number(u.port) : defaultPort;
@@ -100,7 +179,7 @@ export interface ShareState {
   away?: { since: string; held: { chat: string[]; image: string | null }; /** Logged out for the hours the main PC agreed to: it starts again by itself then. */ until?: string } | null;
   /** Someone at this PC sent the main PC "I need to use the pc, please log out for N hours" from the lock screen: the main PC answers it. */
   ask?: PcAsk | null;
-  /** The chat models linked PCs may use (ticked by this PC's owner): they hire their own staff on them. None until ticked. */
+  /** Retired: the models once ticked for linked PCs. Kept in old files, never read (every model on a node is lent). */
   models?: string[];
   /** What linked PCs may do here besides using those models (src/carry.ts): copy them, keep restore points, send models. None until ticked. */
   allow?: Allow;

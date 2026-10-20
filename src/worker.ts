@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { alive } from './hardware.ts';
 import { forget, remember } from './runnerkeys.ts';
+import { startFact } from './runnerpush.ts';
 import type { Device } from './runtimes.ts';
 import * as leftovers from './leftovers.ts';
 import { dllLine, dllNotFound } from './vcrt.ts';
@@ -55,6 +56,19 @@ export interface LaunchSpec {
   /** Most seconds to wait; a big model read from a hard disk can take minutes. */
   timeoutSeconds: number;
 }
+
+/**
+ * What a runner is started with besides this PC's own settings: a CUDA runner gets room for the code the NVIDIA driver
+ * compiles for the card (a Pascal card's is compiled at the first start and kept; with too little room it is compiled
+ * again at every start). A size the PC's owner set is kept. Undefined: the runner gets this PC's settings as they are.
+ */
+export function runnerEnv(device: Device, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv | undefined {
+  if (device !== 'cuda') return undefined;
+  return { ...base, CUDA_CACHE_MAXSIZE: base.CUDA_CACHE_MAXSIZE || String(4 * 2 ** 30) };
+}
+
+/** The last chat runner start on this PC: on which device, seconds until it answered, and its own lines about the card. */
+export let lastStart: { device: Device; seconds: number | null; lines: string[] } | null = null;
 
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -124,7 +138,10 @@ export class Worker {
     const key = randomBytes(24).toString('hex');
     this.log = [];
     this.errors = [];
-    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true });
+    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: runnerEnv(spec.device) });
+    const started = Date.now();
+    const start = this.pane === 'chat' ? { device: spec.device, seconds: null as number | null, lines: [] as string[] } : null;
+    if (start) lastStart = start;
     leftovers.started(child.pid, spec.exe);
     this.child = child;
     this.port = port;
@@ -136,6 +153,7 @@ export class Worker {
       const lines = b.toString().split(/\r\n|\r|\n/).filter(Boolean);
       this.log = [...this.log, ...lines].slice(-60);
       this.errors = [...this.errors, ...lines.filter(l => /\b(error|failed|out of memory)\b|^\S+\s+E\s|FilterExpression|unknown (test|filter)/i.test(l))].slice(-8);
+      if (start) start.lines = [...start.lines, ...lines.filter(startFact)].slice(0, 12);
       for (const l of lines) {
         if (this.view.state === 'loading') {
           const s = stageOf(l);
@@ -169,7 +187,10 @@ export class Worker {
       if (this.child !== child) return this.view.state === 'unloading' ? 'cancelled' : 'failed';
       if (exited) return 'failed';
       try {
-        if (await spec.ready(port)) return 'ready';
+        if (await spec.ready(port)) {
+          if (start) start.seconds = Math.round((Date.now() - started) / 100) / 10;
+          return 'ready';
+        }
       } catch {
         // not listening yet
       }

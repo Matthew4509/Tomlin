@@ -13,10 +13,14 @@ import * as brains from '../brains.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as carry from '../carry.ts';
+import * as runnerpush from '../runnerpush.ts';
+import * as runset from '../runset.ts';
 import * as update from '../update.ts';
+import { lastStart } from '../worker.ts';
 import { cleanRid, Outbox, type Follower, type Kept, type Lock } from '../outbox.ts';
 import { inScope, scope } from '../meter.ts';
 import { log } from '../log.ts';
+import { PICTURE_DROP_MS, unloadWhileLocked } from '../picturelock.ts';
 import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
@@ -28,6 +32,8 @@ export let shareState: share.ShareState = { ...share.DEFAULT_SHARE };
 let shareServer: Server | null = null;
 let shareError = '';
 const guard = new share.PinGuard();
+/** Bytes of sealed requests being read before their seal is checked (S4): per link and in all. */
+const bodies = new share.BodyBudget();
 /** Link-request nonces already answered while this app runs (the newest 500): a request sent twice is refused. */
 const pairNonces = new Set<string>();
 export function usePairNonce(nonce: string): boolean {
@@ -49,11 +55,13 @@ export function lanList(): { address: string; via: string }[] {
 }
 
 export function shareView() {
-  return { on: shareState.on, listening: !!shareServer, error: shareError, port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), models: shareState.models ?? [], allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), runChanges, shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */
 let keptNow: Awaited<ReturnType<typeof carry.keptHere>> = [];
+/** Run settings linked PCs changed here since TOMLIN started, newest first (shown on this PC's Network page). */
+const runChanges: { model: string; name: string; draft: string; draftName: string; by: string; at: string }[] = [];
 /** Linked PCs' projects backed up here (a git repository for each), for this page. */
 let projectsNow: Awaited<ReturnType<typeof carry.projectsHere>> = [];
 const readKept = () => Promise.all([
@@ -121,6 +129,14 @@ const keepOf = (who: share.ShareState['paired'][number]) => who.keep ?? who.from
 
 /** The doors for copies between linked PCs (src/carry.ts): what this PC's owner lets them do is read at each request. Made by startNode. */
 let carryNode: ReturnType<typeof carry.nodeSide>;
+/** The doors for a runner a linked PC sends here (src/runnerpush.ts). */
+let runnerNode: ReturnType<typeof runnerpush.runnerSide>;
+
+/** What this PC says about its runners in its hello: its NVIDIA card and driver, its CUDA runner, its last chat start. */
+function runnerHello(): runnerpush.RunnerHello {
+  const s = runnerNode?.state('llama-cuda') ?? { state: 'none' as const, said: '' };
+  return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('cuda', shareState.name), cuda: s.state, said: s.said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null };
+}
 
 /** The doors for updates pushed by a linked PC (src/update.ts). Made by startNode. */
 let updateNode: ReturnType<typeof update.updateSide>;
@@ -266,7 +282,7 @@ function stillThere(link: string, chatOnly = false) {
 }
 
 /**
- * The models linked PCs are using on this PC now: loaded for them (dropped by itself after 60 s unused) or answering
+ * The models linked PCs are using on this PC now: loaded for them (dropped by itself after 60 s unused, 10 minutes for a picture model) or answering
  * (drawing) for one now. Shown on this PC's Nodes page, and checked before someone here uses one of them.
  */
 export function linkedUse(): { id: string; name: string; kind: 'chat' | 'image'; pcs: string[]; busy: boolean }[] {
@@ -299,20 +315,28 @@ export function impactOf(id: string | null, image = false): string | null {
   return out ? `Loading this model here takes ${out.name} out of memory, and ${who(out)} is using it: their next answer has to load it again.` : null;
 }
 
-/** The models this PC's owner lets linked PCs use, as they stand now (asked fresh each hello). */
+/** Every model on this PC: linked PCs may use any of them (share.json's old list of ticked models is no longer read). */
+const onThisPc = () => [...d.chatList().map(m => m.id), ...d.pictureModels().filter(m => m.installed).map(m => m.id)];
+
+/** The models linked PCs may use (all of them), as they stand now (asked fresh each hello). */
 async function sharedNow(): Promise<nodestaff.SharedModel[]> {
   const s = await d.store.settings();
   const pictures = d.pictureModels().filter(m => m.installed);
   const isPicture = (id: string) => pictures.some(m => m.id === id);
   const v = d.imagePane.view;
-  return nodestaff.sharedList(shareState.models ?? [], {
-    models: [...d.chatList().map(m => ({ ...m, kind: 'chat' as const })), ...pictures.map(m => ({ id: m.id, name: pictureName(m)!, bytes: m.bytes ?? 0, kind: 'image' as const }))],
+  const chats = d.chatList();
+  return nodestaff.sharedList({
+    models: [...chats.map(m => ({ ...m, kind: 'chat' as const })), ...pictures.map(m => ({ id: m.id, name: pictureName(m)!, bytes: m.bytes ?? 0, kind: 'image' as const }))],
     ctxOf: id => {
       const p = d.runnerFor(id);
       return (p?.view.state === 'connected' ? d.runOn(p) : d.runOf(s, id)).ctx;
     },
     loaded: id => (isPicture(id) ? v.model === id && v.state === 'connected' : d.runnerFor(id)?.view.state === 'connected'),
     hidden: id => d.isHidden?.(id) === true,
+    runOf: id => {
+      const m = chats.find(x => x.id === id);
+      return { draft: d.runOf(s, id).draft ?? '', guessers: m ? runset.guessersFor(m, chats) : [] };
+    },
     // A model not loaded is not busy (busy() with no runner would mean "anything, anywhere").
     busy: id => {
       if (isPicture(id)) return drawing || d.imageBusy();
@@ -320,6 +344,30 @@ async function sharedNow(): Promise<nodestaff.SharedModel[]> {
       return lending.has(id) || (!!p && d.busy(p));
     },
   });
+}
+
+/**
+ * Sets a model's Guessing model here for a linked PC, in this PC's own settings (the rest of its setup is kept). A
+ * model loaded here and not answering is let go, so its next answer starts it with the new setting; one answering keeps
+ * going and uses it from its next load.
+ */
+async function runSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const chats = d.chatList();
+  const ask = runset.runSetAsk(b, chats);
+  if ('error' in ask) return { status: ask.status, json: { error: ask.error } };
+  const { model, draft } = ask;
+  const s = await d.store.settings();
+  const { draft: _was, ...rest } = d.runOf(s, model.id);
+  await d.store.saveSettings({ run: { [model.id]: { ...rest, ...(draft ? { draft } : {}) } } });
+  const draftName = chats.find(m => m.id === draft)?.name ?? '';
+  runChanges.unshift({ model: model.id, name: model.name, draft, draftName, by, at: new Date().toISOString() });
+  runChanges.length = Math.min(runChanges.length, 5);
+  console.log(`"${by}" set the guessing model for ${model.name} on this PC to ${draftName || 'none'}.`);
+  const p = d.runnerFor(model.id);
+  const letGo = !!p && p.view.state === 'connected' && !d.busy(p);
+  if (letGo) await p!.disconnect();
+  const when = letGo ? 'It was loaded there and not answering, so it was let go: its next answer starts it with this.' : p ? 'It is answering there now: it uses this from its next load.' : 'It uses this from its next load.';
+  return { status: 200, json: { said: `${model.name} on "${shareState.name}": guessing model ${draftName || 'none'}. ${when}`, letGo } };
 }
 
 /**
@@ -370,7 +418,7 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
   if (at && 'error' in at && b.queue === true && (await pictureMakesWay())) at = d.place(id);
   const swapped = at && !('error' in at) && !at.already && at.replaces ? d.runnerFor(at.replaces) : null;
   const busy = lending.has(id) || (!!runner && d.busy(runner)) || (!!swapped && (d.busy(swapped) || lending.has(swapped.view.model ?? '')));
-  const why = nodestaff.modelRefusal(id, { ticked: shareState.models ?? [], onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy, pcName: shareState.name });
+  const why = nodestaff.modelRefusal(id, { onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy, pcName: shareState.name });
   if (why) return workerJson(res, why.busy ? 409 : 403, why);
   // The asking PC names this one before it ("Worker PC": ...): said once, not twice.
   if (at && 'error' in at) return workerJson(res, 409, { error: at.error });
@@ -421,7 +469,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
   if (want) {
     const v = d.imagePane.view;
     const busy = drawing || d.imageBusy() || (v.state === 'loading' && v.model !== want);
-    const why = nodestaff.modelRefusal(want, { ticked: shareState.models ?? [], onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy, pcName: shareState.name });
+    const why = nodestaff.modelRefusal(want, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy, pcName: shareState.name });
     if (why) return workerJson(res, why.busy ? 409 : 403, why.busy ? { ...why, error: why.error.replace('is answering something else', 'is drawing something else') } : why);
     return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height) }, res, forPc, link, b.queue === true);
   }
@@ -430,9 +478,8 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
   if (drawing) return workerJson(res, 409, { error: 'that PC is already drawing a picture for another PC. Try again in a minute.' });
   const loaded = models.find(m => m.id === v.model);
   if (!loaded) return workerJson(res, 409, { error: 'its connected picture model is not one TOMLIN knows.' });
-  // Only a picture model its owner ticked for other PCs draws for them; a swap for the style only to another ticked one.
-  const ticked = shareState.models ?? [];
-  const notLent = nodestaff.modelRefusal(loaded.id, { ticked, onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy: false, pcName: shareState.name });
+  // The connected picture model draws for them; a swap for the style goes to another installed one.
+  const notLent = nodestaff.modelRefusal(loaded.id, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy: false, pcName: shareState.name });
   if (notLent) return workerJson(res, 403, notLent);
   drawing = true;
   const send = streamTo(res);
@@ -442,7 +489,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
   const beat = setInterval(() => { if (!res.destroyed) res.write(': still working\n\n'); }, 20_000);
   res.on('close', () => clearInterval(beat));
   try {
-    const plan = brains.modelForStyle(style, loaded, models.filter(m => ticked.includes(m.id)), true);
+    const plan = brains.modelForStyle(style, loaded, models.filter(m => m.installed), true);
     if (plan.swap) {
       send('progress', { state: 'starting', text: `Switching to ${plan.use.name.replace(/\s*\(.*\)$/, '')} for the style` });
       if (!(await d.swapImage(plan.use.id))) throw new Error(`${plan.use.name} did not load there. Its owner can connect it in an artist's chat there.`);
@@ -464,7 +511,8 @@ const pictureName = (m: brains.PictureModel | undefined) => (m ? m.name.replace(
 /**
  * A picture on one of the picture models this PC lets linked PCs use: loaded first when it is not (the picture model
  * loaded here makes way, it is not drawing: checked before), then drawn as the linked PC asked (its artist's words are
- * already in the prompt). A model loaded for a linked PC is dropped by itself after 60 s unused, as chat models are.
+ * already in the prompt). A picture model loaded for a linked PC is dropped by itself 10 minutes after its last picture
+ * (src/picturelock.ts PICTURE_DROP_MS): long enough for pictures one after another, short while the PC is locked.
  */
 async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number }, res: ServerResponse, forPc: string, link: string, queue = false) {
   drawing = true;
@@ -510,10 +558,12 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (req.method === 'POST' && p === '/worker/pair') {
       const locked = guard.lockedFor(ip);
       if (locked) return workerJson(res, 429, { error: `Too many wrong PINs from this PC. Try again in ${locked} minute${locked > 1 ? 's' : ''}.` });
+      const paused = guard.pausedFor();
+      if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network: connect PCs).` });
       const b = await d.body(req, 4096);
       // F7 E1: only the encrypted link. A main PC from before it is told to update.
       if (Number(b.v) !== link.LINK_VERSION || typeof b.pub !== 'string') return workerJson(res, 426, { error: 'this PC now uses an encrypted link. Update TOMLIN on this main PC, then link again.' });
-      if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Nodes and memory there. Type it and link again.', needPin: true });
+      if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network: connect PCs there. Type it and link again.', needPin: true });
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
       if (!shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
@@ -521,7 +571,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const got = link.nodeAnswer(await nodePairKey(), b, { id: shareState.id, name: shareState.name }, token);
       if (!got) {
         guard.wrong(ip);
-        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Nodes and memory.' : 'wrong setup code. Type the code shown on that PC under Nodes and memory (8 letters and numbers).' });
+        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network: connect PCs.' : 'wrong setup code. Type the code shown on that PC under Network: connect PCs (8 letters and numbers).' });
       }
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a
       // working link off the end of the list. A real retry from the main PC makes a new one. Checked before the wrong-try
@@ -554,10 +604,22 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (!keys) return workerJson(res, 401, { error: 'this link was made before links were encrypted. Link this PC again from the main PC (Other PCs, Find PCs on my network, then the setup code).' });
     if (req.method !== 'POST') return workerJson(res, 405, { error: 'this PC only takes sealed messages. Update TOMLIN on the main PC.' });
     // A piece of a file (a model or a restore point sent here): the request rides in a header, the piece is the body.
-    const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put';
+    const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put' || p === '/worker/runner-put';
     // A project backup's file list and the ids asked about are long (up to 100,000 files).
     const limit = p === '/worker/run' ? 600_000 : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' ? 1 << 20 : 16_384;
-    const opened = link.openRequest(keys, putDoor ? { box: String(req.headers['x-link'] ?? '') } : await d.body(req, limit), p, taken);
+    // Read whole before the seal can be checked: refused at once when it says it is larger than this door takes, or when
+    // this link (or all of them) already has that much being read (S4). A piece is read only after its header opens.
+    const declared = Number(req.headers['content-length']);
+    if (!putDoor && declared > limit) return workerJson(res, 400, { error: 'that request is too large for this PC to take at once, so it was refused.' });
+    const giveBack = putDoor || limit <= 16_384 ? () => undefined : bodies.take(who.hash, declared >= 0 && declared <= limit ? declared : limit);
+    if (!giveBack) return workerJson(res, 429, { error: 'this PC is taking in other large requests from linked PCs now. Try again in a minute.' });
+    let sent: Record<string, unknown> | { box: string };
+    try {
+      sent = putDoor ? { box: String(req.headers['x-link'] ?? '') } : await d.body(req, limit);
+    } finally {
+      giveBack();
+    }
+    const opened = link.openRequest(keys, sent, p, taken);
     if ('error' in opened) return workerJson(res, 400, { error: opened.error });
     // A piece (up to 16 MB) is read only once its sealed request has opened: the fingerprint alone gets nothing read.
     const raw = putDoor ? await rawBody(req, carry.PIECE + 1024) : null;
@@ -576,11 +638,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // The disk that keeps other PCs' backups here (read at once, no program started), so they see the room left.
       const disk = await carry.diskOf(d.carry.keptRoot);
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk });
-      // The connected models are named only when their owner ticked them for other PCs (an unticked one is not lent).
-      const lent = (id: string | null | undefined) => !!id && (shareState.models ?? []).includes(id);
+      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello() });
+      // The connected models are named (every model here is lent).
+      const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id);
       const img = imageHello();
-      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk });
+      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello() });
     }
     // This PC's meters for the head of a paired PC's chat with someone here: read from what the sampler measured in
     // the last second for this PC's own top bar, so asking every few seconds adds no measuring here.
@@ -599,6 +661,28 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     const carryDoor = p.startsWith('/worker/carry-') || p.startsWith('/worker/backup-') || p.startsWith('/worker/update-') || p.startsWith('/worker/git-');
     if (away && (carryDoor || ['/worker/switch', '/worker/draw', '/worker/run'].includes(p))) return workerJson(res, 503, { error: `I need to log off for now: someone is using ${shareState.name} (since ${new Date(away.since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}). Its work goes to other PCs until it is started again.`, away: away.since });
+    // Download to this PC, asked by a linked main PC (no tick needed, as for a model it sends), not while someone here
+    // is using it.
+    if (p === '/worker/fetch-start' || p === '/worker/fetch-state' || p === '/worker/fetch-stop') {
+      if (away && p === '/worker/fetch-start') return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      const a = await d.fetch(p, body);
+      return workerJson(res, a.status, a.json);
+    }
+    // A runner a linked PC sends here (only the build this PC pins, checked before it is unpacked), not while someone
+    // here is using it.
+    if (p.startsWith('/worker/runner-')) {
+      if (away && (p === '/worker/runner-offer' || p === '/worker/runner-put')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      const a = await runnerNode.handle(p, body, { key: keepOf(who), name: who.name }, piece ?? undefined);
+      return workerJson(res, a.status, 'json' in a ? a.json : { error: 'a runner door sent a piece.' });
+    }
+    // A linked PC sets how one of this PC's models runs (its Guessing model), only with this PC's owner's tick and by
+    // ids checked against this PC's own models (src/runset.ts); not while someone here is using it.
+    if (p === '/worker/run-set') {
+      if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
+      const a = await runSetHere(body, who.name);
+      return workerJson(res, a.status, a.json);
+    }
     if (p.startsWith('/worker/update-')) {
       const a = await updateNode(p, body, { key: keepOf(who), name: who.name }, piece ?? undefined);
       return workerJson(res, a.status, a.json);
@@ -634,8 +718,8 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
       if (typeof b.model === 'string' && b.model) return await modelChat(b, turns, { system, user }, maxTokens, res, who.name, keep, keepOf(who));
       if (d.chat.view.state !== 'connected' || !d.chat.worker.base) return workerJson(res, 409, { error: 'no chat model is connected on the worker PC. Press Connect there.' });
-      // The model connected here answers only when its owner ticked it for other PCs (never lent unasked).
-      const notLent = nodestaff.modelRefusal(d.chat.view.model ?? '', { ticked: shareState.models ?? [], onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy: false, pcName: shareState.name });
+      // The model connected here answers for linked PCs (every model on this PC is lent).
+      const notLent = nodestaff.modelRefusal(d.chat.view.model ?? '', { onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy: false, pcName: shareState.name });
       if (notLent) return workerJson(res, 403, notLent);
       if (d.busy()) return workerJson(res, 409, { error: 'that PC is busy answering something else. Try again in a moment.' });
       const verdict = checkMessage(turns ? turns.at(-1)!.content : user, { recent: [] });
@@ -755,12 +839,12 @@ export async function setShare(b: Record<string, unknown>) {
   // What the link part listens with, before this change: it restarts only when one of them changes (below).
   const was = { on: shareState.on, port: shareState.port };
   await shareLoaded;
-  if (turningOn && !d.appLockOn()) return { status: 409, body: { error: 'A node must have the app lock, so whoever sits at this PC cannot read or change it. Set a PIN first: the padlock, top right. Then tick this again.', needAppLock: true } };
+  if (turningOn && !d.appLockOn()) return { status: 409, body: { error: 'A node must have a pin code to lock the app.', needAppLock: true } };
   // Checked before anything is changed, so a refused port never leaves half of the other changes made.
   const port = 'port' in b ? Math.floor(Number(b.port)) : shareState.port;
   if ('port' in b && (!(port >= 1024 && port <= 65535) || port === Number(process.env.TOMLIN_PORT ?? 8740))) return { status: 400, body: { error: 'Use a port number from 1024 to 65535, not TOMLIN\'s own.' } };
   if (shareState.on && !turningOn) {
-    const ok = d.appPinCheck(b.appPin);
+    const ok = await d.appPinCheck(b.appPin);
     if ('error' in ok) return { status: ok.status, body: { error: ok.error, needAppPin: true } };
   }
   if (b.away === true) {
@@ -781,7 +865,6 @@ export async function setShare(b: Record<string, unknown>) {
   shareState.port = port;
   if ('pinOn' in b) shareState.pinOn = b.pinOn === true;
   if ('allow' in b) shareState.allow = carry.cleanAllow(b.allow);
-  if ('models' in b) shareState.models = nodestaff.cleanTicks(b.models, [...d.chatList().map(m => m.id), ...d.pictureModels().filter(m => m.installed).map(m => m.id)]);
   if (b.newPin === true || (shareState.pinOn && !shareState.pin)) shareState.pin = share.newPin();
   if (b.newCode === true) shareState.code = share.newCode();
   // By the link's own id (its token's fingerprint): the list can change while the page shows it (a PC links meanwhile).
@@ -806,7 +889,7 @@ export function startNode(): void {
   setInterval(readKept, 60_000).unref();
   carryNode = carry.nodeSide({
     allow: () => shareState.allow ?? carry.NO_ALLOW,
-    ticked: () => shareState.models ?? [],
+    shared: onThisPc,
     pcName: () => shareState.name,
     chatFiles: d.carry.chatFiles,
     pictureFiles: d.carry.pictureFiles,
@@ -818,14 +901,15 @@ export function startNode(): void {
     onInstalled: (name, model) => {
       console.log(`A linked PC installed ${name} on this PC.`);
       d.carry.onInstalled();
-      // A model sent here is shared at once (ticked under "Models to share with others"): staff moved off this PC and
-      // back again find it here, with nothing to tick by hand.
-      const ticked = shareState.models ?? [];
-      if (!ticked.includes(model.id)) {
-        shareState.models = [...ticked, model.id].slice(-40);
-        void saveShare().catch(() => undefined);
-      }
     },
+  });
+
+  runnerNode = runnerpush.runnerSide({
+    runtimes: d.runner.runtimes,
+    pcName: () => shareState.name,
+    why: device => d.runner.why(device, shareState.name),
+    inUse: device => d.runner.inUse(device),
+    onChange: () => console.log(`The CUDA runner on this PC changed (a linked PC sent it, or took it away).`),
   });
 
   // Logged out for the hours the main PC agreed to: it starts again by itself when they are up.
@@ -849,15 +933,25 @@ export function startNode(): void {
       await d.update.switchTo(dir);
     },
   });
+  // When the picture model last drew, or was loaded (src/picturelock.ts: unloaded while locked after a while with nothing drawn).
+  let pictureUsedAt = Date.now();
   setInterval(() => {
     const v = d.imagePane.view;
+    if (v.state !== 'connected' || drawing || d.imageBusy()) pictureUsedAt = Date.now();
+    let dropped = false;
     if (pictureFor && (v.model !== pictureFor.id || (v.state !== 'connected' && v.state !== 'loading'))) pictureFor = null;
     else if (pictureFor && (drawing || v.state === 'loading')) pictureFor.at = Date.now();
     // Drawing, but not for a linked PC: someone at this PC uses it now, so it is theirs.
     else if (pictureFor && d.imageBusy()) pictureFor = null;
-    else if (pictureFor && Date.now() - pictureFor.at > UNUSED_DROP_MS) {
-      console.log(`Dropping ${v.modelName ?? pictureFor.id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 1000} s.`);
+    else if (pictureFor && Date.now() - pictureFor.at > PICTURE_DROP_MS) {
+      console.log(`Dropping ${v.modelName ?? pictureFor.id}: loaded for a linked PC, and no linked PC used it for ${PICTURE_DROP_MS / 60_000} minutes.`);
       pictureFor = null;
+      dropped = true;
+      void d.imagePane.disconnect().catch(() => undefined);
+    }
+    // sd-server takes no key: while TOMLIN is locked, a picture model of this PC's own does not stay loaded with nothing to do.
+    if (!dropped && unloadWhileLocked({ locked: d.appLocked(), state: v.state, forLinked: !!pictureFor, busy: drawing || d.imageBusy(), idleMs: Date.now() - pictureUsedAt })) {
+      console.log(`Unloading ${v.modelName ?? v.model}: TOMLIN is locked, and the picture runner takes no key. It loads again for the next picture.`);
       void d.imagePane.disconnect().catch(() => undefined);
     }
     for (const [id, v] of loadedForPc) {

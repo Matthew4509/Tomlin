@@ -1,19 +1,36 @@
 // Notifications (person and event, never content), Mute, and the scratch pad and snippets.
 import type { ChatLine } from '../store.ts';
-import { whoFor, type JobEvent } from '../home.ts';
+import { chatOfficeKind, officeEventOf, OfficeFeed, whoFor, type JobEvent } from '../home.ts';
 import * as mute from '../mute.ts';
 import * as notes from '../notes.ts';
 import * as notify from '../notify.ts';
 import { type Routes, chats, json, mutes, noteStore, notifier, staff } from './core.ts';
 import { chatPeople } from './people.ts';
+import { jobRoutes } from './jobs.ts';
 
 // ---- Notifications (src/notify.ts): person and event, never content; Mute decides first ----
 
 const personKey = (who: string) => (who.startsWith('staff:') || who.startsWith('node:') ? who : 'manager');
 
+/** What each hire just did, for the office chat (Home's staff rows carry it: src/server/team.ts). */
+export const officeFeed = new OfficeFeed();
+
+/** A job's event into the office chat: told by the hire who did it (nobody hired for the role: nothing). */
+async function officeJob(id: string, e: JobEvent, people: { id: string; name: string; role: string }[]): Promise<void> {
+  const got = officeEventOf(e, officeFeed.lastRole(id));
+  if ('role' in e && e.role) officeFeed.worked(id, e.role);
+  const hire = got?.role ? whoFor(got.role, people).id : null;
+  if (!got || !hire) return;
+  const job = await jobRoutes.loadJob(id).catch(() => null);
+  const { role: _role, ...news } = got;
+  void _role;
+  officeFeed.add(hire, { ...news, job: job?.name || job?.goal?.slice(0, 60) || 'a project' });
+}
+
 export async function tellJob(id: string, e: JobEvent): Promise<void> {
   try {
     const people = staff.list().map(m => ({ id: m.id, name: m.name, role: m.role }));
+    await officeJob(id, e, people).catch(() => undefined);
     const told = notify.jobTold(e, role => whoFor(role, people).name);
     if (!told) return;
     const hire = told.role ? whoFor(told.role, people).id : null;
@@ -34,6 +51,8 @@ export async function tellChat(file: string, lines: ChatLine[]): Promise<void> {
     chatToldAt.set(id, last.at);
     const c = await chats.get(id);
     if (!c) return;
+    const kind = chatOfficeKind(last);
+    if (kind && c.who.startsWith('staff:')) officeFeed.add(c.who.slice(6), { kind, chat: c.title || 'a chat' });
     if (!mute.shouldTell(await mutes.get(), [`chat:${id}`, personKey(c.who)], 'finished')) return;
     await notifier.tell('finished', notify.chatTold(chatPeople().find(p => p.who === c.who)?.name ?? 'TOMLIN'), `chat:${id}`);
   } catch {

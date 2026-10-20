@@ -21,11 +21,13 @@ import { inScope, type Tally, type Used } from './meter.ts';
 import type { Pane } from './pane.ts';
 import type { Place } from './runners.ts';
 import type { RunOptions, Settings, Store } from './store.ts';
+import type { RunnerHello } from './runnerpush.ts';
+import type { Device, Runtimes } from './runtimes.ts';
 import { d, useDeps } from './jobrun/shared.ts';
 import { canKeep, canThink, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, copyFrom, keptOn, network, projectsBack, projectsOn, projectsTo, sendTo, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
+import { backupTo, bringBack, copyFrom, fetchOn, keptOn, network, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
 import { applyShare, askHost, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
@@ -115,11 +117,15 @@ export interface JobDeps {
   notebooks: memory.Notebooks;
   /** Whether the app lock has a PIN (F7 E3: a node must have one). */
   appLockOn: () => boolean;
+  /** The app lock is on and no browser has TOMLIN open. */
+  appLocked: () => boolean;
   /** Checks the app lock PIN (wrong tries are counted there). */
-  appPinCheck: (pin: unknown) => { ok: true } | { status: number; error: string };
+  appPinCheck: (pin: unknown) => Promise<{ ok: true } | { status: number; error: string }>;
   /** Unloads every model on this PC (F7 E5: the node gives way). */
   /** Unloads every model here; `still` is asked before each one (the node may be started again part-way). */
   unloadAll: (still?: () => boolean) => Promise<void>;
+  /** A download a linked main PC asks this node to make itself (/worker/fetch-start, -state, -stop; src/server/hf.ts fetchHere). */
+  fetch: (path: string, b: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> }>;
   /** Told when a linked PC says "I need to log off for now" (its name). */
   onNodeAway?: (name: string) => void;
   /** Told when someone at a linked PC sends "I need to use the pc, please log out for N hours" (its name, the hours). */
@@ -130,6 +136,21 @@ export interface JobDeps {
   carry: CarryDeps;
   /** Updates pushed to nodes (src/update.ts): this copy's folder, whether Start TOMLIN.cmd can start another, the switch. */
   update: UpdateDeps;
+  /** Runners sent between linked PCs (src/runnerpush.ts): this PC's runners, its NVIDIA card and driver. */
+  runner: RunnerDeps;
+}
+
+/** What sending runners between linked PCs needs from the server (src/runnerpush.ts). */
+export interface RunnerDeps {
+  runtimes: Runtimes;
+  /** This PC has an NVIDIA card of its own. */
+  nvidia: () => boolean;
+  /** Its NVIDIA driver's version, when nvidia-smi gave one. */
+  driver: () => string | null;
+  /** Why this PC (named `pc` in the words) cannot use a runner for `device` ('' when it can). */
+  why: (device: Device, pc: string) => string;
+  /** True while a model runs (or loads) on that device here. */
+  inUse: (device: Device) => boolean;
 }
 
 /** What a paired PC said in its last hello: what it has loaded and what it can do. */
@@ -189,6 +210,8 @@ export interface Hello {
   installed: string | null;
   /** The disk that keeps other PCs' backups there: its size and what is free (bytes); null before 2.0.47. */
   disk: { total: number; free: number } | null;
+  /** Its NVIDIA card, driver and CUDA runner, and its last chat start (2.0.56 on); null from an older TOMLIN. */
+  runner: RunnerHello | null;
 }
 
 /** Something that answers: the local chat model, or a worker PC's. */
@@ -293,9 +316,13 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/projects-back': reply(await projectsBack(b)); return true;
     case '/api/network/copy': reply(await copyFrom(b)); return true;
     case '/api/network/send': reply(await sendTo(b)); return true;
+    case '/api/network/fetch': reply(await fetchOn(b)); return true;
     case '/api/network/backup': reply(await backupTo(b)); return true;
     case '/api/network/bring': reply(await bringBack(b)); return true;
     case '/api/network/update': reply(await updatePc(b)); return true;
+    case '/api/network/runner': reply(await runnerTo(b)); return true;
+    case '/api/network/runner-remove': reply(await runnerOff(b)); return true;
+    case '/api/network/run-set': reply(await runSetOn(b)); return true;
     case '/api/network/stop': d.json(res, 200, { stopped: transfers.stop(String(b.id ?? '')) }); return true;
     default: return false;
   }

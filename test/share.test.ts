@@ -110,3 +110,57 @@ test('Send host: the request word for word, 1, 2 or 4 hours, waiting until the m
   assert.equal(askPending(null), null);
   assert.equal(askUntil(2, Date.parse(at)), '2026-10-08T12:00:00.000Z');
 });
+
+test('S3: wrong setup codes from many addresses pause linking for every address; old addresses are dropped from the list', async () => {
+  let t = 0;
+  const g = new PinGuard(() => t);
+  // Four tries each from five addresses: none is locked on its own, but twenty in ten minutes pause linking.
+  for (let a = 0; a < 4; a++) for (let i = 0; i < 4; i++) g.wrong(`10.0.0.${a}`);
+  assert.equal(g.pausedFor(), 0);
+  for (let i = 0; i < 4; i++) g.wrong('10.0.0.9');
+  assert.equal(g.lockedFor('10.0.0.9'), 0);
+  assert.equal(g.pausedFor(), 10);
+  t = 6 * 60_000;
+  assert.equal(g.pausedFor(), 4);
+  t = 10 * 60_000 + 1;
+  assert.equal(g.pausedFor(), 0);
+  // Addresses whose tries are all older than ten minutes are not kept.
+  for (let a = 0; a < 300; a++) g.wrong(`10.1.${a >> 8}.${a & 255}`);
+  t = 21 * 60_000;
+  g.wrong('10.2.0.1');
+  assert.equal(g.size, 1);
+  g.right('10.2.0.1');
+  assert.equal(g.size, 0);
+});
+
+test('S4: large bodies read before the seal opens are held to a byte budget per link and in all', async () => {
+  const { BodyBudget } = await import('../src/share.ts');
+  const b = new BodyBudget(40 << 20, 96 << 20);
+  const one = b.take('a', 32 << 20);
+  assert.ok(one);
+  assert.equal(b.take('a', 32 << 20), null, 'a second 32 MB body from the same link waits');
+  assert.ok(b.take('a', 1 << 20), 'a small one still fits beside it');
+  assert.ok(b.take('b', 32 << 20));
+  assert.equal(b.take('c', 32 << 20), null, 'no room left in all');
+  one!();
+  one!();
+  assert.ok(b.take('c', 32 << 20), 'given back once (a second give-back changes nothing)');
+  assert.equal(b.take('d', 32 << 20), null, 'full again: 1 + 32 + 32 MB held, 96 MB in all');
+});
+
+test('S6: a worker address that is a name must resolve to the home network only', async () => {
+  const { homeNetworkWhy } = await import('../src/share.ts');
+  const dns = (table: Record<string, string[]>) => async (host: string) => {
+    if (!table[host]) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' });
+    return table[host].map(address => ({ address }));
+  };
+  const look = dns({ 'desk.local': ['192.168.1.20'], 'evil.example': ['93.184.216.34'], 'mixed.lan': ['192.168.1.21', '8.8.8.8'], 'v6.lan': ['fe80::1'] });
+  assert.equal(await homeNetworkWhy('http://desk.local:8741', look), null);
+  assert.equal(await homeNetworkWhy('http://v6.lan:8741', look), null);
+  assert.equal(await homeNetworkWhy('http://192.168.1.20:8741', async () => { throw new Error('a number is not looked up'); }), null);
+  assert.match((await homeNetworkWhy('http://evil.example:8741', look))!, /evil\.example.*93\.184\.216\.34.*not on your home network/);
+  assert.match((await homeNetworkWhy('http://mixed.lan:8741', look))!, /8\.8\.8\.8/);
+  assert.match((await homeNetworkWhy('http://nobody.lan:8741', look))!, /nobody\.lan.*could not be found/);
+  // The real resolver: localhost is this PC.
+  assert.equal(await homeNetworkWhy('http://localhost:8741'), null);
+});

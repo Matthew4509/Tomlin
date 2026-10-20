@@ -6,6 +6,7 @@ import * as brains from '../brains.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as carry from '../carry.ts';
 import * as update from '../update.ts';
+import * as runnerpush from '../runnerpush.ts';
 import * as speedKeys from '../speed.ts';
 import { cleanRid, ridOf } from '../outbox.ts';
 import { cleanTally, cleanUsed, scope } from '../meter.ts';
@@ -34,6 +35,12 @@ const askTold = new Map<string, string>();
 /** The chat model each linked PC had loaded when it last answered (kept while it is off, to name a hire's own model). */
 export const lastModel = new Map<string, string>();
 
+/** A linked PC's address given as a name must still point inside the home network (S6): checked before each request. */
+export async function onHomeNetwork(r: Pick<Remote, 'name' | 'url'>): Promise<void> {
+  const why = await share.homeNetworkWhy(r.url);
+  if (why) throw new Error(`"${r.name}": ${why}`);
+}
+
 /**
  * One call to a linked PC over the encrypted link (src/link.ts): the request is sealed, and the answer comes back
  * opened, as a plain Response, so the readers stay as they are. Only a refusal may come back unsealed (one made
@@ -46,6 +53,7 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
   if (!keys) throw Object.assign(new Error(`"${r.name}" was linked before links were encrypted. Link it again: Other PCs, Find PCs on my network, then its setup code.`), { relink: true });
   const req = link.sealRequest(keys, path, payload);
   const id = link.requestId(req.box);
+  await onHomeNetwork(r);
   const res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
   if ((res.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
     if (!res.body) throw new Error(`"${r.name}" sent nothing back.`);
@@ -60,7 +68,7 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
 const WORK_PATHS = new Set(['/worker/run', '/worker/draw', '/worker/switch', '/worker/carry-offer', '/worker/carry-put']);
 /** Set to "Backups only" on this PC (as saved now). */
 export const backupsOnly = (id: string) => d.store.peek()?.remotes.find(x => x.id === id)?.backupsOnly === true;
-export const backupsOnlyWhy = (name: string) => `"${name}" is set to Backups only: it keeps backups and does no other work. To use it for staff again, untick Backups only on its card (Nodes and memory, Other PCs).`;
+export const backupsOnlyWhy = (name: string) => `"${name}" is set to Backups only: it keeps backups and does no other work. To use it for staff again, untick Backups only on its card (Network: connect PCs, Linked PCs).`;
 
 /** A link from before the encryption: said as it is, not as "could not be reached". */
 const relink = (e: unknown) => (e as { relink?: boolean }).relink === true;
@@ -122,6 +130,7 @@ export async function hello(r: Remote, ms = 4000): Promise<Hello> {
     meter: meterOf(data.meter),
     installed: typeof data.installed === 'string' && !Number.isNaN(Date.parse(data.installed)) ? data.installed : null,
     disk: carry.cleanDisk(data.disk),
+    runner: runnerpush.cleanRunner(data.runner),
   };
   // A "Backups only" PC lends nothing here: no model of it is offered for a hire, a chat, a job or a picture.
   if (backupsOnly(r.id)) Object.assign(h, { models: [], image: null });
@@ -208,7 +217,7 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
     if (rid) signal.addEventListener('abort', stop, { once: true });
     try {
       let res = await once(body, signal);
-      if (!res.ok) throw new Error(`"${r.name}": ${String(((await res.json().catch(() => ({}))) as Record<string, unknown>).error ?? `answered ${res.status}`)}${res.status === 401 ? '. Link it again under Nodes and memory, Other PCs.' : ''}`);
+      if (!res.ok) throw new Error(`"${r.name}": ${String(((await res.json().catch(() => ({}))) as Record<string, unknown>).error ?? `answered ${res.status}`)}${res.status === 401 ? '. Link it again under Network: connect PCs, Find other PCs.' : ''}`);
       let lostAt = 0;
       for (;;) {
         try {
@@ -327,7 +336,7 @@ export function sharedWhy(r: Remote, h: Hello, model: string): string {
   if (backupsOnly(r.id)) return backupsOnlyWhy(r.name);
   if (h.away) return `"${r.name}" is being used by its owner for now (they pressed "I need to use the pc")`;
   if (!h.can.includes('models')) return `"${r.name}" runs an older TOMLIN that cannot lend its models by name: update it there`;
-  if (!h.models.some(x => x.id === model && x.kind === 'chat')) return `"${r.name}" no longer lets other PCs use ${name} (its owner ticks the models others may use under Nodes and memory)`;
+  if (!h.models.some(x => x.id === model && x.kind === 'chat')) return `${name} is no longer on "${r.name}"`;
   return '';
 }
 
@@ -361,7 +370,7 @@ export async function pictureDrawer(refs: string[], anyPc: boolean, why: string[
     if (model) {
       const no = h.away ? `"${r.name}" is being used by its owner for now`
         : !h.can.includes('draw-models') ? `"${r.name}" runs an older TOMLIN that cannot lend its picture models: update it there`
-        : !h.models.some(x => x.id === model && x.kind === 'image') ? `"${r.name}" no longer lets other PCs use ${sharedName(r.id, model)}` : '';
+        : !h.models.some(x => x.id === model && x.kind === 'image') ? `${sharedName(r.id, model)} is no longer on "${r.name}"` : '';
       if (!no) return { r, h, model };
       why.push(no);
     } else if (h.can.includes('draw') && h.image?.model) return { r, h };
@@ -466,7 +475,7 @@ export async function remoteStatus() {
       const behind = update.updateWhy({ name: r.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, d.version, d.build());
       // build: the 7 characters shown beside its version ('' from an older TOMLIN); update.other: the same version with
       // different files, and update.build this PC's, for "Runs 2.0.48 but different files from this PC (build x there, y here)".
-      return { id: r.id, name: r.name, url: r.url, ok: true, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, backupsOnly: r.backupsOnly === true, update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' } };
+      return { id: r.id, name: r.name, url: r.url, ok: true, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, runner: h.runner, backupsOnly: r.backupsOnly === true, update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' } };
     } catch (e) {
       return { id: r.id, name: r.name, url: r.url, ok: false, backupsOnly: r.backupsOnly === true, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true };
     }

@@ -501,7 +501,7 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   }
   await swapData(home, fresh);
   const v = readVersion(home);
-  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Nodes and memory).' : ''}`;
+  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network: connect PCs).' : ''}`;
   await writeVersion(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
   return note;
 }

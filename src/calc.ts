@@ -109,6 +109,17 @@ export function cardFit(bytes: number, cards: { n: number; total: number }): 'ok
   return bytes + chat <= cards.total - cards.n * 0.5 * GB ? 'ok' : 'no';
 }
 
+/**
+ * Whether a chat model file this size could run on a PC at all (not "now": other programs and loaded models come and
+ * go): its RAM less 2 GB for Windows, plus each graphics card's own memory less 1 GB. This PC's Models list marks
+ * (src/server/hf.ts) and the Fits drop-down for a linked PC use the same sum.
+ */
+export function fitsRoom(bytes: number, ram: number, cards: number[]): 'ok' | 'tight' | 'no' {
+  const room = Math.max(0, ram - 2 * GB) + cards.reduce((n, c) => n + Math.max(0, c - GB), 0);
+  const need = bytes * 1.1 + 0.8 * GB;
+  return need <= room * 0.85 ? 'ok' : need <= room ? 'tight' : 'no';
+}
+
 /** A card's speed when not named: a typical figure for its memory size. */
 export function cardSpeedOf(hw: Hardware): number {
   if (hw.cardSpeed) return hw.cardSpeed;

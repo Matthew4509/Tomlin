@@ -6,11 +6,13 @@ import * as share from '../share.ts';
 import * as link from '../link.ts';
 import * as carry from '../carry.ts';
 import * as update from '../update.ts';
+import * as runnerpush from '../runnerpush.ts';
+import * as runset from '../runset.ts';
 import * as pb from '../projectbackup.ts';
 import { broughtBackWhy, recordSent } from '../keep.ts';
 import type { Remote } from '../store.ts';
 import { d, sleep } from './shared.ts';
-import { hello, remoteStatus } from './links.ts';
+import { hello, onHomeNetwork, remoteStatus } from './links.ts';
 import type { Hello } from '../jobrun.ts';
 
 // ---- Copies between linked PCs (src/carry.ts): this PC's side ----
@@ -28,6 +30,7 @@ function wireFor(r: Remote): carry.Wire {
     const headers: Record<string, string> = { authorization: `Link ${share.hashToken(r.token)}` };
     // A piece is 16 MB: 5 minutes is 55 KB a second, slower than any home network that works.
     let tries = 0;
+    await onHomeNetwork(r);
     for (;;) {
       // Sealed afresh for each try: the node takes each sealed request once, so a resend of the same one is refused.
       const req = link.sealRequest(keys, path, body);
@@ -45,7 +48,8 @@ function wireFor(r: Remote): carry.Wire {
       }
     }
   };
-  const fault = (v: Record<string, unknown>, status: number) => new Error(`"${r.name}": ${String(v.error ?? `it answered ${status}`)}`);
+  // The node's status and its own words ride along, for a door that passes them on (runSetOn).
+  const fault = (v: Record<string, unknown>, status: number) => Object.assign(new Error(`"${r.name}": ${String(v.error ?? `it answered ${status}`)}`), { status, said: String(v.error ?? '') });
   return {
     async ask(path, body) {
       const { res, id } = await call(path, body);
@@ -77,8 +81,8 @@ export const transfers = new carry.Transfers();
 async function netPcs(): Promise<carry.NetPc[]> {
   const s = await d.store.settings();
   return (await remoteStatus()).map(r => ('allow' in r && r.ok
-    ? { id: r.id, name: r.name, ok: true, away: r.away ?? null, can: r.can ?? [], allow: r.allow ?? null, models: r.models ?? [], backupsOnly: r.backupsOnly, disk: r.disk ?? null, memory: r.memory }
-    : { id: r.id, name: r.name, ok: false, away: null, can: [], allow: null, models: s.remotes.find(x => x.id === r.id)?.models ?? [], backupsOnly: r.backupsOnly, disk: null, memory: null }));
+    ? { id: r.id, name: r.name, ok: true, away: r.away ?? null, can: r.can ?? [], allow: r.allow ?? null, models: r.models ?? [], backupsOnly: r.backupsOnly, disk: r.disk ?? null, memory: r.memory, runner: r.runner ?? null }
+    : { id: r.id, name: r.name, ok: false, away: null, can: [], allow: null, models: s.remotes.find(x => x.id === r.id)?.models ?? [], backupsOnly: r.backupsOnly, disk: null, memory: null, runner: null }));
 }
 
 /** What tells one PC from another in a list: its RAM, its graphics card and that card's memory (from its hello). */
@@ -100,7 +104,7 @@ export async function network() {
   const chats = d.chatList();
   return {
     rows: carry.networkList(pcs, { chatFiles: chats.map(m => m.id), pictures: pictures.filter(m => m.installed).map(m => m.id) }),
-    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length }))),
+    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }) }))),
     mine: [
       ...chats.filter(m => !m.id.startsWith('ollama:')).map(m => ({ kind: 'chat' as const, id: m.id, name: m.name, bytes: m.bytes })),
       ...pictures.filter(m => m.installed).map(m => ({ kind: 'image' as const, id: m.id, name: m.name.replace(/\s*\(.*\)$/, ''), bytes: m.bytes ?? 0 })),
@@ -162,9 +166,110 @@ export async function sendTo(b: Record<string, unknown>) {
   const w = wireFor(r);
   const t = transfers.start({ kind: 'send', what: name, pc: r.id, pcName: r.name }, async (progress, signal) => {
     const sent = await carry.push(w, { kind, model, name, files, progress, signal });
-    return sent ? `${name} is on "${r.name}" now. Its owner ticks it under "Models to share with others" there if this PC should use it.` : `${name} was on "${r.name}" already: nothing was sent.`;
+    return sent ? `${name} is on "${r.name}" now. This PC can use it.` : `${name} was on "${r.name}" already: nothing was sent.`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
+}
+
+/**
+ * Download to a linked PC (Download, To that PC, on the Models page): that PC downloads the model itself, from the
+ * internet, into its own models folder; nothing passes through this PC. Followed here as a transfer (My local LLMs
+ * shows it, with Stop), asking that PC how far it is every 2 seconds.
+ */
+export async function fetchOn(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  const pc = (await netPcs()).find(x => x.id === r.id)!;
+  const why = carry.fetchWhy(pc);
+  if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
+  const image = b.kind === 'image';
+  const ask = image ? { kind: 'image', id: String(b.id ?? '') } : { kind: 'chat', repo: String(b.repo ?? ''), rev: String(b.rev ?? ''), name: String(b.name ?? '') };
+  const what = String(b.what ?? '').slice(0, 120) || (image ? ask.id : ask.name) || 'A model';
+  const w = wireFor(r);
+  const num = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  const t = transfers.start({ kind: 'fetch', what, pc: r.id, pcName: r.name }, async (progress, signal) => {
+    await w.ask('/worker/fetch-start', ask);
+    signal.addEventListener('abort', () => void w.ask('/worker/fetch-stop', ask).catch(() => undefined), { once: true });
+    for (;;) {
+      if (signal.aborted) throw new Error('Stopped.');
+      const s = await w.ask('/worker/fetch-state', ask).catch(() => null);
+      if (s) {
+        progress({ done: num(s.got), bytes: num(s.bytes) });
+        if (s.state === 'done') return `${what} is on "${r.name}" now, downloaded there. This PC can use it.`;
+        if (s.state === 'failed') throw new Error(`"${r.name}": ${String(s.error || 'the download stopped there.')}`);
+        if (s.state === 'stopped') throw new Error(`it was stopped on "${r.name}".`);
+        if (s.state === 'none') throw new Error(`"${r.name}" is no longer downloading ${what} (it may have started again). Download it again.`);
+      }
+      await sleep(2000);
+    }
+  });
+  return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
+}
+
+/**
+ * Sends the CUDA runner to a linked PC with an NVIDIA card: downloaded here first when its zips are not here (checked,
+ * then kept for the next PC), sent in sealed pieces, then checked and unpacked there (src/runnerpush.ts).
+ */
+export async function runnerTo(b: Record<string, unknown>) {
+  const id = String(b.id ?? '');
+  const pin = d.runner.runtimes.pins[id];
+  if (!pin || pin.device !== 'cuda' || pin.engine !== 'llama') return { status: 400, body: { error: 'Only the NVIDIA (CUDA) chat runner can be sent to a linked PC; the others come with TOMLIN.' } };
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  const pc = (await netPcs()).find(x => x.id === r.id)!;
+  const why = runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null });
+  if (why) return { status: 409, body: { error: why } };
+  const w = wireFor(r);
+  const rt = d.runner.runtimes;
+  const total = pin.parts.reduce((n, p) => n + p.bytes, 0);
+  const t = transfers.start({ kind: 'runner', what: pin.name, pc: r.id, pcName: r.name }, async (progress, signal) => {
+    if (!rt.zipsHere(pin.engine, pin.device)) {
+      progress({ stage: 'get', done: 0, bytes: total });
+      await rt.fetchZips(pin.engine, pin.device, p => progress({ done: p.got, bytes: p.bytes }), signal);
+    }
+    progress({ stage: 'send', done: 0, bytes: total });
+    const files = pin.parts.map((p, k) => ({ path: rt.zipOf(pin.engine, pin.device, k), bytes: p.bytes, sha256: p.sha256 }));
+    const sent = await runnerpush.pushRunner(w, { id, files, progress, signal });
+    if (sent === 'had') return `"${r.name}" has ${pin.name} already.`;
+    return `${pin.name} is on "${r.name}" now, checked and unpacked: the next model loaded there uses it. Its files stay on this PC (${GBs(total)}) for another PC; Remove takes them away.`;
+  });
+  return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
+}
+
+/** Takes the CUDA runner away from a linked PC (Vulkan runs its models again from the next load). */
+export async function runnerOff(b: Record<string, unknown>) {
+  const id = String(b.id ?? '');
+  const pin = d.runner.runtimes.pins[id];
+  if (!pin || pin.device !== 'cuda' || pin.engine !== 'llama') return { status: 400, body: { error: 'Only the NVIDIA (CUDA) chat runner can be taken away from a linked PC.' } };
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  try {
+    await wireFor(r).ask('/worker/runner-remove', { id });
+  } catch (e) {
+    return { status: 409, body: { error: (e as Error).message } };
+  }
+  return { status: 200, body: { said: `${pin.name} was taken away from "${r.name}": its models run on the graphics chip (Vulkan) from their next load.` } };
+}
+
+/**
+ * Sets the Guessing model of one of a linked PC's chat models (its own settings there): only the two model ids are sent,
+ * and that PC checks them against its own models and its owner's tick ("Allow host to test and change model run
+ * settings"), saying why not in its own words.
+ */
+export async function runSetOn(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  const pc = (await netPcs()).find(x => x.id === r.id)!;
+  const why = runset.tuneWhy(pc);
+  if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
+  try {
+    const a = await wireFor(r).ask('/worker/run-set', { model: String(b.model ?? ''), draft: String(b.draft ?? '') });
+    return { status: 200, body: { said: String(a.said ?? 'Saved there.'), letGo: a.letGo === true } };
+  } catch (e) {
+    const { status, said } = e as { status?: number; said?: string };
+    if (status === 403 && said) return { status: 403, body: { error: said } };
+    return { status: status === 400 || status === 404 ? status : 409, body: { error: (e as Error).message } };
+  }
 }
 
 /** A linked PC's restore points of this PC's data. */

@@ -2,6 +2,7 @@
 // waiting on disk and the state of the models, never by a model: a small model does not reliably report what it did.
 // Plain functions, tested in test/home.test.ts; the server gathers the facts and the page draws them.
 import type { Job } from './jobs.ts';
+import type { ChatLine } from './store.ts';
 
 /** A step that came back and is waiting for the person (kept on disk as jobs/<id>/waiting.json until saved or discarded). */
 export interface Waiting {
@@ -236,6 +237,56 @@ export function doingOf(o: { state: State; away: boolean; remoteBusy: boolean; p
   if (o.phase === 'waiting' || o.remoteBusy) return 'waiting';
   if (o.job) return 'working';
   return 'resting';
+}
+
+// ---- The office chat (public/banter.js says it): what a project's job and a saved answer tell the office ----
+
+/** Something a hire did that the office chat tells, measured (a job's event or an answer saved), never guessed. */
+export type OfficeKind = 'step-start' | 'step-done' | 'step-failed' | 'stopped' | 'tests-failed' | 'job-done' | 'bug' | 'answered' | 'picture' | 'chat-failed';
+export interface OfficeEvent { seq: number; at: string; kind: OfficeKind; n?: number; job?: string; step?: string; chat?: string; problems?: number }
+type OfficeNews = Omit<OfficeEvent, 'seq' | 'at'>;
+
+/**
+ * A job event as the office hears it, with the role whose hire says it; null for what it does not tell. The tests and
+ * the end of a job carry no role: `lastRole` (the last role that worked on the job) says those.
+ */
+export function officeEventOf(e: JobEvent, lastRole: string | null): { kind: OfficeKind; role: string | null; n?: number; step?: string; problems?: number } | null {
+  switch (e.type) {
+    case 'step': return { kind: 'step-start', role: e.role, n: e.n, step: e.title.trim().replace(/\.+$/, '') };
+    case 'result': return { kind: 'step-done', role: e.role, n: e.n };
+    case 'failed': return { kind: e.error === 'Stopped.' ? 'stopped' : 'step-failed', role: e.role, n: e.n };
+    case 'tests': return e.ok ? null : { kind: 'tests-failed', role: lastRole };
+    case 'saved': return e.left === 0 ? { kind: 'job-done', role: lastRole } : null;
+    case 'review': return e.problems > 0 ? { kind: 'bug', role: 'reviewer', n: e.n, problems: e.problems } : null;
+    default: return null;
+  }
+}
+
+/** A chat line just saved, as the office hears it: an answer, a picture, or a turn that failed; null for the user's own. */
+export function chatOfficeKind(line: ChatLine): 'answered' | 'picture' | 'chat-failed' | null {
+  if (line.role !== 'assistant') return null;
+  return line.failed ? 'chat-failed' : line.picture ? 'picture' : 'answered';
+}
+
+/** Each hire's last few office events (two minutes, five at most), numbered in order so the page tells each once. */
+export class OfficeFeed {
+  private seq = 0;
+  private byWho = new Map<string, OfficeEvent[]>();
+  private roles = new Map<string, string>();
+  add(who: string, news: OfficeNews, now = Date.now()): void {
+    const list = [...(this.byWho.get(who) ?? []), { ...news, seq: ++this.seq, at: new Date(now).toISOString() }];
+    this.byWho.set(who, list.slice(-5));
+  }
+  forWho(who: string, now = Date.now()): OfficeEvent[] {
+    return (this.byWho.get(who) ?? []).filter(e => now - Date.parse(e.at) <= 120_000);
+  }
+  /** The role that last worked on a job (for the events that carry none). */
+  worked(job: string, role: string): void {
+    this.roles.set(job, role);
+  }
+  lastRole(job: string): string | null {
+    return this.roles.get(job) ?? null;
+  }
 }
 
 // ---- The office's rewards: employee of the month (most tokens written this month) and the weekly leaderboard ----

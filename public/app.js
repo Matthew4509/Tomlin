@@ -90,7 +90,7 @@ const DEVICE_TEXT = { cpu: 'CPU', vulkan: 'graphics chip (Vulkan)', cuda: 'NVIDI
 
 const app = { status: null, models: null, onStatus: [] };
 
-// ---- "Show hidden": models hidden on Nodes and memory (Models on this PC, Hide) are left out where a model is picked ----
+// ---- "Show hidden": models hidden on This PC: models and updates (Models on this PC, Hide) are left out where a model is picked ----
 
 app.showHidden = store('show-hidden') === '1';
 /** The models of a pick list to offer: a hidden one only once "Show hidden" is ticked, or when it is the pick now. */
@@ -484,6 +484,14 @@ function drawContext() {
   place.replaceChildren(...ways.map(([v, t]) => el('option', { value: v, text: t })));
   place.value = ways.some(([v]) => v === m.run.place) ? m.run.place : 'auto';
   $('#ctx-place-row').hidden = !(m.places?.length || m.moe);
+  // A guessing model: a much smaller chat model of the same family on this PC (same name start, e.g. Qwen3.5): llama.cpp
+  // refuses one whose words list differs.
+  const draft = $('#ctx-draft');
+  const family = x => String(x.name).toLowerCase().split('-')[0];
+  const smaller = (app.models.chat ?? []).filter(x => x.id !== m.id && !x.id.startsWith('ollama:') && family(x) === family(m) && x.bytes < m.bytes / 2);
+  draft.replaceChildren(el('option', { value: '', text: 'None' }), ...smaller.map(x => el('option', { value: x.id, text: `${x.name} · ${gb(x.bytes)}` })));
+  draft.value = smaller.some(x => x.id === m.run.draft) ? m.run.draft : '';
+  $('#ctx-draft-row').hidden = !smaller.length;
   $('#ctx-try-row').hidden = !(m.places?.length > 1);
   drawTry();
   const bytes = m.cost?.[m.run.cache]?.[m.run.ctx];
@@ -501,7 +509,7 @@ async function saveContext() {
   const id = panes.chat.model.value;
   if (!id) return;
   try {
-    await api('/api/settings', { pane: 'chat', runModel: id, run: { ctx: Number($('#ctx-size').value), cache: $('#ctx-cache').value, place: $('#ctx-place').value } });
+    await api('/api/settings', { pane: 'chat', runModel: id, run: { ctx: Number($('#ctx-size').value), cache: $('#ctx-cache').value, place: $('#ctx-place').value, draft: $('#ctx-draft').value } });
     app.models = await api('/api/models');
     drawContext();
     drawFit('chat');
@@ -558,7 +566,7 @@ async function reconnect(name) {
   }
   poll();
 }
-for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place']) $(id).addEventListener('change', saveContext);
+for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft']) $(id).addEventListener('change', saveContext);
 
 // ---- Try each way (PLAN F8): load the model each way, measure, keep the fastest ----
 function drawTry() {

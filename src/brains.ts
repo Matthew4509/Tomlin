@@ -1,7 +1,7 @@
 // A hire's brain: the model that answers for them, on this PC or on a paired PC, with a fallback when the preferred one
 // cannot answer now. A brain is written as a short text in staff.json: a model id on this PC ("qwen3-8b-q4_k_m"),
-// "remote:<paired PC id>:<model id there>" for one of the models that PC lets linked PCs use (ticked there under Nodes
-// and memory; it loads there when asked), or "remote:<paired PC id>" for whatever model that PC has loaded (older PCs,
+// "remote:<paired PC id>:<model id there>" for one of the models on that PC (every model on a node is
+// lent; it loads there when asked), or "remote:<paired PC id>" for whatever model that PC has loaded (older PCs,
 // and hires made before). Picture hires use the same form for picture models. Also: picture styles (the modes a picture
 // model is made for, from the registry), so a manager PC asks a node for a style and the node picks its own model for
 // it. The plain parts, tested in test/brains.test.ts.

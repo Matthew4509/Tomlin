@@ -7,7 +7,14 @@
 const homeUi = { data: null, pcs: [], view: 'home', drawn: {}, pcMem: {}, dragging: null };
 // "32 GB / 4 GB VRAM", "16 GB / 0 VRAM": the memory, then the graphics card's own (none when the graphics use the RAM).
 /** A backup disk in words: "931 GB, 412 GB free" (TB from 1 TB up). */
-const diskWords = k => { const w = n => n >= 2 ** 40 ? `${(n / 2 ** 40).toFixed(1)} TB` : gb(n); return `${w(k.total)} disk, ${w(k.free)} free`; };
+const diskSize = n => (n >= 2 ** 40 ? `${(n / 2 ** 40).toFixed(1)} TB` : gb(n));
+const diskWords = k => `${diskSize(k.total)} disk, ${diskSize(k.free)} free`;
+/** "357 / 476 GB" (used / total; "614 GB / 1.8 TB" when the units differ): a linked PC's disk on its card. */
+const diskUsed = k => {
+  const used = diskSize(Math.max(0, k.total - k.free));
+  const total = diskSize(k.total);
+  return used.split(' ')[1] === total.split(' ')[1] ? `${used.split(' ')[0]} / ${total}` : `${used} / ${total}`;
+};
 const memWords = (ram, vram) => `${Math.round(ram / 2 ** 30)} GB / ${vram ? `${Math.round(vram / 2 ** 30)} GB VRAM` : '0 VRAM'}`;
 /** A PC's name as you gave it (the PC window), else its make and model, else `fallback`; and its make and model. */
 const pcName = (key, fallback) => app.pcProfileOf?.(key)?.name || app.pcProfileOf?.(key)?.model || fallback;
@@ -40,7 +47,7 @@ app.showPanes = () => setView('chat');
 // ---- Set up's pages: Staff, Jobs and Files open as pages beside the Set up menu, not as windows over it ----
 
 /** The pages the Set up menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'nodes', 'staff', 'jobs', 'files'];
+const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings' };
@@ -83,8 +90,8 @@ $('#rail-home').addEventListener('click', () => setView('home'));
 $('#rail-home-row').addEventListener('click', () => setView('home'));
 // The Set up menu is the whole left panel on its pages: Home at its top goes back.
 $('#rail-setup-home').addEventListener('click', () => setView('home'));
-// Under Projects: Hire staff as the Staff page, the Set up menu open beside it.
-$('#rail-staff-row').addEventListener('click', () => app.openHire({ page: true }));
+// Under Projects: the Staff menu (Hire staff, Manage staff) as the Staff page, the Set up menu open beside it.
+$('#rail-staff-row').addEventListener('click', () => app.openStaffMenu());
 phone.addEventListener('change', e => {
   if (!e.matches && homeUi.view === 'rail') setView(store('view') === 'chat' ? 'chat' : 'home');
 });
@@ -400,7 +407,7 @@ function deskModels(s, pc) {
   // A hidden model is left out (unless "Show hidden" is ticked): a hire is moved onto models offered for picking.
   const list = visibleModels(team.data?.hireChoices?.[s.kind === 'image' ? 'image' : 'chat'] ?? []);
   // On a linked PC: the models it lets this PC use. "What it has loaded" counts only when something is loaded there:
-  // a PC that shares nothing (its ticks under Nodes and memory) offers nothing to move to.
+  // a PC that shares nothing (its ticks under Network: connect PCs) offers nothing to move to.
   return pc ? list.filter(c => c.id.startsWith(`remote:${pc}:`) || (c.id === `remote:${pc}` && c.ok !== false)) : list.filter(c => !c.id.startsWith('remote:'));
 }
 
@@ -529,7 +536,8 @@ const timeText = iso => {
   const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
-// ---- Nodes and memory: this PC as a node (and the models other PCs may use), the linked PCs as tiles with their
+// ---- Network: connect PCs (this PC as a node, and the models other PCs may use; finding and linking PCs) and This PC:
+// models and updates (the models on this PC, Update this install) as tiles with their
 // memory bars, and the models on this PC. Every figure comes from /api/nodes (measured by the memory samplers). ----
 
 const NODE_GB = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
@@ -544,6 +552,21 @@ function memBar(bar, label) {
     track.append(part);
   }
   return el('div', { class: 'mbar-box' }, el('span', { class: 'mbar-title', text: label }), track, el('span', { class: 'hint', text: bar.text }));
+}
+
+/**
+ * A linked PC's memory on its card, short: the name on the left, "7.1 GB used of 32 GB" on the right, the bar under
+ * them. The long words (models loaded, other programs, free) stay in the bar's tooltip and its spoken label.
+ */
+function memLine(bar, label) {
+  const used = bar.segments.filter(s => s.kind !== 'free').reduce((n, s) => n + s.bytes, 0);
+  const total = used + (bar.segments.find(s => s.kind === 'free')?.bytes ?? 0);
+  const box = memBar(bar, label);
+  box.classList.add('mbar-short');
+  box.title = bar.text;
+  box.querySelector('.mbar-title').after(el('span', { class: 'mbar-sum', text: `${used < 0.05 * 2 ** 30 ? '0 GB' : NODE_GB(used)} used of ${NODE_GB(total)}` }));
+  box.querySelector(':scope > .hint').remove();
+  return box;
 }
 
 function drawNodes(n) {
@@ -640,6 +663,9 @@ function drawNodeSwitch(n) {
   if (!typing($('#node-name')) && !saving) $('#node-name').value = sh.name;
   if (!typing($('#node-port')) && !saving) $('#node-port').value = String(sh.port);
   $('#node-code').textContent = sh.code;
+  // Too many wrong setup codes from the home network in 10 minutes: linking waits (S3).
+  $('#node-link-paused').hidden = !sh.linkPaused;
+  $('#node-link-paused').textContent = sh.linkPaused ? `(!) Linking to this PC is paused for ${sh.linkPaused} minute${sh.linkPaused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. If nobody here typed them, press New code.` : '';
   const asig = JSON.stringify(sh.addresses);
   if (asig !== homeUi.drawn.addrs) {
     homeUi.drawn.addrs = asig;
@@ -683,18 +709,23 @@ function drawNodeSwitch(n) {
 }
 
 /**
- * "Sharing permissions": Allow all, Sharing of models, Enable backups, Allow host to push models, Allow host to update
- * TOMLIN remotely. Each tick is saved
+ * "Sharing permissions": Allow all, Sharing of models, Enable backups, Allow host to update TOMLIN remotely, Allow host
+ * to test and change model run settings (sending a model here needs no tick since 2.0.56). Each tick is saved
  * at once (with the app lock PIN); a refused or cancelled PIN puts the ticks back as saved at the next refresh.
  */
 function drawNodeAllow(sh) {
-  const a = sh.allow ?? { pull: false, backup: false, push: false };
+  const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false };
   if (!homeUi.nodeSaving) {
     for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.checked = a[t.dataset.allow] === true;
     const all = $('#node-allow-all');
-    all.checked = a.pull && a.backup && a.push && a.update;
-    all.indeterminate = !all.checked && (a.pull || a.backup || a.push || a.update);
+    all.checked = a.pull && a.backup && a.update && a.tune;
+    all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune);
   }
+  // Run settings a linked PC changed here since TOMLIN started (newest first).
+  const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const changes = (sh.runChanges ?? []).slice(0, 3);
+  $('#node-run-changes').hidden = !changes.length;
+  $('#node-run-changes').textContent = changes.map(c => `Guessing model for ${c.name} set to ${c.draftName || 'none'} by "${c.by}" on ${when(c.at)}.`).join(' ');
   $('#node-restarts').hidden = sh.restarts !== false;
   const up = sh.updated;
   $('#node-updated').hidden = !up;
@@ -732,12 +763,9 @@ function saveAllow(changed) {
   return nodeShare({ allow: { ...now, ...changed } });
 }
 for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.addEventListener('change', () => saveAllow({}));
-$('#node-allow-all').addEventListener('change', e => saveAllow({ pull: e.target.checked, backup: e.target.checked, push: e.target.checked, update: e.target.checked }));
+$('#node-allow-all').addEventListener('change', e => saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked }));
 
-/**
- * "Models other PCs may use": one tick per chat model on this PC. Ticks changed here stay as they are (the 3-second
- * refresh leaves them) until Save the list, which asks the app lock PIN once for the whole list.
- */
+/** "Models other PCs can use": every model on this PC, listed (nothing to tick: linked PCs may use them all). */
 function drawNodeShare(sh) {
   // Who is using this PC's models now: busy (answering or drawing for them) or loaded for them.
   const use = sh.inUse ?? [];
@@ -745,65 +773,22 @@ function drawNodeShare(sh) {
   // Said only while a linked PC uses this PC (nothing when it is idle).
   $('#node-busy').hidden = !use.length;
   $('#node-busy').textContent = use.length
-    ? `Busy for linked PCs now: ${use.map(u => `${u.name} ${u.busy ? (u.kind === 'image' ? 'is drawing for' : 'is answering') : 'is loaded for'} ${pcs(u)}`).join('; ')}.${use.some(u => !u.busy) ? ' A model loaded for a linked PC is dropped by itself after 60 seconds unused.' : ''}`
+    ? `Busy for linked PCs now: ${use.map(u => `${u.name} ${u.busy ? (u.kind === 'image' ? 'is drawing for' : 'is answering') : 'is loaded for'} ${pcs(u)}`).join('; ')}.${use.some(u => !u.busy) ? ' A model loaded for a linked PC is dropped by itself after 60 seconds unused (a picture model: 10 minutes after its last picture).' : ''}`
     : '';
   $('#node-busy').dataset.busy = use.some(u => u.busy) ? 'yes' : use.length ? 'loaded' : 'no';
   const list = sh.shareable ?? [];
-  const saved = sh.models ?? [];
-  const box = $('#node-share-list');
-  const ticks = () => [...box.querySelectorAll('input[type=checkbox]')].filter(x => x.checked).map(x => x.value);
-  const same = (a, b) => a.length === b.length && a.every(x => b.includes(x));
-  const sig = JSON.stringify([list, saved]);
-  if (sig !== homeUi.drawn.share && !homeUi.shareChanged) {
-    homeUi.drawn.share = sig;
-    const row = m => {
-      const tick = el('input', { type: 'checkbox', value: m.id, checked: saved.includes(m.id) });
-      tick.addEventListener('change', () => {
-        homeUi.shareChanged = !same(ticks(), saved);
-        line();
-      });
-      return el('label', { class: 'check' }, tick, ` ${m.name} · ${(m.bytes / 2 ** 30).toFixed(1)} GB`);
-    };
-    const chat = list.filter(m => m.kind !== 'image');
-    const pics = list.filter(m => m.kind === 'image');
-    box.replaceChildren(...(list.length ? [
-      ...(chat.length ? [el('p', { class: 'hint', text: 'Standard models:' }), ...chat.map(row)] : []),
-      ...(pics.length ? [el('p', { class: 'hint', text: 'Image creation models:' }), ...pics.map(row)] : []),
-    ] : [el('p', { class: 'hint', text: 'No models on this PC yet. Get one under Models, then tick it here.' })]));
-  }
-  const line = () => {
-    const n = ticks().length;
-    // Select all: ticked when every model is, half when some are.
-    const all = $('#node-share-all');
-    all.hidden = !list.length;
-    all.closest('label').hidden = !list.length;
-    all.checked = !!list.length && n === list.length;
-    all.indeterminate = n > 0 && n < list.length;
-    $('#node-share-save').hidden = !homeUi.shareChanged;
-    $('#node-share-line').textContent = homeUi.shareChanged ? 'Not saved yet. Save asks for the app lock PIN.'
-      : !list.length ? '' : n ? `${n} of ${list.length} shared: linked PCs can hire staff on ${n > 1 ? 'them' : 'it'}.` : 'None shared: linked PCs cannot use this PC\'s models by name.';
-  };
-  line();
+  const sig = JSON.stringify(list);
+  if (sig === homeUi.drawn.share) return;
+  homeUi.drawn.share = sig;
+  const row = m => el('li', { text: `${m.name} · ${(m.bytes / 2 ** 30).toFixed(1)} GB` });
+  const chat = list.filter(m => m.kind !== 'image');
+  const pics = list.filter(m => m.kind === 'image');
+  $('#node-share-list').replaceChildren(...(list.length ? [
+    ...(chat.length ? [el('p', { class: 'hint', text: 'Standard models:' }), el('ul', {}, ...chat.map(row))] : []),
+    ...(pics.length ? [el('p', { class: 'hint', text: 'Image creation models:' }), el('ul', {}, ...pics.map(row))] : []),
+  ] : [el('p', { class: 'hint', text: 'No models on this PC yet. Get one under Models: linked PCs can use it straight away.' })]));
+  $('#node-share-line').textContent = list.length ? `${list.length} model${list.length > 1 ? 's' : ''}: linked PCs can hire staff on ${list.length > 1 ? 'any of them' : 'it'}.` : '';
 }
-$('#node-share-all').addEventListener('change', e => {
-  const saved = homeUi.nodes?.share?.models ?? [];
-  const boxes = [...$('#node-share-list').querySelectorAll('input[type=checkbox]')];
-  for (const b of boxes) b.checked = e.target.checked;
-  const now = boxes.filter(b => b.checked).map(b => b.value);
-  homeUi.shareChanged = !(now.length === saved.length && now.every(x => saved.includes(x)));
-  drawNodeShare(homeUi.nodes.share);
-});
-$('#node-share-save').addEventListener('click', async () => {
-  const models = [...$('#node-share-list').querySelectorAll('input[type=checkbox]')].filter(x => x.checked).map(x => x.value);
-  $('#node-share-save').disabled = true;
-  // Saved: the list is drawn again from the server. PIN cancelled or refused: the ticks stay as they were changed.
-  if (await nodeShare({ models })) {
-    homeUi.shareChanged = false;
-    homeUi.drawn.share = null;
-    await refreshNodes();
-  }
-  $('#node-share-save').disabled = false;
-});
 
 // Its own line: the refresh after a change redraws the others, and a refusal must stay readable.
 function nodeFault(text) {
@@ -981,7 +966,7 @@ $('#node-scan').addEventListener('click', async () => {
       const again = f.linked && !f.broken ? el('button', { class: 'link', type: 'button', text: 'Not working? Link it again', onclick: e => { form.hidden = false; e.target.remove(); code.focus(); } }) : null;
       return el('article', { class: 'node-card' },
         el('div', { class: 'node-head' }, el('strong', { text: f.name }), el('span', { class: 'hint', text: f.url.replace('http://', '') })),
-        f.broken ? el('span', { class: 'hint', text: 'Linked before, but that link no longer works. Type its setup code (shown on that PC under Nodes and memory) and press Link again.' })
+        f.broken ? el('span', { class: 'hint', text: 'Linked before, but that link no longer works. Type its setup code (shown on that PC under Network: connect PCs) and press Link again.' })
           : f.linked ? el('span', { class: 'hint ok', text: '✓ Linked from this PC before' }) : null, again,
         form,
         fault);
@@ -1002,9 +987,9 @@ app.openPcs = async () => {
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
-/** Update this install (Settings, Your data and updates, opens it): at the foot of Nodes and memory. */
+/** Update this install (Settings, Your data and updates, opens it): on This PC: models and updates. */
 app.openUpdateInstall = async () => {
-  openNodes();
+  openThisPc();
   await new Promise(r => setTimeout(r, 100));
   $('#node-install').scrollIntoView({ block: 'start' });
   $('#node-install-git').focus({ preventScroll: true });
@@ -1046,7 +1031,11 @@ function drawOthers(pcs) {
       }
       refreshOthers();
       refreshPcs();
-    } }), ' Backups only', el('span', { class: 'hint', text: ' No staff, chats, jobs or pictures run here, and no model is copied to it. It is first in line for project backups.' }));
+    } }), ' Backups only');
+    role.title = 'Ticked: no staff, chats, jobs or pictures run on this PC, and no model is copied to it. It is first in line for project backups.';
+    const disk = !p.ok ? null : p.disk
+      ? el('span', { class: 'node-disk', title: `Backup disk: ${diskWords(p.disk)}`, text: `Disk: ${diskUsed(p.disk)}` })
+      : el('span', { class: 'node-disk hint', title: 'That PC runs an older TOMLIN: update it to see its free space here.', text: 'Disk: not reported' });
     return el('article', { class: 'node-card' },
       el('div', { class: 'node-head' },
         el('span', { class: 'sdot', 'data-state': p.ok && !away ? (p.model ? 'on' : 'asleep') : 'off', 'aria-hidden': 'true' }),
@@ -1066,10 +1055,10 @@ function drawOthers(pcs) {
             e.target.disabled = false;
           }
         } })) : null,
-      mem ? memBar(p.memory.ram.bar, 'Memory (RAM)') : null,
-      mem && p.memory.gpu ? memBar(p.memory.gpu.bar, `Graphics memory (${p.memory.gpu.name})`) : null,
-      p.ok ? el('span', { class: 'hint', text: p.disk ? `Backup disk: ${diskWords(p.disk)}.` : 'Backup disk: not reported (that PC runs an older TOMLIN: update it to see its free space here).' }) : null,
-      role,
+      mem ? memLine(p.memory.ram.bar, 'Memory (RAM)') : null,
+      mem && p.memory.gpu ? memLine(p.memory.gpu.bar, `Graphics card (${p.memory.gpu.name.replace(/^NVIDIA\s+(GeForce\s+)?/i, '')})`) : null,
+      el('div', { class: 'node-role-row' }, role, disk),
+      p.backupsOnly ? el('span', { class: 'hint', text: 'Keeps backups only: no staff, chats, jobs or pictures run here, and no model is copied to it. First in line for project backups.' }) : null,
       p.ok && !mem ? el('span', { class: 'hint', text: `Its memory is not reported: that PC runs TOMLIN ${p.version || 'older than 2.0.16'}. Update it to see its memory here.` }) : null,
       // The models it lets this PC use by name (hire staff on them here).
       // One model a line, chat models under Standard and picture models under Images.
@@ -1080,10 +1069,11 @@ function drawOthers(pcs) {
             el('h4', { text: head }),
             el('ul', {}, ...list.map(m => {
               const bit = m.busy ? (m.kind === 'image' ? 'busy: drawing for someone now' : 'busy: answering someone now') : m.loaded ? 'loaded' : '';
-              return el('li', { text: `${m.name}${bit ? ` (${bit})` : ''}` });
+              return el('li', {}, `${m.name}${bit ? ` (${bit})` : ''}`, m.kind !== 'image' && m.guessers?.length ? guessPick(p, m) : null);
             })))),
-          el('span', { class: 'hint', text: 'Hire staff on them here: Hire staff, pick that PC, then the model.' }))
-        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Nodes and memory, tick the models other PCs may use.' })) : null,
+          p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network: connect PCs, Sharing permissions).` }) : null,
+          el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Hire staff on it', 'data-key': `hire:${p.id}`, title: `Opens Hire staff with ${p.name} picked: then choose one of its models`, onclick: () => app.openHire?.({ pc: p.id }) })))
+        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Network: connect PCs, tick the models other PCs may use.' })) : null,
       // How fast its loaded model answers for this PC (its answers here are timed; Test speed runs the example prompt there).
       p.ok && p.model && !away && !p.backupsOnly ? el('span', { class: 'hint' }, p.speed?.expect ? `Speed: ${app.speedWords(p.speed.expect)} (${p.speed.basis === 'answers' ? `the average of ${p.speed.average.n} answers` : 'tested'}) · ` : 'Speed: not measured yet · ', app.speedLink(`remote:${p.id}`, msg => sayHere($('#node-others-ask'), msg), refreshOthers)) : null,
       el('div', { class: 'team-actions' }, back, el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => {
@@ -1095,8 +1085,34 @@ function drawOthers(pcs) {
   }) : [el('p', { class: 'hint', text: 'No other PCs linked yet.' })]);
 }
 
+/**
+ * A linked PC's chat model: its Guessing model (a smaller model of the same family on that PC guesses the next few
+ * words, the model checks them; the answer is its own). Picked here, kept in that PC's own settings; that PC says why
+ * not when its owner has not ticked it.
+ */
+function guessPick(p, m) {
+  const name = id => p.models.find(x => x.id === id)?.name ?? id;
+  const sel = el('select', { 'data-key': `guess:${p.id}:${m.id}`, 'aria-label': `Guessing model for ${m.name} on ${p.name}`, title: "A smaller model of the same family on that PC guesses the next few words and this model checks them: the answer is this model's own, only the speed changes. It takes memory of its own there." },
+    el('option', { value: '', text: 'None', selected: !m.draft }),
+    ...m.guessers.map(id => el('option', { value: id, text: name(id), selected: id === m.draft })));
+  sel.addEventListener('change', async () => {
+    const box = $('#node-others-ask');
+    sel.disabled = true;
+    try {
+      sayHere(box, (await api('/api/network/run-set', { pc: p.id, model: m.id, draft: sel.value })).said);
+    } catch (err) {
+      sel.value = m.guessers.includes(m.draft) ? m.draft : '';
+      sayHere(box, err.message);
+    }
+    sel.disabled = false;
+    refreshOthers();
+  });
+  return el('label', { class: 'guess-pick' }, 'Guessing model', sel);
+}
+
 async function refreshNodes() {
-  if (homeUi.view !== 'nodes') return;
+  // One answer draws both pages: this PC as a node (Network) and the models on this PC (This PC).
+  if (homeUi.view !== 'nodes' && homeUi.view !== 'thispc') return;
   try {
     drawNodes(await api('/api/nodes'));
   } catch {
@@ -1111,7 +1127,7 @@ async function refreshOthers() {
     drawOthers([]);
   }
 }
-/** "Its settings" in a PC's window: this PC's Nodes and memory, or Other PCs for a linked one. */
+/** "Its settings" in a PC's window: Network: connect PCs (this PC as a node, or the linked PCs). */
 app.pcMore = id => (id === 'here' ? openNodes() : app.openPcs());
 
 function openNodes() {
@@ -1119,8 +1135,15 @@ function openNodes() {
   homeUi.drawn.models = homeUi.drawn.team = homeUi.drawn.paired = null;
   refreshNodes();
   refreshOthers();
+}
+/** This PC: models and updates (the Set up menu; Settings' Update this install). */
+function openThisPc() {
+  setView('thispc');
+  homeUi.drawn.models = homeUi.drawn.team = null;
+  refreshNodes();
   drawInstall();
 }
+app.openThisPc = openThisPc;
 
 // ---- Update this install: Check git (the newest signed release on GitHub) or Check zip (a zip uploaded here) becomes
 // this PC's next copy; then the linked PCs from here ----

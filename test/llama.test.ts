@@ -54,6 +54,20 @@ test('the runner is started with the model\'s own context, cache and expert plac
   assert.deepEqual(chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'card' }, true).slice(9), ['-ngl', '999']);
 });
 
+test('a guessing model (speculative drafts): started beside the big one, on the card with it, or in RAM on the CPU', () => {
+  const run = { ctx: 8192, cache: 'f16' as const, place: 'auto' as const, draft: 'C:/models/Qwen3.5-0.8B-Q4_K_M.gguf' };
+  const card = chatArgs('big.gguf', 9000, 'vulkan', 0, false, run, true);
+  assert.deepEqual(card.slice(card.indexOf('--spec-type')), ['--spec-type', 'draft-simple', '-md', 'C:/models/Qwen3.5-0.8B-Q4_K_M.gguf', '-ngld', '999']);
+  // On the CPU the guessing model is in RAM too.
+  const cpu = chatArgs('big.gguf', 9000, 'cpu', 0, false, run);
+  assert.deepEqual(cpu.slice(cpu.indexOf('--spec-type')), ['--spec-type', 'draft-simple', '-md', 'C:/models/Qwen3.5-0.8B-Q4_K_M.gguf', '-ngld', '0']);
+  // Its context memory follows the big model's smaller cache.
+  const half = chatArgs('big.gguf', 9000, 'vulkan', 0, false, { ...run, cache: 'q8_0' }, true);
+  assert.deepEqual(half.slice(half.indexOf('-ngld') + 2), ['-ctkd', 'q8_0', '-ctvd', 'q8_0']);
+  // None chosen: no speculative flags at all.
+  assert.ok(!chatArgs('big.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, true).some(a => a.startsWith('--spec') || a === '-md'));
+});
+
 test('a chat template the runner cannot read is recognised, so the runner tries its plain formats', () => {
   const nemo = 'While executing FilterExpression at line 12, column 122 in source:';
   assert.ok(TEMPLATE_FAULT.test(nemo));

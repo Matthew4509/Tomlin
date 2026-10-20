@@ -162,7 +162,7 @@ async function calcTest() {
 }
 
 /**
- * Every model on this PC (Nodes and memory, and the PC window): its size, the memory it needs loaded (`need`, a chat
+ * Every model on this PC (This PC: models and updates, and the PC window): its size, the memory it needs loaded (`need`, a chat
  * model's at an 8K context; a picture model's is about its file), whether it fits this PC (`fit`), loaded or not, its
  * speed, Hide, and who works on it.
  */

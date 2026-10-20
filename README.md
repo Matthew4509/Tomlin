@@ -110,6 +110,8 @@ about each one and choose for yourself.
 - Rewards paid from the tokens your staff have written: treats (coffee, donuts, ice creams, cake), desk friends,
   furniture, **gym equipment** and an **arcade machine** you can play yourself. Buy everything for a trophy case. Free
   pizza, employee of the month, and a weekly leaderboard.
+- **Thoughts**, the office chat: a line from each hire when what they do really changes (an answer started, a step done or
+  stuck, a picture drawn, a PC off), and banter from six fixed characters on top. Everything, Work only or Off.
 
 ## Install (2.0.37)
 
@@ -151,7 +153,7 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 (chats, staff, pictures, memory, settings, links to other PCs, the app lock), `models` (downloaded models),
 `runtime` (downloaded graphics-card runners) and `backups`. The app folder holds only the program.
 
-To update: **Update this install** (Nodes and memory; Settings, Your data and updates, opens it), with **Check git**
+To update: **Update this install** (This PC: models and updates; Settings, Your data and updates, opens it), with **Check git**
 or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
 data it zips the `data` folder into `backups` (the last 5 are kept; models are not in them). **Settings** (top bar),
@@ -425,9 +427,10 @@ rather than misread it.
   job planner** asks a few questions and the look, then plans it in steps. In Jobs, each job's Overview says who plans and who does the code, the
   words and the audit (Roles), with the Scope card and the design brief to copy or change; **LETS GO!!!** runs the
   steps. Every job keeps its events in `jobs/<id>/events.jsonl` in the workspace (job rooms were dropped in 2.0.36).
-- **Nodes and memory** (Set up, in the left list; also a card on Home while nothing is set up): this PC as a node,
-  the linked PCs as tiles (three across on a wide screen: On / Asleep / Off, their memory bar, the models each lets
-  this PC use under Standard and Images, one a line, speed), and every model on this PC with its speed. This PC's own memory and loaded models are in the
+- **Network: connect PCs** (Set up, in the left list; also a card on Home while nothing is set up): this PC as a node,
+  finding other PCs, and the linked PCs as tiles (three across on a wide screen: On / Asleep / Off, their memory bar, the models each lets
+  this PC use under Standard and Images, one a line, speed). **This PC: models and updates** has every model on this
+  PC with its speed, and Update this install. This PC's own memory and loaded models are in the
   top bar. Nothing loads by itself. A model you load stays loaded until you drop it (Drop in the top bar) or another
   model needs its place: a new one goes beside the loaded ones when it fits, else the least recently used one that
   is not answering makes room. On a node, a model loaded because a linked PC asked for it is dropped by itself when
@@ -480,9 +483,9 @@ rather than misread it.
     the picture model as typed; no chat model rewrites them.
 - **New chat starts clean:** a new chat (or opening another one) shows no messages and no pictures; an artist's chat
   always opens on **This chat**, and **All chats** shows every picture until the next chat change.
-- **Linking PCs (Nodes and memory):** on the PC that lends its models, tick **Enable this PC as a node**; its Setup
+- **Linking PCs (Network: connect PCs):** on the PC that lends its models, tick **Enable this PC as a node**; its Setup
   shows the name other PCs see, its **setup code** (8 letters and numbers, its own, kept; **New code** makes another)
-  and, only if you tick it, a PIN as well; the port is under Advanced. On your main PC, Nodes and memory > Other PCs >
+  and, only if you tick it, a PIN as well; the port is under Advanced. On your main PC, Network: connect PCs > Find other PCs >
   **Find PCs on my network** lists the PCs with it on; type one's setup code (and PIN, if it asks) and press **Link**.
   Not found? Type its address instead. A PC linked again keeps the hires on its models (each node has a fixed id).
 - **Private nodes (2.0.26):** the link between two PCs is encrypted. At linking each PC makes a fresh key pair
@@ -493,7 +496,7 @@ rather than misread it.
   a picture drawn for another PC is made in memory and never enters the node's gallery. A node **must have the app
   lock**: it cannot be turned on without a PIN, every change to it asks for that PIN again, and the lock cannot be
   turned off while it is a node (without the PIN file the node stops listening). The node never gives way by itself:
-  Nodes and memory has the button **I need to use the pc and stop smartmanager for a while** (behind the PIN), and
+  Network: connect PCs has the button **I need to use the pc and stop smartmanager for a while** (behind the PIN), and
   its lock screen has **Send host**, which asks the main PC to log out for 1, 2 or 4 hours (no PIN; the main PC
   decides, and a yes ends by itself when the hours are up). Logged out, it takes no new work, lets a running step finish, unloads its models, and the main PC is
   told "I need to log off for now" and sends work elsewhere. The main PC's **Start it again** asks first within an
@@ -502,7 +505,7 @@ rather than misread it.
   the node's Windows account could still read its memory while it works; the PIN file can be deleted while Smart
   Manager is closed (the node then stops); Windows may still put the PC to sleep.
 - **Models other PCs may use (2.0.30; picture models 2.0.31):** a node just downloads models and chooses which are
-  accessible. On the node, Nodes and memory, under Enable this PC as a node, tick the chat models (they answer) and
+  accessible. On the node, Network: connect PCs, under Enable this PC as a node, tick the chat models (they answer) and
   picture models (they draw) linked PCs may run and press **Save the list** (it asks the app lock PIN once). On the
   main PC (or any linked PC), hire staff as usual, pick that PC and one of its models in **Hire staff** (or First choice
   in Edit Staff): "Qwen3.5-9B on "Worker PC"" for chat staff, "DreamShaper 8 LCM on "Worker PC"" for an artist. Who
@@ -519,12 +522,13 @@ rather than misread it.
 - **Staff hired on a node and lent out are retired (2.0.31):** linked PCs no longer lend their own staff (Work for
   linked PCs, Remote staff, Switch are gone). An old chat with one is kept to read and says how to carry on: hire
   someone on that PC's models here. A main PC from before 2.0.31 asking for one is told the same.
-- **What linked PCs may do, and the node network (2.0.32):** on a node, Nodes and memory, under **What linked PCs may
+- **What linked PCs may do, and the node network (2.0.32; since 2.0.56 every model on a node is shared, no list to tick):** on a node, Nodes and memory, under **What linked PCs may
   do** (below **Models to share with others**, the list once called "Models other PCs may use"): **Allow all**, then
   **Sharing of models** (linked PCs may copy the models ticked to share), **Host can back up** (since 2.0.44 **Enable backups**: a linked PC may keep a
   restore point there: a zip of its data/, the newest 3 from each PC, in the home folder's "backups from other PCs")
   and **Allow host to push models** (a linked PC may install one of its models in this PC's chat models folder; it is
-  not shared until ticked). All off until ticked; each change asks the app lock PIN. A PC keeps listing and bringing
+  not shared until ticked; retired in 2.0.56: any linked PC may send one, no tick). All off until ticked; each change
+  asks the app lock PIN. A PC keeps listing and bringing
   back its own restore points after the backup tick is taken off. On any PC, **My local LLMs**
   (Nodes and memory > Other PCs, and the Models page) lists every model the linked PCs share, once each, with **Get a
   copy from …** (or why not: that PC is off, older, being used, lets others use but not copy, or it is an Ollama
@@ -559,6 +563,18 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.56:** Locked, TOMLIN unloads your picture model after 2 idle minutes (its runner takes no key; the lock says so);
+  a node keeps one loaded for a linked PC 10 minutes. The app lock PIN is hashed at a higher cost (made again at your
+  next right PIN). Linking pauses after 20 wrong codes; large requests capped before their seal; a PC's name must stay on the home network.
+  Staff: hire and edit opens a Staff menu (Hire staff, Manage staff). Set up: **Network: connect PCs** and **This PC: models
+  and updates** replace Nodes and memory. Models: a **Fits** drop-down (This PC or a linked PC), and **To** under each
+  Download: a linked PC downloads the model itself. New PIN: auto-lock minutes.
+  Staff overview: **Thoughts**, the office chat (what each hire does, then banter), Everything / Work only / Off.
+  A node lends every model on it to the PCs linked to it: nothing to tick (its owner still decides copying and backups).
+  No tick to send a model to a node any more. Model runners: the NVIDIA (CUDA) runner can be downloaded on a PC with an
+  NVIDIA card, or sent from this PC to a linked one (that PC checks it against its own pinned build before unpacking).
+  A chat model's **Guessing model** (a smaller same-family model speeds it up; the answer stays its own) can be picked
+  for a linked PC's model on its card, once that PC ticks **Allow host to test and change model run settings**.
 - **2.0.55:** Hire staff: **Add new** beside the model search opens Add a model; **Push to node** on each of All
   models sends that model to any PC on the list. Update this install: **Check git** (newest signed GitHub Release),
   **Check zip**, and the offline steps. Colours: a Day / Night / Auto switch at the top. Office: sandwiches, energy drinks (vending machine), indoor plants,
@@ -672,7 +688,8 @@ rather than misread it.
   - **Nodes and memory, new words:** Node name, Setup Code, "Enter the setup code into the other PCs to allow them
     remote access."; the share list has **Select all** and the headings **Standard models** / **Image creation
     models**; the busy line shows only while a linked PC uses the node; the ticks are **Sharing permissions:** Sharing
-    of models, **Enable backups**, Allow host to push models, **Allow host to update TOMLIN remotely**.
+    of models, **Enable backups**, Allow host to push models (retired in 2.0.56), **Allow host to update TOMLIN remotely**,
+    **Allow host to test and change model run settings** (2.0.56: a linked PC picks a model's Guessing model there).
   - **Project backups to nodes (Enable backups):** the main PC's workspace (its projects) goes to each node that keeps
     backups as a commit in a local git repository there ("backups from other PCs/<pc>/projects.git", a normal bare
     repository that git, GitHub Desktop or VS Code open). Every 10 minutes when something changed, or **Back up

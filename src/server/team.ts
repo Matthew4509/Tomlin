@@ -19,6 +19,7 @@ import { chat, chatList, chatPlace, connectChat, images, lastUsed, main, runnerF
 import { answerPhases, answeringBusy, endAnswer, lastWorked, reserve, stopOn, takeChat } from './answering.ts';
 import { answeringNow, offHost, setWho, whoList } from './people.ts';
 import { jobRoutes } from './jobs.ts';
+import { officeFeed } from './notices.ts';
 import { queueHome } from './queue.ts';
 import { staffUsage } from './costs.ts';
 import { memoryNow } from './thispc.ts';
@@ -116,7 +117,7 @@ function remoteState(ref: string | null | undefined, image: boolean): { state: '
     const name = shortName(jobRoutes.sharedName(r.id, b.model));
     const sh = h.models.find(x => x.id === b.model && (x.kind === 'image') === image);
     if (h.away) return { state: 'off', text: `"${r.name}": its owner is using it for now`, modelName: name, pc: r.name, owner: true };
-    if (!sh) return { state: 'none', text: `"${r.name}" no longer lets other PCs use ${name}`, modelName: name, pc: r.name };
+    if (!sh) return { state: 'none', text: `${name} is no longer on "${r.name}"`, modelName: name, pc: r.name };
     if (sh.busy) return { state: 'on', text: `${name} on "${r.name}" is ${image ? 'drawing' : 'answering'} for someone else now: yours waits for it`, modelName: name, pc: r.name, busy: true };
     return sh.loaded ? { state: 'on', text: `On, on "${r.name}"`, modelName: name, pc: r.name } : { state: 'asleep', text: `Asleep: ${name} loads on "${r.name}" when asked`, modelName: name, pc: r.name };
   }
@@ -252,6 +253,9 @@ async function homeView() {
       // What they are doing now, for the office in Staff overview (public/office.js).
       doing,
       doingText: doing === 'working' ? `Working: ${jobs.working!.text}` : DOING_WORDS[doing],
+      // The chat they answer in now, and what they just did (a job's event, an answer saved), for the office chat.
+      chat: answering.find(a => a.who === `staff:${m.id}`)?.title || null,
+      events: officeFeed.forWho(m.id),
       // Seconds since they last worked (null: not since TOMLIN started): the office keeps them at the desk a while.
       idleFor: WORKING.has(doing) ? 0 : last ? Math.round((Date.now() - last) / 1000) : null,
       pcId: where.kind === 'remote' ? where.pc : '',
@@ -495,6 +499,8 @@ async function officeView() {
     // `behind`: who leads now when this month's award went to someone else earlier in the month (null otherwise).
     month: { key: p.month, name: p.monthName, board: monthBoard, behind: awardBehind(awards, p.month, monthBoard) },
     week: { from: p.weekFrom, board: board(p.weekFrom, p.today) },
+    // Tokens each wrote today: the office chat's payday (Thursdays) compares them.
+    today: { board: board(p.today, p.today) },
     awards,
     purse: purseOf(byStaff.totalWritten(), bought),
     shop: shopView(bought),

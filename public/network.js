@@ -36,8 +36,8 @@ let netLast = [];
 function drawNetTransfers(list) {
   netLast = list;
   const verb = t => (t.state === 'done'
-    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"` }
-    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"` })[t.kind];
+    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
+    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
   $('#net-transfers').replaceChildren(...list.map(t => {
     const fill = el('div', { class: 'p-fill' });
     const frac = t.bytes ? t.done / t.bytes : 0;
@@ -47,7 +47,11 @@ function drawNetTransfers(list) {
     const sent = t.kind === 'update' && t.state !== 'failed' && t.state !== 'stopped'
       ? `Sent: ${!t.bytes ? (working ? 'comparing the files…' : 'nothing had changed.') : t.done < t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : working ? `${netSize(t.bytes)}, starting it there…` : `${netSize(t.bytes)}. ${t.said}`}`
       : null;
-    const line = sent ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`);
+    // A runner: downloaded here first (when its files are not here yet), sent, then checked and unpacked there.
+    const runner = t.kind === 'runner' && working && t.bytes
+      ? (t.stage === 'get' ? `Downloading it here first: ${netSize(t.done)} of ${netSize(t.bytes)}` : t.done < t.bytes ? `Sent ${netSize(t.done)} of ${netSize(t.bytes)}` : `Sent. "${t.pcName}" is checking and unpacking it…`)
+      : null;
+    const line = sent ?? runner ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`);
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: verb(t) })),
       working ? el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: () => netDo('/api/network/stop', { id: t.id }) }) : null,

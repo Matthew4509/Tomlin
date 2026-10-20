@@ -104,6 +104,12 @@ export interface ChatRun {
    * in RAM and the rest on the card (a big mixture-of-experts model on a small card).
    */
   place: 'auto' | 'card' | 'ram';
+  /**
+   * A guessing model's file (speculative drafts): a small model of the same family guesses the next few words and the
+   * big one checks them in one pass. The answer is the big model's own; only the speed changes. On a card it sits on the
+   * card with the big one; on the CPU in RAM.
+   */
+  draft?: string;
 }
 
 /** How llama-server is started for chat on `device`. `plainTemplates`: llama.cpp's own chat formats, for a model
@@ -119,5 +125,9 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   if (threads > 0) args.push('-t', String(threads));
   if (plainTemplates) args.push('--no-jinja');
   if (key) args.push('--api-key', key, '--no-slots');
+  if (run.draft) {
+    args.push('--spec-type', 'draft-simple', '-md', run.draft, '-ngld', device === 'cpu' ? '0' : '999');
+    if (run.cache !== 'f16') args.push('-ctkd', run.cache, '-ctvd', run.cache);
+  }
   return args;
 }

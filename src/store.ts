@@ -57,6 +57,8 @@ export interface RunOptions {
   cache: 'f16' | 'q8_0' | 'q4_0';
   /** Where the weights go on a graphics device (src/llama.ts ChatRun). Settings saved before kept cpuMoe: true = 'ram'. */
   place: 'auto' | 'card' | 'ram';
+  /** A guessing model (another chat model's id on this PC) started beside it; none: ''. */
+  draft?: string;
 }
 
 export interface Remote {

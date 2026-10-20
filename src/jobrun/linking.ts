@@ -25,8 +25,11 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const url = share.cleanWorkerUrl(b.url);
     if (!url) return { status: 400, body: { error: 'That PC\'s address is not one on your home network. Press "Find PCs on my network" again, or type the address shown on that PC (for example 192.168.1.20:8741).' } };
     const code = share.cleanCode(b.code);
-    if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Nodes and memory (for example ABCD-EFGH).' } };
+    if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network: connect PCs (for example ABCD-EFGH).' } };
     const pin = String(b.pin ?? '').replace(/\D/g, '');
+    // A name (desk.local) must point inside the home network before anything is sent to it (S6).
+    const outside = await share.homeNetworkWhy(url);
+    if (outside) return { status: 400, body: { error: outside } };
     const unreachable = (e: unknown) => ({ status: 502, body: { error: `Nothing answered at ${url} (${(e as Error).message}). Check the address, that TOMLIN runs on that PC with sharing on, and that its firewall lets the port through on a private network.` } });
     // An older PC cannot make the encrypted link (F7 E1): said plainly, before anything is sent.
     let about: Record<string, unknown>;

@@ -126,7 +126,7 @@ export async function brainForRef(want: string, forWhat: string, change: string,
     try {
       h = await hello(r);
     } catch (e) {
-      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Enable this PC as a node" ticked (Nodes and memory), or choose another model for ${forWhat}.`);
+      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Enable this PC as a node" ticked (Network: connect PCs), or choose another model for ${forWhat}.`);
     }
     if (b.model) {
       const why = sharedWhy(r, h, b.model);
@@ -256,7 +256,7 @@ export async function backupChoices(m: StaffMember): Promise<{ own: string; choi
         if (!mine.includes(at)) choices.push({ ref: at, pc: name, pcId: r.id, model: x.name, ready: x.loaded, same: brains.sameModel(own, x.name), intern: brains.isIntern(own, x.name), fit: fitOn(there, x.bytes), level: levelOf(x.name, x.bytes) });
       }
       if (chatModels.length || mine.includes(ref)) return;
-      if (!h.model) others.push({ pc: name, why: 'on, with no chat model loaded (its owner connects one there, or ticks the models other PCs may use)' });
+      if (!h.model) others.push({ pc: name, why: 'on, with no chat model loaded (its owner connects one there, or hire someone here on one of its models)' });
       else choices.push({ ref, pc: name, pcId: r.id, model: h.model, ready: true, same: brains.sameModel(own, h.model), intern: brains.isIntern(own, h.model), fit: null, level: levelOf(h.model, 0) });
     } catch {
       others.push({ pc: name, why: 'off or not answering' });

@@ -6,7 +6,8 @@
 'use strict';
 {
   const dlg = $('#hire-dlg');
-  const hs = { role: '', pc: '', model: '', level: '', levelPicked: false, look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map() };
+  // fromMenu: opened from the Staff menu's Create, so Cancel and Close go back to that menu.
+  const hs = { role: '', pc: '', model: '', level: '', levelPicked: false, look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map(), fromMenu: false };
 
   /** Names of four or five letters for Random, never one already on the team or the one in the box now. */
   const NAMES = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina', 'Adam', 'Alan', 'Brian', 'Colin', 'David', 'Dylan', 'Ethan', 'Frank', 'Gavin', 'Harry', 'Henry', 'Isaac', 'Jack', 'James', 'Jason', 'Kyle', 'Liam', 'Lucas', 'Mark', 'Mason', 'Neil', 'Noah', 'Oscar', 'Owen', 'Peter', 'Ryan', 'Simon', 'Tyler', 'Wade'];
@@ -169,7 +170,7 @@
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
     const p = hs.pc ? d().pcs.find(x => x.id === hs.pc) : null;
     const empty = q && offered(hs.pc).length ? [el('p', { class: 'hint', text: `No ${thing} on ${pcName(hs.pc)} match "${hs.q.trim()}".` })]
-      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} shares no ${thing} with this PC. On that PC, open Nodes and memory and tick the models other PCs may use.` })]
+      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} shares no ${thing} with this PC. On that PC, open Network: connect PCs and tick the models other PCs may use.` })]
       : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => { dlg.close(); app.openModels(kind() === 'image' ? 'image' : 'chat'); } }), '.')];
     // The model kept when it is still offered; else the one loaded now on this PC; else the first on the list.
     if (!list.some(c => c.id === hs.model)) {
@@ -293,7 +294,7 @@
   async function follow(e, id, words) {
     for (;;) {
       const t = (await api('/api/network/transfers').catch(() => null))?.transfers?.find(x => x.id === id);
-      if (!t) throw new Error('the copy is no longer listed: look in My local LLMs (Nodes and memory)');
+      if (!t) throw new Error('the copy is no longer listed: look in My local LLMs (Network: connect PCs)');
       if (t.state === 'done') return t;
       if (t.state !== 'working') throw new Error(t.said || 'it stopped');
       hs.moving.set(e.key, { ...hs.moving.get(e.key), said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
@@ -362,10 +363,10 @@
   }
 
   /**
-   * Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). `page`: as the Staff page (Set
-   * up, Staff: hire and edit), with the Set up menu on the left; else a window over the page.
+   * Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). `page`: as the Staff page, with
+   * the Set up menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`).
    */
-  app.openHire = async ({ role = '', pc = '', page = false } = {}) => {
+  app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false } = {}) => {
     try {
       team.data = await api('/api/staff');
     } catch (e) {
@@ -380,7 +381,8 @@
     hs.look = null;
     hs.q = '';
     hs.nameAuto = '';
-    $('#hs-name').value = '';
+    hs.fromMenu = fromMenu;
+    $('#hs-name').value = name;
     $('#hs-search').value = '';
     fault('');
     closeLook();
@@ -426,24 +428,27 @@
     drawAllModels();
     drawSummary();
   });
-  $('#hs-random').addEventListener('click', () => {
-    const box = $('#hs-name');
+  /** A random name for `box`: never one already on the team or the one in the box now (Random here, the Staff menu's dice). */
+  app.randomName = box => {
     const taken = new Set([...(d()?.staff ?? []).map(s => s.name.toLowerCase()), box.value.trim().toLowerCase()]);
     const free = NAMES.filter(n => !taken.has(n.toLowerCase()));
     box.value = (free.length ? free : NAMES)[Math.floor(Math.random() * (free.length || NAMES.length))];
     box.focus();
-  });
+  };
+  $('#hs-random').addEventListener('click', () => app.randomName($('#hs-name')));
   // Add new: the Models page (Add a model), as "get a model" does.
   $('#hs-add-model').addEventListener('click', () => {
     dlg.close();
     app.openModels(kind() === 'image' ? 'image' : 'chat');
   });
-  $('#hs-cancel').addEventListener('click', () => dlg.close());
-  $('#hs-close').addEventListener('click', () => dlg.close());
-  // Editing is on the Staff page: each person, with See all staff.
+  // Opened from the Staff menu: back to it (it takes the page over); else back to where Hire staff was opened from.
+  const leave = () => (hs.fromMenu && dlg.classList.contains('as-page') ? app.openStaffMenu() : dlg.close());
+  $('#hs-cancel').addEventListener('click', leave);
+  $('#hs-close').addEventListener('click', leave);
+  // See all staff opens the list of everyone (it used to open the person last edited).
   $('#hs-see-staff').addEventListener('click', () => {
-    dlg.close();
-    $('#team-open').click();
+    if (!dlg.classList.contains('as-page')) dlg.close();
+    app.seeAllStaff({ fromMenu: hs.fromMenu });
   });
   $('#hs-form').addEventListener('submit', async e => {
     e.preventDefault();

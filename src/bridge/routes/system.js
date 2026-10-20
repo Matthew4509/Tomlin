@@ -1,6 +1,6 @@
 // The Bridge part as a whole: This PC numbers, the start-line prompt, the Git program check, Stop all, stopping a port another program holds,
 // the folder picker, Scan folders, token recount and the live check of every site. Setup, shortcuts, Start with Windows,
-// Uninstall and Quit are TOMLIN's own (its installer, Nodes and memory, its icon by the clock), so they are not here.
+// Uninstall and Quit are TOMLIN's own (its installer, Network: connect PCs, its icon by the clock), so they are not here.
 'use strict';
 const { state, saveSettings, refreshTokens } = require('../state');
 const { laptopStats, scanFolders } = require('../views');

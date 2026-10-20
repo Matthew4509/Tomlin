@@ -59,12 +59,12 @@ test('a workspace walk leaves out .git and node_modules, and its signature chang
 });
 
 /** A node's doors for one host, as the host reaches them. */
-function aNode(allow = { pull: false, backup: true, push: false, update: false }) {
+function aNode(allow = { pull: false, backup: true, update: false, tune: false }) {
   const root = tmp();
   let now = allow;
   const handle = carry.nodeSide({
     allow: () => now,
-    ticked: () => [],
+    shared: () => [],
     pcName: () => 'Worker PC',
     chatFiles: () => null,
     pictureFiles: () => null,
@@ -162,15 +162,15 @@ test('a file changed on the way is not kept; a commit naming a file not sent is 
   await assert.rejects(node.ask('/worker/git-commit', { files: [{ path: '../a.md', id: git.blobId(data) }] }), /not named as one/);
   await node.put(git.blobId(data), data);
   await node.ask('/worker/git-commit', { files: [{ path: 'a.md', id: git.blobId(data) }] });
-  node.setAllow({ pull: false, backup: false, push: false, update: false });
+  node.setAllow({ pull: false, backup: false, update: false, tune: false });
   await assert.rejects(node.ask('/worker/git-have', { ids: [git.blobId(data)] }), /Enable backups/);
   assert.equal(((await node.ask('/worker/git-log', {})).commits as unknown[]).length, 1);
 });
 
 test('the reason a host cannot back its projects up names the tick, or an update for an older node', () => {
-  const pc = (o: Partial<carry.NetPc> = {}): carry.NetPc => ({ id: 'aaaa1111', name: 'Worker PC', ok: true, away: null, can: ['carry', 'git'], allow: { pull: false, backup: true, push: false, update: false }, models: [], ...o });
+  const pc = (o: Partial<carry.NetPc> = {}): carry.NetPc => ({ id: 'aaaa1111', name: 'Worker PC', ok: true, away: null, can: ['carry', 'git'], allow: { pull: false, backup: true, update: false, tune: false }, models: [], ...o });
   assert.equal(carry.projectsWhy(pc()), '');
   assert.match(carry.projectsWhy(pc({ can: ['carry'] })), /older TOMLIN/);
-  assert.match(carry.projectsWhy(pc({ allow: { pull: false, backup: false, push: false, update: false } })), /Enable backups/);
+  assert.match(carry.projectsWhy(pc({ allow: { pull: false, backup: false, update: false, tune: false } })), /Enable backups/);
   assert.match(carry.projectsWhy(pc({ ok: false })), /off/);
 });

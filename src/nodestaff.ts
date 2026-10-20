@@ -17,7 +17,7 @@ export const RETIRED_NODE_HIRE = 'Linked PCs no longer lend their own staff: a n
 const text = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 // ---- Models a node lets linked PCs use ----
-// Its owner ticks them under Nodes and memory ("Models other PCs may use"): chat models and picture models. A linked PC
+// Its owner ticks them under Network: connect PCs ("Models other PCs may use"): chat models and picture models. A linked PC
 // then hires its OWN staff on them; the node only loads the model and answers (or draws). Nothing is shared until a
 // model is ticked.
 
@@ -36,23 +36,24 @@ export interface SharedModel {
   busy: boolean;
   /** Hidden by that PC's owner (Models on this PC, Hide): still usable, left out of the pick lists until "Show hidden". */
   hidden?: boolean;
+  /** A chat model: its Guessing model there ('' = none), and the ones that PC could use (src/runset.ts). An older node sends neither. */
+  draft?: string;
+  guessers?: string[];
 }
 
-/** The ticks as saved: model ids that are on this PC, no repeats, at most 40. */
-export function cleanTicks(raw: unknown, onPc: string[]): string[] {
-  if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.filter((x): x is string => typeof x === 'string' && onPc.includes(x)))].slice(0, 40);
-}
-
-/** What a node tells linked PCs: each ticked model still on it, chat models first, each list in its own order. */
-export function sharedList(ticked: string[], o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean }): SharedModel[] {
+/** What a node tells linked PCs: every model on it (nothing to tick), chat models first, each list in its own order. */
+export function sharedList(o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean; runOf?: (id: string) => { draft: string; guessers: string[] } }): SharedModel[] {
   const kindOf = (m: { kind?: 'chat' | 'image' }) => m.kind ?? 'chat';
-  return [...o.models.filter(m => kindOf(m) === 'chat'), ...o.models.filter(m => kindOf(m) === 'image')].filter(m => ticked.includes(m.id)).map(m => {
+  return [...o.models.filter(m => kindOf(m) === 'chat'), ...o.models.filter(m => kindOf(m) === 'image')].map(m => {
     const loaded = o.loaded(m.id);
     const kind = kindOf(m);
-    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}) };
+    const run = kind === 'chat' ? o.runOf?.(m.id) : undefined;
+    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}), ...(run ? { draft: run.draft, guessers: run.guessers } : {}) };
   });
 }
+
+/** A model id as a node sent it: a short string with no control characters, else ''. */
+const modelId = (v: unknown) => (typeof v === 'string' && v.length <= 300 && !/[\u0000-\u001f\u007f]/.test(v) ? v : '');
 
 /** What a node sent as its shared models, made safe to keep and show: at most 40, names capped, numbers only. */
 export function cleanShared(raw: unknown): SharedModel[] {
@@ -60,23 +61,24 @@ export function cleanShared(raw: unknown): SharedModel[] {
   const out: SharedModel[] = [];
   for (const r of raw.slice(0, 40)) {
     const x = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
-    const id = typeof x.id === 'string' && x.id.length <= 300 && !/[\u0000-\u001f\u007f]/.test(x.id) ? x.id : '';
+    const id = modelId(x.id);
     if (!id || out.some(m => m.id === id)) continue;
     const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
     const kind = x.kind === 'image' ? 'image' : 'chat';
-    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}) });
+    const run = kind === 'chat' && Array.isArray(x.guessers) ? { draft: modelId(x.draft), guessers: x.guessers.map(modelId).filter(Boolean).slice(0, 40) } : {};
+    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}), ...run });
   }
   return out;
 }
 
 /**
- * Whether a linked PC may run a model here: ticked, still on this PC, and not answering something else. Null when it
- * may; else the refusal (said on that PC) and whether it is only busy (that PC waits and asks again).
+ * Whether a linked PC may run a model here: still on this PC (every model on a node is lent), and not answering
+ * something else. Null when it may; else the refusal (said on that PC) and whether it is only busy (that PC waits and
+ * asks again).
  */
-export function modelRefusal(id: string, o: { ticked: string[]; onPc: (id: string) => string | null; busy: boolean; pcName: string }): { error: string; busy?: true } | null {
+export function modelRefusal(id: string, o: { onPc: (id: string) => string | null; busy: boolean; pcName: string }): { error: string; busy?: true } | null {
   const name = o.onPc(id);
   if (!name) return { error: `that model is not on "${o.pcName}" any more.` };
-  if (!o.ticked.includes(id)) return { error: `"${o.pcName}" does not let other PCs use ${name} now (its owner ticks the models others may use under Nodes and memory).` };
   if (o.busy) return { error: `${name} is answering something else on "${o.pcName}" now.`, busy: true };
   return null;
 }

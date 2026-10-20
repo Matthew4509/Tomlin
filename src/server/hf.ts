@@ -1,11 +1,13 @@
 // Chat models from Hugging Face: search, sizes, one download at a time; and models in another folder.
 import { statSync } from 'node:fs';
+import { statfs } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { totalmem } from 'node:os';
 import { cursorPlaces, fetchChecked, hfUrl, lookUpHf, searchHf, usualModel, type HfLookup } from '../download.ts';
 import { isMoe, ordered, pick } from '../hflist.ts';
 import { GB, type Routes, chatModels, hfList, json } from './core.ts';
-import { cardFit } from '../calc.ts';
-import { cardMem, chatCards, fit, loadShapes } from './panes.ts';
+import { cardFit, fitsRoom } from '../calc.ts';
+import { cardMem, chatCards, fit, images, loadShapes } from './panes.ts';
 
 // ---- Chat models from Hugging Face (a node chooses and downloads its own; nobody else can) ----
 
@@ -22,10 +24,7 @@ const hfView = () => (hfJob ? { repo: hfJob.repo, name: hfJob.name, state: hfJob
  * RAM less 2 GB for Windows, plus the graphics cards' own memory less 1 GB each. Used to mark sizes in the Models list.
  */
 function fitsPc(bytes: number): 'ok' | 'tight' | 'no' {
-  const card = chatCards().reduce((n, g) => n + Math.max(0, (g.total ?? 0) - GB), 0);
-  const room = Math.max(0, totalmem() - 2 * GB) + card;
-  const need = bytes * 1.1 + 0.8 * GB;
-  return need <= room * 0.85 ? 'ok' : need <= room ? 'tight' : 'no';
+  return fitsRoom(bytes, totalmem(), chatCards().map(g => g.total ?? 0));
 }
 
 /** A repo's files, read from Hugging Face once per half hour (a search asks for up to 30 at a time). */
@@ -82,6 +81,73 @@ function startHf(repo: string, rev: string, m: { name: string; bytes: number; fi
   })();
 }
 
+/**
+ * Starts one chat model's download (Download on the Models page, or a linked main PC's Download to this PC): refused
+ * while another runs, and when the drive has not got room for it.
+ */
+async function getHf(repo: string, rev: string, name: string): Promise<{ status: number; json: unknown }> {
+  if (hfJob?.state === 'downloading') return { status: 409, json: { error: `${hfJob.name} is still downloading. Wait for it, or stop it.` } };
+  // Taken before the look-up (a second or two): a second Get pressed meanwhile is told to wait, never started beside it.
+  if (hfStarting) return { status: 409, json: { error: 'A download is starting. Wait a moment, then try again.' } };
+  hfStarting = true;
+  try {
+    const found = await lookUpHf(`https://huggingface.co/${repo}/tree/${rev}`);
+    const m = found.models.find(x => x.name === name);
+    if (!m) return { status: 404, json: { error: 'That model is not at that link any more. Look the link up again.' } };
+    const fs = m.files.length ? await statfs(dirname(chatModels.target(m.files[0].path))).catch(() => null) : null;
+    const free = fs ? fs.bavail * fs.bsize : Infinity;
+    if (m.bytes + 0.5 * GB > free) return { status: 507, json: { error: `Not enough free disk space: ${m.name} needs ${(m.bytes / GB).toFixed(1)} GB, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.` } };
+    startHf(found.repo, found.rev, m);
+    return { status: 200, json: hfView() };
+  } catch (error) {
+    return { status: 400, json: { error: hfSaid(error) } };
+  } finally {
+    hfStarting = false;
+  }
+}
+
+/**
+ * A download asked for by a linked main PC (Download, To this PC, on its Models page): a chat model from Hugging Face
+ * ({kind: 'chat', repo, rev, name}) or a picture model from TOMLIN's list ({kind: 'image', id}), downloaded here, by
+ * this PC. /worker/fetch-start starts it, /worker/fetch-state says how far it is, /worker/fetch-stop stops it. No tick
+ * is needed (since 2.0.56); the node's door refuses it while someone there is using that PC (src/jobrun/node.ts).
+ */
+export async function fetchHere(p: string, b: Record<string, unknown>): Promise<{ status: number; json: Record<string, unknown> }> {
+  const image = b.kind === 'image';
+  const id = String(b.id ?? '');
+  const repo = String(b.repo ?? '');
+  const name = String(b.name ?? '');
+  const mine = () => !!hfJob && hfJob.repo === repo && hfJob.name === name;
+  const state = (): Record<string, unknown> => {
+    if (image) {
+      const m = images.registry.get(id);
+      if (m && images.registry.installed(m)) return { state: 'done', got: images.registry.bytes(m), bytes: images.registry.bytes(m) };
+      const dl = images.registry.download(id);
+      if (!dl) return { state: 'none' };
+      return { state: dl.error ? (/^Stopped\./.test(dl.error) ? 'stopped' : 'failed') : dl.done ? 'done' : 'downloading', got: dl.got, bytes: dl.bytes, error: dl.error ?? '' };
+    }
+    if (!mine()) return { state: 'none' };
+    return { state: hfJob!.state, got: hfJob!.got, bytes: hfJob!.bytes, error: hfJob!.error };
+  };
+  if (p === '/worker/fetch-state') return { status: 200, json: state() };
+  if (p === '/worker/fetch-stop') {
+    if (image) images.registry.stop(id);
+    else if (mine()) hfJob!.ac.abort();
+    return { status: 200, json: state() };
+  }
+  if (image) {
+    try {
+      await images.registry.start(id);
+      return { status: 200, json: state() };
+    } catch (error) {
+      return { status: 400, json: { error: (error as Error).message } };
+    }
+  }
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !name) return { status: 400, json: { error: 'that is not a Hugging Face model this PC can download.' } };
+  const r = await getHf(repo, String(b.rev ?? 'main'), name);
+  return { status: r.status, json: r.status === 200 ? state() : (r.json as Record<string, unknown>) };
+}
+
 // ---- Routes ----
 
 /** GET requests answered here, by path. */
@@ -119,7 +185,7 @@ export const hfPost: Routes = {
     return json(res, 200, await hfList.status());
   },
   '/api/chatmodels/search': async ({ res, b }) => {
-    // {q, terms, moe, order, minB, maxB, minGB, maxGB, card, cursor}: one page of GGUF chat models on Hugging Face matching the words
+    // {q, terms, moe, order, minB, maxB, minGB, maxGB, card, fitOn, cursor}: one page of GGUF chat models on Hugging Face matching the words
     // ("all": every one) and sizes, each with its file sizes read already (the list shows them before anything is
     // pressed). A repo with no model file TOMLIN can download (none at all, or behind a Hugging Face licence
     // page) is left out, and so is one that is not a chat model (no chat template and no chat task: video, music). Hugging Face is asked for up to 3 lots of 40 until 20 are kept, so the size filters do not
@@ -132,7 +198,12 @@ export const hfPost: Routes = {
     const inGB = (bytes: number) => (!minGB || bytes >= minGB * GB) && (!maxGB || bytes <= maxGB * GB);
     // Fits my card ticked: only a size that sits wholly on this PC's graphics cards (an estimate, src/calc.ts cardFit).
     const card = b.card === true;
-    const sizeOk = (m: { bytes: number; card: string | null }) => inGB(m.bytes) && (!card || m.card === 'ok');
+    // Fits (a drop-down on the page): 'here' = fits this PC; {ram, vram} = fits a linked PC with that memory (its last
+    // report, which the page has); anything else = all sizes.
+    const on = b.fitOn as { ram?: unknown; vram?: unknown } | string | undefined;
+    const there = on && typeof on === 'object' && Number(on.ram) > 0 ? { ram: Number(on.ram), cards: Number(on.vram) > 0 ? [Number(on.vram)] : [] } : null;
+    const fitsOn = (m: { bytes: number; fits: string }) => (on === 'here' ? m.fits !== 'no' : there ? fitsRoom(m.bytes, there.ram, there.cards) !== 'no' : true);
+    const sizeOk = (m: { bytes: number; card: string | null; fits: string }) => inGB(m.bytes) && (!card || m.card === 'ok') && fitsOn(m);
     const q = String(b.q ?? '');
     const terms = [...new Set((Array.isArray(b.terms) ? b.terms : []).map(String))].filter(t => t === 'abliterated' || t === 'uncensored');
     // MoE's ticked: mixtures of experts only (by name). Order: Size or A to Z on the page (most downloaded when not set).
@@ -220,21 +291,8 @@ export const hfPost: Routes = {
   },
   '/api/chatmodels/get': async ({ res, b }) => {
     // {repo, rev, name}: downloads one model's files from that fixed revision, each checked against Hugging Face's SHA-256.
-    if (hfJob?.state === 'downloading') return json(res, 409, { error: `${hfJob.name} is still downloading. Wait for it, or stop it.` });
-    // Taken before the look-up (a second or two): a second Get pressed meanwhile is told to wait, never started beside it.
-    if (hfStarting) return json(res, 409, { error: 'A download is starting. Wait a moment, then try again.' });
-    hfStarting = true;
-    try {
-      const found = await lookUpHf(`https://huggingface.co/${String(b.repo ?? '')}/tree/${String(b.rev ?? '')}`);
-      const m = found.models.find(x => x.name === b.name);
-      if (!m) return json(res, 404, { error: 'That model is not at that link any more. Look the link up again.' });
-      startHf(found.repo, found.rev, m);
-      return json(res, 200, hfView());
-    } catch (error) {
-      return json(res, 400, { error: hfSaid(error) });
-    } finally {
-      hfStarting = false;
-    }
+    const r = await getHf(String(b.repo ?? ''), String(b.rev ?? ''), String(b.name ?? ''));
+    return json(res, r.status, r.json);
   },
   '/api/chatmodels/stop': async ({ res }) => {
     hfJob?.ac.abort();

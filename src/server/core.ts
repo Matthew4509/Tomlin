@@ -74,7 +74,7 @@ export const HOME = keep.resolveHome();
 export const startupOf = autostart(ROOT);
 /**
  * Ends this copy so its launcher (Start TOMLIN.cmd, or TOMLIN.exe by the clock) starts the whole new copy in `dir`: an
- * update pushed from a linked PC, or a TOMLIN zip uploaded under Nodes and memory. Ended a moment later, so the answer
+ * update pushed from a linked PC, or a TOMLIN zip uploaded under This PC: models and updates. Ended a moment later, so the answer
  * reaches whoever asked first.
  */
 export async function restartInto(dir: string): Promise<void> {
@@ -120,7 +120,7 @@ export const cachedCopies = () => [join(ROOT, 'models'), ...besideCopies()];
 export const staff = await Staff.load(HOME.data);
 // How fast each model answers, here and on linked PCs: every real answer, and Test speed (src/speed.ts).
 export const speeds = await Speeds.load(HOME.data);
-/** Models hidden from the lists a model is picked from (Nodes and memory, Models on this PC, Hide). */
+/** Models hidden from the lists a model is picked from (This PC: models and updates, Models on this PC, Hide). */
 export const hidden = await Hidden.load(HOME.data);
 // One profile photo per person (src/faces.ts), kept in data/faces.
 export const faces = new Faces(join(store.dir, 'faces'));

@@ -211,8 +211,10 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     assert.notEqual((await fetch(`${base}/bridge/config.js`)).status, 200, 'only the page\'s own files are served');
     // A page from another site cannot post to it (TOMLIN's own origin check runs first).
     assert.equal((await fetch(`${base}/bridge/api/scan`, { method: 'POST', headers: { origin: 'https://example.com', 'x-bridge-key': key! }, body: '{}' })).status, 403);
-    const lockOn = await post('/api/applock', { action: 'set', pin: '4826', pin2: '4826', agree: true });
+    // The auto-lock minutes picked in the new-PIN window are kept with the PIN.
+    const lockOn = await post('/api/applock', { action: 'set', pin: '4826', pin2: '4826', agree: true, idleMinutes: 15 });
     assert.equal(lockOn.status, 200, await lockOn.clone().text());
+    assert.equal(((await lockOn.clone().json()) as { idleMinutes: number }).idleMinutes, 15, 'the auto-lock minutes are saved with the PIN');
     const locked = await fetch(`${base}/bridge/`, { redirect: 'manual' });
     assert.equal(locked.status, 302, 'locked: the page goes to the PIN screen');
     assert.equal(locked.headers.get('location'), '/');

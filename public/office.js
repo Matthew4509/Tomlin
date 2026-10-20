@@ -116,7 +116,7 @@
 
   /** Every office starts empty: what is bought comes from the server (GET /api/office `rooms`). */
   const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false, plants: false, clock: false, cooler: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false }, desks: { rocks: false, ducks: false, cactus: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0, volleyball: false, flamingo: false, trophy: null };
-  const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', rooms: EMPTY, roomsKey: '', purse: null, shop: [], awards: [], weekBoard: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [], blocks: FIXED };
+  const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', rooms: EMPTY, roomsKey: '', purse: null, shop: [], awards: [], weekBoard: [], todayBoard: [], thoughts: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [], blocks: FIXED };
   /** The pieces in the way now: the fixed ones and whatever is bought (kept in world.blocks: walkable runs often). */
   const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : []), ...(world.rooms.boardroom.cooler ? [COOLER] : []), ...(world.rooms.boardroom.plants ? PLANTS.map(q => ({ x: q.x - 12, y: q.y - 12, w: 24, h: 24 })) : []), ...(world.rooms.trophy ? [TROPHY] : [])];
   const views = [];
@@ -439,9 +439,185 @@
     p.bubbleUntil = world.time + seconds;
   }
 
+  // ---- Thoughts: the office chat beside the office, like a team chat, one message at a time (public/banter.js has the
+  // lines). First a plain line for each real change in what a hire does, then the banter; nothing invented. ----
+
+  /** How many messages are kept, shown under the small office and in Watch's column, and may wait to be posted. */
+  const THOUGHTS_KEPT = 30;
+  const THOUGHTS_TILE = 4;
+  const THOUGHTS_FULL = 10;
+  const THOUGHTS_WAITING = 20;
+  /** Messages waiting to be posted: they go into the chat one at a time, 1 to 2 seconds apart, as if typed. */
+  const chatQueue = [];
+  let chatNextAt = 0;
+  const CHAT_KEY = 'tomlin-office-chat';
+  /** The chat setting, kept on this PC: 'all' (Everything), 'work' (Work only: what they do, no banter) or 'off'. */
+  app.chatMode = () => { try { const m = localStorage.getItem(CHAT_KEY); return m === 'work' || m === 'off' ? m : 'all'; } catch { return 'all'; } };
+  app.setChatMode = m => {
+    try { localStorage.setItem(CHAT_KEY, m); } catch { /* kept for this visit only */ }
+    world.chatMode = m;
+    if (m === 'off') chatQueue.length = 0;
+    for (const v of views) v.told = v.thoughtsTold = '';
+    syncChatPick();
+    wake();
+  };
+  const chatMode = () => world.chatMode ?? (world.chatMode = app.chatMode());
+  /** Watch's Thoughts column (above the shop) and the Chat list in its header. */
+  const fullThoughts = el('section', { class: 'office-thoughts office-side-thoughts', 'aria-label': 'Thoughts' });
+  const chatPick = el('select', { class: 'office-chat-pick', 'aria-label': 'Office chat', title: 'Thoughts beside the office: Everything (what they do, banter and chit-chat), Work only (what they do), or Off', onchange: e => app.setChatMode(e.target.value) },
+    el('option', { value: 'all', text: 'Everything' }), el('option', { value: 'work', text: 'Work only' }), el('option', { value: 'off', text: 'Off' }));
+  function syncChatPick() {
+    chatPick.value = chatMode();
+  }
+  const ago = at => {
+    const m = Math.floor((Date.now() - at) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`;
+  };
+  /** What decides when a message list is drawn again: a message added, the setting, and each minute for the "ago". */
+  const thoughtsKey = () => `${world.thoughts.length}|${world.thoughts.at(-1)?.at ?? 0}|${chatMode()}|${Math.floor(Date.now() / 60000)}`;
+  /** The latest `n` messages, newest at the bottom, each with its writer's small head; or why there are none. */
+  function thoughtsParts(n) {
+    const head = el('b', { class: 'office-thoughts-title', text: 'Thoughts' });
+    if (chatMode() === 'off') return [head, el('p', { class: 'hint' }, 'The office chat is off. ', el('button', { class: 'btn quiet', type: 'button', text: 'Turn it on', onclick: () => app.setChatMode('all') }))];
+    const list = world.thoughts.slice(-n).map(t => el('li', { class: `office-msg${Date.now() - t.at < 1500 ? ' new' : ''}${t.kind === 'work' ? ' work' : ''}` },
+      app.avatar ? app.avatar(`staff:${t.id}`, t.who.slice(0, 2).toUpperCase()) : el('span'),
+      el('div', { class: 'office-msg-body' }, el('div', {}, el('strong', { text: t.who }), el('span', { class: 'hint', text: ` ${ago(t.at)}` })), el('div', { text: t.text }))));
+    return [head, list.length ? el('ul', { class: 'office-msgs' }, ...list) : el('p', { class: 'hint', text: 'Quiet for now: what they do and say shows here.' })];
+  }
+  /** Show general chit-chat: ticked is Everything, unticked Work only (Off is under Chat in Watch). */
+  function chitTick() {
+    if (chatMode() === 'off') return null;
+    return el('label', { class: 'office-chit', title: 'The banter and chit-chat in Thoughts. Untick to keep only what they are doing (Chat in Watch also has Off)' },
+      el('input', { type: 'checkbox', checked: chatMode() === 'all', onchange: e => app.setChatMode(e.target.checked ? 'all' : 'work') }), ' Show general chit-chat');
+  }
+  /**
+   * Something a hire said or thought, queued for the chat. kind 'work': a line about their work (kept in Work only);
+   * anything else is the office chat. The same words again from them are left out: banter within 10 minutes, a work
+   * line only straight after itself (the same chat answered twice in an hour is two real answers).
+   */
+  function think(p, text, kind = 'chat') {
+    if (!text || !p?.row || world.people.get(p.id) !== p || p.leaving || p.firing) return;
+    const mode = chatMode();
+    if (mode === 'off' || (mode === 'work' && kind !== 'work')) return;
+    const now = Date.now();
+    const last = [...chatQueue].reverse().find(t => t.id === p.id) ?? [...world.thoughts].reverse().find(t => t.id === p.id);
+    if (last?.text === text && (kind === 'work' || !last.at || now - last.at < 600000)) return;
+    chatQueue.push({ id: p.id, who: p.row.name, text, kind });
+    if (chatQueue.length > THOUGHTS_WAITING) chatQueue.shift();
+  }
+  /** Posts the next waiting message when its turn comes (newest at the bottom of the chat). */
+  function postThought() {
+    const now = Date.now();
+    if (!chatQueue.length || now < chatNextAt) return;
+    world.thoughts.push({ ...chatQueue.shift(), at: now });
+    if (world.thoughts.length > THOUGHTS_KEPT) world.thoughts.shift();
+    // On energy drinks the chat runs as fast as they talk.
+    chatNextAt = now + ([...world.people.values()].some(buzzing) ? 250 + Math.random() * 250 : 1000 + Math.random() * 1000);
+    for (const v of views) tell(v);
+  }
+  setInterval(postThought, 250);
+
+  /** Banter: the spacing in the office as a whole, and for the same kind from the same person (seconds). */
+  const BANTER_GAP = 25;
+  const KIND_GAP = 180;
+  /** The others nearby: those at the same PC's desk first, three at most. */
+  const nearOf = p => present().filter(o => o !== p && o.row).sort((a, b) => ((b.row.pcId ?? '') === (p.row.pcId ?? '')) - ((a.row.pcId ?? '') === (p.row.pcId ?? ''))).slice(0, 3);
+  /** Office chat for something that happened to p: often one line out loud, some a reply or two, some nothing. Everything only. */
+  function banter(p, e) {
+    const B = window.officeBanter;
+    if (!B || !p?.row || p.leaving || chatMode() !== 'all') return;
+    p.banterAt = p.banterAt || {};
+    if (clock() - (p.banterAt[e.kind] ?? -Infinity) < KIND_GAP || clock() - (world.banterAt ?? -Infinity) < BANTER_GAP) return;
+    const near = nearOf(p);
+    const lines = B.plan(e, B.characterOf(p.seed), near.map(o => ({ character: B.characterOf(o.seed), name: o.row.name })), p.row.name);
+    if (!lines.length) return;
+    p.banterAt[e.kind] = world.banterAt = clock();
+    lines.forEach((l, i) => {
+      const who = l.by < 0 ? p : near[l.by];
+      if (!who) return;
+      if (i === 0) say(who, l.text, 4);
+      think(who, l.text);
+    });
+  }
+  /** A new hire: one or two of the others welcome them, each by their own chance to talk. */
+  function greet(p) {
+    const B = window.officeBanter;
+    if (!B || chatMode() !== 'all') return;
+    nearOf(p).slice(0, 2).forEach(o => {
+      const c = B.characterOf(o.seed);
+      const list = B.REPLIES.hire[c.id];
+      if (list && Math.random() < c.talk) think(o, list[Math.floor(Math.random() * list.length)].replaceAll('{who}', p.row.name));
+    });
+  }
+  /** General chit-chat on settling somewhere with nothing to do: now and then, so the chat is not all the same. */
+  function atEase(p) {
+    const t = p.target;
+    const B = window.officeBanter;
+    if (!t || !B || !p.row || chatMode() !== 'all' || ['desk', 'boardroom', 'gone', 'run'].includes(t.area) || Math.random() > 0.3) return;
+    const list = t.pizza ? B.AT_EASE[world.food] : B.AT_EASE[t.rest?.id] ?? B.AT_EASE[t.area];
+    if (list?.length) think(p, list[Math.floor(Math.random() * list.length)]);
+  }
+  /**
+   * Payday: on a Thursday (this PC's clock), once, with two or more in who wrote different amounts today, they compare
+   * pay. Not straight away: a small chance on each list, so it lands some time in the day. The figures are read fresh.
+   */
+  async function paydayChat() {
+    const B = window.officeBanter;
+    const now = new Date();
+    if (!B?.payday || chatMode() !== 'all' || now.getDay() !== 4 || world.paydayOn === now.toDateString() || world.paydayAsking) return;
+    if (clock() - (world.banterAt ?? -Infinity) < BANTER_GAP || Math.random() > 0.05) return;
+    world.paydayAsking = true;
+    try {
+      await loadOffice();
+      const today = new Map((world.todayBoard ?? []).map(r => [r.id, r.out]));
+      const crew = present().filter(p => p.row && p.row.doing !== 'off');
+      const lines = B.payday(crew.map(p => ({ name: p.row.name, today: today.get(p.id) ?? 0 })));
+      if (!lines.length) return;
+      world.paydayOn = now.toDateString();
+      world.banterAt = clock();
+      lines.forEach((l, i) => {
+        if (i === 0) say(crew[l.by], l.text, 4);
+        think(crew[l.by], l.text);
+      });
+    } finally {
+      world.paydayAsking = false;
+    }
+  }
+  /** What one of Home's staff rows says changed for p (s: the new row, was: the one before), into the chat. */
+  function chatChanges(p, was, s, snap) {
+    const B = window.officeBanter;
+    if (!B) return;
+    // What the server measured since the last list (a step, the tests, an answer or a picture saved), oldest first.
+    const fresh = (s.events ?? []).filter(e => e.seq > (world.eventSeq ?? 0)).sort((a, b) => a.seq - b.seq);
+    for (const c of B.changes(was, s, { first: world.first, stepEvent: fresh.some(e => e.kind === 'step-start') })) {
+      think(p, c.text, 'work');
+      if (c.event?.kind === 'hire') greet(p);
+      else if (c.event && !snap) banter(p, c.event);
+    }
+    for (const e of fresh) {
+      think(p, B.eventLine(e), 'work');
+      const kind = B.banterKind(e);
+      if (kind && !snap) banter(p, B.dayKind({ kind }, e.at));
+    }
+    // A long think (they go to the boardroom then): said once.
+    if (s.doing !== 'thinking') p.thinkTold = false;
+    else if (!p.thinkTold && clock() - (p.doingSince ?? clock()) > 15) {
+      p.thinkTold = true;
+      think(p, s.chat ? `Still thinking about "${s.chat}".` : 'Still thinking.', 'work');
+    }
+    // Working late (11 pm to 5 am on this PC's clock): once a night each.
+    const night = new Date(Date.now() - 5 * 3600e3).toDateString();
+    const hour = new Date().getHours();
+    if (!snap && ['typing', 'working', 'drawing'].includes(s.doing) && (hour >= 23 || hour < 5) && p.lateNight !== night) {
+      p.lateNight = night;
+      banter(p, { kind: 'late' });
+    }
+  }
+
   /** Home's lists, every few seconds: the staff (with what each is doing) and the desks. */
   function update({ staff, desks, follow }) {
     world.staff = staff;
+    if (world.first) world.eventSeq = Math.max(0, ...staff.flatMap(s => (s.events ?? []).map(e => e.seq)));
     const now = performance.now();
     // Shown again after a long time away: everyone is put where they are now, not walked there.
     const snap = world.first || now - world.seenAt > 4000;
@@ -467,7 +643,9 @@
       if (s.doing === 'working' && p.row && p.row.doing !== 'working' && !snap) deliveries.push({ kind: 'folder', who: s.id });
       if (s.doing !== 'working') p.folders = 0;
       p.idleSince = s.idleFor == null ? -Infinity : clock() - s.idleFor;
+      const was = p.row ?? null;
       p.row = s;
+      chatChanges(p, was, s, snap);
       p.look = (app.lookOf?.(`staff:${s.id}`)) ?? null;
       retarget(p, snap);
     }
@@ -478,6 +656,9 @@
       say(p, 'Goodbye!');
       retarget(p, snap);
     }
+    // Every event in this list is told now (on the first list none is: they happened before the page opened).
+    world.eventSeq = Math.max(world.eventSeq ?? 0, ...staff.flatMap(s => (s.events ?? []).map(e => e.seq)));
+    if (!snap) void paydayChat();
     // The open chat's person is followed when the chat changes to them.
     if (follow !== world.follow) {
       world.follow = follow;
@@ -750,6 +931,7 @@
     drawShop();
     world.awards = d.awards ?? [];
     world.weekBoard = d.week?.board ?? [];
+    world.todayBoard = d.today?.board ?? [];
     world.monthBoard = d.month?.board ?? [];
     world.monthName = d.month?.name ?? '';
     world.monthKey = d.month?.key ?? '';
@@ -877,6 +1059,7 @@
   function arrived(p) {
     p.face = p.target?.face ?? 'south';
     if (p.targetKey === 'gone') p.out = true;
+    else atEase(p);
     // The box is put down on arriving: at the new desk with a word, anywhere else (the move fell through) without.
     if (p.carry) {
       p.carry = false;
@@ -1797,10 +1980,19 @@
   }
   document.addEventListener('visibilitychange', wake);
 
-  /** The line under the office: the person picked and what they do, or how the staff are now. */
+  /**
+   * The line under the office: the person picked and what they do; nobody picked, under the small office, Thoughts (the
+   * office chat). Watch has Thoughts in its own column, above the shop.
+   */
   function tell(v) {
+    if (v.kind === 'full' && v.thoughtsTold !== thoughtsKey()) {
+      v.thoughtsTold = thoughtsKey();
+      fullThoughts.replaceChildren(...thoughtsParts(THOUGHTS_FULL), chitTick() ?? '');
+      // The newest message is at the bottom: kept in view.
+      fullThoughts.scrollTop = fullThoughts.scrollHeight;
+    }
     const p = world.selected ? world.people.get(world.selected) : null;
-    const key = p ? `${p.id}|${wordsOf(p)}|${p.row.pc ?? ''}|${holding(p)}` : `all|${world.staff.map(s => s.doing).join()}`;
+    const key = p ? `${p.id}|${wordsOf(p)}|${p.row.pc ?? ''}|${holding(p)}` : `all|${world.staff.length}|${v.kind === 'tile' ? thoughtsKey() : ''}`;
     if (key === v.told) return;
     v.told = key;
     if (p) {
@@ -1811,7 +2003,9 @@
         el('button', { class: 'btn quiet', type: 'button', text: 'Show everyone', onclick: () => { world.selected = null; v.told = ''; } }));
       return;
     }
-    v.strip.replaceChildren(el('span', { class: 'hint', text: world.staff.length ? 'Click on a staff to see what they are up to.' : 'Nobody hired yet.' }));
+    const hint = el('span', { class: 'hint', text: world.staff.length ? 'Click on a staff to see what they are up to.' : 'Nobody hired yet.' });
+    if (v.kind !== 'tile' || !world.staff.length) return v.strip.replaceChildren(hint);
+    v.strip.replaceChildren(el('div', { class: 'office-thoughts' }, ...thoughtsParts(THOUGHTS_TILE), el('div', { class: 'office-thoughts-foot' }, chitTick() ?? '', hint)));
   }
 
   // ---- Pointer: press a person to pick them, a desk to open its PC window; drag a person onto another desk ----
@@ -1962,7 +2156,7 @@
   const purseLine = el('p', { class: 'office-purse' });
   const fullHead = el('div', { class: 'office-full-head' },
     el('div', { class: 'office-full-title' }, el('h2', { id: 'office-full-title', text: 'Staff overview' }), purseLine),
-    el('span', { class: 'office-full-tools' }, awardBtn, undoAwardBtn, pizzaBtn, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => full.close() })));
+    el('span', { class: 'office-full-tools' }, el('label', { class: 'office-chat-label' }, 'Chat ', chatPick), awardBtn, undoAwardBtn, pizzaBtn, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => full.close() })));
   const fullSaid = el('p', { class: 'hint office-said', 'aria-live': 'polite' });
   /** What the window has to say (a purchase, an award, why not): at the foot of the menu, where the buying is done. */
   const fullSay = words => {
@@ -2242,6 +2436,8 @@
       say(p, SIP_LINES[(p.seed + i) % SIP_LINES.length], 2);
       p.targetKey = '';
     });
+    const first = drinkers()[0];
+    if (first) banter(first, { kind: 'vending' });
     wake();
   }
   const vendDlg = el('dialog', { class: 'vend-dlg', 'aria-labelledby': 'vend-title' });
@@ -2315,7 +2511,8 @@
     boardLine.textContent = ((rows.length ? `This week's leaderboard (tokens written since Monday): ${rows.map((r, i) => `${i + 1}. ${r.name} ${r.out.toLocaleString()}`).join(' · ')}.` : '') + behind).trim();
   }
   const fullBody = el('div', { class: 'office-full-body' });
-  full.append(fullHead, el('div', { class: 'office-full-main' }, fullBody, shopPanel));
+  full.append(fullHead, el('div', { class: 'office-full-main' }, fullBody, el('div', { class: 'office-side' }, fullThoughts, shopPanel)));
+  syncChatPick();
   document.body.append(full);
   addView('full', fullBody, full);
   fullBody.append(boardLine);
