@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, GB, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, ramNearlyFull, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
+import { CHAT_MODELS, GB, cardFit, chatNeed, chatRows, fitOf, moveWontFit, pictureRow, ramFit, ramNearlyFull, speedOf, testedSpeed, timeText, type Hardware } from '../src/calc.ts';
 
 const laptop: Hardware = { ram: 16 * GB, vram: 0, card: 'builtin', cores: 2 };
 const desktop: Hardware = { ram: 32 * GB, vram: 0, card: 'none', cores: 4 };
@@ -88,4 +88,23 @@ test('moving someone: a model fits a PC on its card or in its RAM less 3 GB, tig
   const why = moveWontFit('Qwen3.5-35B-A3B', 24 * GB, '"Worker PC"', laptop);
   assert.match(why, /^Not moved: Qwen3\.5-35B-A3B needs about 24 GB of memory, and "Worker PC" has 8\.0 GB of RAM \(3 GB of it is kept for Windows\)\./);
   assert.match(why, /Pick a smaller model for them there, or move them to a PC with more memory\.$/);
+});
+
+test('card fit: the file and room for an 8K chat against the cards memory less 0.5 GB each (the 1060 6 GB: about 5.5)', () => {
+  const gtx1060 = { n: 1, total: 6 * GB };
+  assert.equal(cardFit(2.6 * GB, gtx1060), 'ok'); // Qwen3.5 4B Q4_K_M: all on the card
+  assert.equal(cardFit(4.4 * GB, gtx1060), 'ok'); // a 9B at Q3: 4.4 + 0.8
+  assert.equal(cardFit(5.3 * GB, gtx1060), 'no'); // Qwen3.5 9B Q4_K_M: just over (runs, part on the processor)
+  assert.equal(cardFit(6.8 * GB, gtx1060), 'no'); // Gemma 3 12B Q4_K_M
+  assert.equal(cardFit(6.8 * GB, { n: 2, total: 12 * GB }), 'ok'); // two 6 GB cards
+  assert.equal(cardFit(2.6 * GB, { n: 0, total: 0 }), null); // no card of its own: no mark
+  assert.equal(cardFit(0, gtx1060), null);
+});
+
+test('a PC memory report: RAM and every card (2.0.50), or one card from an older PC, none when shared', async () => {
+  const { memOfReport } = await import('../src/calc.ts');
+  assert.deepEqual(memOfReport({ ram: { total: 16 * GB }, cards: { total: 12 * GB }, gpu: { total: 6 * GB } }), { ram: 16 * GB, vram: 12 * GB });
+  assert.deepEqual(memOfReport({ ram: { total: 16 * GB }, gpu: { total: 6 * GB } }), { ram: 16 * GB, vram: 6 * GB });
+  assert.deepEqual(memOfReport({ ram: { total: 8 * GB }, gpu: { total: 2 * GB, shared: true } }), { ram: 8 * GB, vram: 0 });
+  assert.deepEqual(memOfReport(null), { ram: 0, vram: 0 });
 });

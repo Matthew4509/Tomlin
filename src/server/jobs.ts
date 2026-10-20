@@ -135,7 +135,7 @@ export function startJobs(): void {
       },
       keptRoot: join(HOME.home, 'backups from other PCs'),
       backupsDir: HOME.backups,
-      makeBackup: label => keep.backup(HOME, label),
+      makeBackup: (label, o) => keep.backup(HOME, label, o),
       onInstalled: () => void loadShapes().catch(() => undefined),
     },
     update: {

@@ -631,6 +631,9 @@ function historySecrets() {
 
 async function runAudit(dir, url, opts = {}) {
   const started = Date.now();
+  // Tests only: hold the thread this long, as reading a big project does.
+  const spin = Number(process.env.BRIDGE_TEST_AUDIT_SPIN_MS) || 0;
+  while (Date.now() - started < spin) { /* busy */ }
   let ownHost = null; try { ownHost = opts.liveUrl ? new URL(opts.liveUrl).hostname : null; } catch {}
   // Old copies of the app inside the project (lib/roots.js): left out of the code rules, and out of the disclosure
   // pass unless git would publish them. opts.root === false scans everything; opts.include brings folders back.

@@ -49,6 +49,7 @@ async function listView(fresh) {
       order: order.has(k) ? order.get(k) : null,
       tokens: tokens.per[p.id] || 0, tokensMonth: tokens.month[p.id] || 0,
       commands: p.commands.map(c => ({ key: c.key, name: c.name, port: c.port, from: c.from, ports: c.alts ? c.alts.map(a => a.port) : undefined })),
+      startSkipped: [...new Set(p.startSkipped || [])], // which of its files hold a start entry the Bridge could not use
       running: r ? { port: r.port, name: r.name, started: r.started, url: r.url } : null,
       portInUse: busyElsewhere, portSharedWith,
       audit: auditSummary(lastAudit(p.id)),

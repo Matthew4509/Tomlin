@@ -53,7 +53,15 @@ async function main() {
   make('dev', { 'README.md': '# A project that happens to be called dev\n' });
   make('public', { 'index.html': PAGE });
   make('shop', { 'server.js': '// made-up\n' });
+  make('react-shop', { 'frontend/package.json': '{}', 'admin/package.json': '{}' });
+  make('react-other', { 'frontend/package.json': '{}' });
   make('.claude', { 'launch.json': launch(
+    { name: 'root-react', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: path.join(WS, 'react-shop', 'frontend'), env: { PORT: '5200', BROWSER: 'none' }, port: 5200 },
+    { name: 'root-react-2', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: path.join(WS, 'react-shop', 'frontend'), env: { PORT: '5201', BROWSER: 'none' }, port: 5201 },
+    { name: 'root-react-admin', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: path.join(WS, 'react-shop', 'admin'), env: { PORT: '5205', BROWSER: 'none' }, port: 5205 },
+    { name: 'root-react-other', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: 'react-other/frontend', port: 5202 },
+    { name: 'root-react-gone', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: path.join(WS, 'react-other', 'missing'), port: 5203 },
+    { name: 'root-react-bad-env', runtimeExecutable: 'npx', runtimeArgs: ['craco', 'start'], cwd: 'react-other/frontend', env: { PORT: 5204 }, port: 5204 },
     { name: 'root-dev', runtimeExecutable: 'npm', runtimeArgs: ['run', 'dev'], port: 5100 },
     { name: 'root-vite', runtimeExecutable: 'npx', runtimeArgs: ['vite', 'dev'], port: 5104 },
     { name: 'root-public', runtimeExecutable: 'npx', runtimeArgs: ['serve', 'public'], port: 5101 },
@@ -78,6 +86,27 @@ async function main() {
   await check('S7: a root entry attaches where its argument is a path inside the folder (serve public, shop/server.js)', () => {
     assert.deepStrictEqual(row('public').commands.map(c => c.name), ['root-public']);
     assert.deepStrictEqual(row('shop').commands.map(c => c.name), ['root-shop']);
+  });
+  await check('S7: a root entry whose cwd is inside the folder attaches, runs there with its env, and its other-port copy merges', () => {
+    const cs = row('react-shop').commands;
+    assert.strictEqual(cs[0].name, 'root-react', JSON.stringify(cs));
+    assert.strictEqual(cs[0].cwd, path.join(WS, 'react-shop', 'frontend'));
+    assert.deepStrictEqual(cs[0].env, { PORT: '5200', BROWSER: 'none' });
+    assert.deepStrictEqual(cs[0].alts.map(a => [a.port, a.env.PORT]), [[5200, '5200'], [5201, '5201']]);
+  });
+  await check('S7: a relative cwd resolves from the root; a cwd that is not there or an env value that is not text drops the entry', () => {
+    assert.deepStrictEqual(row('react-other').commands.map(c => c.name), ['root-react-other']);
+  });
+  await check('S7: a dropped root entry whose cwd names the folder is counted for that folder, with the reason when its folder is gone', () => {
+    assert.deepStrictEqual(row('react-other').startSkipped, [
+      'root .claude/launch.json ("root-react-gone", whose cwd folder is not there)',
+      'root .claude/launch.json ("root-react-bad-env")']);
+    for (const f of ['react-shop', 'shop', 'public', 'good']) assert.deepStrictEqual(row(f).startSkipped, [], f + ' was given another folder\'s entry');
+  });
+  await check('S7: the same command run in two sub-folders of one project stays two entries', () => {
+    const cs = row('react-shop').commands;
+    assert.deepStrictEqual(cs.map(c => c.name), ['root-react', 'root-react-admin'], JSON.stringify(cs));
+    assert.strictEqual(cs[1].cwd, path.join(WS, 'react-shop', 'admin'));
   });
   const before = new Map(rows.map(r => [r.folder, r.id]));
   make('my-site', { 'README.md': '# one\n' });
@@ -130,7 +159,9 @@ async function main() {
   });
   // In a child process over its own data folder, so nothing here reads or writes the real Bridge's data.
   const inChild = lines => {
-    const r = spawnSync(NODE, ['-e', lines.join(' ')], { cwd: path.join(__dirname, '..', '..'), env: { ...process.env, BRIDGE_DRYRUN: '1', BRIDGE_DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-robust-child-')), BRIDGE_ROOT: WS }, encoding: 'utf8', timeout: 20000 });
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-robust-child-'));
+    temps.push(data);
+    const r = spawnSync(NODE, ['-e', lines.join(' ')], { cwd: path.join(__dirname, '..', '..'), env: { ...process.env, BRIDGE_DRYRUN: '1', BRIDGE_DATA: data, BRIDGE_ROOT: WS }, encoding: 'utf8', timeout: 20000 });
     try { return JSON.parse(r.stdout.trim().split(/\r?\n/).pop()); } catch { throw new Error(r.stdout + r.stderr); }
   };
   await check('S12: Stop, then Run again while the first start checks its port: only the new start counts', () => {
@@ -243,6 +274,18 @@ async function main() {
       assert(s.ok, JSON.stringify(s));
       assert(Date.now() - t < 15000);
       await api('/api/stop', { id: await idOf('cmd-site') });
+    });
+    await check('S7: a start entry with a cwd and an env PORT runs in that folder and answers on that port', async () => {
+      const pEnv = await freePort();
+      make('env-site', { 'web/x.txt': 'x', '.claude/launch.json': launch({ name: 'env', runtimeExecutable: NODE,
+        runtimeArgs: ['-e', "require('http').createServer((q,s)=>s.end(process.cwd())).listen(+process.env.PORT,'127.0.0.1')"],
+        cwd: 'web', env: { PORT: String(pEnv) }, port: pEnv }) });
+      const id = await idOf('env-site');
+      const s = (await api('/api/start', { id, key: '0', open: false })).json;
+      assert(s.ok, JSON.stringify(s));
+      const body = await (await fetch('http://127.0.0.1:' + pEnv + '/')).text();
+      await api('/api/stop', { id });
+      assert.strictEqual(body.toLowerCase(), path.join(WS, 'env-site', 'web').toLowerCase());
     });
     await check('S3: a program that does not exist fails at once, not after 20 s', async () => {
       make('no-such-program', { '.claude/launch.json': launch({ name: 'x', runtimeExecutable: 'no-such-program-' + Date.now() + '.exe', port: await freePort() }) });

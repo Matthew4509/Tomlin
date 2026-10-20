@@ -89,6 +89,37 @@ export interface BackupChoice {
   ready: boolean;
   same: boolean;
   intern: boolean;
+  /** Which PC it answers on: 'here', or the linked PC's id (the window's PC filter). */
+  pcId?: string;
+  /** Whether the model fits that PC's memory as a whole (src/calc.ts ramFit); null when not known. */
+  fit?: 'ok' | 'tight' | 'no' | null;
+  /** Its size against the hire's level: match, above, below, or any (a Default level). */
+  level?: 'match' | 'above' | 'below' | 'any';
+}
+
+/** One row per PC and model (two copies of one file, in two folders, are one choice): the one that answers now is kept. */
+export function tidyChoices(list: BackupChoice[]): BackupChoice[] {
+  const kept = new Map<string, BackupChoice>();
+  for (const c of list) {
+    const key = `${c.pc}\n${c.model.toLowerCase()}`;
+    const had = kept.get(key);
+    if (!had || (c.ready && !had.ready)) kept.set(key, c);
+  }
+  return [...kept.values()];
+}
+
+/** Each linked PC's name for the backup list: with its address when another linked PC has the same name. */
+export function pcLabels(remotes: { id: string; name: string; url: string }[]): Record<string, string> {
+  const count = new Map<string, number>();
+  for (const r of remotes) count.set(r.name, (count.get(r.name) ?? 0) + 1);
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+  return Object.fromEntries(remotes.map(r => [r.id, (count.get(r.name) ?? 0) > 1 ? `${r.name} (${host(r.url)})` : r.name]));
 }
 
 /** Same model first, then the ones that answer at once, then bigger before smaller. */

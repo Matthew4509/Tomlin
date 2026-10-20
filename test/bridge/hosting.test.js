@@ -487,6 +487,21 @@ async function main() {
     await api('/api/stop', { id: ep.id });
   });
 
+  await check('local copy: a launch file\'s env reaches it as well, and a Local secret of the same name wins', async () => {
+    const ENVP = path.join(WS, 'env-merge-site');
+    const p3 = await freePort();
+    w(ENVP, 'serve.js', 'require("fs").writeFileSync(require("path").join(__dirname,"seen.txt"), process.env.API_KEY + "|" + process.env.FROM_LAUNCH);require("http").createServer((q,s)=>s.end("ok")).listen(+process.env.PORT,"127.0.0.1");');
+    w(ENVP, '.claude/launch.json', JSON.stringify({ configurations: [{ name: 'env', runtimeExecutable: process.execPath, runtimeArgs: ['serve.js'], env: { PORT: String(p3), API_KEY: 'from-the-launch-file', FROM_LAUNCH: 'yes' }, port: p3 }] }));
+    refreshProjects(true);
+    const ep = state.projects.find(p => p.dir.toLowerCase() === ENVP.toLowerCase());
+    assert((await api('/api/hosting/secrets', { id: ep.id, rows: [{ name: 'API_KEY', local: 'the-local-one', live: 'the-live-one' }] })).ok);
+    const s = await api('/api/start', { id: ep.id, key: ep.commands[0].key, open: false });
+    assert(s.ok, JSON.stringify(s));
+    await sleep(200);
+    assert.strictEqual(r(ENVP, 'seen.txt'), 'the-local-one|yes');
+    await api('/api/stop', { id: ep.id });
+  });
+
   // ---------- FTPS (Windows' curl against a plain FTP server: the tests' only exception to "FTPS only") ----------
   let fconn;
   await check('FTPS: a wrong password is refused plainly; the right one connects and lists the folders', async () => {

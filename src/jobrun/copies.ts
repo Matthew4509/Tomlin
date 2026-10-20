@@ -1,5 +1,5 @@
 // Copies between linked PCs (src/carry.ts), this PC's side: models both ways, restore points, and updates pushed.
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import * as git from '../gitstore.ts';
 import * as share from '../share.ts';
@@ -7,6 +7,7 @@ import * as link from '../link.ts';
 import * as carry from '../carry.ts';
 import * as update from '../update.ts';
 import * as pb from '../projectbackup.ts';
+import { broughtBackWhy, recordSent } from '../keep.ts';
 import type { Remote } from '../store.ts';
 import { d, sleep } from './shared.ts';
 import { hello, remoteStatus } from './links.ts';
@@ -187,8 +188,12 @@ export async function backupTo(b: Record<string, unknown>) {
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
   const w = wireFor(r);
   const t = transfers.start({ kind: 'backup', what: 'A restore point of your data', pc: r.id, pcName: r.name }, async (progress, signal) => {
-    const name = await d.carry.makeBackup(`kept on ${r.name}`);
-    await carry.pushBackup(w, { file: join(d.carry.backupsDir, name), name, progress, signal });
+    // Without this PC's keys to its linked PCs, sharing code and PIN (src/keep.ts); what was sent is noted, so what
+    // comes back can be checked.
+    const name = await d.carry.makeBackup(`kept on ${r.name}`, { forOtherPc: true });
+    const file = join(d.carry.backupsDir, name);
+    await recordSent(d.carry.backupsDir, name, file);
+    await carry.pushBackup(w, { file, name, progress, signal });
     return `Backed up as "${name.replace(/\.zip$/, '')}": one copy in this PC's backups, one on "${r.name}" (it keeps your newest ${carry.KEEP_FOR_PC}).`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
@@ -267,8 +272,22 @@ export async function bringBack(b: Record<string, unknown>) {
   if (room) return { status: 507, body: { error: `${room.charAt(0).toUpperCase()}${room.slice(1)}` } };
   const w = wireFor(r);
   const t = transfers.start({ kind: 'bring', what: name.replace(/\.zip$/, ''), pc: r.id, pcName: r.name }, async (progress, signal) => {
-    await carry.pullBackup(w, { name, bytes, dest, progress, signal });
-    return 'It is in this PC\'s backups now: Settings, Your data and updates, then Put back beside it.';
+    // Into a file beside it first (not listed: no .zip ending), checked against what was sent, then moved in: one
+    // changed on that PC is never kept, and never takes the place of a copy here.
+    const coming = `${dest}.coming`;
+    try {
+      await carry.pullBackup(w, { name, bytes, dest: coming, progress, signal });
+    } catch (e) {
+      await rm(coming, { force: true });
+      throw e;
+    }
+    const why = await broughtBackWhy(d.carry.backupsDir, name, coming);
+    if (why && why !== 'unchecked') {
+      await rm(coming, { force: true });
+      throw new Error(why);
+    }
+    await rename(coming, dest);
+    return `It is in this PC's backups now: Settings, Your data and updates, then Put back beside it.${why === 'unchecked' ? ' It could not be checked against what was sent (it was sent before this check, or this PC\'s record of it is gone); putting it back still checks it is a plain backup.' : ''}`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
 }

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { HfList, listed, nextPage, pick, type ListedModel } from '../src/hflist.ts';
+import { HfList, isMoe, listed, nextPage, ordered, pick, type ListedModel } from '../src/hflist.ts';
 
 test('Hugging Face list: keeps public chat models (or no task said) that people use', () => {
   const got = listed([
@@ -105,4 +105,21 @@ test('Hugging Face list: the copy shipped with TOMLIN is read until this PC has 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("MoE's: a mixture of experts is known by its name, and ticking it keeps only those", () => {
+  for (const n of ['unsloth/Qwen3-30B-A3B-GGUF', 'TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF', 'allenai/OLMoE-1B-7B-0924', 'bartowski/Phi-3.5-MoE-instruct-GGUF', 'unsloth/gpt-oss-20b-GGUF', 'ibm/granite-3.0-3b-a800m-instruct', 'LiquidAI/LFM2-8B-A1B-GGUF']) assert.ok(isMoe(n), n);
+  for (const n of ['unsloth/Qwen3.5-9B-GGUF', 'unsloth/gemma-3n-E4B-it-GGUF', 'TheBloke/Llama-2-7B-AWQ', 'some/amoeba-7b']) assert.ok(!isMoe(n), n);
+  const list: ListedModel[] = [['a/Qwen3-30B-A3B-GGUF', 50, 0, 30e9], ['b/Qwen3.5-9B-GGUF', 90, 0, 9e9], ['c/gpt-oss-20b-GGUF', 70, 0, 20e9]];
+  assert.deepEqual(pick(list, { q: 'all', moe: true }).map(m => m[0]), ['a/Qwen3-30B-A3B-GGUF', 'c/gpt-oss-20b-GGUF']);
+});
+
+test('Size and A to Z order the whole list both ways; a name with no size goes last; unset keeps most downloaded', () => {
+  const list: ListedModel[] = [['x/Big-70B', 10, 0, 70e9], ['y/alpha-1B', 30, 0, 1e9], ['z/Mystery', 50, 0, null], ['w/Mid-8B', 20, 0, 8e9]];
+  const names = (o: string) => ordered(list, o).map(m => m[0]);
+  assert.deepEqual(names('size-asc'), ['y/alpha-1B', 'w/Mid-8B', 'x/Big-70B', 'z/Mystery']);
+  assert.deepEqual(names('size-desc'), ['x/Big-70B', 'w/Mid-8B', 'y/alpha-1B', 'z/Mystery']);
+  assert.deepEqual(names('name-asc'), ['y/alpha-1B', 'x/Big-70B', 'w/Mid-8B', 'z/Mystery']);
+  assert.deepEqual(names('name-desc'), ['z/Mystery', 'w/Mid-8B', 'x/Big-70B', 'y/alpha-1B']);
+  assert.deepEqual(names(''), list.map(m => m[0]));
 });

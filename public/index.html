@@ -35,7 +35,11 @@
   <span class="mute-all-line" id="mute-all-line" hidden><span id="mute-all-text"></span> <button class="link" type="button" id="mute-all-off">Unmute</button></span>
   <button class="btn quiet mute-all" type="button" id="mute-all" aria-label="Mute all"></button>
   <button class="btn quiet padlock" type="button" id="applock-btn" aria-label="App lock" title="App lock: set a PIN for the whole app" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="applock-shackle" d="M8 11V7a4 4 0 0 1 8 0"/></svg></button>
-  <button class="btn quiet colours-toggle" type="button" data-colours-toggle>Colours</button>
+  <div class="theme-switch" role="radiogroup" aria-label="Colours">
+    <button type="button" role="radio" aria-checked="false" data-colours-set="day" aria-label="Day"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7 7 17M17 7l1.7-1.7"/></svg></button>
+    <button type="button" role="radio" aria-checked="false" data-colours-set="night" aria-label="Night"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="fill" d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/></svg></button>
+    <button type="button" role="radio" aria-checked="false" data-colours-set="auto" aria-label="Auto, by sunrise and sunset"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9.5" cy="12" r="3.2"/><path d="M9.5 5.2v1.6M9.5 17.2v1.6M2.7 12h1.6M4.7 7.2l1.1 1.1M4.7 16.8l1.1-1.1"/><path class="fill" d="M13.5 3.2a8.8 8.8 0 0 1 0 17.6a10.5 10.5 0 0 0 0-17.6z"/></svg></button>
+  </div>
   <button class="btn quiet settings-open" type="button" id="settings-open" title="Settings for the whole app: notifications, app lock, your data and updates"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg><span class="settings-word">Settings</span></button>
   <button class="btn quiet" type="button" id="help-open" data-help="help-title">Help</button>
 </header>
@@ -231,12 +235,24 @@
   <section class="home-part" id="node-install" aria-labelledby="node-install-title">
     <h3 id="node-install-title">Update this install</h3>
     <p class="hint" id="node-install-line"></p>
-    <p class="hint">Got a newer TOMLIN as a zip (tomlin-&lt;version&gt;.zip)? Upload it here instead of installing over the top. TOMLIN checks it is whole and newer, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs from here.</p>
+    <p class="hint"><b>Check git</b> looks for a newer TOMLIN on GitHub and downloads it; it must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, with no internet needed: pick it together with its signature, tomlin-&lt;version&gt;.zip.sig (hold Ctrl to pick both); without one, or with one that fails, you are warned first. Either way TOMLIN checks it is whole and newer, starts it once as a test, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs from here.</p>
     <div class="team-actions">
-      <label class="btn primary node-install-pick" id="node-install-pick">Upload a TOMLIN zip<input type="file" id="node-install-file" accept=".zip,application/zip" hidden></label>
+      <button class="btn primary" type="button" id="node-install-git">Check git</button>
+      <label class="btn node-install-pick" id="node-install-pick">Check zip<input type="file" id="node-install-file" accept=".zip,.sig,application/zip" multiple hidden></label>
     </div>
+    <div class="node-install-git" id="node-install-git-box" hidden></div>
     <div class="node-install-progress" id="node-install-progress" hidden><div class="p-track"><div class="p-fill" id="node-install-fill"></div></div><span class="hint" id="node-install-said" aria-live="polite"></span></div>
     <div id="node-install-ask" hidden></div>
+    <details class="node-install-hand">
+      <summary>Update by hand (offline)</summary>
+      <ol class="hint">
+        <li>On a PC with internet, open <a id="node-install-releases" target="_blank" rel="noopener noreferrer">TOMLIN's releases on GitHub</a> and download tomlin-&lt;version&gt;.zip and tomlin-&lt;version&gt;.zip.sig. Or copy both from a PC that has them (a USB stick will do).</li>
+        <li>Bring both files to this PC, in one folder.</li>
+        <li>Press <b>Check zip</b>, pick the zip and its .sig together (hold Ctrl), then <b>Update now</b>. No internet is needed for this.</li>
+        <li>Or wholly by hand: close TOMLIN, unzip the zip into a new folder beside this one (not over the top of it), and run <b>Install TOMLIN.cmd</b> in the new folder. Your staff, chats and models stay where they are: the new version finds them.</li>
+        <li>Linked PCs: <b>Update all linked PCs</b> below, or the same steps on each PC.</li>
+      </ol>
+    </details>
     <h4>Linked PCs</h4>
     <div class="team-actions"><button class="btn" type="button" id="node-update-all" disabled>Update all linked PCs</button><span class="hint" id="node-update-all-line" aria-live="polite"></span></div>
   </section>
@@ -279,7 +295,13 @@
         <div class="mp-job" id="mp-job" aria-live="polite"></div>
       </div>
       <div class="team-actions"><button class="btn" type="button" id="mp-stop" hidden>Stop the download</button></div>
-      <h3 id="mp-heading">All models</h3>
+      <div class="mp-heading-row">
+        <h3 id="mp-heading">All models</h3>
+        <span class="g-shelves mp-order" id="mp-order" role="group" aria-label="Order the list">
+          <button class="g-shelf" type="button" data-order="size" aria-pressed="false">Size</button>
+          <button class="g-shelf" type="button" data-order="name" aria-pressed="false">A to Z</button>
+        </span>
+      </div>
       <div class="mp-folder mp-tiles" id="mp-folder-box" hidden>
         <section class="mp-tile" aria-labelledby="mp-tile-download">
           <h4 id="mp-tile-download">Download</h4>
@@ -311,10 +333,12 @@
     <p class="hint">For the whole app. A model's own settings (where it runs, how many cores, its context) are under the gear beside its Connect button; a person's are in Staff.</p>
     <fieldset class="colours-pick" data-colours-pick>
       <legend>Colours</legend>
-      <p class="hint">Kept in this browser. The button beside Settings at the top swaps Day and Night.</p>
+      <p class="hint">Kept in this browser. The switch beside Settings at the top picks Day, Night or Auto.</p>
       <label class="check"><input type="radio" name="colours" value=""> Follow Windows (light or dark, as Windows is set)</label>
       <label class="check"><input type="radio" name="colours" value="day"> Day: light grey and blue</label>
       <label class="check"><input type="radio" name="colours" value="night"> Night: deep navy and sky blue</label>
+      <label class="check"><input type="radio" name="colours" value="auto"> Auto: Day from sunrise to sunset, Night after</label>
+      <p class="hint" data-colours-today></p>
     </fieldset>
     <div id="settings-notify"></div>
     <div id="settings-lock"></div>
@@ -337,7 +361,7 @@
     <h3 class="help-part" id="help-part-one">One PC first</h3>
 
     <h4 id="help-models">1. Installing models</h4>
-    <p class="hint">A model is the software your staff think with: a chat model writes, a picture model draws. Open <b>Set up</b>, <b>Add a model</b> (the Models page). Search by name or by what it is for, narrow it with the filters on the left (size in billions of parameters, B, or in GB, and the kinds of model), and each row shows its size before you press anything. <b>Download</b> takes the recommended size in one press and turns into the download's progress; a model you have says <b>✓ On this PC</b>. Chat models come from Hugging Face; picture models, helpers (the background remover) and the model runners come from TOMLIN's own list.</p>
+    <p class="hint">A model is the software your staff think with: a chat model writes, a picture model draws. Open <b>Set up</b>, <b>Add a model</b> (the Models page). Search by name or by what it is for, narrow it with the filters on the left (size in billions of parameters, B, or in GB, the kinds of model, and <b>MoE's</b> for mixtures of experts), and each row shows its size before you press anything. <b>Size</b> and <b>A to Z</b>, right of the list's heading, order it (press again for the other way round). <b>Download</b> takes the recommended size in one press and turns into the download's progress; a model you have says <b>✓ On this PC</b>. Chat models come from Hugging Face; picture models, helpers (the background remover) and the model runners come from TOMLIN's own list.</p>
     <figure class="help-shot"><img src="help-models.webp" alt="The Models page: a search box, Search, All, Not installed and Installed, then models with a Download button or On this PC" width="742" height="640" loading="lazy"><figcaption>The Models page. "File list from …" is the list of Hugging Face models kept on this PC (see 9. Scanning).</figcaption></figure>
     <p class="hint"><b>What fits this PC:</b> bigger models answer and draw better but need more memory and time. <button class="link" type="button" data-calc>What can my PC run? Work it out</button> lists each model with whether it fits and about how fast it runs. Hire staff shows the memory each model needs, too. Times below were measured on an Intel HD 520 laptop and a 32 GB CPU-only desktop. A token is about three quarters of a word.</p>
     <p class="hint"><b>Model files you already have:</b> chat models are .gguf files: put them in <code>TOMLIN\models\chat</code> in your user folder (Models lists what is found).</p>
@@ -389,12 +413,12 @@
     </ul>
 
     <h4 id="help-staff">2. Hiring staff</h4>
-    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role and level), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Hire staff</b> (Staff: hire and edit, in the left panel or under Set up) is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards, each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
+    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role and level), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Hire staff</b> (Staff: hire and edit, in the left panel or under Set up) is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards (<b>Add new</b>, beside its search, opens Add a model), each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
     <figure class="help-shot"><img src="help-hire.webp" alt="Hire staff: the profile and the roles on the left; Assign a PC with My PC and Worker PC, then the model cards, then All models with Copy to My PC" width="1000" height="690" loading="lazy"><figcaption>A coder on this PC. All models, at the foot, lists the models your other PCs have and this one has not.</figcaption></figure>
     <ul class="help-tips">
       <li><strong>The role</strong>: Default, Coder, Writer, Project manager, Graphic designer or Artist. Default is the model as it is, with nothing of ours sent (no instructions, no memory, the model's own settings), as in a plain chat window. An artist or a graphic designer draws with a picture model.</li>
       <li><strong>The level</strong> starts at the size of the model picked (change it if you like: it only orders the models suggested to them). Their name comes from the model (Qwen, Gemma…) unless you type one.</li>
-      <li><strong>All models</strong>, under Choose a model: the models (of the role's kind) on this PC and the linked PCs that the PC picked has not got, each with "On &lt;PCs&gt;" and <b>Copy to &lt;PC&gt;</b> (from one linked PC to another it goes through this PC). When the copy is done the model is in that PC's list and picked.</li>
+      <li><strong>All models</strong>, under Choose a model: the models (of the role's kind) on this PC and the linked PCs that the PC picked has not got, each with "On &lt;PCs&gt;" and <b>Copy to &lt;PC&gt;</b> (from one linked PC to another it goes through this PC). When the copy is done the model is in that PC's list and picked. <b>Push to node</b> on a card opens a window of every PC on the list: press Push on any of them (a PC that has it says so).</li>
       <li><strong>Later</strong>: give each a first choice model and a fallback under Edit Staff (the pencil beside them). Firing someone (Staff, Edit, Fire) opens the office on them: the boss walks in, they pack a box and leave by the front door.</li>
     </ul>
     <p class="hint"><b>Look</b> (Change look in Hire staff, and under Edit Staff) draws each hire as a little person: gender, skin, hair, hair colour, top, glasses, facial hair and headwear. It is their round picture wherever they have no profile photo (a photo, when set, still shows instead), and how the office draws them. Press a person in the left panel to talk to them. An artist's chat draws what you type there, exactly as typed; a picture asked for in any other chat is pointed to the artist. The chat shows the model of the chat open now; every model loaded is in the top bar.</p>
@@ -402,7 +426,7 @@
     <h5 id="help-office">The office (Staff overview)</h5>
     <figure class="help-shot"><img src="help-office.webp" alt="The office full screen: staff at their desks typing and drawing, one thinking at the boardroom table, the lounge, the kitchen and the beach, with the Look after the team shop beside it" width="1080" height="752" loading="lazy"><figcaption>Watch: the office full screen, with the shop beside it. Here the boardroom and the lounge have been furnished.</figcaption></figure>
     <p class="hint">On the right of the chat, <b>Chats | Tools | Staff overview</b> (Home's right panel has <b>Waiting for you | Staff overview</b>): Staff overview shows each hire with their role, the model they run and on which PC, how they are now and what they are doing, with Talk and Edit. At its top is the office: each hire as a little person at their PC's desk while their model loads, reads, thinks, types or draws (a long think, over 15 seconds, goes to the boardroom once it has a table; until then it stays at the desk). With nothing to do they stay at the desk for 2 minutes, then stand up and stretch in the room, after 5 minutes go to the kitchen or the lounge (to what it has), and after 10 minutes take a break in a deck chair on the beach if one is free (On a break, a green cup). While their PC is off they are out of the front door on holiday, lying on a towel on the beach (PC off, a grey power mark), and the PC sits in the far corner in cobwebs. Press a person (or their card) to follow them; in a chat it follows the person you are talking to. <b>Watch</b> opens it full screen (Esc closes it). Press a person to see what they are holding. A PC linked while you watch is carried in and set up by IT (and carried out when removed); a project step brings a folder of work to the desk; up to two people with nothing to do join a long think in the boardroom, one to each chair left over; someone whose PC is in use by its owner is away: in the lounge (by its window while it is empty), asleep in the armchair, or helping a brainstorm.</p>
-    <p class="hint">In the full view, <b>Award employee of the month</b> gives it to whoever wrote the most tokens this month (their portrait goes on the lounge wall, with a 20% off voucher; the frame opens who won and this month's tokens by person). <b>Buy them pizza</b> brings a pizza to the kitchen for everyone with nothing to do. <b>Look after the team</b>, beside the office (under it on a phone), is the shop: picture cards, each with its price, a tick once bought, and how many tokens are still to go. It spends the tokens your staff have written ("To spend", under the title). <b>Treat the team</b>: <b>Pizza</b> (free), <b>Donuts</b>, <b>Ice creams</b> and <b>Cake</b> come to the kitchen table, <b>Coffee</b> is delivered: a courier brings each of them a cup, wherever they are. <b>Improve the office</b>: pet rocks, rubber ducks and cacti for the desks (each with a name: point at one to read it); the boardroom and the lounge start empty in every office and are bought piece by piece, each once: the boardroom table (a long think goes to it), its chairs a pair at a time up to six (the thinkers sit first; each chair left over seats a helper), the whiteboard, a wall clock and a water cooler; the lounge's armchair, bookcase, sofa, TV, gym equipment and arcade machine (each a place to rest; click the arcade machine to play Tetris, Lunar Lander or Moon Rover yourself); and up to six deck chairs with umbrellas on the beach, for breaks, and an inflatable flamingo on the sea. Buy everything and treat the team to every treat once, and a trophy case appears in the corridor. This week's leaderboard is under the office.</p>
+    <p class="hint">In the full view, <b>Award employee of the month</b> gives it to whoever wrote the most tokens this month (their portrait goes on the lounge wall, with a 20% off voucher; the frame opens who won and this month's tokens by person). <b>Buy them pizza</b> brings a pizza to the kitchen for everyone with nothing to do. <b>Look after the team</b>, beside the office (under it on a phone), is the shop: picture cards, each with its price, a tick once bought, and how many tokens are still to go. It spends the tokens your staff have written ("To spend", under the title). <b>Treat the team</b>: <b>Pizza</b> (free), <b>Donuts</b>, <b>Sandwiches</b>, <b>Ice creams</b> and <b>Cake</b> come to the kitchen table, <b>Coffee</b> is delivered: a courier brings each of them a cup, wherever they are. <b>Energy drinks</b> come from the kitchen's vending machine (click the machine; they have no card, and they are free, like pizza): everyone in gets a can and for a minute walks and talks three times as fast. <b>Improve the office</b>: pet rocks, rubber ducks and cacti for the desks (each with a name: point at one to read it); the boardroom and the lounge start empty in every office and are bought piece by piece, each once: the boardroom table (a long think goes to it), its chairs a pair at a time up to six (the thinkers sit first; each chair left over seats a helper), the whiteboard, indoor plants, a wall clock and a water cooler; the lounge's armchair, bookcase, sofa, TV, gym equipment and arcade machine (each a place to rest; click the arcade machine to play Tetris, Lunar Lander or Moon Rover yourself); and up to six deck chairs with umbrellas on the beach, for breaks, a beach volleyball net (staff with nothing to do for 5 minutes play, two a side) and an inflatable flamingo on the sea. Buy everything and treat the team to every treat once, and a trophy case appears in the corridor. This week's leaderboard is under the office.</p>
 
     <h4 id="help-saving">3. Saving your work</h4>
     <p class="hint">Every chat is kept on this PC, so closing TOMLIN loses nothing that was finished. These keep the work where you can find it again.</p>
@@ -444,7 +468,7 @@
       <li><strong>Backups only</strong>: tick it on a linked PC's card on this PC (Nodes and memory, Linked). No staff, chats, jobs or pictures run there, and no model is copied to it; it is first in line for project backups. Its card says what it keeps and how much disk is free.</li>
       <li><strong>Your workspace</strong> is the folder TOMLIN keeps its own work in: every project made with Lets create a project, and the files your staff write and save. It is inside TOMLIN's data folder unless you chose another one (Set up, Files and blog writer, Workspace folder). The whole workspace is backed up with no tick: everything in it except <code>.git</code> and <code>node_modules</code> folders.</li>
       <li><strong>Project backups</strong>: your workspace, and each Bridge project you tick <b>Copy this project to my other PCs</b> in its git window (8. Git), go to your linked PCs that have Enable backups ticked every 10 minutes when something changed, and only what changed is sent; each PC keeps the older versions too. In My local LLMs, <b>Back up projects now</b> sends them at once and <b>Bring projects back</b> puts a copy in a new folder, never over the project.</li>
-      <li><strong>Restore points</strong> (your chats, staff and settings): My local LLMs, <b>Back up to it now</b> beside a PC keeps one there (the newest 3 are kept); <b>Restore points kept there</b> lists them, and Bring back puts one in this PC's backups, which Settings, Your data and updates, <b>Put back</b> uses.</li>
+      <li><strong>Restore points</strong> (your chats, staff and settings): My local LLMs, <b>Back up to it now</b> beside a PC keeps one there (the newest 3 are kept); <b>Restore points kept there</b> lists them, and Bring back puts one in this PC's backups, which Settings, Your data and updates, <b>Put back</b> uses. A restore point kept on another PC holds no keys to your linked PCs, no sharing code and no PIN, so putting it back keeps this PC's own; one changed on that PC is refused when it comes back.</li>
     </ul>
     <figure class="help-shot"><img src="help-llms.webp" alt="My local LLMs: models shared by linked PCs, some On this PC and some with Get a copy from Worker PC; below, Restore points on linked PCs with Back up to it now and Back up projects now" width="860" height="720" loading="lazy"><figcaption>My local LLMs: the models your PCs share, and the backups kept on them.</figcaption></figure>
     <p class="hint"><b>What TOMLIN backs up, and what it doesn't.</b> TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs. It is not a full backup of your PC.</p>
@@ -463,8 +487,8 @@
 
     <h4 id="help-copies">7. Backing up models and software</h4>
     <p class="hint"><b>Models</b> are big, so keep them on more than one PC instead of downloading them again. <b>My local LLMs</b> (Nodes and memory, Linked, and the Models page) lists every model the linked PCs share: <b>Get a copy from &lt;PC&gt;</b> brings one here over your home network, so a model you deleted to save room comes back without downloading it again. A copy that was cut short carries on from where it stopped. The other way, Send in the Move window, and Copy to &lt;PC&gt; in Hire staff's All models, put a model on a linked PC (that PC must tick Allow host to push models). A Backups only PC keeps projects and restore points, not models: to keep a spare copy of a model, keep it on another linked PC that shares it.</p>
-    <p class="hint"><b>The software</b>: Nodes and memory, <b>Update this install</b> says which TOMLIN this PC runs. <b>Upload a TOMLIN zip</b> takes a newer version: TOMLIN checks it is whole and newer, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. This needs TOMLIN started by its installed program or by Start TOMLIN.cmd. Then <b>Update all linked PCs</b> updates each linked PC that is behind and allows it.</p>
-    <figure class="help-shot"><img src="help-update.webp" alt="Update this install: This PC runs TOMLIN 2.0.50, Upload a TOMLIN zip; Linked PCs: Update all linked PCs" width="1003" height="250" loading="lazy"></figure>
+    <p class="hint"><b>The software</b>: Nodes and memory, <b>Update this install</b> says which TOMLIN this PC runs. <b>Check git</b> asks GitHub for the newest TOMLIN and, when it is newer, offers to download it; a download must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, picked together with its tomlin-&lt;version&gt;.zip.sig (no internet needed; <b>Update by hand (offline)</b>, under it, lists the steps). A zip whose signature is missing or fails gets a red warning: <b>Cancel</b> is the default, and <b>Install anyway</b> is only for a zip you trust, such as one you made yourself. Either way TOMLIN checks it is whole and newer, starts it once as a test (a version that does not come up is not installed, and nothing changes), then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. This needs TOMLIN started by its installed program or by Start TOMLIN.cmd. Then <b>Update all linked PCs</b> updates each linked PC that is behind and allows it.</p>
+    <figure class="help-shot"><img src="help-update.webp" alt="Update this install: This PC runs TOMLIN 2.0.55, Check git and Check zip, Update by hand (offline) folded; Linked PCs: Update all linked PCs" width="1003" height="283" loading="lazy"></figure>
     <p class="hint">One linked PC at a time: when it runs an older TOMLIN, its card has a yellow (!) and its window says <b>Outdated: 2.0.32 (this PC 2.0.33)</b> with <b>Update it</b>, or why it cannot be updated from here. On that PC, tick <b>Allow host to update TOMLIN remotely</b> first. Only the files that changed are sent; that PC puts the new version in a folder beside its copy (the old one is kept for going back), backs its data up, and starts the new version in the same window, once nothing is running there. It must run as the installed TOMLIN (Install TOMLIN.cmd) or from Start TOMLIN.cmd. A PC older than 2.0.33 cannot be updated this way: install the new version there by hand once.</p>
 
     <h4 id="help-git">8. Adding git</h4>
@@ -869,6 +893,8 @@
 
 <dialog id="keep-dlg" class="small-dlg" aria-labelledby="keep-title"></dialog>
 <dialog id="backup-dlg" class="small-dlg" aria-labelledby="backup-title"></dialog>
+<!-- After Hire staff, for a hire who chats: start a chat with them now, or not now (team.js afterHire). -->
+<dialog id="hired-dlg" class="small-dlg" aria-labelledby="hired-title"></dialog>
 
 <dialog id="impact-dlg" class="small-dlg" aria-labelledby="impact-title">
   <form class="help-body private-form" id="impact-form">
@@ -905,6 +931,8 @@
       <div class="person-chats-new">
         <span id="person-chats-face"></span>
         <button class="btn primary" type="button" id="person-chats-start">New chat</button>
+        <button class="btn" type="button" id="person-chats-edit" hidden>Edit staff</button>
+        <button class="btn primary" type="button" id="person-chats-resume" hidden>Resume chat</button>
       </div>
       <div class="person-chats-recent">
         <h3>Recent chats</h3>
@@ -1326,7 +1354,7 @@
           <h3 id="hs-models-title">Choose a model</h3>
           <p class="hint">Memory needed is an estimate (a chat model with an 8K context).</p>
         </div>
-        <div class="hs-tools" id="hs-tools"><input id="hs-search" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off"></div>
+        <div class="hs-tools" id="hs-tools"><input id="hs-search" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off"><button class="btn" type="button" id="hs-add-model">Add new</button></div>
         <div class="hs-models" id="hs-models"></div>
         <div class="hs-all" id="hs-all-block" hidden>
           <h3 id="hs-all-title">All models</h3>
@@ -1339,6 +1367,18 @@
     <div class="fault" id="hs-fault" role="alert" hidden></div>
     <div class="team-actions hs-go"><button class="btn quiet" type="button" id="hs-cancel">Cancel</button><button class="btn primary" type="submit" id="hs-go">Hire staff</button></div>
   </form>
+</dialog>
+
+<dialog id="hs-push-dlg" aria-labelledby="hs-push-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="hs-push-title">Push to node</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <p class="hint" id="hs-push-line"></p>
+    <div class="hs-push-list" id="hs-push-list"></div>
+    <div class="fault" id="hs-push-fault" role="alert" hidden></div>
+  </div>
 </dialog>
 
 <dialog id="queue-photos" class="pc-dlg" aria-labelledby="queue-photos-title">

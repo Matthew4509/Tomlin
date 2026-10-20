@@ -44,7 +44,10 @@ const post = {
   '/api/snap': ({ p, body }) => snapshot(p, !!body.force),
   '/api/start': async ({ p, body }) => {
     const r = await startProject(p, body.key, body.open !== false);
-    if (r.ok && body.scan) r.audit = await auditProject(p, r.url);
+    if (r.ok && body.scan) {
+      try { r.audit = await auditProject(p, r.url); }
+      catch (e) { if (e.status !== 409) throw e; r.note = (r.note ? r.note + ' ' : '') + e.message; }
+    }
     return r;
   },
   // Hide from display: stays on the list, shown only when "Show hidden" is on. Unhide puts it back.

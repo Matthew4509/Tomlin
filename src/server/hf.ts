@@ -2,9 +2,10 @@
 import { statSync } from 'node:fs';
 import { totalmem } from 'node:os';
 import { cursorPlaces, fetchChecked, hfUrl, lookUpHf, searchHf, usualModel, type HfLookup } from '../download.ts';
-import { pick } from '../hflist.ts';
+import { isMoe, ordered, pick } from '../hflist.ts';
 import { GB, type Routes, chatModels, hfList, json } from './core.ts';
-import { chatCards, fit, loadShapes } from './panes.ts';
+import { cardFit } from '../calc.ts';
+import { cardMem, chatCards, fit, loadShapes } from './panes.ts';
 
 // ---- Chat models from Hugging Face (a node chooses and downloads its own; nobody else can) ----
 
@@ -41,9 +42,10 @@ function lookCached(repo: string): Promise<HfLookup> {
 /** What the Models list shows for a repo before anything is pressed: each size with whether it fits, and the usual one. */
 async function hfSizes(repo: string) {
   const l = await lookCached(repo);
-  const models = l.models.map(m => ({ name: m.name, bytes: m.bytes, have: m.files.every(f => chatModels.has(f.path)), fits: fitsPc(m.bytes), fit: fit(m.bytes, 'chat').level }));
+  const cards = cardMem();
+  const models = l.models.map(m => ({ name: m.name, bytes: m.bytes, have: m.files.every(f => chatModels.has(f.path)), fits: fitsPc(m.bytes), fit: fit(m.bytes, 'chat').level, card: cardFit(m.bytes, cards) }));
   const usual = usualModel(l.models);
-  return { repo: l.repo, rev: l.rev, licence: l.licence, params: l.params, usual: usual?.name ?? null, models };
+  return { repo: l.repo, rev: l.rev, licence: l.licence, params: l.params, chat: l.chat, usual: usual?.name ?? null, models };
 }
 
 /** Runs `f` over `items`, at most `n` at a time. */
@@ -117,10 +119,10 @@ export const hfPost: Routes = {
     return json(res, 200, await hfList.status());
   },
   '/api/chatmodels/search': async ({ res, b }) => {
-    // {q, terms, minB, maxB, minGB, maxGB, cursor}: one page of GGUF chat models on Hugging Face matching the words
+    // {q, terms, moe, order, minB, maxB, minGB, maxGB, card, cursor}: one page of GGUF chat models on Hugging Face matching the words
     // ("all": every one) and sizes, each with its file sizes read already (the list shows them before anything is
     // pressed). A repo with no model file TOMLIN can download (none at all, or behind a Hugging Face licence
-    // page) is left out. Hugging Face is asked for up to 3 lots of 40 until 20 are kept, so the size filters do not
+    // page) is left out, and so is one that is not a chat model (no chat template and no chat task: video, music). Hugging Face is asked for up to 3 lots of 40 until 20 are kept, so the size filters do not
     // leave a page nearly empty; `next` is the cursor for the page after (null on the last).
     // With no list on this PC yet, Hugging Face's own search answers, and it takes one search at a time: ticked terms
     // (abliterated, uncensored) are either-or, so each term is its own search with the words, a share of each lot
@@ -128,14 +130,20 @@ export const hfPost: Routes = {
     const num = (v: unknown) => (Number(v) > 0 ? Number(v) : null);
     const minB = num(b.minB), maxB = num(b.maxB), minGB = num(b.minGB), maxGB = num(b.maxGB);
     const inGB = (bytes: number) => (!minGB || bytes >= minGB * GB) && (!maxGB || bytes <= maxGB * GB);
+    // Fits my card ticked: only a size that sits wholly on this PC's graphics cards (an estimate, src/calc.ts cardFit).
+    const card = b.card === true;
+    const sizeOk = (m: { bytes: number; card: string | null }) => inGB(m.bytes) && (!card || m.card === 'ok');
     const q = String(b.q ?? '');
     const terms = [...new Set((Array.isArray(b.terms) ? b.terms : []).map(String))].filter(t => t === 'abliterated' || t === 'uncensored');
+    // MoE's ticked: mixtures of experts only (by name). Order: Size or A to Z on the page (most downloaded when not set).
+    const moe = b.moe === true;
+    const order = ['size-asc', 'size-desc', 'name-asc', 'name-desc'].includes(String(b.order)) ? String(b.order) : '';
     const list = await hfList.get();
     if (list) {
       // The file list (shipped, or this PC's own rescan): every match is known at once, so ticked terms are simply either-or.
       // Each page reads the sizes of the next matches until 20 fit (at most 60 read); `next` is where the next page
       // starts in the matches, `total` how many matched the words, ticks and the size in the name.
-      const picked = pick(list.models, { q, terms, minB, maxB });
+      const picked = ordered(pick(list.models, { q, terms, moe, minB, maxB }), order);
       const inB = (n: number | null) => n == null || ((!minB || n >= minB * 0.95e9) && (!maxB || n <= maxB * 1.05e9));
       // Hugging Face turning this PC away for asking too often (429) ends the page at that model, so Next starts there
       // and nothing is skipped without a word.
@@ -155,7 +163,7 @@ export const hfPost: Routes = {
         const stop = sized.indexOf('limited');
         limited = stop >= 0;
         const kept = limited ? sized.slice(0, stop) : sized;
-        for (const x of kept) if (x && x !== 'limited' && inB(x.params) && x.models.some(m => inGB(m.bytes))) found.push(x);
+        for (const x of kept) if (x && x !== 'limited' && x.chat && inB(x.params) && x.models.some(sizeOk)) found.push(x);
         at += kept.length;
         read += kept.length;
       }
@@ -173,7 +181,7 @@ export const hfPost: Routes = {
         const got = await Promise.all(searches.map((words, i) => (at[i] === false ? null : searchHf(words, { minB, maxB }, at[i] || null, Math.ceil(40 / searches.length)))));
         at = got.map(lot => lot?.next ?? false);
         lots++;
-        const fits = got.flatMap(lot => lot?.found ?? []).filter(x => !seen.has(x.repo) && seen.add(x.repo) && !x.gated && (!x.params || ((!minB || x.params >= minB * 0.95e9) && (!maxB || x.params <= maxB * 1.05e9))));
+        const fits = got.flatMap(lot => lot?.found ?? []).filter(x => !seen.has(x.repo) && seen.add(x.repo) && !x.gated && (!moe || isMoe(x.repo)) && (!x.params || ((!minB || x.params >= minB * 0.95e9) && (!maxB || x.params <= maxB * 1.05e9))));
         const sized = await inTurns(fits, 6, async x => {
           try {
             return { ...x, ...(await hfSizes(x.repo)) };
@@ -181,10 +189,11 @@ export const hfPost: Routes = {
             return null;
           }
         });
-        for (const x of sized) if (x && x.models.some(m => inGB(m.bytes))) found.push(x);
+        for (const x of sized) if (x && x.chat && x.models.some(sizeOk)) found.push(x);
       } while (at.some(c => c !== false) && found.length < 20 && lots < 3);
+      // Hugging Face's own search answers most downloaded first: Size and A to Z order each page as it comes.
       found.sort((x, y) => y.downloads - x.downloads);
-      return json(res, 200, { found, next: at.some(c => c !== false) ? at : null });
+      return json(res, 200, { found, next: at.some(c => c !== false) ? at : null, pageOrder: !!order });
     } catch (error) {
       return json(res, 502, { error: (error as Error).name === 'TimeoutError' ? 'Hugging Face took too long to answer. Check the internet connection, then search again.' : (error as Error).message });
     }

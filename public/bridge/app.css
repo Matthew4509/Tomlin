@@ -91,6 +91,7 @@ select.sel{height:32px;border:1px solid var(--line2);border-radius:4px;backgroun
 
 .badge{display:inline-flex;align-items:center;gap:6px;height:22px;border-radius:11px;padding:0 9px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-run{background:var(--ok-soft);color:var(--ok)} .b-busy{background:var(--warn-soft);color:var(--warn)} .b-off{background:var(--off-soft);color:var(--off)}
+button.badge.b-link{border:0;font-family:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px} button.badge.b-link:hover{text-decoration-style:solid} button.badge.b-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .b-new{background:var(--accent-soft);color:var(--accent)}
 .b-bad{background:var(--bad-soft);color:var(--bad)} .b-ok{background:var(--ok-soft);color:var(--ok)}
 .audit-link{border:0;background:none;padding:0;cursor:pointer;font-size:12px;text-align:left}
@@ -219,6 +220,7 @@ dialog::backdrop{background:rgba(0,0,0,.3)}
 .fld-err{color:var(--bad);font-weight:600}
 textarea.prompt-text{display:block;width:100%;min-height:260px;resize:vertical;font:13px/1.5 Consolas,"Cascadia Mono",monospace;padding:8px 10px;border:1px solid var(--line2);border-bottom-color:var(--muted);border-radius:4px;background:var(--card);color:var(--ink);margin:0 0 4px}
 textarea.prompt-text:focus{outline:0;border-bottom:2px solid var(--accent)}
+textarea.prompt-text[hidden]{display:none}
 textarea.prompt-text.judge-text{min-height:90px;font:inherit;font-size:13px}
 dialog.wide{width:min(820px,calc(100vw - 32px))}
 /* Audits › Private details: label, detail, Remove on one line; stacked on a phone */

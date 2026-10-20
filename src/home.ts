@@ -292,28 +292,34 @@ export function undoAward(awards: Award[], month: string): { awards: Award[]; un
 
 /**
  * The office's reward shop (public/office.js): the team's tokens written are its money. A coffee round, a box of
- * donuts, ice creams and a cake are treats (bought again and again). Everything else is kept once bought: the desks'
+ * donuts, a sandwich platter, ice creams, a cake and energy drinks (at the kitchen's vending machine) are treats
+ * (bought again and again). Everything else is kept once bought: the desks'
  * pet rocks, rubber ducks and cacti (one set for every desk), and the boardroom and the lounge, which start
  * empty in every office and are furnished piece by piece (the boardroom chairs a pair at a time, up to the six round
  * the table), the gym, and the beach's deck chairs (a chair and its umbrella at a time, up to six). `most`: how many
  * can be bought (0 = no end); `needs`: bought only after that one; `the`: its name in a sentence. Set so both rooms
  * take about 9 hours of nonstop writing at 13 tokens a second (a 35B model on a 5 GB card); the pieces added later
- * (desk friends, clock, water cooler, arcade, flamingo) at the same rate.
+ * (desk friends, clock, water cooler, arcade, flamingo; sandwiches, energy drinks, plants, volleyball) at the same rate.
  */
-export type ShopId = 'coffee' | 'donuts' | 'icecream' | 'cake' | 'rocks' | 'ducks' | 'cactus' | 'table' | 'chairs' | 'whiteboard' | 'clock' | 'cooler' | 'armchair' | 'bookcase' | 'sofa' | 'tv' | 'gym' | 'arcade' | 'deckchair' | 'flamingo';
+export type ShopId = 'coffee' | 'donuts' | 'sandwiches' | 'icecream' | 'cake' | 'energy' | 'rocks' | 'ducks' | 'cactus' | 'table' | 'chairs' | 'whiteboard' | 'plants' | 'clock' | 'cooler' | 'armchair' | 'bookcase' | 'sofa' | 'tv' | 'gym' | 'arcade' | 'deckchair' | 'volleyball' | 'flamingo';
 export type ShopRoom = 'treats' | 'desks' | 'boardroom' | 'lounge' | 'beach';
 export interface ShopItem { id: ShopId; name: string; the: string; price: number; keeps: boolean; most: number; room: ShopRoom; needs?: ShopId }
 export const SHOP: readonly ShopItem[] = [
   { id: 'coffee', name: 'Coffee round', the: 'the coffee round', price: 10_000, keeps: false, most: 0, room: 'treats' },
   { id: 'donuts', name: 'Box of donuts', the: 'the box of donuts', price: 25_000, keeps: false, most: 0, room: 'treats' },
+  { id: 'sandwiches', name: 'Sandwich platter', the: 'the sandwich platter', price: 20_000, keeps: false, most: 0, room: 'treats' },
   { id: 'icecream', name: 'Ice creams', the: 'the ice creams', price: 15_000, keeps: false, most: 0, room: 'treats' },
   { id: 'cake', name: 'Celebration cake', the: 'the celebration cake', price: 30_000, keeps: false, most: 0, room: 'treats' },
+  // From the kitchen's vending machine (a click on it; no card), for everyone in at once. Free, like pizza: a node has
+  // no tokens of its own (they are counted on the main PC), and its machine works too.
+  { id: 'energy', name: 'Energy drinks', the: 'the energy drinks', price: 0, keeps: false, most: 0, room: 'treats' },
   { id: 'rocks', name: 'Pet rocks', the: 'the pet rocks', price: 10_000, keeps: true, most: 1, room: 'desks' },
   { id: 'ducks', name: 'Rubber ducks', the: 'the rubber ducks', price: 15_000, keeps: true, most: 1, room: 'desks' },
   { id: 'cactus', name: 'Desk cacti', the: 'the desk cacti', price: 12_500, keeps: true, most: 1, room: 'desks' },
   { id: 'table', name: 'Boardroom table', the: 'the boardroom table', price: 75_000, keeps: true, most: 1, room: 'boardroom' },
   { id: 'chairs', name: 'Pair of boardroom chairs', the: 'a pair of boardroom chairs', price: 25_000, keeps: true, most: 3, room: 'boardroom', needs: 'table' },
   { id: 'whiteboard', name: 'Whiteboard', the: 'the whiteboard', price: 40_000, keeps: true, most: 1, room: 'boardroom' },
+  { id: 'plants', name: 'Indoor plants', the: 'the indoor plants', price: 30_000, keeps: true, most: 1, room: 'boardroom' },
   { id: 'clock', name: 'Wall clock', the: 'the wall clock', price: 20_000, keeps: true, most: 1, room: 'boardroom' },
   { id: 'cooler', name: 'Water cooler', the: 'the water cooler', price: 35_000, keeps: true, most: 1, room: 'boardroom' },
   { id: 'armchair', name: 'Armchair', the: 'the armchair', price: 30_000, keeps: true, most: 1, room: 'lounge' },
@@ -323,6 +329,7 @@ export const SHOP: readonly ShopItem[] = [
   { id: 'gym', name: 'Gym equipment', the: 'the gym equipment', price: 500_000, keeps: true, most: 1, room: 'lounge' },
   { id: 'arcade', name: 'Arcade machine', the: 'the arcade machine', price: 125_000, keeps: true, most: 1, room: 'lounge' },
   { id: 'deckchair', name: 'Deck chair and umbrella', the: 'a deck chair and umbrella', price: 50_000, keeps: true, most: 6, room: 'beach' },
+  { id: 'volleyball', name: 'Beach volleyball set', the: 'the beach volleyball set', price: 100_000, keeps: true, most: 1, room: 'beach' },
   { id: 'flamingo', name: 'Inflatable flamingo', the: 'the inflatable flamingo', price: 40_000, keeps: true, most: 1, room: 'beach' },
 ];
 /** One purchase: what, what it cost then, when. */
@@ -381,8 +388,8 @@ export function buy(item: unknown, earned: number, bought: Bought[], now = new D
 
 /** The lounge's places to rest (public/office.js REST ids) and the piece each needs. */
 export const LOUNGE_SPOTS: Record<string, ShopId> = { nap: 'armchair', library: 'bookcase', chat: 'sofa', tv: 'tv', treadmill: 'gym', weights: 'gym', arcade: 'arcade' };
-/** The treats that count towards the trophy (pizza is free, so it is not kept). */
-const TREATS: ShopId[] = ['coffee', 'donuts', 'icecream', 'cake'];
+/** The treats that count towards the trophy (pizza is free, so it is not kept; energy drinks are not a treat to earn it by). */
+const TREATS: ShopId[] = ['coffee', 'donuts', 'sandwiches', 'icecream', 'cake'];
 /** Everything done: every piece bought as many times as the office holds, and the team treated to each treat once. */
 const allDone = (bought: Bought[]) => SHOP.filter(i => i.keeps).every(i => countOf(bought, i.id) >= i.most) && TREATS.every(id => countOf(bought, id) > 0);
 /**
@@ -399,13 +406,14 @@ export function trophyOf(bought: Bought[]): { at: string } | null {
  * Boardroom: no table = no room to think in (a long think stays at the desk); `chairs` seats (a pair per purchase),
  * the thinkers sit first and each chair left over seats a helper. `rest`: every place to rest open now (the kitchen's
  * always; the lounge's by its furniture). `away`: where staff whose PC's owner is using it wait: the lounge's places,
- * or the lounge window while it is empty. `deckchairs`: places on the beach for a break.
+ * or the lounge window while it is empty. `deckchairs`: places on the beach for a break. `volleyball`: the net on the
+ * sand, where up to four with nothing to do play.
  */
 export function roomsOf(bought: Bought[]) {
   const has = (id: ShopId) => countOf(bought, id) > 0;
   const lounge = Object.entries(LOUNGE_SPOTS).filter(([, id]) => has(id)).map(([spot]) => spot);
   return {
-    boardroom: { table: has('table'), chairs: Math.min(3, countOf(bought, 'chairs')) * 2, whiteboard: has('whiteboard'), clock: has('clock'), cooler: has('cooler') },
+    boardroom: { table: has('table'), chairs: Math.min(3, countOf(bought, 'chairs')) * 2, whiteboard: has('whiteboard'), plants: has('plants'), clock: has('clock'), cooler: has('cooler') },
     lounge: { armchair: has('armchair'), bookcase: has('bookcase'), sofa: has('sofa'), tv: has('tv'), gym: has('gym'), arcade: has('arcade') },
     desks: { rocks: has('rocks'), ducks: has('ducks'), cactus: has('cactus') },
     flamingo: has('flamingo'),
@@ -413,6 +421,7 @@ export function roomsOf(bought: Bought[]) {
     rest: ['coffee', 'vending', 'lunch', ...lounge],
     away: lounge.length ? lounge : ['window'],
     deckchairs: Math.min(6, countOf(bought, 'deckchair')),
+    volleyball: has('volleyball'),
   };
 }
 export type Rooms = ReturnType<typeof roomsOf>;

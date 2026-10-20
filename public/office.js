@@ -30,10 +30,11 @@
   const PIZZA = [[250, 588, 'south'], [295, 588, 'south'], [340, 588, 'south'], [250, 668, 'north'], [295, 668, 'north'], [340, 668, 'north'], [205, 625, 'east'], [405, 625, 'west']];
   /** How long a pizza (or the donuts) lasts on the table (seconds). */
   const PIZZA_SECONDS = 45;
-  /** What can come to the kitchen table: pizza (free), and donuts, ice creams and cake (from the shop), with their words. */
+  /** What can come to the kitchen table: pizza (free), and donuts, sandwiches, ice creams and cake (from the shop), with their words. */
   const FOOD = {
     pizza: { courier: 'Pizza delivery', called: 'Pizza delivery!', cheer: ['Pizza!', 'Yum!', 'Thanks, boss!'], going: 'Off to the kitchen: pizza!', having: 'Having pizza in the kitchen', holding: 'a slice of pizza' },
     donuts: { courier: 'Donut delivery', called: 'Donuts!', cheer: ['Donuts!', 'Sprinkles!', 'Thanks, boss!'], going: 'Off to the kitchen: donuts!', having: 'Having a donut in the kitchen', holding: 'a donut' },
+    sandwiches: { courier: 'Sandwich delivery', called: 'Sandwiches!', cheer: ['Lunch!', 'Sandwiches!', 'Thanks, boss!'], going: 'Off to the kitchen: sandwiches!', having: 'Having a sandwich in the kitchen', holding: 'a sandwich' },
     icecream: { courier: 'Ice cream delivery', called: 'Ice creams!', cheer: ['Ice cream!', 'Brain freeze!', 'Thanks, boss!'], going: 'Off to the kitchen: ice cream!', having: 'Having an ice cream in the kitchen', holding: 'an ice cream cone' },
     cake: { courier: 'Cake delivery', called: 'Cake!', cheer: ['Cake!', "Is it someone's birthday?", 'Thanks, boss!'], going: 'Off to the kitchen: cake!', having: 'Having cake in the kitchen', holding: 'a slice of cake' },
   };
@@ -41,16 +42,31 @@
   const SCOOPS = ['#fff1d6', '#ef8a91', '#8a5a3c', '#a5e0ad'];
   /** How long a delivered coffee is held (seconds). */
   const COFFEE_HELD = 120;
+  /** An energy drink lasts this long (seconds), and they walk this many times as fast meanwhile. */
+  const ENERGY_SECONDS = 60;
+  const ENERGY_PACE = 3;
+  /** On an energy drink now. */
+  const buzzing = p => (p.hyperUntil ?? 0) > world.time;
   /** The gym in the lounge once bought: a treadmill and a weights bench, and the spots in front of them. */
   const GYM = [{ x: 778, y: 566, w: 70, h: 36 }, { x: 872, y: 566, w: 64, h: 36 }];
   /** What is always there to walk round (the frame and the kitchen), and the pieces bought for the boardroom and lounge. */
   const FIXED = [FRAME, { x: 80, y: 475, w: 180, h: 43 }, { x: 465, y: 480, w: 60, h: 65 }, { x: 230, y: 600, w: 150, h: 45 }];
+  /** The kitchen's vending machine (click it: energy drinks for everyone in). */
+  const VENDING = FIXED[2];
   const PIECES = { table: { x: 760, y: 145, w: 290, h: 100 }, bookcase: { x: 680, y: 475, w: 110, h: 35 }, tv: { x: 950, y: 485, w: 160, h: 50 }, sofa: { x: 920, y: 720, w: 200, h: 32 }, arcade: { x: 1120, y: 452, w: 46, h: 52 } };
   /** The boardroom's water cooler (once bought), in the corner by the door, and its wall clock over the table. */
   const COOLER = { x: 652, y: 300, w: 30, h: 42 };
   const CLOCK = { x: 905, y: 42, r: 15 };
   /** The inflatable flamingo (once bought): where it floats on the sea, drifting a little either side. */
   const FLAMINGO = { x: 560, y: 924 };
+  /** The boardroom's indoor plants (once bought): one in each far corner. */
+  const PLANTS = [{ x: 668, y: 50 }, { x: 1152, y: 332 }];
+  /** The beach volleyball court (once the set is bought), left of the front door on the sand: two a side, either side of the net. */
+  const VOLLEY = [[330, 852, 'east'], [450, 852, 'west'], [330, 884, 'east'], [450, 884, 'west']];
+  const NET = { x: 390, top: 834, bottom: 898 };
+  /** Seconds a game of volleyball lasts before the players rest a while (then they can play again). */
+  const VOLLEY_GAME = 90;
+  const VOLLEY_REST = 120;
   /** The trophy case (World's Best Boss), once earned: at the far end of the corridor between the computer room and the kitchen. */
   const TROPHY = { x: 24, y: 366, w: 48, h: 68 };
   /** Less motion asked for (Windows' animation setting): the flamingo and the TV picture keep still. */
@@ -77,8 +93,9 @@
   const STEP_OUT = [600, 805];
   /** Where someone leaving the team walks off, along the path. */
   const GONE = [-60, 805];
-  /** Towels on the sand, left of the front door: where the staff of a PC that is off lie in the sun. */
-  const BEACH = [70, 160, 250, 340, 430, 520].map((x, i) => [x, 868 + (i % 2) * 10]);
+  /** Towels on the sand, either side of the volleyball court and of the front path: where the staff of a PC that is off
+   * lie in the sun. */
+  const BEACH = [50, 125, 200, 505, 670, 745].map((x, i) => [x, 868 + (i % 2) * 10]);
   /** The deck chairs bought (each under its umbrella), right of the front door: where a break is taken. Bought in this
    * order, so the first three stand well apart. */
   const DECK = [800, 940, 1080, 870, 1010, 1150].map(x => [x, 866]);
@@ -98,10 +115,10 @@
   const HURRY = 160;
 
   /** Every office starts empty: what is bought comes from the server (GET /api/office `rooms`). */
-  const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false, clock: false, cooler: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false }, desks: { rocks: false, ducks: false, cactus: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0, flamingo: false, trophy: null };
+  const EMPTY = { boardroom: { table: false, chairs: 0, whiteboard: false, plants: false, clock: false, cooler: false }, lounge: { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false }, desks: { rocks: false, ducks: false, cactus: false }, rest: ['coffee', 'vending', 'lunch'], away: ['window'], deckchairs: 0, volleyball: false, flamingo: false, trophy: null };
   const world = { desks: [], people: new Map(), staff: [], time: 0, selected: null, follow: null, seenAt: 0, first: true, grid: [], layout: '', pizzaUntil: 0, pizzaOn: false, food: 'pizza', rooms: EMPTY, roomsKey: '', purse: null, shop: [], awards: [], weekBoard: [], monthName: '', monthKey: '', behind: null, installing: new Set(), ghosts: [], blocks: FIXED };
   /** The pieces in the way now: the fixed ones and whatever is bought (kept in world.blocks: walkable runs often). */
-  const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : []), ...(world.rooms.boardroom.cooler ? [COOLER] : []), ...(world.rooms.trophy ? [TROPHY] : [])];
+  const blocksOf = () => [...FIXED, ...Object.entries(PIECES).filter(([k]) => k === 'table' ? world.rooms.boardroom.table : world.rooms.lounge[k]).map(([, b]) => b), ...(world.rooms.lounge.gym ? GYM : []), ...(world.rooms.boardroom.cooler ? [COOLER] : []), ...(world.rooms.boardroom.plants ? PLANTS.map(q => ({ x: q.x - 12, y: q.y - 12, w: 24, h: 24 })) : []), ...(world.rooms.trophy ? [TROPHY] : [])];
   const views = [];
   let background = null;
   let ownerLook = null;
@@ -228,6 +245,8 @@
     // No boardroom table yet: a long think stays at the desk.
     const atDesk = ['typing', 'working', 'drawing', 'researching', 'arriving', 'waiting'].includes(s.doing) || (s.doing === 'thinking' && (!longThink || !table)) || (s.doing === 'resting' && idle < SIT_IDLE) || ready;
     if (p.leaving) return { key: 'gone', x: GONE[0], y: GONE[1], face: 'west', area: 'gone' };
+    // On an energy drink nobody with nothing to do stays put: they dash about the office and the beach.
+    if (buzzing(p) && ['resting', 'nodesk', 'owner'].includes(s.doing) && !ready) return energyRun(p);
     if (s.doing === 'off') {
       const i = world.staff.filter(x => x.doing === 'off').findIndex(x => x.id === s.id);
       const [x, y] = BEACH[i % BEACH.length];
@@ -265,6 +284,12 @@
       // Up and stretching, along the free wall of the computer room.
       const [x, y] = STRETCH[p.seed % STRETCH.length];
       return { key: `stretch:${x}:${y}`, x, y, face: 'south', area: 'stretch', desk };
+    }
+    // Beach volleyball: once the set is bought, up to four with nothing to do for LEAVE_IDLE play, two a side.
+    const vb = volleyIndex(p);
+    if (vb >= 0) {
+      const [x, y, face] = VOLLEY[vb];
+      return { key: `volley:${vb}`, x, y, face, area: 'volley' };
     }
     // A break: nothing to do for BREAK_IDLE seconds and a deck chair free on the beach (none bought, or all taken: the
     // kitchen or the lounge, as before).
@@ -330,6 +355,36 @@
     const i = free.findIndex(x => x.id === p.id);
     return i >= 0 && i < Math.min(world.rooms.deckchairs, DECK.length) ? i : -1;
   }
+  /** A place in the volleyball game for p (0-3), or -1: needs the set, two players at least, and a rest between games. */
+  function volleyIndex(p) {
+    if (!world.rooms.volleyball || p.firing || p.leaving) return -1;
+    const now = clock();
+    const players = world.staff.filter(x => {
+      const o = world.people.get(x.id);
+      return o && !o.firing && !o.leaving && x.doing === 'resting' && !(x.state === 'on' && x.active) && now - (o.idleSince ?? -Infinity) >= LEAVE_IDLE && !(o.volleyAfter > world.time);
+    }).slice(0, VOLLEY.length);
+    if (players.length < 2) return -1;
+    return players.findIndex(x => x.id === p.id);
+  }
+  /** Players standing at the net now (the ball is in play from two). */
+  const playing = () => [...world.people.values()].filter(p => p.target?.area === 'volley' && !p.path.length).length;
+  /**
+   * Dashing about on an energy drink: a spot in the office or on the beach, and as soon as they get there the next one
+   * (never the same twice running).
+   */
+  function energyRun(p) {
+    const spots = [...PIZZA, ...STRETCH, ...DECK, ...VOLLEY, ...BEACH, ...REST.filter(r => world.rooms.rest.includes(r.id)).map(r => [r.x, r.y])];
+    const there = p.run && p.targetKey === p.run.key && !p.path.length;
+    if (!p.run || there) {
+      let i = Math.floor(Math.random() * spots.length);
+      if (i === p.run?.i) i = (i + 1 + Math.floor(Math.random() * (spots.length - 1))) % spots.length;
+      const n = (p.run?.n ?? 0) + 1;
+      p.run = { n, i, key: `run:${n}`, x: spots[i][0], y: spots[i][1] };
+      if (there && Math.random() < 0.3) say(p, DASH_LINES[Math.floor(Math.random() * DASH_LINES.length)], 1.5);
+    }
+    return { key: p.run.key, x: p.run.x, y: p.run.y, face: 'south', area: 'run' };
+  }
+  const DASH_LINES = ['Lap two!', 'Beach! Now kitchen!', "Can't stop, won't stop!", 'Beep beep, coming through!', 'Last one there is a bug!', 'Sprint!'];
   /** On a break (in or walking to a deck chair) or on holiday (PC off): the two are never said the same way. */
   const breakOf = p => p?.target?.area === 'break';
 
@@ -449,13 +504,22 @@
     // enough): the same rule as a new list.
     if (world.time - lookedAt > 1) {
       lookedAt = world.time;
-      for (const p of world.people.values()) if (!p.path.length && !p.drag && !p.leaving && !p.firing) retarget(p);
+      for (const p of world.people.values()) if (!p.path.length && !p.drag && !p.leaving && !p.firing) {
+        // A game of volleyball runs a while from when they reach the net; then the player rests before the next one.
+        if (p.target?.area !== 'volley') p.volleyUntil = 0;
+        else if (!p.volleyUntil) p.volleyUntil = world.time + VOLLEY_GAME + Math.random() * VOLLEY_GAME;
+        else if (world.time > p.volleyUntil) {
+          p.volleyAfter = world.time + VOLLEY_REST;
+          p.volleyUntil = 0;
+        }
+        retarget(p);
+      }
     }
     for (const p of world.people.values()) {
       if (p.drag) continue;
       if (p.path.length) {
         // Work waiting: they hurry to the desk (or the boardroom); anywhere else, a stroll.
-        if (move(p, dt, ['desk', 'boardroom'].includes(p.target?.area) && !p.firing ? HURRY : WALK)) arrived(p);
+        if (move(p, dt, (['desk', 'boardroom', 'run'].includes(p.target?.area) && !p.firing ? HURRY : WALK) * (buzzing(p) ? ENERGY_PACE : 1))) arrived(p);
         continue;
       }
       // A rest spot is changed now and then (the target is worked out again).
@@ -464,6 +528,7 @@
     stepBoss(dt);
     stepCourier(dt);
     stepIt(dt);
+    stepEnergy();
     for (const [id, p] of world.people) if (p.leaving && p.out) world.people.delete(id);
   }
 
@@ -791,6 +856,7 @@
     if (p.carry) items.push('a box of belongings');
     if (p.folders) items.push(p.folders === 1 ? 'a folder of project work' : `${p.folders} folders of project work`);
     if (p.coffee === 'have' && world.time < p.coffeeUntil) items.push('a coffee (your treat)');
+    if (buzzing(p)) items.push('an energy drink (your treat)');
     if (p.target?.pizza && still) items.push(FOOD[world.food].holding);
     else if (p.target?.rest?.id === 'weights' && still) items.push('a pair of dumbbells');
     else if (p.target?.rest?.id === 'treadmill' && still) items.push('a water bottle');
@@ -802,6 +868,7 @@
     else if (p.target?.area === 'boardroom' && still && world.rooms.boardroom.cooler) items.push('a cup of water from the cooler');
     else if (p.target?.area === 'beach' && still) items.push('a towel and sunglasses');
     else if (p.target?.area === 'break' && still) items.push('a cold drink');
+    else if (p.target?.area === 'volley' && still && playing() >= 2) items.push('the volleyball, now and then');
     else if (p.target?.area === 'stretch' && still) items.push('a dumbbell');
     const n = vouchersOf(p.id);
     if (n) items.push(n === 1 ? 'a 20% off voucher (employee of the month)' : `${n} × 20% off voucher (employee of the month ${n} times)`);
@@ -822,6 +889,7 @@
     const s = p.row;
     const t = p.target;
     if (p.firing) return BOSS_WORDS[p.firing];
+    if (t?.area === 'run') return 'On an energy drink: dashing about the office';
     if (t?.pizza) return p.path.length ? FOOD[world.food].going : FOOD[world.food].having;
     if (t?.helping) {
       const lead = thinkersNow()[0]?.name ?? 'someone';
@@ -833,7 +901,8 @@
       if (t?.area === 'gone') return 'Leaving the office';
       if (t?.area === 'beach') return 'PC off: off to the beach on holiday';
       if (t?.area === 'break') return 'Off out for a break in a deck chair';
-      if (outdoors(p.x, p.y)) return p.from === 'break' ? 'Back in from a break' : 'Back from holiday: their PC is on';
+      if (t?.area === 'volley') return 'Off to the beach for a game of volleyball';
+      if (outdoors(p.x, p.y)) return p.from === 'break' ? 'Back in from a break' : p.from === 'volley' ? 'Back in from volleyball' : 'Back from holiday: their PC is on';
       if (t?.area === 'boardroom') return 'Walking to the boardroom to think';
       if (t?.area === 'stretch') return thinkHere ? 'Thinking on their feet (no boardroom table yet)' : 'Getting up to stretch their legs';
       if (t?.area === 'desk') return `Walking to ${t.desk?.name ?? 'their desk'}${p.carry ? ', carrying a box' : ''}`;
@@ -841,6 +910,7 @@
     }
     if (t?.area === 'beach') return 'PC off: on holiday, lying on a towel';
     if (t?.area === 'break') return 'On a break: in a deck chair on the beach';
+    if (t?.area === 'volley') return playing() >= 2 ? 'Playing beach volleyball' : 'At the volleyball net, waiting for a partner';
     if (thinkHere && t?.area === 'stretch') return 'Thinking on their feet (no boardroom table yet)';
     if (thinkHere && t?.area === 'desk' && clock() - (p.doingSince ?? clock()) >= THINK_AWAY) return 'Thinking at the desk (no boardroom table yet)';
     if (s.doing === 'resting' && t?.area === 'desk') return 'At the desk, ready for the next message';
@@ -905,8 +975,8 @@
     // The lounge's window on its outside wall (staff wait by it while the lounge is empty).
     box(c, 1172, 566, 14, 82, 3, '#cfe8f5', INK, 2);
     line(c, 1179, 570, 1179, 644, '#fff', 1.5);
-    // Outside: the path past the front door, the sand, the sea; a towel for each place on the beach, and the deck chairs
-    // bought, each under its umbrella.
+    // Outside: the path past the front door, the sand, the sea; a towel for each place on the beach, the deck chairs
+    // bought, each under its umbrella, and the volleyball net.
     c.fillStyle = '#b9c9a4';
     c.fillRect(0, 786, W, 38);
     c.fillStyle = '#d9cfb8';
@@ -921,6 +991,7 @@
       line(c, x - 30, y + 2, x + 30, y + 2, '#fff', 1.5);
     });
     DECK.slice(0, world.rooms.deckchairs).forEach(([x, y], i) => deckChair(c, x, y, i));
+    if (world.rooms.volleyball) drawVolleyNet(c);
     // The front door.
     box(c, 574, 750, 52, 28, 4, '#a4b8c3');
     line(c, 570, 790, 570, 762, '#667e94', 4);
@@ -931,7 +1002,7 @@
       box(c, d.x + 38, d.y - 16, 9, 30, 2, '#5d7084', INK, 2);
       if (!d.dead) for (const off of d.seats) box(c, d.x + off - 15, d.y + 26, 30, 21, 7, '#9eb3c8');
     }
-    // Boardroom (what is bought): the table, the chairs round it, the whiteboard.
+    // Boardroom (what is bought): the table, the chairs round it, the whiteboard, the plants.
     const br = world.rooms.boardroom;
     if (br.table) box(c, 760, 145, 290, 100, 22, '#e8bb80');
     for (const i of seatOrder().slice(0, br.chairs)) box(c, MEETING[i][0] - 19, MEETING[i][1] - 8, 38, 26, 8, '#a6aacb');
@@ -939,6 +1010,7 @@
       box(c, 1110, 105, 40, 160, 7, INK);
       box(c, 1116, 112, 28, 146, 3, '#fff7ed');
     }
+    if (br.plants) for (const q of PLANTS) drawPlant(c, q.x, q.y);
     if (br.cooler) waterCooler(c, COOLER.x, COOLER.y);
     if (world.rooms.trophy) trophyCase(c);
     // Kitchen: counter with the coffee machine, the vending machine, the table, the sink.
@@ -977,7 +1049,65 @@
   function emptyRooms() {
     const b = world.rooms.boardroom;
     const l = world.rooms.lounge;
-    return ROOMS.filter(r => (r.name === 'Boardroom' && !b.table && !b.chairs && !b.whiteboard && !b.clock && !b.cooler) || (r.name === 'Lounge and library' && !l.armchair && !l.bookcase && !l.sofa && !l.tv && !l.gym && !l.arcade));
+    return ROOMS.filter(r => (r.name === 'Boardroom' && !b.table && !b.chairs && !b.whiteboard && !b.plants && !b.clock && !b.cooler) || (r.name === 'Lounge and library' && !l.armchair && !l.bookcase && !l.sofa && !l.tv && !l.gym && !l.arcade));
+  }
+  /** An indoor plant in its pot, seen from above: the pot's rim, the soil, six leaves round a new shoot. */
+  function drawPlant(c, x, y) {
+    oval(c, x, y + 1, 11, 11, '#b36b4a', INK, 1.5);
+    oval(c, x, y + 1, 8, 8, '#6b4a3a', null);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.4;
+      c.beginPath();
+      c.ellipse(x + Math.cos(a) * 8, y + Math.sin(a) * 8, 7, 3.5, a, 0, Math.PI * 2);
+      c.fillStyle = i % 2 ? '#5aa469' : '#7cc47f';
+      c.fill();
+      c.strokeStyle = INK;
+      c.lineWidth = 1.2;
+      c.stroke();
+    }
+    oval(c, x, y, 3.5, 3.5, '#a5e0ad', INK, 1.2);
+  }
+  /** The volleyball court on the sand: the lines, two posts and the net between them. */
+  function drawVolleyNet(c) {
+    c.setLineDash([6, 5]);
+    box(c, 300, NET.top, 180, NET.bottom - NET.top, 4, 'rgba(255, 255, 255, 0.22)', '#c9b58a', 1.5);
+    c.setLineDash([]);
+    line(c, NET.x, NET.top, NET.x, NET.bottom, '#7b6a55', 5);
+    c.setLineDash([3, 3]);
+    line(c, NET.x, NET.top + 4, NET.x, NET.bottom - 4, '#ffffff', 1.5);
+    c.setLineDash([]);
+    oval(c, NET.x, NET.top, 4, 4, '#7b6a55', INK, 1.5);
+    oval(c, NET.x, NET.bottom, 4, 4, '#7b6a55', INK, 1.5);
+  }
+  /** The ball in play: back and forth over the net, highest as it crosses, with its shadow on the sand. */
+  function drawBall(c) {
+    const t = calm() ? 0.6 : world.time * 1.7;
+    const bx = NET.x + 58 * Math.sin(t);
+    const lift = 8 + 26 * Math.abs(Math.cos(t));
+    oval(c, bx, 866 + 3, 5, 2, 'rgba(0, 0, 0, 0.15)', null);
+    oval(c, bx, 866 - lift, 5, 5, '#fff6e4', INK, 1.5);
+    line(c, bx - 4, 866 - lift, bx + 4, 866 - lift, '#ef8a91', 1.2);
+  }
+  /** A sandwich seen from above: a triangle of bread with the filling showing along the cut. */
+  function sandwich(c, x, y, r) {
+    c.beginPath();
+    c.moveTo(x - r, y + r * 0.8);
+    c.lineTo(x + r, y + r * 0.8);
+    c.lineTo(x, y - r);
+    c.closePath();
+    c.fillStyle = '#f3d9a4';
+    c.fill();
+    c.strokeStyle = INK;
+    c.lineWidth = 1.2;
+    c.stroke();
+    line(c, x - r * 0.45, y + r * 0.35, x + r * 0.45, y + r * 0.35, '#7cc47f', 1.5);
+  }
+  /** An energy drink can in hand: black, with a green band and a lightning flash. */
+  function energyHeld(c, p) {
+    const dx = p.face === 'west' ? -15 : 15;
+    box(c, p.x + dx - 4, p.y - 7, 8, 13, 2, '#1d2330', INK, 1.4);
+    box(c, p.x + dx - 4, p.y - 3, 8, 4, 0, '#7be36b', null);
+    line(c, p.x + dx + 1, p.y - 6, p.x + dx - 1, p.y - 1, '#f7cd50', 1.4);
   }
   /** A deck chair seen from above (striped, its back to the path) under a beach umbrella. */
   function deckChair(c, x, y, i) {
@@ -1420,8 +1550,9 @@
   function pizzaBox(c, p, kind = 'pizza') {
     const dx = p.face === 'east' ? 24 : p.face === 'west' ? -24 : 0;
     const dy = p.face === 'north' ? -32 : 9;
-    box(c, p.x + dx - 22, p.y + dy - 10, 44, 20, 4, { donuts: '#ffe3ef', icecream: '#bfe6f2', cake: '#fff2f6' }[kind] ?? '#fff2d8', INK, 2);
-    if (kind === 'donuts') for (let i = 0; i < 3; i++) donut(c, p.x + dx - 12 + i * 12, p.y + dy, 4.5, PALETTE[i + 1]);
+    box(c, p.x + dx - 22, p.y + dy - 10, 44, 20, 4, { donuts: '#ffe3ef', sandwiches: '#f6f1e6', icecream: '#bfe6f2', cake: '#fff2f6' }[kind] ?? '#fff2d8', INK, 2);
+    if (kind === 'sandwiches') for (let i = 0; i < 3; i++) sandwich(c, p.x + dx - 12 + i * 12, p.y + dy, 5);
+    else if (kind === 'donuts') for (let i = 0; i < 3; i++) donut(c, p.x + dx - 12 + i * 12, p.y + dy, 4.5, PALETTE[i + 1]);
     else if (kind === 'icecream') for (let i = 0; i < 3; i++) oval(c, p.x + dx - 12 + i * 12, p.y + dy, 4.5, 4.5, SCOOPS[i], INK, 1);
     else if (kind === 'cake') oval(c, p.x + dx, p.y + dy, 12, 7, '#f7d6e0', INK, 1.2);
     else oval(c, p.x + dx, p.y + dy, 12, 6, '#e6a64c', null);
@@ -1466,7 +1597,9 @@
     for (const p of list) {
       const walk = p.path.length > 0;
       const lifted = p.drag && p.drag.view === view;
-      const y = lifted ? p.y - 14 : p.y;
+      // On an energy drink: buzzing on the spot (not when less motion is asked for), and legs going three times as fast.
+      const buzz = buzzing(p) && !calm();
+      const y = lifted ? p.y - 14 : p.y - (buzz && !walk ? Math.abs(Math.sin(world.time * 22 + p.seed)) * 2.5 : 0);
       if (world.selected === p.id) oval(c, p.x, p.y + 12, 22, 11, '#f8d878', null);
       if (lifted) oval(c, p.x, p.y + 12, 18, 8, 'rgba(39, 54, 78, .2)', null);
       const look = ready ? p.look ?? app.look.fromId(p.id, p.row.roleId ?? '') : null;
@@ -1481,10 +1614,10 @@
         oval(c, 5, -12, 4.5, 3.2, '#1d2633', null);
         line(c, -1, -12, 1, -12, '#1d2633', 1.5);
         c.restore();
-      } else if (look && !walk && (p.target?.area === 'stretch' || p.target?.rest?.gym)) {
-        // Stretching or at the gym: hopping on the spot.
-        app.look.sprite(c, look, p.x, y - Math.abs(Math.sin(world.time * 5 + p.seed)) * 6, 'south', { walk: true, time: world.time, seed: p.seed % 10 });
-      } else if (look) app.look.sprite(c, look, p.x, y, p.face, { walk, time: world.time, seed: p.seed % 10 });
+      } else if (look && !walk && (p.target?.area === 'stretch' || p.target?.area === 'volley' || p.target?.rest?.gym)) {
+        // Stretching, at the gym, or on their toes at the volleyball net (facing the other side): hopping on the spot.
+        app.look.sprite(c, look, p.x, y - Math.abs(Math.sin(world.time * 5 + p.seed)) * 6, p.target?.area === 'volley' ? p.face : 'south', { walk: true, time: world.time, seed: p.seed % 10 });
+      } else if (look) app.look.sprite(c, look, p.x, y, p.face, { walk, time: buzz ? world.time * ENERGY_PACE : world.time, seed: p.seed % 10 });
       else oval(c, p.x, y, 14, 18, PALETTE[p.seed % 6]);
       if (p.carry === 'coffee') coffeeTray(c, { ...p, y });
       else if (FOOD[p.carry]) pizzaBox(c, { ...p, y }, p.carry);
@@ -1492,6 +1625,7 @@
       else if (p.carry === 'pc') pcCarried(c, { ...p, y });
       else if (p.carry) carried(c, { ...p, y });
       else if (p.coffee === 'have' && world.time < p.coffeeUntil) coffeeHeld(c, { ...p, y });
+      else if (buzzing(p)) energyHeld(c, { ...p, y });
       else if (breakOf(p) && !walk) drinkHeld(c, { ...p, y });
       if (full && p.bubbleUntil > world.time) bubble(c, { ...p, y }, labelSize(c));
       else drawIcon(c, { ...p, y });
@@ -1588,6 +1722,9 @@
     if (world.pizzaOn && world.food === 'donuts') {
       box(c, 268, 603, 70, 38, 4, '#ffe3ef', INK, 2);
       for (let i = 0; i < 6; i++) donut(c, 281 + (i % 3) * 22, 613 + Math.floor(i / 3) * 18, 7, PALETTE[i % 6]);
+    } else if (world.pizzaOn && world.food === 'sandwiches') {
+      box(c, 262, 603, 82, 38, 6, '#f6f1e6', INK, 2);
+      for (let i = 0; i < 4; i++) sandwich(c, 277 + i * 18, 623, 8);
     } else if (world.pizzaOn && world.food === 'icecream') {
       box(c, 264, 603, 78, 38, 6, '#bfe6f2', INK, 2);
       for (let i = 0; i < 5; i++) oval(c, 279 + i * 12, 622 + (i % 2 ? 6 : -5), 6, 6, SCOOPS[i % SCOOPS.length], INK, 1.2);
@@ -1621,6 +1758,7 @@
       box(c, a.x + 9 + k * 5, a.y + 10 + (k % 2) * 6, 5, 4, 1, '#ffffff', null);
     }
     drawPeople(c, full, view);
+    if (world.rooms.volleyball && playing() >= 2) drawBall(c);
   }
 
   // ---- Frames: only while a view is on the screen ----
@@ -1682,6 +1820,7 @@
   /** A desk's rock, duck or cactus under the pointer (its name shows), the trophy case, the arcade machine. */
   const friendUnder = (x, y) => world.desks.flatMap(friendsOf).find(fr => Math.hypot(fr.x - x, fr.y - 3 - y) < 9) ?? null;
   const trophyUnder = (x, y) => !!world.rooms.trophy && x > TROPHY.x - 4 && x < TROPHY.x + TROPHY.w + 4 && y > TROPHY.y - 4 && y < TROPHY.y + TROPHY.h + 4;
+  const vendingUnder = (x, y) => x > VENDING.x - 4 && x < VENDING.x + VENDING.w + 4 && y > VENDING.y - 4 && y < VENDING.y + VENDING.h + 4;
   const arcadeUnder = (x, y) => {
     const a = PIECES.arcade;
     return !!world.rooms.lounge.arcade && x > a.x - 4 && x < a.x + a.w + 4 && y > a.y - 4 && y < a.y + a.h + 4;
@@ -1717,10 +1856,10 @@
       const press = view.press;
       if (!press) {
         const who = personAt(x, y);
-        cv.style.cursor = who ? 'grab' : trophyUnder(x, y) || arcadeUnder(x, y) || deskUnder(x, y) || onFrame(x, y) ? 'pointer' : '';
+        cv.style.cursor = who ? 'grab' : trophyUnder(x, y) || arcadeUnder(x, y) || vendingUnder(x, y) || deskUnder(x, y) || onFrame(x, y) ? 'pointer' : '';
         // Point at a desk friend to read its name; the trophy case and the arcade machine say what a click does.
         const fr = !who && friendUnder(x, y);
-        const tip = trophyUnder(x, y) ? "Trophy case: World's Best Boss (click to read it)" : !who && arcadeUnder(x, y) ? 'Arcade machine: click to play' : fr ? `${FRIEND_WORDS[fr.kind]}: ${fr.name}${fr.who?.row?.name ? ` (${fr.who.row.name}'s)` : fr.desk ? ` (on the ${fr.desk} desk)` : ''}` : '';
+        const tip = trophyUnder(x, y) ? "Trophy case: World's Best Boss (click to read it)" : !who && arcadeUnder(x, y) ? 'Arcade machine: click to play' : !who && vendingUnder(x, y) ? 'Vending machine: energy drinks for everyone in (click it)' : fr ? `${FRIEND_WORDS[fr.kind]}: ${fr.name}${fr.who?.row?.name ? ` (${fr.who.row.name}'s)` : fr.desk ? ` (on the ${fr.desk} desk)` : ''}` : '';
         if (cv.title !== tip) cv.title = tip;
         return;
       }
@@ -1762,6 +1901,7 @@
       }
       if (trophyUnder(press.x, press.y)) showTrophy();
       else if (arcadeUnder(press.x, press.y)) app.arcade?.open();
+      else if (vendingUnder(press.x, press.y)) openVending();
       else if (press.desk) app.openPc?.(press.desk.key || 'here');
       else if (onFrame(press.x, press.y)) openMonth();
     };
@@ -1796,7 +1936,7 @@
   }
 
   function addView(kind, holder, dialog = null) {
-    const canvas = el('canvas', { class: 'office-canvas', role: 'img', 'aria-label': 'The office: each hire as a little person, at their PC\'s desk when they work, in the boardroom when they think a long time (once it has a table), in the kitchen, the lounge or a deck chair on the beach when they rest, on a towel on the beach when their PC is off. The list below says the same in words.' });
+    const canvas = el('canvas', { class: 'office-canvas', role: 'img', 'aria-label': 'The office: each hire as a little person, at their PC\'s desk when they work, in the boardroom when they think a long time (once it has a table), in the kitchen, the lounge, a deck chair or the volleyball net on the beach when they rest, on a towel on the beach when their PC is off. The list below says the same in words.' });
     const strip = el('div', { class: 'office-strip', 'aria-live': 'off' });
     const view = { kind, canvas, ctx: canvas.getContext('2d'), strip, dialog, seen: kind === 'full' };
     holder.append(el('div', { class: 'office-stage' }, canvas), strip);
@@ -1844,6 +1984,8 @@
     pizza: { label: 'Pizza', title: 'A pizza comes to the kitchen; whoever has nothing to do gathers round it (free)' },
     coffee: { label: 'Coffee', title: 'A coffee delivery comes in by the front door and hands each of them a coffee, wherever they are, busy or not' },
     donuts: { label: 'Donuts', title: 'A box of donuts comes to the kitchen table; whoever has nothing to do gathers round it' },
+    sandwiches: { label: 'Sandwiches', title: 'A platter of sandwiches comes to the kitchen table; whoever has nothing to do gathers round it' },
+    energy: { label: 'Energy drinks', title: "The kitchen's vending machine: a can for everyone in the office, and for a minute they walk and talk three times as fast (click the machine, or this card)" },
     icecream: { label: 'Ice creams', title: 'A cool box of ice creams comes to the kitchen table; whoever has nothing to do gathers round it' },
     cake: { label: 'Cake', title: 'A celebration cake with three candles comes to the kitchen table; whoever has nothing to do gathers round it' },
     rocks: { label: 'Pet rocks', title: 'A pet rock with googly eyes on every seat of every desk, each with a name of its own (point at it to read it)', done: 'every seat has a pet rock now: point at one to read its name' },
@@ -1852,6 +1994,7 @@
     table: { label: 'Table', title: 'Opens the boardroom: a think over 15 seconds goes to the table (until then it stays at the desk)', done: 'the boardroom is open: a think over 15 seconds goes to the table now. Buy chairs to seat them, and a helper in each chair left over' },
     chairs: { label: 'Chairs', each: 'a pair', title: 'Two chairs round the boardroom table, up to six: the thinkers sit first, and each chair left over seats someone with nothing to do who joins in to help (up to two)', done: 'two more chairs round the boardroom table' },
     whiteboard: { label: 'Whiteboard', title: 'Fills with notes while someone thinks in the boardroom', done: 'it fills with notes while someone thinks in the boardroom' },
+    plants: { label: 'Plants', title: 'Indoor plants for the boardroom, one in each far corner', done: 'a plant stands in each far corner of the boardroom' },
     clock: { label: 'Wall clock', title: 'A clock on the boardroom wall that keeps the real time', done: 'it keeps the real time on the boardroom wall' },
     cooler: { label: 'Water cooler', title: 'A water cooler in the boardroom corner: whoever is in the boardroom has a cup of water to hand', done: 'whoever is in the boardroom has a cup of water to hand' },
     armchair: { label: 'Armchair', title: 'Staff with nothing to do nap in it', done: 'staff with nothing to do nap in it' },
@@ -1861,6 +2004,7 @@
     gym: { label: 'Gym', title: 'A treadmill and a weights bench for the lounge, kept for good: staff with nothing to do work out there', done: 'a treadmill and a weights bench in the lounge, kept for good. Staff with nothing to do work out there now and then' },
     arcade: { label: 'Arcade', title: 'An arcade machine in the lounge corner: staff with nothing to do play on it, and you can too (click the machine): Tetris, Lunar Lander and Moon Rover', done: 'staff with nothing to do play on it now. Click the machine (or Play on its card) to have a go yourself' },
     deckchair: { label: 'Deck chair', title: 'A deck chair under an umbrella on the beach, up to six: staff with nothing to do for 10 minutes take a break there (busy staff never go; the staff of a PC that is off lie on towels instead)', done: 'staff with nothing to do for 10 minutes take a break there' },
+    volleyball: { label: 'Volleyball', title: 'A beach volleyball net on the sand: staff with nothing to do for 5 minutes play there, two a side (from two players, with a rest between games)', done: 'staff with nothing to do for 5 minutes play on the sand, two a side' },
     flamingo: { label: 'Flamingo', title: 'An inflatable flamingo that floats and drifts on the sea', done: 'it floats and drifts on the sea' },
   };
   const num = n => Number(n || 0).toLocaleString();
@@ -1963,6 +2107,21 @@
       box(c, 54, 50, 6, 6, 2, '#ef8a91', INK, 1.2);
     } else if (id === 'flamingo') {
       flamingo(c, 44, 52, 1.9);
+    } else if (id === 'sandwiches') {
+      box(c, 10, 28, 80, 30, 8, '#f6f1e6', INK, 2);
+      for (let i = 0; i < 3; i++) sandwich(c, 28 + i * 22, 44, 11);
+    } else if (id === 'plants') {
+      drawPlant(c, 32, 40);
+      drawPlant(c, 68, 40);
+    } else if (id === 'volleyball') {
+      line(c, 50, 12, 50, 64, '#7b6a55', 5);
+      c.setLineDash([3, 3]);
+      line(c, 50, 16, 50, 60, '#ffffff', 1.5);
+      c.setLineDash([]);
+      oval(c, 50, 12, 4, 4, '#7b6a55', INK, 1.5);
+      oval(c, 50, 64, 4, 4, '#7b6a55', INK, 1.5);
+      oval(c, 24, 36, 9, 9, '#fff6e4', INK, 2);
+      line(c, 17, 36, 31, 36, '#ef8a91', 2);
     } else if (id === 'arcade') {
       box(c, 28, 8, 44, 60, 6, '#5b4b8a');
       box(c, 34, 14, 32, 24, 3, '#182638', INK, 1.5);
@@ -1974,7 +2133,8 @@
     }
   }
   /** The menu's sections: the treats, then the office by room, each a row of picture cards. */
-  const SECTIONS = [['Treat the team', [['', ['pizza', 'coffee', 'donuts', 'icecream', 'cake']]]], ['Improve the office', [['Desks', ['rocks', 'ducks', 'cactus']], ['Boardroom', ['table', 'chairs', 'whiteboard', 'clock', 'cooler']], ['Lounge', ['armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade']], ['Beach', ['deckchair', 'flamingo']]]]];
+  // Energy drinks have no card (rows of three): they come only from clicking the vending machine itself.
+  const SECTIONS = [['Treat the team', [['', ['pizza', 'coffee', 'donuts', 'sandwiches', 'icecream', 'cake']]]], ['Improve the office', [['Desks', ['rocks', 'ducks', 'cactus']], ['Boardroom', ['table', 'chairs', 'whiteboard', 'plants', 'clock', 'cooler']], ['Lounge', ['armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade']], ['Beach', ['deckchair', 'volleyball', 'flamingo']]]]];
   /** Pizza is the boss's treat (free): on the menu beside the paid ones. */
   const PIZZA_ITEM = { id: 'pizza', name: 'Pizza', price: 0, room: 'treats', keeps: false, most: 0, have: 0, owned: false, waits: false };
   function tile(i) {
@@ -2029,7 +2189,7 @@
         fullSay(`${item.name} ordered (${num(item.price)} tokens): ${item.id === 'cake' ? 'it comes' : 'they come'} in by the front door to the kitchen table. ${left}`);
       } else {
         const now = d.shop?.find(i => i.id === item.id);
-        const cheer = item.id === 'gym' ? ['A gym!', 'New treadmill!', 'Time to lift!'] : item.id === 'arcade' ? ['An arcade!', 'Bagsy first go!', 'High score time!'] : item.id === 'flamingo' ? ['A flamingo!', 'Look at it float!', 'Beach goals!'] : item.room === 'desks' ? ['A desk buddy!', 'I shall name it…', 'Too cute!'] : item.room === 'beach' ? ['A deck chair!', 'Beach time!', 'Sun lounger!'] : ['New furniture!', 'Nice!', 'Very smart!'];
+        const cheer = item.id === 'gym' ? ['A gym!', 'New treadmill!', 'Time to lift!'] : item.id === 'arcade' ? ['An arcade!', 'Bagsy first go!', 'High score time!'] : item.id === 'flamingo' ? ['A flamingo!', 'Look at it float!', 'Beach goals!'] : item.id === 'volleyball' ? ['Volleyball!', 'Game on!', 'Bagsy my team!'] : item.id === 'plants' ? ['Plants!', 'So green!', 'Fresh air at last!'] : item.room === 'desks' ? ['A desk buddy!', 'I shall name it…', 'Too cute!'] : item.room === 'beach' ? ['A deck chair!', 'Beach time!', 'Sun lounger!'] : ['New furniture!', 'Nice!', 'Very smart!'];
         for (const p of present()) {
           say(p, cheer[p.seed % 3], 4);
           if (p.target?.rest) p.restUntil = 0;
@@ -2045,6 +2205,104 @@
     } finally {
       button.disabled = false;
     }
+  }
+  // ---- The vending machine: a coin buys everyone in an energy drink, and for a minute they buzz ----
+
+  /** What they say on an energy drink, quickly, every couple of seconds; and when it wears off. */
+  const BUZZ_LINES = ["Okayokayokay let's go!", 'I can hear the code!', 'Refactor everything! Now!', 'Race you to the kitchen!',
+    'Ten tabs! Twenty! Thirty!', 'Typing at the speed of light!', 'Ship it ship it ship it!', 'I just blinked twice. Productive!',
+    'Bugs? Fixed. All of them. Probably.', 'My keyboard is smoking!', 'Meeting? Done. Next!', 'Wheeee!', 'Faster! Faster!',
+    'Deadline? Bring it!', 'I could rewrite this in an hour. Easy.', 'Zoom zoom!', 'Is the floor moving or is it me?', 'Who needs sleep?'];
+  const CRASH_LINES = ['I need a nap.', 'Was I talking fast? Sorry.', 'Where did that minute go?', 'Never again. Until next time.', 'My hands are still buzzing.'];
+  const SIP_LINES = ['Ooh, energy drinks!', 'Thanks, boss! *glug*', 'Here we gooo!', 'I can feel it already!'];
+  function stepEnergy() {
+    for (const p of world.people.values()) {
+      if (!p.hyperUntil || p.leaving || p.out) continue;
+      if (world.time >= p.hyperUntil) {
+        p.hyperUntil = 0;
+        say(p, CRASH_LINES[p.seed % CRASH_LINES.length], 3);
+        // Worn off: straight back to what they were doing (not on to the next spot first).
+        p.run = null;
+        if (!p.drag && !p.firing) retarget(p);
+        continue;
+      }
+      if (world.time > (p.hyperNext ?? 0)) {
+        say(p, BUZZ_LINES[Math.floor(Math.random() * BUZZ_LINES.length)], 1.3);
+        p.hyperNext = world.time + 2 + Math.random() * 2.5;
+      }
+    }
+  }
+  /** Who gets a can: everyone in the office (the staff of a PC that is off are on holiday). */
+  const drinkers = () => present().filter(p => p.row.doing !== 'off');
+  /** The cans are out: everyone here has one, says so, and buzzes for ENERGY_SECONDS. */
+  function drinkUp() {
+    drinkers().forEach((p, i) => {
+      p.hyperUntil = world.time + ENERGY_SECONDS;
+      p.hyperNext = world.time + 2 + Math.random() * 1.5;
+      say(p, SIP_LINES[(p.seed + i) % SIP_LINES.length], 2);
+      p.targetKey = '';
+    });
+    wake();
+  }
+  const vendDlg = el('dialog', { class: 'vend-dlg', 'aria-labelledby': 'vend-title' });
+  document.body.append(vendDlg);
+  /** A price as a coin: 50K, 1M. */
+  const coinOf = n => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}K`);
+  /** The machine itself, in a window: rows of cans behind the glass, a little display, the coin slot. */
+  function openVending() {
+    const energy = world.shop.find(i => i.id === 'energy');
+    const screen = el('p', { class: 'vend-screen', role: 'status' });
+    const show = (big, small = '') => screen.replaceChildren(el('b', { text: big }), small ? el('span', { text: small }) : '');
+    const balance = el('p', { class: 'vend-balance' });
+    // Free (the price is 0, like pizza): no coin and no balance, the button gives the drinks.
+    const free = !energy?.price;
+    const showBalance = () => { balance.textContent = free ? '' : `Your balance: ${num(world.purse?.left ?? 0)} tokens`; };
+    const tray = el('div', { class: 'vend-tray', 'aria-hidden': 'true' });
+    const cans = el('div', { class: 'vend-glass', 'aria-hidden': 'true' }, ...Array.from({ length: 12 }, (_, i) => el('span', { class: `vend-can c${i % 4}` })));
+    const coin = el('button', { type: 'button', class: 'vend-coin', onclick: insert }, el('span', { class: 'vend-slot', 'aria-hidden': 'true' }), el('span', { text: free ? 'Press for free drinks' : `Insert a ${coinOf(energy?.price ?? 0)}-token coin` }));
+    const awake = [...world.people.values()].filter(buzzing).length;
+    if (free) show('FREE DRINKS', 'Energy drinks for everyone in · on the house');
+    else show('INSERT COIN', `Energy drinks for everyone in · ${num(energy?.price ?? 0)} tokens`);
+    showBalance();
+    async function insert() {
+      if (!energy) return show('OUT OF ORDER', 'The office did not list the drinks: close this and open the office again.');
+      if (!drinkers().length) return show('NOBODY HERE', 'Hire someone first: then there is someone to drink it.');
+      const still = Math.max(0, ...[...world.people.values()].map(p => (buzzing(p) ? p.hyperUntil - world.time : 0)));
+      if (still > 0) return show('STILL BUZZING', `They are on the last cans for ${Math.ceil(still)} s more. Try again after.`);
+      if ((world.purse?.left ?? 0) < energy.price) return show('NOT ENOUGH TOKENS', `${num(energy.price - (world.purse?.left ?? 0))} more to go: every token your staff write adds to it.`);
+      coin.disabled = true;
+      coin.classList.add('dropping');
+      try {
+        const d = await api('/api/office/buy', { item: 'energy' });
+        officeData(d);
+        showBalance();
+        show('THANK YOU', 'Cans coming out…');
+        tray.replaceChildren(...drinkers().slice(0, 6).map((_, i) => {
+          // Set through the style object: the page's rules refuse a style attribute.
+          const can = el('span', { class: `vend-can c${i % 4} out` });
+          can.style.animationDelay = `${i * 0.12}s`;
+          return can;
+        }));
+        fullSay(free ? 'Energy drinks on the house: everyone in buzzes for a minute.' : `Energy drinks bought (${num(energy.price)} tokens): everyone in buzzes for a minute. ${num(d.purse?.left)} tokens left to spend.`);
+        setTimeout(() => {
+          vendDlg.close();
+          drinkUp();
+        }, 1300);
+      } catch (e) {
+        show('COIN RETURNED', e.message || 'TOMLIN did not answer: check it is still running, then try again.');
+        coin.disabled = false;
+        coin.classList.remove('dropping');
+      }
+    }
+    vendDlg.replaceChildren(el('div', { class: 'vend' },
+      el('h2', { id: 'vend-title', class: 'sr-only', text: 'Vending machine: energy drinks' }),
+      el('div', { class: 'vend-top' }, el('span', { class: 'vend-brand', text: 'ENERGY' }), el('span', { class: 'vend-sub', text: 'Drinks for the whole team' })),
+      el('div', { class: 'vend-body' }, cans, el('div', { class: 'vend-side' }, screen, coin, balance)),
+      tray,
+      el('p', { class: 'vend-note', text: `Everyone in the office gets a can and, for a minute, walks and talks three times as fast.${awake ? ' Some are still buzzing from the last ones.' : ''}` }),
+      el('div', { class: 'vend-foot' }, el('button', { type: 'button', class: 'btn', text: 'Close', onclick: () => vendDlg.close() }))));
+    vendDlg.showModal();
+    coin.focus();
   }
   const boardLine = el('p', { class: 'hint office-board' });
   /** This week's leaderboard: tokens written since Monday, most first. */
@@ -2116,6 +2374,8 @@
         tell(v);
       }
     },
+    /** The energy drinks now (for checks): how many are buzzing, and the most seconds left. */
+    energyNow: () => ({ buzzing: [...world.people.values()].filter(buzzing).length, left: Math.max(0, ...[...world.people.values()].map(p => (p.hyperUntil ?? 0) - world.time)) }),
     /** The person followed now (their id), or null. */
     picked: () => world.selected,
     /** Who is on a break in a deck chair now (ids): Staff overview's cards say so (a PC that is off says PC off). */

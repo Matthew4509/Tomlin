@@ -96,11 +96,29 @@ function norm(p) { return String(p).replace(/\\/g, '/').toLowerCase(); }
 // One start entry from a file, checked: an object, a program name as text, arguments as a list of text. Anything
 // else ({"configurations":{}}, [null], "args":"server.js") is skipped and counted, never trusted or crashed on.
 const asList = v => Array.isArray(v) ? v : [];
+// An entry may name the folder it runs in ("cwd", relative to where the file's entries run) and extra environment
+// variables ("env", e.g. PORT for a React dev server); a cwd that is not a folder on disk, or an env that is not plain
+// names with text values, skips the entry like any other bad value.
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function runFolder(v, base) {
+  if (v === undefined) return base;
+  if (typeof v !== 'string' || !v.trim()) return null;
+  const abs = path.resolve(base, v);
+  try { return fs.statSync(abs).isDirectory() ? abs : null; } catch { return null; }
+}
+function envOf(v) {
+  if (v === undefined) return undefined;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const e = Object.entries(v);
+  return e.every(([k, s]) => ENV_NAME.test(k) && typeof s === 'string') ? Object.fromEntries(e) : null;
+}
 function startEntry(c, exeKey, argsKey, cwd, from, skipped) {
   if (!c || typeof c !== 'object') { skipped.push(from); return null; }
   const exe = c[exeKey], args = c[argsKey] === undefined ? [] : c[argsKey];
   if (typeof exe !== 'string' || !exe.trim() || !Array.isArray(args) || !args.every(a => typeof a === 'string')) { skipped.push(from); return null; }
-  return { name: asText(c.name) || 'start', exe, args, port: asPort(c.port), cwd, from };
+  const runIn = runFolder(c.cwd, cwd), env = envOf(c.env);
+  if (!runIn || env === null) { skipped.push(from); return null; }
+  return { name: asText(c.name) || 'start', exe, args, port: asPort(c.port), cwd: runIn, ...(c.cwd !== undefined ? { setCwd: true } : {}), ...(env ? { env } : {}), from };
 }
 // Words that name a script or a sub-command, not a folder ("npm run dev", "vite preview"): a project folder that
 // happens to be called dev or public is not the one a root entry runs.
@@ -122,11 +140,20 @@ function startCommands(root, dir, rootLaunch, override, skipped = []) {
   const pj = readJson(path.join(dir, 'project.json'));
   if (pj && pj.start) add(startEntry(pj.start, 'exe', 'args', dir, 'project.json', skipped));
   if (override && override.start) add(startEntry(override.start, 'exe', 'args', dir, "the Bridge's projects.json", skipped));
-  // Root entries run from the projects root (as preview_start runs them), so a relative "shop" or "shop/x"
-  // argument belongs to the shop folder as much as an absolute path does.
+  // Root entries run from the projects root (as preview_start runs them) unless they name a cwd, so a relative "shop"
+  // or "shop/x" argument belongs to the shop folder as much as an absolute path does; so does an entry whose cwd is
+  // the folder or inside it ("npx craco start" run in shop/frontend).
+  const d = keyOf(dir);
+  const inside = p => { const k = keyOf(p); return k === d || k.startsWith(d + path.sep); };
   for (const c of asList(rootLaunch && rootLaunch.configurations)) {
     const e = startEntry(c, 'runtimeExecutable', 'runtimeArgs', root, 'root .claude/launch.json', []); // other folders' entries are not this one's to count
-    if (e && e.args.some((a, i) => pointsInside(a, i, e.args, root, dir))) add(e);
+    if (e && (inside(e.cwd) || e.args.some((a, i) => pointsInside(a, i, e.args, e.cwd, dir)))) add(e);
+    // ...except one whose cwd names this folder but could not be used (the sub-folder was renamed or deleted): it is
+    // this project's, so it is counted with the reason, instead of the project saying it has no start entry at all.
+    else if (!e && c && typeof c.cwd === 'string' && c.cwd.trim() && inside(path.resolve(root, c.cwd))) {
+      const name = asText(c.name) || 'start', gone = runFolder(c.cwd, root) === null;
+      skipped.push('root .claude/launch.json ("' + name.slice(0, 60) + '"' + (gone ? ', whose cwd folder is not there' : '') + ')');
+    }
   }
   const seen = new Set();
   return mergeSameApp(out.filter(c => { const k = c.name + '|' + c.port; if (seen.has(k)) return false; seen.add(k); return true; }))
@@ -148,16 +175,20 @@ function sameAppKey(c) {
     const abs = path.resolve(c.cwd, s);
     return fs.existsSync(abs) ? 'path:' + keyOf(abs) : s;
   };
-  return [norm(c.exe), ...c.args.map(resolve)].join('\n');
+  // A named cwd and the env (PORT=3010 and PORT=3021 are the same app) are part of what runs.
+  const where = c.setCwd ? ['cwd:' + keyOf(c.cwd)] : [];
+  const env = Object.keys(c.env || {}).sort().map(k => 'env:' + k.toUpperCase() + '=' + blank(c.env[k]));
+  return [norm(c.exe), ...c.args.map(resolve), ...where, ...env].join('\n');
 }
 function mergeSameApp(list) {
   const groups = new Map(), out = [];
+  const alt = c => ({ name: c.name, port: c.port, args: c.args, cwd: c.cwd, ...(c.env ? { env: c.env } : {}), from: c.from });
   for (const c of list) {
     const k = sameAppKey(c);
     const g = k != null && groups.get(k);
     if (g) {
-      if (!g.alts) g.alts = [{ name: g.name, port: g.port, args: g.args, cwd: g.cwd, from: g.from }];
-      g.alts.push({ name: c.name, port: c.port, args: c.args, cwd: c.cwd, from: c.from });
+      if (!g.alts) g.alts = [alt(g)];
+      g.alts.push(alt(c));
       continue;
     }
     const first = { ...c };

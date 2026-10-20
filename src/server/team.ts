@@ -6,7 +6,7 @@ import { streamChat, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
-import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
+import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
 import { staffState as homeState, activityOf, awardBehind, awardPeriods, buy, cleanAwards, cleanBought, doingOf, DOING_WORDS, purseOf, roomsOf, shopView, undoAward, winnerOf, type Award } from '../home.ts';
 import { readData, updateData } from '../atomic.ts';
 import * as mute from '../mute.ts';
@@ -22,7 +22,7 @@ import { jobRoutes } from './jobs.ts';
 import { queueHome } from './queue.ts';
 import { staffUsage } from './costs.ts';
 import { memoryNow } from './thispc.ts';
-import { chatNeed, moveWontFit, ramFit } from '../calc.ts';
+import { chatNeed, memOfReport, moveWontFit, ramFit } from '../calc.ts';
 
 // ---- Staff ----
 
@@ -52,12 +52,7 @@ async function staffView() {
   // For the Hire staff window: each PC's memory, and each model's PC, size, the memory it needs, whether it fits there,
   // and the level its size suggests (the level picker starts there; it can be changed).
   const mem = memoryNow();
-  const memOf = (raw: unknown) => {
-    const m = raw as { ram?: { total?: number }; gpu?: { total?: number; shared?: boolean } | null; cards?: { total?: number } } | null | undefined;
-    // Every card's own memory (2.0.50 sends it); an older PC said only one card's.
-    const cards = typeof m?.cards?.total === 'number' ? m.cards.total : m?.gpu && !m.gpu.shared ? m.gpu.total ?? 0 : 0;
-    return { ram: m?.ram?.total ?? 0, vram: cards };
-  };
+  const memOf = memOfReport;
   const pcMem = new Map(pcs.map(r => [r.id, memOf(r.ok ? r.memory : null)]));
   /** Whether a model needing `need` bytes fits a linked PC: on its card, else in its RAM (3 GB kept for Windows); null = not known. */
   const fitThere = (pc: string, need: number) => {
@@ -602,7 +597,18 @@ export const teamPost: Routes = {
           const list = Array.isArray(change.group) ? change.group : [];
           if (list.some(id => typeof id !== 'string' || !(image ? images.has(id) : chatList().some(m => m.id === id)))) return json(res, 400, { error: `Only ${image ? 'picture' : 'chat'} models on this PC can be in the list. Download it first, then tick it.` });
         }
+        const ran = was ? { model: was.model, group: [...(was.group ?? [])], active: was.active } : null;
+        const wasChat = !!was && !roleOf(was.role).kind;
         if (!(await staff.change(String(b.id), change))) return json(res, 404, { error: 'There is no such person on the team.' });
+        // Given another chat model: the old one is unloaded when it is idle and nobody else runs on it, so the new one
+        // takes its place instead of loading beside it.
+        const now = staff.get(String(b.id));
+        const left = ran && wasChat && now ? modelLeft(ran, roleOf(now.role).kind ? { model: null } : now, staff.list().filter(o => o.id !== now.id && !roleOf(o.role).kind)) : null;
+        const holder = runnerFor(left);
+        if (holder?.view.state === 'connected' && !answeringBusy(holder)) {
+          console.log(`Unloading ${left}: ${now!.name} was given another model and nobody else runs on it.`);
+          await holder.disconnect();
+        }
       } else if (b.action === 'fire') {
         if (!(await staff.fire(String(b.id)))) return json(res, 404, { error: 'There is no such person on the team.' });
         // Someone hired later with the same name starts without this one's photo.

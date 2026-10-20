@@ -97,6 +97,18 @@ export function chatNeed(bytes: number): number {
   return (bytes + Math.min(bytes * 0.2, 1.5 * GB)) * 1.1 + 0.8 * GB;
 }
 
+/**
+ * Whether a chat model file sits wholly on the graphics cards: an estimate, not llama.cpp's own fit. The file and room
+ * for an 8K chat (0.5 GB under 3 GB, 0.8 GB under 6 GB, else 1 GB) against the cards' memory less 0.5 GB on each for
+ * Windows (a 6 GB GTX 1060: about 5.5). A model that does not fit still runs, part on the card and part on the
+ * processor, slower. null when there is no card of its own (or the size is not known). The Models page's "Fits my card".
+ */
+export function cardFit(bytes: number, cards: { n: number; total: number }): 'ok' | 'no' | null {
+  if (!cards.n || !cards.total || !bytes) return null;
+  const chat = bytes < 3 * GB ? 0.5 * GB : bytes < 6 * GB ? 0.8 * GB : GB;
+  return bytes + chat <= cards.total - cards.n * 0.5 * GB ? 'ok' : 'no';
+}
+
 /** A card's speed when not named: a typical figure for its memory size. */
 export function cardSpeedOf(hw: Hardware): number {
   if (hw.cardSpeed) return hw.cardSpeed;
@@ -116,7 +128,7 @@ export function fitOf(need: number, hw: Hardware): { level: Level; where: ChatRo
 }
 
 /**
- * The leeway before a model is called too big for a PC: 5% over all its memory (his call, 11 Oct). The need is an
+ * The leeway before a model is called too big for a PC: 5% over all its memory. The need is an
  * estimate and runs high (the 35B-A3B: about 26.7 GB worked out, about 24 GB in Help's note from the 32 GB desktop).
  */
 export const FIT_LEEWAY = 1.05;
@@ -129,6 +141,16 @@ export const FIT_LEEWAY = 1.05;
 export function ramFit(need: number, mem: { ram: number; vram: number }): Level | null {
   if (!mem.ram || !need) return null;
   return need <= mem.vram + Math.max(0, mem.ram - OS_RAM) ? 'ok' : need <= (mem.vram + mem.ram) * FIT_LEEWAY ? 'tight' : 'no';
+}
+
+/**
+ * A PC's memory as a whole from what it reports (this PC's memoryNow, or a linked PC's hello `memory`): its RAM and
+ * every card's own memory (2.0.50 sends `cards`; an older PC said only one card's). For ramFit.
+ */
+export function memOfReport(raw: unknown): { ram: number; vram: number } {
+  const m = raw as { ram?: { total?: number }; gpu?: { total?: number; shared?: boolean } | null; cards?: { total?: number } } | null | undefined;
+  const cards = typeof m?.cards?.total === 'number' ? m.cards.total : m?.gpu && !m.gpu.shared ? m.gpu.total ?? 0 : 0;
+  return { ram: m?.ram?.total ?? 0, vram: cards };
 }
 
 /** RAM this full (in use / total) or more: the PC's card in the left panel shows a yellow (!) (public/home.js). */

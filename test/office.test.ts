@@ -184,10 +184,11 @@ function bought(...items: string[]): Bought[] {
 test('every office starts empty: no boardroom, nothing in the lounge, no deck chairs, the kitchen only to rest in', () => {
   // Nothing bought (a new office, or one made before 2.0.50: nothing counts as owned already).
   const none = roomsOf(cleanBought({}));
-  assert.deepEqual(none.boardroom, { table: false, chairs: 0, whiteboard: false, clock: false, cooler: false });
+  assert.deepEqual(none.boardroom, { table: false, chairs: 0, whiteboard: false, plants: false, clock: false, cooler: false });
   assert.deepEqual(none.lounge, { armchair: false, bookcase: false, sofa: false, tv: false, gym: false, arcade: false });
   assert.deepEqual(none.desks, { rocks: false, ducks: false, cactus: false });
   assert.equal(none.flamingo, false);
+  assert.equal(none.volleyball, false);
   assert.equal(none.trophy, null);
   assert.deepEqual(none.rest, ['coffee', 'vending', 'lunch']);
   // Away staff (their PC's owner is using it) wait by the lounge window while the lounge is empty.
@@ -204,12 +205,13 @@ test('every office starts empty: no boardroom, nothing in the lounge, no deck ch
 test('what each room offers with some and with all of it bought', () => {
   // Some: a table and one pair of chairs; the armchair.
   const some = roomsOf(bought('table', 'chairs', 'armchair'));
-  assert.deepEqual(some.boardroom, { table: true, chairs: 2, whiteboard: false, clock: false, cooler: false });
+  assert.deepEqual(some.boardroom, { table: true, chairs: 2, whiteboard: false, plants: false, clock: false, cooler: false });
   assert.deepEqual(some.rest, ['coffee', 'vending', 'lunch', 'nap']);
   assert.deepEqual(some.away, ['nap']);
   // All: three pairs (six chairs), the whiteboard, every lounge piece, the gym, six deck chairs.
-  const all = roomsOf(bought('table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'flamingo', 'rocks', 'ducks', 'cactus'));
-  assert.deepEqual(all.boardroom, { table: true, chairs: 6, whiteboard: true, clock: true, cooler: true });
+  const all = roomsOf(bought('table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'plants', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'volleyball', 'flamingo', 'rocks', 'ducks', 'cactus'));
+  assert.deepEqual(all.boardroom, { table: true, chairs: 6, whiteboard: true, plants: true, clock: true, cooler: true });
+  assert.equal(all.volleyball, true);
   assert.deepEqual(all.lounge, { armchair: true, bookcase: true, sofa: true, tv: true, gym: true, arcade: true });
   assert.deepEqual(all.desks, { rocks: true, ducks: true, cactus: true });
   assert.equal(all.flamingo, true);
@@ -263,14 +265,36 @@ test("the new treats, desk friends and pieces are sold at the shop's rate, each 
   assert.deepEqual(roomsOf(bought('arcade')).away, ['arcade']);
 });
 
+test("sandwiches, energy drinks, indoor plants and the volleyball set: AHO's prices / 20, treats again and again, the rest once", () => {
+  const now = new Date(2026, 9, 17, 12);
+  const price = (id: string) => SHOP.find(i => i.id === id)?.price;
+  // Energy drinks are free, like pizza: a node, with no tokens of its own, can use its machine too.
+  assert.deepEqual(['sandwiches', 'energy', 'plants', 'volleyball'].map(price), [20_000, 0, 30_000, 100_000]);
+  assert.ok('bought' in buy('sandwiches', 1e9, bought('sandwiches', 'sandwiches'), now));
+  assert.ok('bought' in buy('energy', 1e9, bought('energy', 'energy'), now));
+  const free = buy('energy', 0, [], now);
+  assert.ok('bought' in free && free.bought.price === 0, JSON.stringify(free));
+  const plants = buy('plants', 1e9, bought('plants'), now);
+  assert.ok('error' in plants && /the indoor plants already: it stays in the boardroom\./.test(plants.error), JSON.stringify(plants));
+  const net = buy('volleyball', 1e9, bought('volleyball'), now);
+  assert.ok('error' in net && /the beach volleyball set already: it stays on the beach\./.test(net.error), JSON.stringify(net));
+  const short = buy('volleyball', 99_999, [], now);
+  assert.ok('error' in short && /100,000/.test(short.error), JSON.stringify(short));
+  assert.equal(roomsOf(bought('plants')).boardroom.plants, true);
+  assert.equal(roomsOf(bought('volleyball')).volleyball, true);
+});
+
 test('the trophy case comes by itself with the purchase that finishes everything, dated by it', () => {
-  const everything = ['table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'flamingo', 'rocks', 'ducks', 'cactus'];
+  const everything = ['table', 'chairs', 'chairs', 'chairs', 'whiteboard', 'plants', 'clock', 'cooler', 'armchair', 'bookcase', 'sofa', 'tv', 'gym', 'arcade', ...Array(6).fill('deckchair'), 'volleyball', 'flamingo', 'rocks', 'ducks', 'cactus'];
   // Every piece but no treats yet: not earned.
   assert.equal(trophyOf(bought(...everything)), null);
-  // Every treat but the cake: still not.
-  assert.equal(trophyOf(bought(...everything, 'coffee', 'donuts', 'icecream')), null);
+  // Every treat but the cake: still not (energy drinks are not needed).
+  assert.equal(trophyOf(bought(...everything, 'coffee', 'donuts', 'sandwiches', 'icecream')), null);
+  // Without the plants or the volleyball set: not either.
+  assert.equal(trophyOf(bought(...everything.filter(i => i !== 'plants'), 'coffee', 'donuts', 'sandwiches', 'icecream', 'cake')), null);
+  assert.equal(trophyOf(bought(...everything.filter(i => i !== 'volleyball'), 'coffee', 'donuts', 'sandwiches', 'icecream', 'cake')), null);
   // The cake finishes it: earned, dated by the cake; a coffee after it does not move the date.
-  const list = bought(...everything, 'coffee', 'donuts', 'icecream', 'cake');
+  const list = bought(...everything, 'coffee', 'donuts', 'sandwiches', 'icecream', 'cake');
   const done = [...list, { item: 'coffee' as const, price: 10_000, at: '2027-01-01T00:00:00.000Z' }];
   assert.deepEqual(trophyOf(done), { at: list.at(-1)?.at });
   assert.deepEqual(roomsOf(done).trophy, { at: list.at(-1)?.at });

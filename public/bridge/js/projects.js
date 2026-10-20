@@ -6,7 +6,7 @@ function stateBadge(r) {
   if (r.running) return h('span', { class: 'badge b-run' }, '● Running :' + r.running.port);
   if (r.portInUse) return h('span', { class: 'badge b-busy', title: 'Something is answering on this port, but the Bridge did not start it.' }, '◐ Port ' + r.portInUse + ' in use');
   if (r.portSharedWith) return h('span', { class: 'badge b-off', title: 'This project starts on the same port as ' + r.portSharedWith.name + ', which the Bridge is running. Stop that one first to run this one.' }, '○ Port ' + r.portSharedWith.port + ' used by ' + r.portSharedWith.name);
-  if (!r.commands.length) return h('span', { class: 'badge b-off' }, '– No start command');
+  if (!r.commands.length) return h('button', { class: 'badge b-off b-link', type: 'button', title: 'How to add a start command', onclick: () => noStartDialog(r) }, '– No start command');
   return h('span', { class: 'badge b-off' }, '○ Stopped');
 }
 
@@ -51,7 +51,8 @@ function runButton(r) {
   if (r.running) return [
     h('button', { class: 'btn', type: 'button', onclick: () => act('open-browser', r) }, icon(0xE774), 'Open'),
     h('button', { class: 'btn', type: 'button', onclick: () => stop(r) }, icon(0xE71A), 'Stop')];
-  if (!r.commands.length) return h('button', { class: 'btn', type: 'button', disabled: true, title: 'No start command in the project\'s .claude/launch.json or project.json' }, icon(0xE768), 'Run local copy');
+  // Pressable, not greyed out: a greyed button cannot say why (Firefox shows no tooltip on it); this one does.
+  if (!r.commands.length) return h('button', { class: 'btn', type: 'button', title: 'No start command yet: see how to add one', onclick: () => noStartDialog(r) }, icon(0xE768), 'Run local copy');
   return h('button', { class: 'btn', type: 'button', 'aria-haspopup': r.commands.length > 1 ? 'menu' : null,
     onclick: e => r.commands.length > 1 ? openRunMenu(r, e.currentTarget) : askStart(r, r.commands[0]) },
     icon(0xE768), 'Run local copy', r.commands.length > 1 ? icon(0xE70D) : null);
@@ -125,7 +126,12 @@ function renderList() {
   if (!rows.length) {
     return L.replaceChildren(h('div', { class: 'empty' }, 'No projects yet. ',
       h('button', { class: 'btn accent', type: 'button', onclick: () => addFolderDialog() }, 'Add a working folder'), ' ',
-      h('button', { class: 'btn', type: 'button', onclick: () => addProjectDialog() }, 'Add one project')));
+      h('button', { class: 'btn', type: 'button', onclick: () => addProjectDialog() }, 'Add one project'),
+      // TOMLIN has no Welcome window: the empty list is where a first-time person starts, so the prompt is offered here.
+      h('div', { style: 'max-width:560px;margin:18px auto 0;border-top:1px solid var(--line2);padding-top:14px;text-align:left' },
+        h('b', { style: 'color:var(--ink)' }, 'Teach your AI to save a start line'),
+        h('p', { class: 'muted', style: 'font-size:13px;margin:4px 0 10px' }, 'TOMLIN runs each project from a "start" line in its project.json. Paste this prompt once into Claude, ChatGPT or the AI you use, and it will write that line for your projects and keep it up to date. It is also on the Prompts page.'),
+        copyBlock('Copy the prompt', startLinePrompt, 'Start-line prompt copied. Paste it into the AI you use.'))));
   }
   if (!list.length) {
     const hiddenN = rows.length - visible.length;
@@ -171,6 +177,41 @@ async function copyPrompt(r) {
     dialog('Copy this prompt', [h('p', { class: 'muted' }, 'The clipboard was blocked, so copy it from here (Ctrl+C):'), ta], [h('button', { class: 'btn accent', type: 'button', onclick: closeDialog }, 'Done')]);
     ta.focus(); ta.select();
   }
+}
+
+// ---- The start-line prompt: pasted once into the AI the person uses, so it writes each project's "start" in its
+// project.json and keeps it up to date. On the empty list and on a project with no start command; also a starter on Prompts.
+let startLine = null;
+async function startLinePrompt() { if (!startLine) startLine = await api('/api/start-prompt'); return startLine.text; }
+// A Copy button that says Copied. If the clipboard is blocked, the text shows selected in place: a second dialog
+// would close the one the button sits in.
+function copyBlock(label, textOf, done, accent) {
+  const ta = h('textarea', { class: 'prompt-text', readonly: true, hidden: true, 'aria-label': 'The prompt' });
+  const text = h('span', null, label);
+  const b = h('button', { class: accent ? 'btn accent' : 'btn', type: 'button', onclick: async () => {
+    let t;
+    try { t = await textOf(); } catch (e) { return info(e.message, true); }
+    try {
+      await navigator.clipboard.writeText(t);
+      info(done);
+      text.textContent = 'Copied';
+      setTimeout(() => { text.textContent = label; }, 2000);
+    } catch {
+      ta.value = t; ta.hidden = false; ta.focus(); ta.select();
+      info('The clipboard was blocked, so the prompt is shown below the button: copy it with Ctrl+C.', true);
+    }
+  } }, icon(0xE8C8), text);
+  return h('div', { style: 'display:grid;gap:8px;justify-items:start' }, b, ta);
+}
+function noStartDialog(r) {
+  const bad = r.startSkipped || [];
+  dialog('No start command for ' + r.name, [
+    h('p', null, 'TOMLIN runs a project from a start line in its own files: a "start" in project.json at the top of its folder, or an entry in .claude/launch.json. ' +
+      (bad.length ? 'The start entry in ' + bad.join(' and ') + ' could not be used. An entry is skipped when it names no program, its arguments are not a list, its cwd is not a folder that is there, or its env is not plain names with text values.' : 'This project has neither yet.')),
+    h('p', { class: 'muted' }, 'Copy this prompt into Claude, ChatGPT or the AI you use. It asks the AI to remember how to write a start line, and to add one for this project now (the prompt names its folder).'),
+    copyBlock('Copy the prompt', async () => (await startLinePrompt()) + '\n\nPlease add the start line for this project now.\n' + promptFor(r),
+      'Start-line prompt copied for ' + r.name + '. Paste it into the AI you use, then Refresh here.', true)],
+    [h('button', { class: 'btn', type: 'button', onclick: closeDialog }, 'Close')]);
 }
 
 // ---- My order: move with the menu or by dragging (only while sorted by "My order") ----

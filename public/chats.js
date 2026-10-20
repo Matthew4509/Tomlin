@@ -89,11 +89,15 @@ function drawRecent() {
     const b = el('button', { class: 'rail-row rail-recent-row', type: 'button', 'data-key': `recent:${c.id}`, 'aria-current': inChat && c.id === chatUi.current ? 'true' : null, title: `${c.title}\nWith ${c.name}\n${timeText(c.updated)}` },
       app.avatar(c.who, c.avatar),
       el('span', { class: 'rail-text' }, el('span', { class: 'rail-name', text: c.title }), el('span', { class: 'rail-sub', text: c.name })));
-    b.addEventListener('click', () => openChat(c.id));
-    // The … beside a chat: Pin or Unpin, and Delete (the same window as the chat's own menu).
+    // The picture: their window (New chat, Edit staff, Resume chat, their recent chats); the rest of the row opens the chat.
+    const person = () => app.openPerson(c.who, c.name, { resume: c.id });
+    b.title += `\nPress the picture: new chat, edit staff, resume chat`;
+    b.addEventListener('click', e => (e.target.closest('.rail-avatar') ? person() : openChat(c.id)));
+    // The … beside a chat: Pin or Unpin, Delete (the same window as the chat's own menu), and the person's window.
     const more = el('button', { class: 'rail-edit rail-more', type: 'button', title: `"${c.title}": pin, unpin or delete`, 'aria-label': `More for the chat ${c.title}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
     more.innerHTML = MORE_RAIL_ICON;
     more.addEventListener('click', () => railMenu(more, [
+      [`${c.name}: new chat, edit staff…`, person],
       [c.pinned ? 'Unpin' : 'Pin under Projects', () => pinChat(c, !c.pinned)],
       ['Delete…', () => askDelete(c), true],
     ]));
@@ -596,38 +600,67 @@ async function startChat(who, button) {
 
 // ---- A person pressed in the left panel: New chat on the left, their recent chats on the right ----
 
-/** How many of their chats the window lists, newest first (all of them are in the Chats list on the right). */
+/** How many of their chats the window lists at first, newest first; Load more shows as many again. */
 const RECENT_SHOWN = 12;
 let personWho = '';
-app.openPerson = async (who, name) => {
+/** The chat Resume chat opens (the one whose picture was pressed in Recent chats), or ''. */
+let personResume = '';
+/**
+ * A person's window: New chat, Edit staff (a hire), Resume chat (opened from one of their chats in Recent chats), then
+ * their recent chats, each with its own Resume chat, and Load more.
+ */
+app.openPerson = async (who, name, opts = {}) => {
   personWho = who;
+  personResume = opts.resume ?? '';
   await loadChats();
   if (personWho !== who) return;
   $('#person-chats-title').textContent = name;
   $('#person-chats-fault').hidden = true;
   $('#person-chats-face').replaceChildren(app.avatar ? app.avatar(who, name.slice(0, 2).toUpperCase()) : '');
   $('#person-chats-start').textContent = chatUi.people.find(p => p.who === who)?.kind === 'image' ? 'New chat (draw)' : 'New chat';
+  $('#person-chats-edit').hidden = !(who.startsWith('staff:') && app.editStaff);
+  $('#person-chats-resume').hidden = !personResume;
   const theirs = chatUi.list.filter(c => c.who === who).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
-  const rows = theirs.slice(0, RECENT_SHOWN).map(c => {
-    // Project name - subject - date.
+  const open = async id => {
+    $('#person-chats').close();
+    await openChat(id);
+  };
+  const row = c => {
+    // Project name - subject - date; the whole row opens it, and so does its Resume chat button.
     const b = el('button', { class: 'person-chat', type: 'button', title: `${c.title}: ${c.messages} message${c.messages === 1 ? '' : 's'}` },
       el('span', { class: 'person-chat-project', text: chatGroup(c)?.name ?? 'Default' }),
       el('span', { class: 'person-chat-sep', text: ' - ', 'aria-hidden': 'true' }),
       el('span', { class: 'person-chat-title', text: c.title }),
       el('span', { class: 'person-chat-sep', text: ' - ', 'aria-hidden': 'true' }),
       el('span', { class: 'person-chat-date', text: timeText(c.updated) }));
-    b.addEventListener('click', async () => {
-      $('#person-chats').close();
-      await openChat(c.id);
-    });
-    return el('li', {}, b);
-  });
-  if (!rows.length) rows.push(el('li', { class: 'hint', text: `No chats with ${name} yet.` }));
-  else if (theirs.length > RECENT_SHOWN) rows.push(el('li', { class: 'hint', text: `${theirs.length - RECENT_SHOWN} older: in the Chats list on the right.` }));
-  $('#person-chats-list').replaceChildren(...rows);
+    b.addEventListener('click', () => open(c.id));
+    return el('li', { class: 'person-chat-item' }, b,
+      el('button', { class: 'btn primary person-chat-resume', type: 'button', text: 'Resume chat', 'aria-label': `Resume chat: ${c.title}`, onclick: () => open(c.id) }));
+  };
+  const list = $('#person-chats-list');
+  const draw = shown => {
+    const rows = theirs.slice(0, shown).map(row);
+    if (!rows.length) rows.push(el('li', { class: 'hint', text: `No chats with ${name} yet.` }));
+    else if (theirs.length > shown) {
+      rows.push(el('li', { class: 'person-chat-more' }, el('button', { class: 'link', type: 'button', text: `Load more (${theirs.length - shown} older)`, onclick: () => {
+        draw(shown + RECENT_SHOWN);
+        list.querySelectorAll('.person-chat')[shown]?.focus();
+      } })));
+    }
+    list.replaceChildren(...rows);
+  };
+  draw(RECENT_SHOWN);
   if (!$('#person-chats').open) $('#person-chats').showModal();
-  $('#person-chats-start').focus();
+  (personResume ? $('#person-chats-resume') : $('#person-chats-start')).focus();
 };
+$('#person-chats-edit').addEventListener('click', () => {
+  $('#person-chats').close();
+  app.editStaff(personWho.slice('staff:'.length));
+});
+$('#person-chats-resume').addEventListener('click', async () => {
+  $('#person-chats').close();
+  await openChat(personResume);
+});
 $('#person-chats-start').addEventListener('click', async e => {
   const b = e.currentTarget;
   $('#person-chats-fault').hidden = true;

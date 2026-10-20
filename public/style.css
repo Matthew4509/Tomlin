@@ -478,10 +478,25 @@ dialog.person-chats { width: min(640px, calc(100vw - 32px)); }
 .person-chats-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; }
 .person-chat { display: flex; align-items: baseline; gap: 0; width: 100%; min-width: 0; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
 .person-chat:hover, .person-chat:focus-visible { background: var(--track); }
+/* Recent chats: the picture opens the person's window, so it shows a ring when pointed at. */
+.rail-recent-row .rail-avatar:hover { box-shadow: 0 0 0 2px var(--accent); }
+.person-chat-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.person-chat-item .person-chat { flex: 1 1 auto; }
+.person-chat-resume { flex: none; padding: 4px 10px; font-size: var(--fs-sm); white-space: nowrap; }
+.person-chat-more { padding: 6px 10px; }
+.person-chats-new .btn { width: 100%; }
 .person-chat-project, .person-chat-date, .person-chat-sep { flex: none; color: var(--ink-soft); white-space: nowrap; }
+/* A flex item drops the spaces round its " - ": put them back as padding. */
+.person-chat-sep { padding: 0 .35em; }
 .person-chat-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .person-chat-project { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 560px) { .person-chats-cols { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+  .person-chats-cols { grid-template-columns: 1fr; }
+  /* Narrow: the subject on its own line, then "project - date", so Resume chat leaves it room. */
+  .person-chat { flex-wrap: wrap; }
+  .person-chat-title { order: -1; flex-basis: 100%; }
+  .person-chat > .person-chat-sep:nth-child(2) { display: none; }
+}
 .rail-state.s-on { color: var(--good); }
 .rail-state.s-asleep, .rail-state.s-waking { color: var(--warn); }
 .rail-state.s-off { color: var(--bad); }
@@ -534,6 +549,12 @@ dialog.person-chats { width: min(640px, calc(100vw - 32px)); }
 .node-install-pick { cursor: pointer; }
 .node-install-pick.is-busy { opacity: .6; pointer-events: none; }
 .node-install-progress { display: grid; gap: 6px; max-width: 520px; }
+.node-install-git { display: grid; gap: 6px; max-width: 640px; }
+.node-install-hand { margin: 10px 0 4px; }
+/* Set apart from Cancel, the default, so it is chosen and not slipped into */
+.install-anyway { margin-left: 18px; }
+.node-install-hand summary { cursor: pointer; font-weight: 600; }
+.node-install-hand ol { margin: 6px 0 0; padding-left: 22px; display: grid; gap: 4px; }
 .node-uses-group h4 { margin: 2px 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
 .node-uses-group ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); color: var(--ink-soft); display: grid; gap: 2px; }
 .node-on { font-size: var(--fs-lg); font-weight: 600; }
@@ -648,6 +669,7 @@ dialog#new-chat { width: min(1040px, 96vw); }
 /* Staff window: hire at the top with role cards and level choices; each person a row that opens for editing. */
 .pick-set { border: 0; margin: 0; padding: 0; min-width: 0; }
 .pick-set legend { font-size: var(--fs-sm); color: var(--ink-soft); margin-bottom: 6px; padding: 0; }
+.team-group-head { margin: 10px 0 4px; font-size: var(--fs-sm); font-weight: 600; }
 .role-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
 .level-pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pick-card { position: relative; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; font-size: var(--fs-md); }
@@ -734,6 +756,8 @@ dialog.ask-pop .fault { text-align: left; }
 .mp-cat[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
 .mp-main { min-width: 0; display: grid; gap: 10px; }
 .mp-main h3 { margin: 4px 0 0; }
+.mp-heading-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.mp-order { flex: none; margin-left: auto; }
 .mp-bar { position: sticky; top: -16px; z-index: 2; display: flex; gap: 10px; align-items: end; padding: 8px 0; background: var(--bg); }
 .mp-bar .field { margin: 0; }
 .mp-list { display: grid; gap: 8px; }
@@ -814,6 +838,18 @@ dialog#profile::backdrop { background: rgba(0,0,0,.55); }
 
 dialog.small-dlg { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); width: min(480px, 94vw); padding: 16px; }
 dialog.small-dlg::backdrop { background: rgba(0,0,0,.55); }
+/* Backup when a PC is off: wider, so each model is a PC | Model row. */
+dialog#backup-dlg { width: min(860px, 96vw); max-height: 92vh; }
+.backup-send h3, #backup-dlg h3 { margin: 14px 0 6px; font-size: var(--fs-md); }
+.backup-filter { flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.backup-filter select { max-width: 240px; }
+.backup-list { display: grid; gap: 2px; max-height: 44vh; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; }
+.backup-head, .backup-row { display: grid; grid-template-columns: 24px minmax(120px, 220px) 1fr; gap: 8px; align-items: start; padding: 6px 8px; }
+.backup-head { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+.backup-row { border-radius: 8px; cursor: pointer; }
+.backup-row:hover, .backup-row:has(input:checked) { background: var(--track); }
+.backup-pc { overflow-wrap: anywhere; }
+@media (max-width: 560px) { .backup-head { display: none; } .backup-row { grid-template-columns: 24px 1fr; } .backup-row > :last-child { grid-column: 2; } }
 .btn.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
 .rail-del:hover { color: #b3261e; }
 
@@ -1226,6 +1262,10 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .ring .trk { stroke: var(--track); }
 .ring .val { stroke: var(--ink-soft); stroke-linecap: round; transition: stroke-dasharray .4s; }
 .ring.high .val { stroke: var(--warn); }
+.ring.off .trk { stroke-dasharray: 3 3; }
+.ring.off .val { visibility: hidden; }
+.ring.off .ring-v { color: var(--ink-soft); }
+.ring .ring-off { width: 16px; height: 16px; transform: none; }
 .ring-v { position: absolute; top: 0; left: 0; right: 0; height: 36px; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
 .ring-k { font-size: var(--fs-xs); line-height: 1.2; color: var(--ink-soft); white-space: nowrap; }
 .loaded { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; align-content: center; font-size: var(--fs-xs); }
@@ -1317,6 +1357,8 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 .mp-job:empty { display: none; }
 .mp-job { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); box-shadow: var(--shadow-sm); font-size: var(--fs-md); }
 .mp-job.on { border-color: var(--accent); }
+.mp-job.done { border: 2px solid var(--good); background: color-mix(in srgb, var(--good) 12%, var(--panel)); }
+.mp-done-text { flex: 1 1 260px; font-weight: 600; }
 .mp-job .dl-track { flex: 1 1 200px; }
 .mp-size { margin: 3px 0 0; font-size: var(--fs-md); color: var(--ink); }
 .mp-links { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
@@ -1713,6 +1755,9 @@ dialog#jobs { width: min(1240px, 96vw); max-height: 92vh; min-height: min(640px,
 .sdot[data-activity="owner"] { background: var(--bad); border-color: var(--bad); }
 .sdot[data-activity="owner"]::after { content: ""; position: absolute; left: 1px; right: 1px; top: 50%; height: 3px; margin-top: -1.5px; background: var(--panel); }
 .sdot[data-activity="offline"] { background: var(--panel); border-color: #8a8a8a; }
+/* Asleep (a hire whose model is not loaded): a yellow ring with a dot in the middle. */
+.sdot[data-activity="asleep"] { background: radial-gradient(circle, #d4a017 0 2px, var(--panel) 2.5px); border-color: #d4a017; }
+.rail-state.a-asleep { color: var(--warn); }
 .rail-state.a-available { color: var(--good); }
 .rail-state.a-busy { color: var(--warn); }
 .rail-state.a-owner { color: var(--bad); }
@@ -1986,6 +2031,9 @@ dialog#hire-dlg { width: min(1180px, 96vw); max-height: 92vh; padding: 16px; bac
 .hs-all { display: grid; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .hs-all h3 { margin: 0; }
 .hs-net { align-items: center; }
+.hs-net-acts { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+dialog#hs-push-dlg { width: min(560px, 96vw); max-height: 90vh; padding: 16px; background: var(--panel); color: var(--ink); }
+.hs-push-list { display: grid; gap: 8px; }
 .hs-models-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .hs-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .hs-tools input[type="search"] { flex: 0 1 340px; min-width: 0; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--field); color: var(--field-ink); font: inherit; font-size: var(--fs-sm); }
@@ -1999,7 +2047,9 @@ dialog#hire-dlg { width: min(1180px, 96vw); max-height: 92vh; padding: 16px; bac
 .hs-model.hs-tight { border-style: dashed; }
 .hs-look-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .hs-look-box h3 { margin: 0 0 8px; }
-.hs-go { justify-content: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Cancel and Hire staff stay in sight at the foot of the window (or the page) while the cards above scroll. */
+.hs-go { justify-content: flex-end; margin-top: 12px; padding: 12px 0 10px; border-top: 1px solid var(--line); position: sticky; bottom: 0; z-index: 3; background: var(--panel); }
+#setup-page > dialog.as-page .hs-go { background: var(--bg); }
 @media (max-width: 760px) {
   .hs-split { grid-template-columns: minmax(0, 1fr); }
   .hs-profile { border-right: 0; padding-right: 0; }
@@ -2080,7 +2130,14 @@ dialog#hire-dlg { width: min(1180px, 96vw); max-height: 92vh; padding: 16px; bac
   .pc-two > .pc-part + .pc-part { padding-left: 0; border-top: 1px solid var(--line); padding-top: 6px; }
 }
 /* Day / Night (theme.js): the button beside Settings, and the picker at the top of Settings */
-.colours-toggle { display: inline-flex; align-items: center; gap: 6px; }
+/* The colours switch at the top (theme.js): Day, Night, Auto by the sun. */
+.theme-switch { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); flex: none; }
+.theme-switch button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: var(--ink-soft); cursor: pointer; padding: 0; }
+.theme-switch button:hover { color: var(--ink); }
+.theme-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.theme-switch button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
+.theme-switch svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.theme-switch svg .fill { fill: currentColor; stroke: none; }
 .colours-pick { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 12px 16px 14px; margin: 0 0 16px; display: grid; gap: 8px; }
 .colours-pick legend { font-weight: 600; padding: 0 4px; }
 .colours-pick .hint { margin: 0; }
@@ -2143,3 +2200,33 @@ dialog.arcade-box::backdrop { background: rgba(8, 12, 24, .6); }
 .cab-hint { margin: auto 0 0; padding-top: 2%; text-align: center; font: 700 12px Consolas, 'Courier New', monospace; letter-spacing: 0.1em; color: #9fb0c8; animation: cab-blink 1.2s steps(2) infinite; }
 @keyframes cab-blink { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .cab-hint { animation: none; } }
+
+/* The kitchen's vending machine (office.js openVending): cans behind glass, a display and a coin slot. */
+dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; padding: 0; background: transparent; box-shadow: none; overflow: visible; }
+.vend { padding: 12px 14px 14px; border-radius: 16px 16px 8px 8px; background: linear-gradient(180deg, #608cad, #3f6688); color: #f2f7fb; box-shadow: inset 0 0 0 4px #2c4a63, 0 18px 40px rgba(0, 0, 0, 0.45); }
+.vend-top { display: grid; justify-items: center; gap: 2px; margin-bottom: 10px; padding: 8px; border-radius: 10px; background: linear-gradient(180deg, #1d2330, #11151d); box-shadow: inset 0 0 0 2px #7be36b, 0 0 14px rgba(123, 227, 107, 0.45); }
+.vend-brand { font: 900 24px/1 Consolas, 'Courier New', monospace; letter-spacing: 0.32em; text-indent: 0.32em; color: #7be36b; text-shadow: 0 0 8px rgba(123, 227, 107, 0.8); }
+.vend-sub { font: 700 12px/1.3 'Segoe UI', system-ui, sans-serif; letter-spacing: 0.08em; color: #d4eefa; }
+.vend-body { display: grid; grid-template-columns: 1fr 150px; gap: 10px; }
+.vend-glass { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 6px; align-content: center; padding: 12px 10px; border-radius: 8px; background: linear-gradient(135deg, rgba(217, 234, 245, 0.95), rgba(170, 205, 228, 0.85)); box-shadow: inset 0 0 0 3px #2c4a63; }
+.vend-can { display: block; justify-self: center; width: 18px; height: 30px; border-radius: 4px; background: linear-gradient(180deg, #1d2330 0 30%, var(--band) 30% 52%, #1d2330 52%); box-shadow: inset 0 3px 0 #9aa1a8, 0 2px 0 rgba(0, 0, 0, 0.25); }
+.vend-can.c0 { --band: #7be36b; } .vend-can.c1 { --band: #f7cd50; } .vend-can.c2 { --band: #ef6b7a; } .vend-can.c3 { --band: #69bfe9; }
+.vend-side { display: grid; gap: 8px; align-content: start; }
+.vend-screen { display: grid; gap: 2px; min-height: 64px; margin: 0; padding: 8px; border-radius: 6px; background: #0b1020; box-shadow: inset 0 0 0 2px #2c4a63; }
+.vend-screen b { font: 800 14px/1.2 Consolas, 'Courier New', monospace; letter-spacing: 0.1em; color: #7be36b; }
+.vend-screen span { font: 600 12px/1.35 'Segoe UI', system-ui, sans-serif; color: #cfd8e3; }
+.vend-coin { display: grid; justify-items: center; gap: 6px; padding: 10px 8px; border: 0; border-radius: 8px; background: #2c4a63; color: #ffffff; font: 700 13px/1.25 'Segoe UI', system-ui, sans-serif; cursor: pointer; box-shadow: inset 0 0 0 2px #9ab6c7; }
+.vend-coin:hover { background: #355a78; }
+.vend-coin:focus-visible { outline: 3px solid #f7cd50; outline-offset: 2px; }
+.vend-coin:disabled { cursor: progress; }
+.vend-slot { position: relative; width: 12px; height: 34px; border-radius: 6px; background: #0b1020; box-shadow: inset 0 0 0 2px #9ab6c7; }
+.vend-slot::after { content: ''; position: absolute; left: -12px; top: -26px; width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3c4, #e0ad1c 60%); box-shadow: inset 0 0 0 2px #b8860b; opacity: 0; }
+.vend-coin.dropping .vend-slot::after { animation: vend-coin 0.6s ease-in forwards; }
+@keyframes vend-coin { 0% { opacity: 1; transform: translateY(-12px) scaleX(1); } 70% { opacity: 1; transform: translateY(14px) scaleX(0.25); } 100% { opacity: 0; transform: translateY(20px) scaleX(0.1); } }
+.vend-balance { margin: 0; font: 600 12px/1.3 'Segoe UI', system-ui, sans-serif; color: #e5eef5; }
+.vend-tray { display: flex; justify-content: center; gap: 10px; min-height: 40px; margin-top: 10px; padding: 5px; border-radius: 6px; background: #1d2330; box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.6); }
+.vend-can.out { transform: rotate(90deg); animation: vend-drop 0.5s ease-in both; }
+@keyframes vend-drop { from { opacity: 0; transform: translateY(-50px) rotate(0deg); } to { opacity: 1; transform: translateY(0) rotate(90deg); } }
+.vend-note { margin: 10px 2px 0; font: 600 12px/1.4 'Segoe UI', system-ui, sans-serif; color: #e5eef5; }
+.vend-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .vend-coin.dropping .vend-slot::after, .vend-can.out { animation: none; } }

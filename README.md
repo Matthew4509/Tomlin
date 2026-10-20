@@ -100,7 +100,7 @@ about each one and choose for yourself.
 **Looking after it**
 - **App lock**: a PIN for the whole app (4 to 12 digits), optional on the main PC.
 - Each PC's uptime, tokens written and what the work would have cost on paid AI services.
-- Mute, notifications, a Day / Night look.
+- Mute, notifications, a Day / Night / Auto look (Auto: Day from sunrise to sunset, from this PC's time zone).
 - Windows installer (no administrator needed), Start with Windows, an icon by the clock, **Repair install**.
 
 **The office (a small game)**
@@ -151,7 +151,8 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 (chats, staff, pictures, memory, settings, links to other PCs, the app lock), `models` (downloaded models),
 `runtime` (downloaded graphics-card runners) and `backups`. The app folder holds only the program.
 
-To update: unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
+To update: **Update this install** (Nodes and memory; Settings, Your data and updates, opens it), with **Check git**
+or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
 data it zips the `data` folder into `backups` (the last 5 are kept; models are not in them). **Settings** (top bar),
 **Your data and updates**, opens the folder, backs up by hand and puts a backup back.
@@ -170,7 +171,7 @@ rather than misread it.
     round picture; **Change look** opens the look editor under it), **Name** (from the model unless typed; Random),
     **Role** (all six), **Level** and what they will run on. Right: **Assign a PC** (this PC and each linked PC as a
     card: on, off or away, its RAM and graphics memory, how many models of the role's kind it has or shares), then
-    **Choose a model** on that PC: search, cards with the memory each needs (a chat model at an 8K context), its file,
+    **Choose a model** on that PC: search, **Add new** beside it (opens Add a model), cards with the memory each needs (a chat model at an 8K context), its file,
     the size level, Loaded / Installed / Loads when asked, and a warning when it needs more memory than is free (never
     a block: any model can be picked). **Show hidden** shows there when the PC has a hidden model. The level starts at
     the size of the model picked (Junior, Experienced, Expert, Senior; a picture model by its size on disk) and can be
@@ -230,6 +231,9 @@ rather than misread it.
   **2.0.54:** ice creams 15,000, cake 30,000, pet rocks 10,000, rubber ducks 15,000, cacti 12,500 (named; point at one),
   wall clock 20,000, water cooler 35,000, arcade machine 125,000 (click it to play; public/arcade.js), flamingo 40,000;
   a trophy case once everything is bought and every treat given (src/home.ts trophyOf).
+  **2.0.55:** sandwich platter 20,000 (kitchen table), energy drinks (free, like pizza; click the vending machine: a minute at three
+  times the pace), indoor plants 30,000 (boardroom corners), beach volleyball set 100,000 (two a side); the towels moved
+  either side of the court. The trophy now needs the plants, the net and the sandwiches too.
   POST /api/office/buy {item} (src/home.ts buy: refuses an unknown item, one bought already, chairs before the table, or
   more than the purse holds, and says why); GET /api/office sends `rooms` (src/home.ts roomsOf: what each room offers);
   purchases kept in data/office.json beside the awards (every kept piece for good, the last 1000 treats).
@@ -276,7 +280,7 @@ rather than misread it.
   page with a random name and key that deletes itself and the file; it needs the site's https. Code:
   `src/bridge/hosting/`, `src/bridge/routes/hosting.js`, `public/bridge/js/hosting.js`; test
   `test/bridge/hosting.test.js` (stand-ins on this PC: a cPanel, an FTP server, sftp.exe).
-- **Top bar:** how busy the CPU and the graphics chip are (GPU %), RAM and graphics memory (GPU mem), refreshed every second, plus what is loaded and how much memory it holds.
+- **Top bar:** how busy the CPU and the graphics chip are (GPU %), RAM and graphics memory (GPU mem), refreshed every second, plus what is loaded and how much memory it holds. GPU and GPU mem show an unplugged plug on a dashed ring (disconnected) when there is no graphics chip with a driver, or Windows gives no readings for it (its tooltip says why).
 - **Chats:** **+ New chat** (left panel, top) asks who the chat is with (TOMLIN and each hire who chats), each
   with role · model · PC. The previous chats are in the **Chats** tab on the right of the chat, under the project each
   belongs to (the project with the newest chat first, then Default), each as [staff] subject, newest first: click one
@@ -555,6 +559,24 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.55:** Hire staff: **Add new** beside the model search opens Add a model; **Push to node** on each of All
+  models sends that model to any PC on the list. Update this install: **Check git** (newest signed GitHub Release),
+  **Check zip**, and the offline steps. Colours: a Day / Night / Auto switch at the top. Office: sandwiches, energy drinks (vending machine), indoor plants,
+  beach volleyball. Models page: Size and A to Z order buttons, and an MoE's category. Top bar: GPU and GPU mem show a disconnected symbol when unreadable.
+  Bridge part: a start entry's `cwd` and `env` are used (a React dev server on its `PORT`), and a local copy gets a
+  minute to answer, not 20 seconds. "No start command" and the empty list offer a prompt that teaches your AI to save
+  each project's start line (also first on Prompts). Check zip checks the zip's .sig too (pick both; none or a failing
+  one warns, with Install anyway), every update is started once as a test before it takes over, and `npm run pack`
+  signs each zip. The chat runner answers only TOMLIN (a new key each start); restore points kept on another PC carry
+  no link keys, sharing code or PIN, and one changed there is refused when it comes back. Models page: **Fits my card**
+  (an estimate of what sits wholly on the graphics card); with a filter set, each row shows a size inside it; draft heads
+  and video/music models are no longer listed as chat models. A hire given another model unloads the old one when
+  nobody else uses it; a hire whose model is not loaded shows Asleep (a yellow ring), not green. The person window has
+  Edit staff, Resume chat on each chat and Load more (Recent chats: press the picture); Hire staff's button stays in sight.
+  A PC that is off: send your last message to someone else online, or pick a backup by PC | Model with fit filters (no
+  picture models, no doubles). After Hire staff: Start chat now, or Not now. Energy drinks: only from the machine.
+  Bridge scans run in a low-priority process of their own: chat, nodes and the office keep answering while one reads a
+  project, and a second scan of the same project says one is already running.
 - **2.0.54:** New office rewards: ice creams, cake, desk friends, wall clock, water cooler, an arcade machine with three
   games, a flamingo and a trophy case. The Bridge part takes the stand-alone Bridge's later fixes.
 - **2.0.53:** Home's **Lets go!** no longer plans: it sends the prompt to the hire under Staff (Default: the hire on
@@ -578,7 +600,8 @@ rather than misread it.
   **Update all linked PCs**; a linked PC behind this one has a yellow (!) on its card in the left panel. A chat in the
   left panel has a … for Pin / Unpin and Delete. The Set up menu no longer folds. Staff: hire and edit opens Hire staff
   (See all staff beside Close for editing); under Choose a model, **All models** lists the models on your other PCs that the
-  PC picked has not got, with Copy to it (a model on another linked PC goes through this PC), then hire on it.
+  PC picked has not got, with Copy to it (a model on another linked PC goes through this PC), then hire on it;
+  **Push to node** on each opens a window of every PC, each with its own Push button.
   Moving someone to another PC (the office or the left panel) offers only the models that fit that PC's memory (its RAM
   with 3 GB kept for Windows, plus every graphics card's own memory); the others are named with what they need, and the server
   refuses such a move too. **Welcome to TOMLIN.html**, at the top of the zip, says what TOMLIN is, what it does and
@@ -839,7 +862,9 @@ rather than misread it.
 - **Models page:** Settings > Set up > **Add a model** opens a whole page. On its left: **Search
   filters** (**Min B** / **Max B**, **Min GB** / **Max GB**), then **Model categories** as tick boxes: **All models**
   (clears the ticks), **Chat models (LLMs)**, **Picture models**, **Helpers**, **Model runners** (any ticked shows),
-  **Abliterated** and **Uncensored** (either word in the name narrows it); then **Import models**. On top: the search
+  **Abliterated** and **Uncensored** (either word in the name narrows it), **MoE's** (mixtures of experts only, by
+  the name, or on this PC by the file); then **Import models**. Right of the list's heading, **Size** (smallest first,
+  pressed again largest first) and **A to Z** (pressed again Z to A) order the list and Hugging Face's whole list. On top: the search
   box (half the width), **Search**, and **All** | **Not installed** | **Installed**, which narrow every
   list, then **My local LLMs**. Every typed word must start a word in the model's name or notes; **all** lists every model and every chat
   model on Hugging Face.

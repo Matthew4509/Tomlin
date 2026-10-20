@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LEVELS, LEVEL_CHOICES, cleanAnswer, drawsFor, isMoe, isPlain, levelOf, levelOfSize, matchModel, paramsB, roleOf, ROLES, runChecks, Staff, staffSystem } from '../src/staff.ts';
+import { LEVELS, LEVEL_CHOICES, cleanAnswer, drawsFor, isMoe, isPlain, levelOf, levelOfSize, matchModel, modelLeft, paramsB, roleOf, ROLES, runChecks, Staff, staffSystem } from '../src/staff.ts';
 
 const GB = 2 ** 30;
 
@@ -180,4 +180,19 @@ test('a "Note: As an AI ..." paragraph comes off an answer, the answer stays', (
   assert.equal(cleanAnswer('Done.\n**Note:** As an AI I cannot run it.\nTry it yourself.\n\nThe end.'), 'Done.\n\n\nThe end.');
   // A note that is not that habit stays.
   assert.equal(cleanAnswer('Note: the API needs a key.'), 'Note: the API needs a key.');
+});
+
+test('a hire given another model: their old one on this PC is the one to unload, unless someone else runs on it', () => {
+  const was = { model: 'Mistral-NeMo-12B.gguf' };
+  assert.equal(modelLeft(was, { model: 'gemma-3-12b.gguf' }, []), 'Mistral-NeMo-12B.gguf');
+  // Another hire still on it: kept loaded.
+  assert.equal(modelLeft(was, { model: 'gemma-3-12b.gguf' }, [{ model: 'Mistral-NeMo-12B.gguf' }]), null);
+  // The same model, nothing changed: nothing to unload.
+  assert.equal(modelLeft(was, { model: 'Mistral-NeMo-12B.gguf' }, []), null);
+  // A linked PC had switched them to one of their other models: that one is what they ran on.
+  assert.equal(modelLeft({ model: 'a.gguf', group: ['b.gguf'], active: 'b.gguf' }, { model: 'c.gguf' }, []), 'b.gguf');
+  // Their old model was on a linked PC: nothing here to unload.
+  assert.equal(modelLeft({ model: 'remote:pc1:x' }, { model: 'c.gguf' }, []), null);
+  // Model taken away (none now): the old one goes.
+  assert.equal(modelLeft(was, { model: null }, []), 'Mistral-NeMo-12B.gguf');
 });

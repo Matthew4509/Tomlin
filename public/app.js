@@ -132,6 +132,7 @@ function meter(id, fraction, text, title) {
 }
 function meterOf(id, fraction, text, title) {
   const m = $(`#${id}`);
+  m.classList.remove('off');
   const pc = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
   $('.val', m).setAttribute('stroke-dasharray', `${pc} 100`);
   $('.ring-v', m).textContent = text;
@@ -143,6 +144,29 @@ function meterOf(id, fraction, text, title) {
 }
 
 const pct = (used, total) => (total ? `${Math.round((used / total) * 100)}%` : '–');
+
+/** A ring with nothing to read: a dashed track and an unplugged plug inside, the reason in its tooltip. */
+function meterOff(id, title) {
+  meterOf(id, 0, '', title);
+  const m = $(`#${id}`);
+  m.classList.add('off');
+  $('.ring-v', m).replaceChildren(unpluggedIcon());
+}
+function unpluggedIcon() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false', class: 'ring-off' })) svg.setAttribute(k, String(v));
+  // A plug (bottom left) pulled away from its socket (top right), each with its cable.
+  for (const d of ['M5 13l6 6-2 2-6-6z', 'M7 15l2-2M9 17l2-2', 'M6 18l-4 4', 'M13 5l6 6 2-2-6-6z', 'M18 6l4-4']) {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+/** Why the graphics chip cannot be read: its driver gives Windows no readings (`there`: ' on "<PC>"' for a linked PC). */
+const NO_CHIP = 'no graphics chip with a driver was found. If this PC has a graphics card, install its maker\'s driver (TOMLIN skips Windows\' basic display driver), then start TOMLIN again';
+const unreadWhy = chip => `Windows gives no readings for ${chip} (Task Manager shows no GPU graph for it either): its driver is missing or too old to report them. Install the maker's latest driver for it, then start TOMLIN again`;
 
 /**
  * The linked PC the top bar shows while a chat with someone on it is on screen (chats.js asks it every 3 s): the answer
@@ -175,13 +199,18 @@ function drawPcBar(r) {
   meter('m-cpu', st.cpu / 100, `${st.cpu}%`, `CPU${there}: ${st.cpu}%`);
   meter('m-ram', st.ram.total ? st.ram.used / st.ram.total : 0, pct(st.ram.used, st.ram.total), `RAM${there}: ${st.ram.total ? pair(st.ram.used, st.ram.total) : gb(st.ram.used)} in use`);
   const g = st.gpu;
+  const off = (id, title) => meterOff(id.replace(/^m-/, 'n-'), title);
   if (!g) {
-    meter('m-gpu', 0, '–', `Graphics memory${there}: no graphics chip found`);
-    meter('m-gpubusy', 0, '–', `GPU${there}: no graphics chip found`);
+    off('m-gpu', `Graphics memory${there}: disconnected: ${NO_CHIP}.`);
+    off('m-gpubusy', `GPU${there}: disconnected: ${NO_CHIP}.`);
     return;
   }
+  if (g.unread) {
+    off('m-gpubusy', `GPU${there}: disconnected: ${unreadWhy(g.name)}.`);
+    if (g.unread === 'all') return off('m-gpu', `Graphics memory${there}: disconnected: ${unreadWhy(g.name)}.`);
+  }
   meter('m-gpu', g.total ? g.used / g.total : 0, g.total ? pct(g.used, g.total) : gb(g.used), `Graphics memory${there}, ${g.name}: ${g.total ? pair(g.used, g.total) : gb(g.used)} in use${g.shared ? ' (built into the processor: it borrows from RAM)' : ''}`);
-  meter('m-gpubusy', (g.busy ?? 0) / 100, g.busy == null ? '–' : `${g.busy}%`, g.busy == null ? `How hard ${g.name}${there} is working: not read yet` : `How hard ${g.name}${there} is working: ${g.busy}%`);
+  if (!g.unread) meter('m-gpubusy', (g.busy ?? 0) / 100, g.busy == null ? '–' : `${g.busy}%`, g.busy == null ? `How hard ${g.name}${there} is working: not read yet` : `How hard ${g.name}${there} is working: ${g.busy}%`);
 }
 
 function drawBar(s) {
@@ -195,19 +224,22 @@ function drawBar(s) {
   const h = s.hardware;
   meter('m-cpu', h.cpu.percent / 100, `${h.cpu.percent}%`, `CPU ${h.cpu.percent}%. ${h.cpu.name}: ${h.cpu.cores} cores, ${h.cpu.threads} threads`);
   meter('m-ram', h.ram.used / h.ram.total, pct(h.ram.used, h.ram.total), `RAM: ${pair(h.ram.used, h.ram.total)} in use`);
-  if (h.gpu) {
+  const unread = h.gpu?.unread;
+  if (unread) meterOff('m-gpubusy', `GPU: disconnected: ${unreadWhy(h.gpu.name.replace(/\(R\)|\(TM\)/gi, ''))}.`);
+  if (unread === 'all') meterOff('m-gpu', `Graphics memory: disconnected: ${unreadWhy(h.gpu.name.replace(/\(R\)|\(TM\)/gi, ''))}.`);
+  if (h.gpu && unread !== 'all') {
     const total = h.gpu.total;
     const chip = h.gpu.name.replace(/\(R\)|\(TM\)/gi, '');
     meter('m-gpu', total ? h.gpu.used / total : 0, total ? pct(h.gpu.used, total) : gb(h.gpu.used),
       `Graphics memory, ${chip}: ${total ? pair(h.gpu.used, total) : gb(h.gpu.used)} in use${h.gpu.shared ? '. Built into the processor, it borrows from RAM (Windows lets it take up to half), so this is also counted in RAM' : ''}. How hard the chip works is the GPU ring.`);
     const busy = h.gpu.busy;
-    meter('m-gpubusy', (busy ?? 0) / 100, busy === null || busy === undefined ? '–' : `${busy}%`,
+    if (!unread) meter('m-gpubusy', (busy ?? 0) / 100, busy === null || busy === undefined ? '–' : `${busy}%`,
       busy === null || busy === undefined
         ? `How hard ${chip} is working: not read yet (Windows' counters start a few seconds after TOMLIN).`
         : `How hard ${chip} is working: ${busy}% (its busiest part, as Task Manager counts it). TOMLIN's models: ${h.gpu.models ?? 0}%.${h.gpu.shared ? ' It shares the processor chip\'s power and heat, so a busy GPU can slow the CPU too.' : ''}`);
-  } else {
-    meter('m-gpu', 0, '–', 'Graphics memory: no graphics chip found');
-    meter('m-gpubusy', 0, '–', 'GPU: no graphics chip found');
+  } else if (!h.gpu) {
+    meterOff('m-gpu', `Graphics memory: disconnected: ${NO_CHIP}.`);
+    meterOff('m-gpubusy', `GPU: disconnected: ${NO_CHIP}.`);
   }
   drawActive(s);
 }

@@ -1,5 +1,6 @@
 // The chat runners and the image pane: what is loaded, where a model goes, whether it fits, how each was started.
 import { usedFromTimings } from '../meter.ts';
+import { cardFit } from '../calc.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { freemem } from 'node:os';
 import { log } from '../log.ts';
@@ -9,6 +10,7 @@ import { chatArgs, TEMPLATE_FAULT, whyItFailed } from '../llama.ts';
 import { Pane } from '../pane.ts';
 import * as runnersOf from '../runners.ts';
 import { readings, streamChat } from '../engine.ts';
+import { runnerHeaders } from '../runnerkeys.ts';
 import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
 import { TONES } from '../persona.ts';
@@ -184,6 +186,8 @@ export function chatCards(): Gpu[] {
   const devices = devicesFor('llama', asked);
   return hardware.gpus.filter(g => !g.integrated && (g.total ?? 0) > 0 && ((devices.includes('cuda') && g.vendor === 'nvidia') || devices.includes('vulkan')));
 }
+/** The cards chat can use, counted and their memory added up (the Models page's "Fits my card"). */
+export const cardMem = () => (cards => ({ n: cards.length, total: cards.reduce((n, g) => n + (g.total ?? 0), 0) }))(chatCards());
 /** True when `device` is a graphics card with memory of its own (Auto lets llama.cpp fit the model to it). */
 const cardFor = (device: Device) => device !== 'cpu' && hardware.gpus.some(g => !g.integrated && (g.total ?? 0) > 0 && (device !== 'cuda' || g.vendor === 'nvidia'));
 /** How the connected chat model was started (for the jobs' room in the context and the worker's hello). */
@@ -294,8 +298,8 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     threads,
     devices: devicesFor('llama', asked),
     expectedSeconds: expected,
-    build: device => ({ exe: runtimes.exe('llama', device)!, args: port => chatArgs(path, port, device, threads, false, run, cardFor(device)), ready, device, timeoutSeconds: 600 }),
-    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { exe: runtimes.exe('llama', device)!, args: port => chatArgs(path, port, device, threads, true, run, cardFor(device)), ready, device, timeoutSeconds: 600 } : null),
+    build: device => ({ exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, false, run, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
+    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, true, run, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
     why: whyItFailed,
     note: notes.join(' ') || undefined,
   });
@@ -425,7 +429,7 @@ export async function openAiChat(req: IncomingMessage, res: ServerResponse): Pro
   takeChat(ac, runner, '', '', 'A program asking through /v1');
   res.once('close', () => ac.abort());
   try {
-    const upstream = await fetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b), signal: ac.signal });
+    const upstream = await fetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(runner.worker.base) }, body: JSON.stringify(b), signal: ac.signal });
     res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
     // Passed through as it comes; its end is kept to read llama.cpp's timings, so the answer counts on this PC (src/meter.ts).
     const dec = new TextDecoder();
@@ -509,7 +513,8 @@ export const panesGet: Routes = {
   '/api/status': async ({ res }) => json(res, 200, await status()),
   '/api/models': async ({ res }) => {
     await loadShapes();
-    return json(res, 200, { chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id) })), runtimes: runtimeList(), folder: chatModels.other(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
+    const cards = cardMem();
+    return json(res, 200, { cards, chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id), card: cardFit(m.bytes, cards) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id) })), runtimes: runtimeList(), folder: chatModels.other(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
   },
   '/api/place/try': async ({ res }) => json(res, 200, { job: tryView() }),
   '/v1/models': async ({ res }) => json(res, 200, { object: 'list', data: [chat, images.pane].filter(x => x.view.state === 'connected').map(x => ({ id: x.view.model, object: 'model', owned_by: 'tomlin' })) }),

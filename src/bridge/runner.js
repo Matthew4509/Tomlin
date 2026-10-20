@@ -10,6 +10,8 @@ const { state, refreshProjects, ownPortUser, commandPorts, projectName } = requi
 const { portBusy, busyPorts, waitForPort, localUrl } = require('./ports');
 const { openBrowser } = require('./desktop');
 
+const START_WAIT = 60000;
+
 function readTail(file) {
   try { return fs.readFileSync(file, 'utf8').trim().slice(-400); } catch { return ''; }
 }
@@ -45,11 +47,12 @@ async function startNow(p, entry, open, place) {
   }
   if (cmd.port !== entry.port) note = 'Port ' + entry.port + ' was busy, so it started on ' + cmd.port + '.';
   // The project's Local secrets (Push live, Secrets) reach the local copy as environment variables, so its code reads
-  // them with getenv() the same way the live site does. They are never written into the project.
-  let env = process.env;
+  // them with getenv() the same way the live site does. They are never written into the project. A launch file's own
+  // env (a PORT for a React dev server) goes under them: the person's Local secrets win.
+  let env = cmd.env ? { ...process.env, ...cmd.env } : process.env;
   try {
     const local = await require('./hosting/secrets').values(p.dir, 'local');
-    if (Object.keys(local).length) env = { ...process.env, ...local };
+    if (Object.keys(local).length) env = { ...process.env, ...(cmd.env || {}), ...local };
   } catch (e) { note = (note ? note + ' ' : '') + 'Its Local secrets could not be opened (' + e.message + '), so it started without them.'; }
   if (running.get(p.id) !== place) return { ok: false, error: p.name + ' was stopped before it started.' }; // Stop pressed during the checks
   const log = path.join(cfg.DATA, 'logs', p.id + '.log');
@@ -72,8 +75,9 @@ async function startNow(p, entry, open, place) {
   // A program that cannot start fires "error" and never "exit", so the log handle is closed in both places.
   child.on('error', e => { spawnError = e; try { fs.closeSync(out); } catch {} });
   child.on('exit', code => { exited = true; rec.exitCode = code; if (running.get(p.id) === rec) running.delete(p.id); try { fs.closeSync(out); } catch {} });
-  // Stops waiting as soon as the program fails to start, exits, or is stopped from the page.
-  const up = await waitForPort(cmd.port, 20000, () => !!spawnError || exited || running.get(p.id) !== rec);
+  // Stops waiting as soon as the program fails to start, exits, or is stopped from the page. A React dev server
+  // takes about 20 s to open its port on a busy PC, so a program that is still running gets a minute.
+  const up = await waitForPort(cmd.port, START_WAIT,() => !!spawnError || exited || running.get(p.id) !== rec);
   if (!up) {
     const tail = readTail(log);
     if (running.get(p.id) !== rec && !exited && !spawnError) return { ok: false, error: p.name + ' was stopped before it answered.', log };
@@ -81,7 +85,7 @@ async function startNow(p, entry, open, place) {
     if (running.get(p.id) === rec) running.delete(p.id);
     const why = spawnError ? 'Could not start "' + cmd.exe + '" (' + spawnError.code + '). Check the path in ' + cmd.from + '.'
       : exited ? p.name + ' ended by itself' + (rec.exitCode ? ' with exit code ' + rec.exitCode : '') + ' before anything answered on port ' + cmd.port + '.'
-      : p.name + ' started but nothing answered on port ' + cmd.port + ' within 20 seconds, so it was stopped.';
+      : p.name + ' started but nothing answered on port ' + cmd.port + ' within ' + START_WAIT / 1000 + ' seconds, so it was stopped.';
     return { ok: false, error: why + (tail ? ' Last output: ' + tail : ''), log };
   }
   return { ok: true, url, note, ...(open ? openBrowser(url) : {}) };

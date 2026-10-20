@@ -39,8 +39,11 @@ export interface Snapshot {
   at: number;
   cpu: { percent: number; cores: number; threads: number; name: string };
   ram: { used: number; total: number };
-  /** busy: how hard the chip is working, 0-100, null when unknown; models: the part of that the loaded models use. */
-  gpu: { name: string; used: number; total: number | null; shared: boolean; busy: number | null; models: number | null } | null;
+  /**
+   * busy: how hard the chip is working, 0-100, null when unknown; models: the part of that the loaded models use.
+   * unread: Windows gives no readings for the chip (see unreadOf): 'all', or 'busy' when nvidia-smi still gives its memory.
+   */
+  gpu: { name: string; used: number; total: number | null; shared: boolean; busy: number | null; models: number | null; unread?: 'all' | 'busy' } | null;
   processes: Record<number, ProcessUse>;
 }
 
@@ -194,6 +197,19 @@ export function alive(pid: number): boolean {
   }
 }
 
+/** How long the graphics counters may take to give a first reading before the chip counts as not read at all. */
+export const COUNTER_GRACE = 15_000;
+
+/**
+ * What Windows cannot read for the chip shown. Nothing while it reports any chip's memory (Task Manager's GPU graph
+ * reads the same counters), or while the counters are still starting; else 'all', or 'busy' when nvidia-smi gives the
+ * memory. A driver with no counters (an old one, or none) is the usual cause: Task Manager then shows no GPU at all.
+ */
+export function unreadOf(adapters: number, sinceStart: number, smi: boolean): 'all' | 'busy' | undefined {
+  if (adapters > 0 || sinceStart < COUNTER_GRACE) return undefined;
+  return smi ? 'busy' : 'all';
+}
+
 /**
  * Samples once a second. `watch(pids)` names the model processes whose memory the bar shows; the graphics counters
  * are restarted when that list changes (the system's counters only list processes that existed when they started).
@@ -204,6 +220,7 @@ export class Sampler {
   private lastCpu = cpus().map(c => c.times);
   private pids: number[] = [];
   private typeperf: ChildProcess | null = null;
+  private countersStarted = 0;
   private gpuValues = new Map<string, number>();
   private enginePerf: ChildProcess | null = null;
   private engineValues = new Map<string, number>();
@@ -240,6 +257,7 @@ export class Sampler {
     if (process.platform !== 'win32') return;
     this.typeperf?.kill();
     this.gpuValues.clear();
+    this.countersStarted = Date.now();
     const counters = ['\\GPU Adapter Memory(*)\\Dedicated Usage', '\\GPU Adapter Memory(*)\\Shared Usage'];
     for (const pid of this.pids) counters.push(`\\GPU Process Memory(pid_${pid}_*)\\Dedicated Usage`, `\\GPU Process Memory(pid_${pid}_*)\\Shared Usage`);
     this.typeperf = perf(counters, values => { this.gpuValues = values; });
@@ -299,15 +317,18 @@ export class Sampler {
       const [chip, best] = [...adapters].sort(([, a], [, b]) => (card.integrated ? b.shared - a.shared : b.dedicated - a.dedicated))[0] ?? [];
       const busy = chip && this.engineValues.size ? (engineBusy(this.engineValues, this.pids).get(chip) ?? { all: 0, models: 0 }) : null;
       const work = { busy: busy?.all ?? null, models: busy?.models ?? null };
+      const since = Date.now() - this.countersStarted;
       if (this.nvidia && card.vendor === 'nvidia') {
         // Every NVIDIA card together: a model is split across them, so what fits is what all of them hold.
         const all = cardsTogether(await nvidiaCards());
-        gpu = { name: all ? (all.count > 1 ? `${all.count} × ${card.name}` : card.name) : card.name, used: all?.used ?? 0, total: all?.total ?? card.total, shared: false, ...work };
+        const unread = unreadOf(adapters.size, since, !!all);
+        gpu = { name: all ? (all.count > 1 ? `${all.count} × ${card.name}` : card.name) : card.name, used: all?.used ?? 0, total: all?.total ?? card.total, shared: false, ...work, ...(unread ? { unread } : {}) };
       } else {
+        const unread = unreadOf(adapters.size, since, false);
         gpu = card.integrated
           // A chip inside the processor borrows from RAM: Windows lets it take up to half.
-          ? { name: card.name, used: best?.shared ?? 0, total: Math.round(totalmem() / 2), shared: true, ...work }
-          : { name: card.name, used: best?.dedicated ?? 0, total: card.total, shared: false, ...work };
+          ? { name: card.name, used: best?.shared ?? 0, total: Math.round(totalmem() / 2), shared: true, ...work, ...(unread ? { unread } : {}) }
+          : { name: card.name, used: best?.dedicated ?? 0, total: card.total, shared: false, ...work, ...(unread ? { unread } : {}) };
       }
     }
 

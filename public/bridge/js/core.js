@@ -37,7 +37,7 @@ async function api(path, body) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 403) { location.reload(); throw new Error('TOMLIN was restarted; reloading.'); }
   if (lost) { setLost(false); load(); }
-  if (!res.ok) throw new Error(data.error || ('TOMLIN answered ' + res.status + '.'));
+  if (!res.ok) throw Object.assign(new Error(data.error || ('TOMLIN answered ' + res.status + '.')), { status: res.status });
   return data;
 }
 

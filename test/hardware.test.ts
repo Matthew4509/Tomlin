@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chipOf, engineBusy } from '../src/hardware.ts';
+import { COUNTER_GRACE, chipOf, engineBusy, unreadOf } from '../src/hardware.ts';
 
 const col = (pid: number, chip: string, eng: number, type: string) => `\\\\PC\\GPU Engine(pid_${pid}_luid_0x00000000_${chip}_phys_0_eng_${eng}_engtype_${type})\\Utilization Percentage`;
 
@@ -29,4 +29,11 @@ test('the busy figure never goes past 100 and nothing watched means no models\' 
   const values = new Map([[col(1, '0x1', 0, '3D'), 80], [col(2, '0x1', 0, '3D'), 45.6]]);
   assert.deepEqual(engineBusy(values).get('luid_0x00000000_0x1'), { all: 100, models: 0 });
   assert.equal(engineBusy(new Map()).size, 0);
+});
+
+test('a chip Windows gives no readings for shows as disconnected, but only once the counters have had time to start', () => {
+  assert.equal(unreadOf(0, COUNTER_GRACE - 1, false), undefined, 'still starting');
+  assert.equal(unreadOf(0, COUNTER_GRACE, false), 'all');
+  assert.equal(unreadOf(0, COUNTER_GRACE, true), 'busy', 'nvidia-smi still gives the memory');
+  assert.equal(unreadOf(1, COUNTER_GRACE * 10, false), undefined, 'any chip reported: read');
 });

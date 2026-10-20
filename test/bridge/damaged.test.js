@@ -50,7 +50,7 @@ const asides = (dir, base) => fs.readdirSync(dir).filter(n => n.startsWith(base 
     const d = fs.mkdtempSync(path.join(tmp, 'p-')), f = path.join(d, 'prompts.json');
     fs.writeFileSync(f, '{"prompts": [{"id": "a", "title": "Mine", "text": "keep me"');
     const st = Prompts.load(f);
-    assert.strictEqual(st.categories.length, 9);
+    assert.strictEqual(st.categories.length, 10); // TOMLIN's own start-line prompt + nine kinds of expert
     const kept = asides(d, 'prompts');
     assert(kept.length === 1 && /keep me/.test(fs.readFileSync(path.join(d, kept[0]), 'utf8')));
   });
@@ -58,8 +58,9 @@ const asides = (dir, base) => fs.readdirSync(dir).filter(n => n.startsWith(base 
     const d = fs.mkdtempSync(path.join(tmp, 'p-')), f = path.join(d, 'prompts.json');
     fs.writeFileSync(f, JSON.stringify({ categories: [{ id: 'c', name: 'C' }, { id: 'c', name: 'again' }, { id: 'b', name: ' ' }, null, 5], prompts: [{ id: 'p', title: 'T', text: 'x', category: 'gone' }, { id: 'q', title: 'U', text: 'y', category: 'c' }, null] }));
     const st = Prompts.load(f);
-    assert.deepStrictEqual(st.categories.map(c => [c.id, c.name]), [['mine', 'My prompts'], ['c', 'C'], ['b', 'Untitled']]);
-    assert.deepStrictEqual(st.prompts.map(p => [p.id, p.category]), [['p', 'mine'], ['q', 'c']]);
+    // (a file from before the start-line prompt also gets that starter once, at the front)
+    assert.deepStrictEqual(st.categories.map(c => [c.id, c.name]), [['starter-bridge', 'TOMLIN'], ['mine', 'My prompts'], ['c', 'C'], ['b', 'Untitled']]);
+    assert.deepStrictEqual(st.prompts.map(p => [p.id, p.category]), [['starter-bridge-1', 'starter-bridge'], ['p', 'mine'], ['q', 'c']]);
   });
 
   await check('a saved audit with junk findings is read as far as it makes sense', () => {

@@ -139,8 +139,9 @@ app.keepBox = () => {
       : el('p', { class: 'hint', text: 'No backups yet. One is made by itself before a new version first uses your data.' });
     box.replaceChildren(
       el('h3', { text: 'Your data and updates' }),
-      el('p', { class: 'hint', text: `Kept in ${k.home} (${keepMb(k.dataBytes)} of chats, pictures and settings, plus your downloaded models). To update: unzip the new version into its own folder and start it. It finds this folder, backs your data up first and downloads nothing again.` }),
+      el('p', { class: 'hint', text: `Kept in ${k.home} (${keepMb(k.dataBytes)} of chats, pictures and settings, plus your downloaded models). An update keeps all of it: the new version finds this folder, backs your data up first and downloads nothing again. To update, use Update this install (on Nodes and memory): Check git or Check zip.` }),
       el('div', { class: 'team-actions' },
+        el('button', { class: 'btn quiet', type: 'button', text: 'Update this install', onclick: () => app.openUpdateInstall?.() }),
         el('button', { class: 'btn quiet', type: 'button', text: 'Open the folder', onclick: () => api('/api/keep', { do: 'open' }).catch(err => (note.textContent = err.message)) }),
         el('button', { class: 'btn quiet', type: 'button', text: 'Back up now', onclick: async () => {
           note.textContent = 'Backing up…';

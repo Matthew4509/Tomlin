@@ -98,6 +98,13 @@ export interface HfLookup {
   models: HfModel[];
   /** Parameters (from the GGUF header Hugging Face reads), when it says. */
   params: number | null;
+  /** False when its header has no chat template and its task is not chat (a video or music model): not a chat model. */
+  chat: boolean;
+}
+
+/** A repo's info as a chat model: false only when Hugging Face read its GGUF header, found no chat template, and its task is not a chat one. */
+export function chatMeta(meta: { gguf?: { total?: unknown; architecture?: unknown; chat_template?: unknown }; pipeline_tag?: unknown }): boolean {
+  return !meta.gguf || !!meta.gguf.chat_template || CHAT_TAGS.has(String(meta.pipeline_tag ?? ''));
 }
 
 /** owner/repo, and a file path when the link points at one. Only huggingface.co links are taken. */
@@ -145,7 +152,7 @@ export async function lookUpHf(link: string): Promise<HfLookup> {
   const info = await fetch(`https://huggingface.co/api/models/${at.repo}/revision/${encodeURIComponent(at.rev)}`, { signal: AbortSignal.timeout(15_000) });
   if (info.status === 401 || info.status === 404) throw new Error(`Hugging Face has no public model ${at.repo}. Check the link.`);
   if (!info.ok) throw new Error(`Hugging Face answered ${info.status}. Try again later.`);
-  const meta = await info.json() as { sha: string; gated?: unknown; cardData?: { license?: string }; gguf?: { total?: number } };
+  const meta = await info.json() as { sha: string; gated?: unknown; cardData?: { license?: string }; gguf?: { total?: number; chat_template?: unknown }; pipeline_tag?: unknown };
   if (meta.gated) throw new Error('This model needs a Hugging Face account and an accepted licence to download. Download it with LM Studio or the website, then use Search this PC.');
   const dir = at.path && !/\.gguf$/i.test(at.path) ? at.path : at.path.split('/').slice(0, -1).join('/');
   // Every folder, not only the top one: bigger models keep each size in a folder of its own (Q4_K_M/...-00001-of-00003.gguf).
@@ -157,8 +164,9 @@ export async function lookUpHf(link: string): Promise<HfLookup> {
     models = models.filter(m => (SPLIT.exec(m.files[0].path)?.[1] ?? m.files[0].path) === want);
   }
   if (!models.length) throw new Error('No .gguf model files at that link. Chat models here are GGUF files: look for a repo whose name ends in -GGUF.');
-  const params = Number(meta.gguf?.total) > 0 ? Number(meta.gguf!.total) : null;
-  return { repo: at.repo, rev: meta.sha, licence: meta.cardData?.license ?? 'not stated', models, params };
+  const params = paramsOf(at.repo, Number(meta.gguf?.total) > 0 ? Number(meta.gguf!.total) : null);
+  if (!/\.gguf$/i.test(at.path)) models = wholeModels(models, params);
+  return { repo: at.repo, rev: meta.sha, licence: meta.cardData?.license ?? 'not stated', models, params, chat: chatMeta(meta) };
 }
 
 type TreeEntry = { type: string; path: string; size: number; lfs?: { oid: string; size: number } };
@@ -173,6 +181,25 @@ async function hfTree(repo: string, rev: string, dir: string): Promise<TreeEntry
     url = /<([^>]+)>;\s*rel="next"/.exec(r.headers.get('link') ?? '')?.[1] ?? null;
   }
   return all;
+}
+
+/**
+ * The sizes that are a whole model: a file under half a bit a parameter, or one named as a draft (mtp, FastMTP,
+ * draft, dflash, eagle) or an importance matrix (imatrix) with far fewer bits than the model has parameters (under 1.2 a parameter: antirez/deepseek-v4's 3.5 GB MTP
+ * file of a 284B model, unsloth's imatrix_unsloth.gguf) is left out. A whole model with MTP or IMATRIX in its name is
+ * kept by its size. Parameters not known, or nothing left: every one is kept.
+ */
+export function wholeModels(models: HfModel[], params: number | null): HfModel[] {
+  if (!params) return models;
+  const bits = (m: HfModel) => (m.bytes * 8) / params;
+  const whole = models.filter(m => bits(m) >= 0.5 && (!/mtp|draft|dflash|eagle|imatrix/i.test(m.name) || bits(m) >= 1.2));
+  return whole.length ? whole : models;
+}
+
+/** A repo's parameters: the GGUF header's, unless it says far fewer than the name (a small draft or vision file read first). */
+export function paramsOf(repo: string, total: number | null): number | null {
+  const named = paramsFromName(repo.split('/')[1] ?? '');
+  return named && (!total || total < named / 2) ? named : total || null;
 }
 
 /** The size most people pick: Q4_K_M when there is one, else the smallest file of at least 4 bits, else the biggest. */
@@ -211,10 +238,7 @@ export function hfFound(list: unknown): HfFound[] {
     if (Array.isArray(r.siblings) && !r.siblings.some(s => /\.gguf$/i.test(fileName(s)) && !/mmproj/i.test(fileName(s)))) return [];
     const g = r.gguf as { total?: unknown; chat_template?: unknown } | undefined;
     if (g && !g.chat_template && !CHAT_TAGS.has(String(r.pipeline_tag ?? ''))) return [];
-    const total = Number(g?.total) || 0;
-    // A header that says far fewer parameters than the name (a small draft or vision file read first) is not believed.
-    const named = paramsFromName(repo.split('/')[1]);
-    const params = named && (!total || total < named / 2) ? named : total || null;
+    const params = paramsOf(repo, Number(g?.total) || null);
     return [{ repo, downloads: Number(r.downloads) || 0, likes: Number(r.likes) || 0, gated: !!r.gated && r.gated !== 'false', params }];
   }).sort((a, b) => b.downloads - a.downloads);
 }

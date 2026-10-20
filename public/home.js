@@ -198,8 +198,10 @@ const dot = state => el('span', { class: 'sdot', 'data-state': state, 'aria-hidd
 /** The one word shown beside the dot; the whole sentence is in the row's tooltip. */
 const STATE_WORD = { on: 'On', waking: 'Waking up', asleep: 'Asleep', off: 'Off', none: 'Not set up' };
 /** A hire's or a PC's activity: green available, yellow busy, red its owner is using the PC, grey offline (a shape each too). */
-const ACTIVITY_WORD = { available: 'Available', busy: 'Busy', owner: 'In use by its owner', offline: 'Offline' };
+const ACTIVITY_WORD = { available: 'Available', asleep: 'Asleep', busy: 'Busy', owner: 'In use by its owner', offline: 'Offline' };
 const activityDot = a => el('span', { class: 'sdot', 'data-activity': a, 'aria-hidden': 'true' });
+/** A hire free for work but with their model not loaded (dropped, or not woken yet): asleep, a yellow ring with a dot, not green. */
+const staffActivity = s => (s.activity === 'available' && s.state === 'asleep' ? 'asleep' : s.activity);
 
 /**
  * A person in the left panel. With `level` (a hire): "Name | Level", the software under it, and a third line only when
@@ -273,7 +275,7 @@ function drawRail() {
   const showing = $('#panes').dataset.show;
   for (const s of d.staff) {
     const li = staffRow({
-      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), level: s.level || 'Default', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: s.activity,
+      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), level: s.level || 'Default', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: staffActivity(s),
       busy: s.busy ? `Working: ${s.busy}` : null, count: counts[s.id], active: inChat && (s.kind === 'image' ? s.active && showing === 'image' : marked(`staff:${s.id}`, s.active)),
       title: `${s.role}${s.pc ? ` on ${s.pc}` : ''}${tokSub(s.speed)}. Press: a new chat, or one of their recent chats`,
       onClick: () => (app.openPerson ? app.openPerson(s.who ?? `staff:${s.id}`, s.name) : talkTo(s)), onEdit: () => app.editStaff?.(s.id),
@@ -331,8 +333,9 @@ function drawRail() {
     const on = d.staff.filter(s => (s.pcId ?? '') === x.id);
     const li = el('li', { class: 'pc-card', 'data-pc': x.id, ...(x.backupsOnly ? { 'data-backups': '1' } : {}) },
       on.length ? el('div', { class: 'pc-desk', 'aria-label': `Working on ${x.name ?? 'this PC'}` }, ...on.map(s => {
-        const b = el('button', { class: 'desk-face', type: 'button', title: `${s.name} (${s.role}): ${ACTIVITY_WORD[s.activity] ?? ''}. Drag onto another PC to move them`, 'aria-label': `${s.name}, ${ACTIVITY_WORD[s.activity] ?? ''}` },
-          app.avatar ? app.avatar(`staff:${s.id}`, initials(s.name), activityDot(s.activity)) : el('span', { class: 'rail-avatar' }, initials(s.name), activityDot(s.activity)));
+        const a = staffActivity(s);
+        const b = el('button', { class: 'desk-face', type: 'button', title: `${s.name} (${s.role}): ${ACTIVITY_WORD[a] ?? ''}. Drag onto another PC to move them`, 'aria-label': `${s.name}, ${ACTIVITY_WORD[a] ?? ''}` },
+          app.avatar ? app.avatar(`staff:${s.id}`, initials(s.name), activityDot(a)) : el('span', { class: 'rail-avatar' }, initials(s.name), activityDot(a)));
         b.addEventListener('click', () => talkTo(s));
         deskDrag(b, s);
         return b;
@@ -999,6 +1002,13 @@ app.openPcs = async () => {
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
+/** Update this install (Settings, Your data and updates, opens it): at the foot of Nodes and memory. */
+app.openUpdateInstall = async () => {
+  openNodes();
+  await new Promise(r => setTimeout(r, 100));
+  $('#node-install').scrollIntoView({ block: 'start' });
+  $('#node-install-git').focus({ preventScroll: true });
+};
 
 function drawOthers(pcs) {
   drawUpdateAll(pcs);
@@ -1112,31 +1122,69 @@ function openNodes() {
   drawInstall();
 }
 
-// ---- Update this install: a TOMLIN zip uploaded here becomes this PC's next copy; then the linked PCs from here ----
+// ---- Update this install: Check git (the newest signed release on GitHub) or Check zip (a zip uploaded here) becomes
+// this PC's next copy; then the linked PCs from here ----
 
 async function drawInstall() {
   const v = await api('/api/install/zip').catch(() => null);
   if (!v) return;
-  // A copy started another way (node src/server.ts) cannot start the new one: said, and the upload is not offered.
+  // A copy started another way (node src/server.ts) cannot start the new one: said, and neither way is offered.
   $('#node-install-pick').hidden = !v.restarts;
+  $('#node-install-git').hidden = !v.restarts || !v.repo;
+  if (v.repo) $('#node-install-releases').href = `https://github.com/${v.repo}/releases`;
+  // A download from git still going (the page was left and opened again): followed again.
+  if (v.git && ['downloading', 'checking', 'opening'].includes(v.git.state) && !gitFollowing) followGit();
   $('#node-install-line').textContent = `This PC runs TOMLIN ${v.version}${v.build ? ` (build ${v.build})` : ''}.${v.restarts ? '' : ' It was not started by its installed program or Start TOMLIN.cmd, so it cannot update itself from a zip here: close it, unzip the new version and run Install TOMLIN.cmd there.'}`;
   if (v.ready && $('#node-install-ask').hidden) askInstall(v.ready, v.version);
 }
 
-/** The zip is checked: Update now (this copy ends, the new one starts) or Cancel (the opened copy is removed). */
+/**
+ * A zip that is not signed by TOMLIN's maker: the warning, with Cancel as the default (it has the focus, so Enter
+ * presses it) and Install anyway set apart from it. True = Install anyway.
+ */
+function askUnsigned(box, z, mine, what) {
+  return new Promise(done => {
+    const end = ok => {
+      box.replaceChildren();
+      box.hidden = true;
+      done(ok);
+    };
+    const cancel = el('button', { class: 'btn primary', type: 'button', text: 'Cancel', onclick: () => end(false) });
+    app.askFor?.(box, () => end(false));
+    box.classList.add('page-ask');
+    box.setAttribute('role', 'alert');
+    box.replaceChildren(
+      el('span', {}, el('b', { class: 'fault-line', text: `Warning: this zip is not signed by TOMLIN's maker. ${z.warning}` }), ` It holds TOMLIN ${z.version}; this PC runs ${mine}. Install it only if you trust where it came from, for example a zip you made yourself. ${what}`),
+      cancel,
+      el('button', { class: 'btn danger install-anyway', type: 'button', text: 'Install anyway', onclick: () => end(true) }),
+    );
+    box.hidden = false;
+    cancel.focus();
+  });
+}
+
+/**
+ * The zip is checked: Update now (it is started once as a test, then this copy ends and the new one starts), or Cancel
+ * (the opened copy is removed). Not signed by TOMLIN's maker (a zip picked by hand): a warning, and Install anyway.
+ */
 async function askInstall(z, mine) {
   const box = $('#node-install-ask');
   const same = z.version === mine;
-  const go = await askHere(box, `The zip holds TOMLIN ${z.version}${z.build ? ` (build ${z.build})` : ''}${same ? ', the same version with other files' : ''}. This PC runs ${mine}. Update now closes TOMLIN for about half a minute and starts ${z.version}: anything being written or drawn now stops. The old copy stays in its folder beside the new one.`, 'Update now', 'Cancel', false);
+  const what = button => `${button} starts it once as a test, then closes TOMLIN for about half a minute and starts ${z.version}: anything being written or drawn now stops. The old copy stays in its folder beside the new one.`;
+  const go = z.signed === false
+    ? await askUnsigned(box, z, mine, what('Install anyway'))
+    : await askHere(box, `The zip holds TOMLIN ${z.version}${z.build ? ` (build ${z.build})` : ''}${same ? ', the same version with other files' : ''}, signed by TOMLIN's maker: checked. This PC runs ${mine}. ${what('Update now')}`, 'Update now', 'Cancel', false);
   if (!go) {
     await api('/api/install/zip-drop', {}).catch(() => undefined);
     return;
   }
+  installSaid(`Starting TOMLIN ${z.version} once as a test (up to a minute and a half)…`, 1);
   try {
-    const r = await api('/api/install/zip-go', { version: z.version });
-    installSaid(`TOMLIN ${r.version} is starting (${r.folder}). This page opens again by itself when it answers.`, 1);
+    const r = await api('/api/install/zip-go', { version: z.version, anyway: z.signed === false });
+    installSaid(`TOMLIN ${r.version} passed its test start and is starting (${r.folder}). This page opens again by itself when it answers.`, 1);
     waitForVersion(r.version);
   } catch (e) {
+    installSaid('');
     sayHere(box, `Not updated: ${e.message}`);
   }
 }
@@ -1157,17 +1205,103 @@ async function waitForVersion(version) {
   installSaid(`TOMLIN ${version} has not answered for 3 minutes. Look at its window by the clock (or the Start TOMLIN window): it says what happened.`, 1);
 }
 
-$('#node-install-file').addEventListener('change', e => {
-  const file = e.target.files?.[0];
+// ---- Check git ----
+
+/** A download's size: "180 MB" under a gigabyte, "1.2 GB" over. */
+const dlSize = n => (n < 2 ** 30 ? `${Math.max(1, Math.round(n / 2 ** 20))} MB` : gb(n));
+const gitBox = () => $('#node-install-git-box');
+function gitSay(...kids) {
+  gitBox().hidden = !kids.length;
+  gitBox().replaceChildren(...kids);
+}
+$('#node-install-git').addEventListener('click', async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  $('#node-install-ask').hidden = true;
+  gitSay(el('p', { class: 'hint', role: 'status', text: 'Asking GitHub for the newest TOMLIN…' }));
+  try {
+    const r = await api('/api/install/git-check', {});
+    const when = r.published ? ` (${new Date(r.published).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})` : '';
+    if (!r.newer) gitSay(el('p', { class: 'hint', role: 'status', text: `This PC runs the newest TOMLIN on GitHub: ${r.mine}${r.version !== r.mine ? ` (GitHub's newest is ${r.version})` : ''}.` }));
+    else {
+      gitSay(el('p', { class: 'hint', role: 'status', text: `TOMLIN ${r.version} is on GitHub${when}${r.bytes ? `, a ${dlSize(r.bytes)} download` : ''}. This PC runs ${r.mine}.${r.notes ? ` ${r.notes}` : ''}` }),
+        el('div', { class: 'team-actions' }, el('button', { class: 'btn primary', type: 'button', text: `Download ${r.version}`, onclick: ev => getGit(r.version, ev.currentTarget) })));
+    }
+  } catch (err) {
+    gitSay(el('p', { class: 'fault-line', role: 'alert', text: err.message }));
+  } finally {
+    btn.disabled = false;
+  }
+});
+async function getGit(version, button) {
+  button.disabled = true;
+  try {
+    await api('/api/install/git-get', { version });
+  } catch (err) {
+    button.disabled = false;
+    return gitSay(el('p', { class: 'fault-line', role: 'alert', text: err.message }));
+  }
+  gitSay();
+  followGit();
+}
+/** The download from git, asked every second: its progress on the bar, then Update now, or why it stopped. */
+let gitFollowing = false;
+async function followGit() {
+  gitFollowing = true;
+  $('#node-install-git').disabled = true;
+  $('#node-install-pick').classList.add('is-busy');
+  try {
+    for (;;) {
+      const v = await api('/api/install/zip').catch(() => null);
+      const g = v?.git;
+      if (!g) return installSaid('');
+      if (g.state === 'downloading') installSaid(`Downloading TOMLIN ${g.version} from GitHub${g.bytes ? `: ${Math.round((g.got / g.bytes) * 100)}% of ${dlSize(g.bytes)}` : `: ${dlSize(g.got)}`}`, g.bytes ? g.got / g.bytes : 0);
+      else if (g.state === 'checking') installSaid(`Checking TOMLIN ${g.version}'s signature…`, 1);
+      else if (g.state === 'opening') installSaid('Opening the zip and checking every part…', 1);
+      else if (g.state === 'ready') {
+        installSaid('');
+        if (v.ready) askInstall(v.ready, v.version);
+        return;
+      } else {
+        installSaid('');
+        return gitSay(el('p', { class: 'fault-line', role: 'alert', text: g.error }));
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } finally {
+    gitFollowing = false;
+    $('#node-install-git').disabled = false;
+    $('#node-install-pick').classList.remove('is-busy');
+  }
+}
+
+/** The .sig file's text as the header carries it (base64); '!' for one that is not a signature file (it checks as one TOMLIN does not make). */
+async function sigHeader(sig) {
+  if (sig.size > 64 * 1024) return '!';
+  try {
+    return btoa(await sig.text());
+  } catch {
+    return '!';
+  }
+}
+
+$('#node-install-file').addEventListener('change', async e => {
+  // The zip, and its signature (tomlin-<version>.zip.sig) when it was picked with it.
+  const files = [...(e.target.files ?? [])];
   e.target.value = '';
-  if (!file) return;
+  if (!files.length) return;
   const box = $('#node-install-ask');
   box.hidden = true;
-  if (!/\.zip$/i.test(file.name)) return sayHere(box, `${file.name} is not a zip. Pick the tomlin-<version>.zip file.`);
+  gitSay();
+  const file = files.find(f => /\.zip$/i.test(f.name));
+  if (!file) return sayHere(box, `${files[0].name} is not a zip. Pick the tomlin-<version>.zip file, with its .sig file beside it (hold Ctrl to pick both).`);
+  const sig = files.find(f => f.name.toLowerCase() === `${file.name.toLowerCase()}.sig`) ?? files.find(f => /\.sig$/i.test(f.name));
+  const sigText = sig ? await sigHeader(sig) : '';
   // XMLHttpRequest, not fetch: it says how much of the file has gone up.
   const x = new XMLHttpRequest();
   x.open('POST', '/api/install/zip');
   x.setRequestHeader('content-type', 'application/zip');
+  if (sigText) x.setRequestHeader('x-tomlin-sig', sigText);
   $('#node-install-pick').classList.add('is-busy');
   installSaid(`Uploading ${file.name}…`, 0);
   x.upload.onprogress = p => p.lengthComputable && installSaid(p.loaded < p.total ? `Uploading ${file.name}: ${Math.round((p.loaded / p.total) * 100)}%` : 'Opening the zip and checking every part…', p.loaded / p.total);
@@ -1181,7 +1315,7 @@ $('#node-install-file').addEventListener('change', e => {
       // said below
     }
     if (x.status !== 200 || !r?.version) return sayHere(box, r?.error ?? (x.status ? `The zip was not taken (the server said ${x.status}). Try again.` : 'The upload stopped: TOMLIN is not answering. Start it again, then upload the zip again.'));
-    askInstall({ version: r.version, build: r.build }, r.mine);
+    askInstall(r, r.mine);
   };
   x.send(file);
 });

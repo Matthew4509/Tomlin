@@ -71,7 +71,7 @@ async function scan(r) {
   dialog('Scanning ' + r.name + '…', [h('p', { class: 'muted' }, 'Checking the code' + (localToo ? ' and the running copy on localhost' : '') +
     (r.liveUrl ? ', then comparing the live site (' + hostOf(r.liveUrl) + ') with ' + (localToo ? 'it' : 'the project\'s files') + '. The live site is asked one page every 5 seconds, so its firewall does not take this for an attack: about a minute.' : '.'))], []);
   try { const d = await api('/api/audit', { id: r.id }); showAudit(r, d.audit); }
-  catch (e) { dialog('Scan failed', [h('p', null, e.message)], [h('button', { class: 'btn accent', type: 'button', onclick: closeDialog }, 'Close')]); }
+  catch (e) { dialog(e.status === 409 ? 'Already scanning' : 'Scan failed', [h('p', null, e.message)], [h('button', { class: 'btn accent', type: 'button', onclick: closeDialog }, 'Close')]); }
   load();
 }
 async function showLastAudit(r) {

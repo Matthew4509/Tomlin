@@ -124,27 +124,34 @@ function modelOptions(m) {
 }
 
 /**
- * Related models on this PC this person may also use, the first choice being the default (Wake up can load one of
- * them). Only for a first choice on this PC: otherwise there is nothing to tick, and nothing is shown.
+ * Related models on this PC this person may also use (backup LLMs), the first choice being the default (a linked PC's
+ * wake can load one of them). Those likely to fit this PC's memory now come first, under their own heading, then the
+ * others. Only for a first choice on this PC: otherwise there is nothing to tick, and nothing is shown.
  */
 function groupOptions(m) {
   if (!m.model || String(m.model).startsWith('remote:')) return null;
   const image = m.kind === 'image';
   const here = visibleModels(m.models, ...(m.group ?? [])).filter(x => (!image || x.installed) && x.id !== m.model);
   const box = el('fieldset', { class: 'pick-set team-group' }, el('legend', { text: `Other models ${m.name} may use` }));
-  box.append(el('p', { class: 'hint', text: `Their default is the first choice above. Wake up can load one of the models ticked here instead.` }));
+  box.append(el('p', { class: 'hint', text: 'Their default is the first choice above. A backup LLM is optional, and can allow for fast switching if required.' }));
   if (!here.length) box.append(el('p', { class: 'hint' }, image ? 'No other picture model is downloaded here. ' : 'No other chat model is on this PC. ',
     el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(); } }), '.'));
   const list = new Set(m.group ?? []);
-  for (const x of here) {
+  const tickFor = x => {
     const tick = el('input', { type: 'checkbox', checked: list.has(x.id) });
     tick.addEventListener('change', () => {
       if (tick.checked) list.add(x.id);
       else list.delete(x.id);
       teamAct({ action: 'change', id: m.id, group: [...list] });
     });
-    box.append(el('label', { class: 'check' }, tick, ` ${x.name.split(' · ')[0]} · about ${x.sizeB}${x.unit}`));
-  }
+    return el('label', { class: 'check' }, tick, ` ${x.name.split(' · ')[0]} · about ${x.sizeB}${x.unit}${FIT[x.fit] ?? ''}`);
+  };
+  // Likely to fit this node (its memory now, as Hire staff's cards say) first, then the others; each lot in the server's order.
+  const likely = here.filter(x => x.fit !== 'no');
+  const others = here.filter(x => x.fit === 'no');
+  if (likely.length && others.length) box.append(el('p', { class: 'team-group-head', text: 'Likely fit this node' }));
+  box.append(...likely.map(tickFor));
+  if (others.length) box.append(el('p', { class: 'team-group-head', text: likely.length ? 'Others' : 'Others (none of these is likely to fit this node now)' }), ...others.map(tickFor));
   if (m.active && m.active !== m.model) {
     const name = m.models.find(x => x.id === m.active)?.name ?? 'another of their models';
     box.append(el('p', { class: 'hint' }, `A linked PC switched ${m.name} to ${name}. `,
@@ -291,10 +298,39 @@ $('#team-get-models').addEventListener('click', () => {
 });
 
 /** After Hire staff (hire.js): the rest of the page catches up, and a hire with no model opens their profile. */
+/** After a hire who chats (with a model): "Start chat now" (true) or "Not now" (false), in a small window. */
+function askStartChat(hired) {
+  const box = $('#hired-dlg');
+  return new Promise(done => {
+    // Answered once: a button, or Escape (cancel, which fires at once; a close event can come late, after the next ask).
+    let answered = false;
+    const end = yes => {
+      if (answered) return;
+      answered = true;
+      box.close();
+      done(yes);
+    };
+    box.replaceChildren(el('div', { class: 'help-body' },
+      el('h2', { id: 'hired-title', text: `${hired.name} is hired.` }),
+      el('p', { text: `Start a chat with ${hired.name.split(/\s+/)[0]} now?` }),
+      el('div', { class: 'team-actions' },
+        el('button', { class: 'btn primary', type: 'button', text: 'Start chat now', onclick: () => end(true) }),
+        el('button', { class: 'btn', type: 'button', text: 'Not now', onclick: () => end(false) }))));
+    box.oncancel = e => {
+      e.preventDefault();
+      end(false);
+    };
+    box.showModal();
+    box.querySelector('.btn.primary').focus();
+  });
+}
+
 app.afterHire = async hired => {
   if (team.data.staff.some(s => s.kind === 'chat')) app.nobodyToTalkTo = false;
-  // The chat turns to a new hire who chats: asked by this window (the server no longer turns every window's chat to them).
-  const turned = hired?.kind === 'chat' ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
+  // A new hire who chats: asked first ("Start chat now"); yes turns this window's chat to them (the server no longer
+  // turns every window's chat to them). One with no model opens their profile instead (below).
+  const start = hired?.kind === 'chat' && hired.model ? await askStartChat(hired) : false;
+  const turned = start ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
   // A new artist draws in this window's Images pane (Draw as), asked by this window: the server no longer picks them.
   if (hired?.kind === 'image') await api('/api/settings', { imageAs: hired.id }).catch(() => undefined);
   await app.loadChats?.();
@@ -380,6 +416,18 @@ async function openProfile(id) {
   if (matchMedia('(max-width: 760px)').matches) $('#staff-edit').scrollIntoView({ block: 'start' });
 }
 app.openProfile = openProfile;
+/** The staff window on See all staff (each with Edit), as a page: from the Models page's "downloaded" notice. */
+app.seeAllStaff = async () => {
+  teamFault(null);
+  try {
+    team.data = await api('/api/staff');
+  } catch (e) {
+    teamFault(e.message);
+  }
+  teamDraw();
+  showMode('all');
+  app.showAsPage(dlg, 'staff');
+};
 
 // ---- The host's profile: this PC's own assistant, not one of the staff. Its pencil picks its model and its name ----
 

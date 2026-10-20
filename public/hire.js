@@ -17,9 +17,12 @@
   const GBs = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
   const pcName = id => (id ? homeUi.pcs.find(p => p.id === id)?.name ?? d()?.pcs.find(p => p.id === id)?.name ?? 'A linked PC' : app.pcProfileOf?.('here')?.name || 'My PC');
 
+  /** A fault shows in the Hire staff window, and in Push to node too while that is open over it. */
   function fault(text) {
-    $('#hs-fault').textContent = text ?? '';
-    $('#hs-fault').hidden = !text;
+    for (const box of [$('#hs-fault'), $('#hs-push-fault')]) {
+      box.textContent = text ?? '';
+      box.hidden = !text;
+    }
   }
 
   /** Every model of the role's kind on one PC ('' = this PC): a hidden one only once "Show hidden" is ticked. */
@@ -145,7 +148,8 @@
       el('span', { class: 'hs-model-text' },
         el('strong', { text: c.label }),
         el('span', { class: 'hint', text: [size, lvl ? `${lvl.name} size` : '', c.hidden ? 'Hidden' : ''].filter(Boolean).join(' · ') || 'Size not known' }),
-        FIT[c.fit] ? el('span', { class: 'hs-warn', text: `⚠ ${FIT[c.fit]}` }) : null),
+        // A linked PC's fit is against all its memory (src/calc.ts ramFit), not what is free on it now.
+        FIT[c.fit] ? el('span', { class: 'hs-warn', text: `⚠ ${c.pc && c.fit === 'no' ? 'Needs more memory than that PC has' : FIT[c.fit]}` }) : null),
       el('span', { class: `hs-state${c.loaded || c.busy ? ' on' : ''}`, text: state }));
   }
   function pickModel(id) {
@@ -231,16 +235,51 @@
 
   function allCard(e) {
     const target = hs.pc;
-    const where = e.on.map(o => (o.pc && o.name) || pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
+    const where = whereOf(e);
     const route = routeTo(e, target);
     const moving = hs.moving.get(e.key);
     const btn = el('button', { class: 'btn', type: 'button', 'data-key': e.key, text: route.via ? `Copy to ${pcName(target)} (through this PC)` : `Copy to ${pcName(target)}`, disabled: !!route.why || !!moving, onclick: () => pull(e) });
+    const push = el('button', { class: 'btn', type: 'button', 'data-key': `push:${e.key}`, text: 'Push to node', onclick: () => openPush(e) });
     return el('div', { class: 'pick-card hs-model hs-net' },
       el('span', { class: 'hs-model-text' },
         el('strong', { text: e.name }),
         el('span', { class: 'hint', text: [e.bytes ? `file ${GBs(e.bytes)}` : '', `On ${where}`].filter(Boolean).join(' · ') }),
-        moving ? el('span', { class: 'hint', role: 'status', text: moving.said }) : route.why ? el('span', { class: 'hs-warn', text: `${route.why.charAt(0).toUpperCase()}${route.why.slice(1)}.` }) : null),
-      btn);
+        moving ? el('span', { class: 'hint', role: 'status', text: moving.said }) : route.why ? el('span', { class: 'hs-warn', text: `${cap(route.why)}.` }) : null),
+      el('span', { class: 'hs-net-acts' }, btn, push));
+  }
+  const cap = t => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
+  const whereOf = e => e.on.map(o => (o.pc && o.name) || pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
+
+  // ---- Push to node: one model, sent to any PC on the list ----
+  const pushDlg = $('#hs-push-dlg');
+  let pushKey = '';
+  function openPush(e) {
+    pushKey = e.key;
+    $('#hs-push-fault').hidden = true;
+    drawPush();
+    pushDlg.showModal();
+  }
+  /** Each PC ('' = this PC) for the model in the window: it has it, it can take it, or why not now. */
+  function drawPush() {
+    const e = networkModels().find(x => x.key === pushKey);
+    if (!e) {
+      $('#hs-push-line').textContent = 'That model is no longer on your linked PCs.';
+      $('#hs-push-list').replaceChildren();
+      return;
+    }
+    const moving = hs.moving.get(e.key);
+    $('#hs-push-line').textContent = `${e.name}${e.bytes ? ` (file ${GBs(e.bytes)})` : ''} is on ${whereOf(e)}. Push it to any PC on the list.`;
+    keepButtons($('#hs-push-list'), ['', ...d().pcs.map(p => p.id)].map(pc => {
+      const has = e.on.some(o => (o.pc ?? '') === pc) || onPc(pc).some(c => choiceKey(c) === e.key);
+      const route = has ? null : routeTo(e, pc);
+      const here = !!moving && moving.to === pc;
+      const said = has ? '✓ Already on it' : here ? moving.said : route.why ? `${cap(route.why)}.` : route.via ? 'Goes through this PC' : '';
+      return el('div', { class: 'pick-card hs-model hs-net' },
+        el('span', { class: 'hs-model-text' },
+          el('strong', { text: pcName(pc) }),
+          said ? el('span', { class: has ? 'hs-state on' : route.why && !here ? 'hs-warn' : 'hint', role: here ? 'status' : null, text: said }) : null),
+        has ? null : el('button', { class: 'btn', type: 'button', 'data-key': pc || 'here', text: `Push to ${pcName(pc)}`, disabled: !!route.why || !!moving, onclick: () => pull(e, pc) }));
+    }));
   }
 
   /** Buttons drawn again keep the keyboard on the same one. */
@@ -257,20 +296,21 @@
       if (!t) throw new Error('the copy is no longer listed: look in My local LLMs (Nodes and memory)');
       if (t.state === 'done') return t;
       if (t.state !== 'working') throw new Error(t.said || 'it stopped');
-      hs.moving.set(e.key, { said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
+      hs.moving.set(e.key, { ...hs.moving.get(e.key), said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
       if (dlg.open) drawAllModels();
+      if (pushDlg.open) drawPush();
       await new Promise(r => setTimeout(r, 1000));
     }
   }
 
-  /** Copies a model to the PC picked: from a linked PC, from this PC, or from a linked PC through this one. */
-  async function pull(e) {
-    const target = hs.pc;
+  /** Copies a model to a PC (the one picked, or one from Push to node): from a linked PC, from this PC, or from a linked PC through this one. */
+  async function pull(e, target = hs.pc) {
     const k = kind();
     const route = routeTo(e, target);
     if (route.why) return;
-    hs.moving.set(e.key, { said: 'Starting…' });
+    hs.moving.set(e.key, { said: 'Starting…', to: target });
     drawAllModels();
+    if (pushDlg.open) drawPush();
     try {
       let local = route.from.pc ? null : route.from.model;
       if (route.from.pc) {
@@ -294,9 +334,11 @@
         drawModels();
       }
       fault('');
+      if (pushDlg.open) drawPush();
     } catch (err) {
       hs.moving.delete(e.key);
       drawAllModels();
+      if (pushDlg.open) drawPush();
       fault(`${e.name} was not copied to ${pcName(target)}: ${err.message}`);
     }
   }
@@ -390,6 +432,11 @@
     const free = NAMES.filter(n => !taken.has(n.toLowerCase()));
     box.value = (free.length ? free : NAMES)[Math.floor(Math.random() * (free.length || NAMES.length))];
     box.focus();
+  });
+  // Add new: the Models page (Add a model), as "get a model" does.
+  $('#hs-add-model').addEventListener('click', () => {
+    dlg.close();
+    app.openModels(kind() === 'image' ? 'image' : 'chat');
   });
   $('#hs-cancel').addEventListener('click', () => dlg.close());
   $('#hs-close').addEventListener('click', () => dlg.close());

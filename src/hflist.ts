@@ -44,11 +44,31 @@ export function nextPage(link: string | null): string | null {
 const wordStart = (w: string) => new RegExp(`(?:^|[^a-z0-9]|(?<=[a-z])(?=\\d))${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
 /**
- * The listed models matching a search, most downloaded first: every word in the repo's owner/name ("all": every model),
- * any one of the ticked terms (abliterated, uncensored), and the size in billions when the name gives one (a name that
- * does not say is kept; its size is checked when its sizes are read).
+ * A mixture-of-experts model, known by its name: the active part ("30B-A3B", "A800M"), "8x7B", MoE (OLMoE, Phi-3.5-MoE),
+ * Mixtral, gpt-oss, DeepSeek V2 and V3. A name that says none of these is taken as one model all through. The page
+ * keeps the same pattern (public/models.js MOE).
  */
-export function pick(models: ListedModel[], s: { q: string; terms?: string[]; minB?: number | null; maxB?: number | null }): ListedModel[] {
+export const isMoe = (name: string) => /(?:^|[^a-z0-9])(?:\d+x\d+(?:\.\d+)?b|a\d+(?:\.\d+)?[bm]|[a-z]*moe|mixtral|gpt-oss|deepseek-v[23])(?![a-z])/i.test(name);
+
+/** How a list is ordered: most downloaded (as kept), by size in billions (a name that does not say goes last), or by name. */
+export type ListOrder = 'size-asc' | 'size-desc' | 'name-asc' | 'name-desc' | '';
+export function ordered(models: ListedModel[], order: string): ListedModel[] {
+  const name = (m: ListedModel) => m[0].split('/')[1].toLowerCase();
+  const by: Record<string, (a: ListedModel, b: ListedModel) => number> = {
+    'size-asc': (a, b) => (a[3] == null ? 1 : 0) - (b[3] == null ? 1 : 0) || (a[3] ?? 0) - (b[3] ?? 0) || b[1] - a[1],
+    'size-desc': (a, b) => (a[3] == null ? 1 : 0) - (b[3] == null ? 1 : 0) || (b[3] ?? 0) - (a[3] ?? 0) || b[1] - a[1],
+    'name-asc': (a, b) => name(a).localeCompare(name(b)) || b[1] - a[1],
+    'name-desc': (a, b) => name(b).localeCompare(name(a)) || b[1] - a[1],
+  };
+  return by[order] ? [...models].sort(by[order]) : models;
+}
+
+/**
+ * The listed models matching a search, most downloaded first: every word in the repo's owner/name ("all": every model),
+ * any one of the ticked terms (abliterated, uncensored), only mixtures of experts when `moe` is ticked, and the size in
+ * billions when the name gives one (a name that does not say is kept; its size is checked when its sizes are read).
+ */
+export function pick(models: ListedModel[], s: { q: string; terms?: string[]; moe?: boolean; minB?: number | null; maxB?: number | null }): ListedModel[] {
   const words = /^all$/i.test(s.q.trim()) ? [] : s.q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8).map(wordStart);
   const terms = (s.terms ?? []).map(t => wordStart(t.toLowerCase()));
   const minB = Number(s.minB) > 0 ? Number(s.minB) : null;
@@ -57,6 +77,7 @@ export function pick(models: ListedModel[], s: { q: string; terms?: string[]; mi
     const name = repo.toLowerCase();
     if (!words.every(w => w.test(name))) return false;
     if (terms.length && !terms.some(t => t.test(name))) return false;
+    if (s.moe && !isMoe(name)) return false;
     return params == null || ((!minB || params >= minB * 0.95e9) && (!maxB || params <= maxB * 1.05e9));
   });
 }

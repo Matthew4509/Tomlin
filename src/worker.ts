@@ -2,8 +2,10 @@
 // until it answers; Disconnect ends the process and waits until Windows says it is gone, so its memory is really
 // back. Nothing starts on its own.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { alive } from './hardware.ts';
+import { forget, remember } from './runnerkeys.ts';
 import type { Device } from './runtimes.ts';
 import * as leftovers from './leftovers.ts';
 import { dllLine, dllNotFound } from './vcrt.ts';
@@ -45,7 +47,8 @@ export interface WorkerView {
 
 export interface LaunchSpec {
   exe: string;
-  args: (port: number) => string[];
+  /** `key`: new for every start; a runner that can take one is started with it (src/runnerkeys.ts). */
+  args: (port: number, key: string) => string[];
   /** Resolves true once the runner answers on `port`. */
   ready: (port: number) => Promise<boolean>;
   device: Device;
@@ -118,12 +121,15 @@ export class Worker {
    */
   async launch(spec: LaunchSpec): Promise<'ready' | 'failed' | 'cancelled'> {
     const port = await freePort();
+    const key = randomBytes(24).toString('hex');
     this.log = [];
     this.errors = [];
-    const child = spawn(spec.exe, spec.args(port), { windowsHide: true });
+    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true });
     leftovers.started(child.pid, spec.exe);
     this.child = child;
     this.port = port;
+    const base = `http://127.0.0.1:${port}`;
+    remember(base, key);
     this.view = { ...this.view, device: spec.device, pid: child.pid ?? null, stage: 'Starting the runner' };
     const keep = (b: Buffer) => {
       // Progress bars redraw with a carriage return, so it ends a line too.
@@ -143,6 +149,7 @@ export class Worker {
     let exited = false;
     child.on('exit', code => {
       exited = true;
+      forget(base);
       // Ended before it said a word, for want of a DLL: on a clean Windows, the Visual C++ Runtime (src/vcrt.ts).
       if (dllNotFound(code)) this.errors = [...this.errors, dllLine()];
       leftovers.ended(child.pid);
@@ -175,6 +182,7 @@ export class Worker {
   /** Ends the runner and waits until the system no longer lists it. True when it is gone. */
   async end(): Promise<boolean> {
     const child = this.child;
+    if (this.port) forget(`http://127.0.0.1:${this.port}`);
     this.child = null;
     this.port = null;
     if (!child?.pid) return true;

@@ -144,8 +144,8 @@ export interface CarryDeps {
   keptRoot: string;
   /** This PC's own backups folder. */
   backupsDir: string;
-  /** Makes a backup of this PC's data now; gives its file name. */
-  makeBackup: (label: string) => Promise<string>;
+  /** Makes a backup of this PC's data now; gives its file name. forOtherPc: to keep on a linked PC, without keys. */
+  makeBackup: (label: string, o?: { forOtherPc?: boolean }) => Promise<string>;
   /** A model came in from a linked PC (copied, or sent here): the model lists are read again. */
   onInstalled: () => void;
 }

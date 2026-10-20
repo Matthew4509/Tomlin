@@ -1,6 +1,7 @@
 // The Models page: a whole page on the right (the left panel stays). Its own side has the search filters (chat model
-// size: Min B / Max B, Min GB / Max GB), Model categories as tick boxes (kinds, Abliterated, Uncensored), and Import
-// models (two tiles: Download, Connect); on top, the search box, Search, and All | Not installed | Installed, then My local LLMs.
+// size: Min B / Max B, Min GB / Max GB), Model categories as tick boxes (kinds, Abliterated, Uncensored, MoE's), and
+// Import models (two tiles: Download, Connect); on top, the search box, Search, and All | Not installed | Installed, then
+// My local LLMs. Right of the list's heading, Size and A to Z order the list (pressed again, the other way round).
 // Every model shows two short lines; "See more" opens the rest. Hugging Face's answer comes a page at a time, from the
 // file list (shipped with TOMLIN, or this PC's own after Rescan Hugging Face) or, with none, Hugging Face's own search.
 // Chat models come from Hugging Face (a PC downloads only to itself): each row shows its size before anything is pressed,
@@ -17,6 +18,12 @@ const mp = {
   list: null, listTimer: 0,
   /** Ticked terms (abliterated, uncensored): either one in the name. */
   terms: new Set(),
+  /** MoE's ticked: mixtures of experts only (as well as any term). */
+  moe: false,
+  /** Fits my card ticked: only chat models with a size that sits wholly on the graphics cards; cards = {n, total} (/api/models). */
+  card: false, cards: null,
+  /** The list's order: '' (as it comes: Hugging Face's most downloaded first), size-asc / size-desc, name-asc / name-desc. */
+  order: '',
   /** Every list: 'all', 'hide' (only what is not on this PC yet) or 'only' (only what is), from the two ticks. */
   show: 'all', open: new Set(), timer: 0, hfTimer: 0,
   /** Hugging Face's answer: page (0 = first), cursors[i] = how page i is asked for (null for the first), next = more after. */
@@ -53,6 +60,13 @@ const CATS = [['all', 'All models'], ['chat', 'Chat models (LLMs)'], ['image', '
 const CAT_NAME = Object.fromEntries(CATS);
 const TERM_NAME = { abliterated: 'Abliterated', uncensored: 'Uncensored' };
 const TERM_TIP = { abliterated: 'Only models with abliterated in the name: their built-in refusals were taken out', uncensored: 'Only models with uncensored in the name' };
+/**
+ * A mixture of experts, known by its name (the same pattern as src/hflist.ts isMoe): the active part ("30B-A3B"),
+ * "8x7B", MoE, Mixtral, gpt-oss, DeepSeek V2 and V3. A model on this PC is also known by its file.
+ */
+const MOE = /(?:^|[^a-z0-9])(?:\d+x\d+(?:\.\d+)?b|a\d+(?:\.\d+)?[bm]|[a-z]*moe|mixtral|gpt-oss|deepseek-v[23])(?![a-z])/i;
+const MOE_TIP = 'Only mixture-of-experts models (MoE): known by the name (A3B, 8x7B, MoE, Mixtral, gpt-oss…) or, on this PC, by the file. Fast for their size, but they need the memory of the whole model';
+const isMoeItem = x => (x.kind === 'chat' || x.kind === 'popular') && (!!x.moe || MOE.test(`${x.name} ${x.repo ?? ''}`));
 
 /** The categories as tick boxes, built once (a box kept between draws keeps its focus), then Import models. */
 function mpNav() {
@@ -66,6 +80,8 @@ function mpNav() {
           if (id === 'all') {
             mp.cats.clear();
             mp.terms.clear();
+            mp.moe = false;
+            mp.card = false;
           } else if (e.target.checked) mp.cats.add(id);
           else mp.cats.delete(id);
           mp.importing = false;
@@ -78,11 +94,32 @@ function mpNav() {
           mp.importing = false;
           mpDraw();
           mpHfSearch(true);
-        }))),
+        })),
+        tick({ 'data-moe': '' }, "MoE's", MOE_TIP, e => {
+          mp.moe = e.target.checked;
+          mp.importing = false;
+          mpDraw();
+          mpHfSearch(true);
+        }),
+        tick({ 'data-card': '' }, 'Fits my card', null, e => {
+          mp.card = e.target.checked;
+          mp.importing = false;
+          mpDraw();
+          mpHfSearch(true);
+        })),
       el('ul', { class: 'mp-own' }, el('li', {}, el('button', { class: 'mp-cat mp-cat-own', type: 'button', id: 'mp-import', text: 'Import models', onclick: () => { mp.importing = !mp.importing; mpDraw(); } }))));
   }
-  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size : mp.cats.has(box.dataset.cat);
+  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size && !mp.moe && !mp.card : mp.cats.has(box.dataset.cat);
+  // Fits my card: only on a PC whose chat can use a graphics card with memory of its own.
+  const cardBox = nav.querySelector('[data-card]');
+  cardBox.checked = mp.card;
+  cardBox.closest('li').hidden = !mp.cards?.n;
+  if (mp.cards?.n) {
+    cardBox.nextElementSibling.textContent = `${mp.cards.n === 1 ? 'Fits my card' : 'Fits my cards'} (${Math.round(mp.cards.total / 2 ** 30)} GB)`;
+    cardBox.parentElement.title = `Only chat models with a size that sits wholly on the graphics card (${cardWord()}, about ${MP_GB(mp.cards.total - mp.cards.n * 2 ** 29)} of it usable). An estimate: the file and room for an 8K chat. A model that does not fit still runs, part on the card and part on the processor, slower.`;
+  }
   for (const box of nav.querySelectorAll('[data-term]')) box.checked = mp.terms.has(box.dataset.term);
+  for (const box of nav.querySelectorAll('[data-moe]')) box.checked = mp.moe;
 }
 
 // ---- Sizes: parameters ("9B") and what fits ----
@@ -103,21 +140,35 @@ const MP_FITS = {
   no: { mark: '✕', text: 'too big for this PC' },
 };
 const fitsText = f => (MP_FITS[f] ? `${MP_FITS[f].mark} ${MP_FITS[f].text}` : '');
+/** "6 GB card", or "2 cards, 12 GB": this PC's graphics cards that chat can use. */
+const cardWord = () => (mp.cards.n === 1 ? `${Math.round(mp.cards.total / 2 ** 30)} GB card` : `${mp.cards.n} cards, ${Math.round(mp.cards.total / 2 ** 30)} GB`);
+/** A size's card mark beside "fits this PC" (none when the PC itself is too small, or there is no card). */
+const cardText = m => (!mp.cards?.n || !m.card || m.fits === 'no' ? '' : m.card === 'ok' ? `✓ fits the ${cardWord()}` : `▲ more than the ${cardWord()} holds: part runs on the processor`);
 
-/** True when no size filter is set. */
-const noFilter = () => !mp.f.minB && !mp.f.maxB && !mp.f.minGB && !mp.f.maxGB;
+/** True when no size filter is set (Fits my card counts as one). */
+const noFilter = () => !mp.f.minB && !mp.f.maxB && !mp.f.minGB && !mp.f.maxGB && !mp.card;
 const inB = p => (!mp.f.minB || p >= mp.f.minB * 0.95e9) && (!mp.f.maxB || p <= mp.f.maxB * 1.05e9);
 const inGB = bytes => (!mp.f.minGB || bytes >= mp.f.minGB * 2 ** 30) && (!mp.f.maxGB || bytes <= mp.f.maxGB * 2 ** 30);
 /** A size filter on an item whose figures are known: false only when a known figure is outside it. Unknown = hidden while a filter is set. */
 function passes(params, sizes) {
   if (noFilter()) return true;
   if ((mp.f.minB || mp.f.maxB) && (params == null || !inB(params))) return false;
-  if ((mp.f.minGB || mp.f.maxGB) && !(sizes ?? []).some(inGB)) return false;
+  if ((mp.f.minGB || mp.f.maxGB || mp.card) && !(sizes ?? []).some(sizeOk)) return false;
   return true;
+}
+/** A size ({bytes, card}) inside the GB filter and, with Fits my card ticked, wholly on the card. */
+function sizeOk(m) {
+  return inGB(m.bytes) && (!mp.card || m.card === 'ok');
+}
+/** The size a row shows and downloads: the recommended one, or, with a filter set and the recommended one outside it, the biggest size inside it. */
+function shownSize(s) {
+  const u = s.models.find(m => m.name === s.usual) ?? s.models[0];
+  if (noFilter() || sizeOk(u)) return u;
+  return s.models.filter(sizeOk).sort((a, b) => b.bytes - a.bytes)[0] ?? u;
 }
 function filterText() {
   const r = (a, b, unit) => (a && b ? `${a} to ${b}${unit}` : a ? `${a}${unit} or more` : b ? `up to ${b}${unit}` : '');
-  return [r(mp.f.minB, mp.f.maxB, 'B'), r(mp.f.minGB, mp.f.maxGB, ' GB download')].filter(Boolean).join(', ');
+  return [r(mp.f.minB, mp.f.maxB, 'B'), r(mp.f.minGB, mp.f.maxGB, ' GB download'), mp.card && mp.cards?.n ? `fits the ${cardWord()}` : ''].filter(Boolean).join(', ');
 }
 
 // ---- The download in progress: the button that started it turns into its progress ----
@@ -169,7 +220,7 @@ function mpJobCard() {
   const j = mp.job;
   $('#mp-stop').hidden = true;
   if (!j) return void box.replaceChildren();
-  box.className = `mp-job${j.state === 'downloading' ? ' on' : ''}`;
+  box.className = `mp-job${j.state === 'downloading' ? ' on' : j.state === 'done' ? ' done' : ''}`;
   const pc = j.bytes ? Math.floor((j.got / j.bytes) * 100) : 0;
   if (j.state === 'downloading') {
     box.replaceChildren(
@@ -177,8 +228,12 @@ function mpJobCard() {
       el('div', { class: 'dl-track', 'aria-hidden': 'true' }, el('span', { class: 'dl-fill' })),
       el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: mpStop }));
     box.querySelector('.dl-fill').style.width = `${pc}%`;
+  } else if (j.state === 'done') {
+    // Done: it stands out (a green box), with a button straight to the staff to give it to.
+    box.replaceChildren(el('span', { class: 'mp-done-text', text: `✓ ${j.name} is downloaded and checked. Assign this to a staff, or pick it in a chat.` }),
+      app.seeAllStaff ? el('button', { class: 'btn primary', type: 'button', text: 'Edit staff', title: 'Opens All staff: press Edit beside someone, then PC settings, to give them this model', onclick: () => app.seeAllStaff() }) : null);
   } else {
-    box.replaceChildren(el('span', { class: j.state === 'failed' ? 'fault-line' : 'hint', text: j.state === 'done' ? `${j.name} is downloaded and checked. Give it to someone in Staff (Edit, then their model), or pick it in a chat.` : j.state === 'stopped' ? `${j.name}: stopped. Download it again to carry on from where it stopped.` : `${j.name}: the download failed. ${j.error}` }));
+    box.replaceChildren(el('span', { class: j.state === 'failed' ? 'fault-line' : 'hint', text: j.state === 'stopped' ? `${j.name}: stopped. Download it again to carry on from where it stopped.` : `${j.name}: the download failed. ${j.error}` }));
   }
 }
 
@@ -251,7 +306,7 @@ function mpItems() {
     items.push({ id: `image:${x.id}`, kind: 'image', modes: x.modes ?? [], name: x.name.replace(/\s*\(.*\)$/, ''), tag: (/\((.*)\)$/.exec(x.name) ?? [])[1] ?? '', about: x.about ?? '', more, warn: x.nonCommercial || x.hardwareFit?.level === 'no', state: regState(x), button: downloadBtn(x), bytes: x.bytes });
   }
   for (const x of d.helpers) items.push({ id: `helper:${x.id}`, kind: 'helper', name: x.name, tag: '', about: x.about ?? '', more: [`Licence: ${x.licence}`], state: regState(x), button: downloadBtn(x), bytes: x.bytes });
-  for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`], state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes });
+  for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`, cardText(c)].filter(Boolean), state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes, card: c.card ?? null, moe: !!c.moe });
   for (const r of d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: r.installed ? 'Installed: it runs the models.' : `Not installed (${MP_GB(r.bytes)}).`, more: r.installed ? [] : [`To install it, close TOMLIN and run: npm run fetch -- ${r.id}`], state: r.installed ? '✓ Installed' : 'Not installed', button: null });
   for (const p of POPULAR) items.push({ id: `popular:${p.repo}`, kind: 'popular', name: p.name, tag: 'Suggested', about: p.about, more: [`From huggingface.co/${p.repo}.`], repo: p.repo });
   return items;
@@ -272,8 +327,8 @@ function hfLine(x) {
   const params = s?.params ?? x.params ?? paramsFromName(x.repo.split('/')[1]) ?? paramsFromName(x.name);
   if (!s || s.busy) return `${params ? `${paramsText(params)} · ` : ''}Reading its sizes on Hugging Face…`;
   if (s.error) return `${params ? `${paramsText(params)} · ` : ''}Its sizes could not be read: ${s.error}`;
-  const u = s.models.find(m => m.name === s.usual) ?? s.models[0];
-  return [params ? paramsText(params) : '', `${shortQuant(u.name)} ${MP_GB(u.bytes)}${u.name === s.usual && s.models.length > 1 ? ' - recommended' : ''}`, fitsText(u.fits)].filter(Boolean).join(' · ');
+  const u = shownSize(s);
+  return [params ? paramsText(params) : '', `${shortQuant(u.name)} ${MP_GB(u.bytes)}${u.name === s.usual && s.models.length > 1 ? ' - recommended' : ''}`, fitsText(u.fits), cardText(u)].filter(Boolean).join(' · ');
 }
 /** "Qwen3.5-9B-Q4_K_M" -> "Q4_K_M": the size's own name, when the file names one. */
 const shortQuant = name => ([...name.matchAll(/(?:^|[-_.])((?:UD-)?(?:I?Q\d(?:_[A-Z0-9]+)*|F16|BF16|F32|MXFP4\w*|NVFP4\w*))(?=$|[-_.])/gi)].at(-1)?.[1].toUpperCase() ?? name);
@@ -282,7 +337,7 @@ const shortQuant = name => ([...name.matchAll(/(?:^|[-_.])((?:UD-)?(?:I?Q\d(?:_[
 function hfRow(x) {
   const s = mp.sizes[x.repo];
   const ready = s && !s.busy && !s.error;
-  const u = ready ? s.models.find(m => m.name === s.usual) ?? s.models[0] : null;
+  const u = ready ? shownSize(s) : null;
   const open = mp.open.has(x.id);
   const others = ready && s.models.length > 1;
   const side = el('div', { class: 'model-side' });
@@ -311,7 +366,7 @@ function mpSizes(repo, name) {
   for (const m of s.models) {
     box.append(el('div', { class: `job-remote${m.name === s.usual ? ' mp-pick' : ''}` },
       el('span', { text: `${name} ${shortQuant(m.name)} ${MP_GB(m.bytes)}${m.name === s.usual ? ' - recommended' : ''}` }),
-      el('span', { class: 'hint', text: fitsText(m.fits) }),
+      el('span', { class: 'hint', text: [fitsText(m.fits), cardText(m)].filter(Boolean).join(' · ') }),
       sizeAction(repo, s.rev, m, false)));
   }
   return box;
@@ -352,8 +407,38 @@ function mpTitle(q, filtering) {
     q ? cats : '',
     filtering ? filterText() : '',
     [...mp.terms].map(t => TERM_NAME[t]).join(' or '),
+    mp.moe ? "MoE's" : '',
     { only: 'installed only', hide: 'not installed yet' }[mp.show] ?? '',
   ].filter(Boolean).join(', ');
+}
+
+/** What Size orders by: the download (a suggestion: its recommended size, once read); unknown goes last. */
+const sizeOf = x => (x.kind === 'popular' ? (s => (s?.models?.length ? shownSize(s).bytes : null))(mp.sizes[x.repo]) : x.bytes) ?? null;
+/** The list in the order picked (as it comes when none is). */
+function mpOrdered(items) {
+  const [by, dir] = mp.order.split('-');
+  if (!by) return items;
+  const k = dir === 'desc' ? -1 : 1;
+  return [...items].sort((a, b) => {
+    if (by === 'name') return k * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    const x = sizeOf(a);
+    const y = sizeOf(b);
+    return (x == null) - (y == null) || k * ((x ?? 0) - (y ?? 0));
+  });
+}
+const ORDER_WORDS = { 'size-asc': 'smallest first', 'size-desc': 'largest first', 'name-asc': 'A to Z', 'name-desc': 'Z to A' };
+/** The two order buttons: pressed shows which way it runs now; pressed again, the other way. */
+function mpOrderButtons(importing) {
+  $('#mp-order').hidden = importing;
+  const [by, dir] = mp.order.split('-');
+  for (const b of document.querySelectorAll('#mp-order [data-order]')) {
+    const on = b.dataset.order === by;
+    b.setAttribute('aria-pressed', String(on));
+    b.textContent = b.dataset.order === 'size' ? (on ? (dir === 'desc' ? 'Size: largest first' : 'Size: smallest first') : 'Size') : on && dir === 'desc' ? 'Z to A' : 'A to Z';
+    b.title = b.dataset.order === 'size'
+      ? `Order by size${on ? `: ${dir === 'desc' ? 'largest' : 'smallest'} first now. Press again for ${dir === 'desc' ? 'smallest' : 'largest'} first` : ', smallest first (press again for largest first)'}`
+      : `Order by name${on ? `: ${dir === 'desc' ? 'Z to A' : 'A to Z'} now. Press again for ${dir === 'desc' ? 'A to Z' : 'Z to A'}` : ', A to Z (press again for Z to A)'}`;
+  }
 }
 
 function mpDraw() {
@@ -363,8 +448,9 @@ function mpDraw() {
   const every = q === 'all';
   const filtering = !noFilter();
   // A size filter is about chat models: picture models, helpers and runners have no "B".
-  const items = mpItems().filter(x => {
+  const items = mpOrdered(mpItems().filter(x => {
     if (filtering && x.kind !== 'chat' && x.kind !== 'popular') return false;
+    if (mp.moe && !isMoeItem(x)) return false;
     if (q && !every && !mpMatches(x, q)) return false;
     if (!inCats(x)) return false;
     if (mp.terms.size && ![...mp.terms].some(t => mpMatches(x, t))) return false;
@@ -372,12 +458,13 @@ function mpDraw() {
     if (!filtering) return true;
     if (x.kind === 'popular') {
       const s = mp.sizes[x.repo];
-      return passes(s?.params ?? paramsFromName(x.name), s?.models?.map(m => m.bytes));
+      return passes(s?.params ?? paramsFromName(x.name), s?.models);
     }
-    return passes(x.params, [x.bytes]);
-  });
+    return passes(x.params, [x]);
+  }));
   // Import models: the page is the two tiles (Download, Connect), not a list.
-  const importing = mp.importing && !q && !filtering && !mp.terms.size;
+  const importing = mp.importing && !q && !filtering && !mp.terms.size && !mp.moe;
+  mpOrderButtons(importing);
   $('#mp-import').setAttribute('aria-current', String(importing));
   for (const b of document.querySelectorAll('#mp-show [data-show]')) b.setAttribute('aria-pressed', String(b.dataset.show === mp.show));
   $('#mp-heading').textContent = importing ? 'Import from another folder' : mpTitle(q, filtering);
@@ -386,9 +473,9 @@ function mpDraw() {
   const list = $('#mp-list');
   list.hidden = importing;
   const parts = [];
-  if (!items.length && !importing) parts.push(el('p', { class: 'hint', text: q || filtering || mp.terms.size || mp.cats.size ? 'Nothing on this PC or in the suggestions matches.' : mp.show === 'only' ? 'None of these is on this PC.' : mp.show === 'hide' ? 'Every one of these is on this PC already.' : 'Nothing here yet.' }));
+  if (!items.length && !importing) parts.push(el('p', { class: 'hint', text: q || filtering || mp.terms.size || mp.moe || mp.cats.size ? 'Nothing on this PC or in the suggestions matches.' : mp.show === 'only' ? 'None of these is on this PC.' : mp.show === 'hide' ? 'Every one of these is on this PC already.' : 'Nothing here yet.' }));
   for (const x of items) parts.push(...mpRow(x));
-  if ((q || filtering || mp.terms.size) && hfInCats()) parts.push(...mpHfRows(items));
+  if ((q || filtering || mp.terms.size || mp.moe) && hfInCats()) parts.push(...mpHfRows(items));
   list.replaceChildren(...parts);
   for (const f of list.querySelectorAll('.dl-fill[data-w]')) f.style.width = `${f.dataset.w}%`;
   mpPaintJob();
@@ -396,7 +483,7 @@ function mpDraw() {
 
 // ---- Hugging Face: every GGUF chat model matching the words and sizes, a page at a time ----
 
-const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.list?.scannedAt ?? null]);
+const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.moe, mp.card, mp.order, mp.list?.scannedAt ?? null]);
 
 const MP_DAY = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const MP_WHEN = iso => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -437,7 +524,7 @@ function mpHfRows(shown) {
   const hf = mp.hf;
   const every = /^all$/i.test(mp.q.trim());
   const total = hf.key === hfKey() && hf.total != null ? `: ${hf.total.toLocaleString()} chat model${hf.total === 1 ? '' : 's'} on the list match` : '';
-  const out = [el('h3', { class: 'mp-hf-head', id: 'mp-hf-head', tabindex: '-1', text: `On Hugging Face${total || ` (${every ? 'every chat model' : 'chat models'})`}, most downloaded first${hf.key === hfKey() && hf.page ? `, page ${hf.page + 1}` : ''}` })];
+  const out = [el('h3', { class: 'mp-hf-head', id: 'mp-hf-head', tabindex: '-1', text: `On Hugging Face${total || ` (${every ? 'every chat model' : 'chat models'})`}, ${mp.order ? `${hf.pageOrder ? 'each page ' : ''}${ORDER_WORDS[mp.order]}` : 'most downloaded first'}${hf.key === hfKey() && hf.page ? `, page ${hf.page + 1}` : ''}` })];
   if (hf.key !== hfKey() || hf.busy) return [...out, el('p', { class: 'hint', text: 'Searching Hugging Face and reading each model\'s sizes…' })];
   if (hf.error) return [...out, el('p', { class: 'fault-line', text: hf.error }), mpPager()].filter(Boolean);
   const have = new Set(shown.map(x => x.repo).filter(Boolean));
@@ -476,16 +563,18 @@ async function mpHfAsk(key, i, paged = false) {
   mpDraw();
   if (paged) $('#mp-hf-head')?.focus();
   try {
-    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], cursor: cursors[i] });
+    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], moe: mp.moe, card: mp.card, order: mp.order, cursor: cursors[i] });
     for (const f of r.found) mp.sizes[f.repo] = f;
     const before = new Set(seen.slice(0, i).flat());
-    const found = r.found.filter(f => !before.has(f.repo));
+    // Hugging Face's own search (no list on this PC) comes most downloaded first: Size and A to Z order each page here.
+    const pageItem = f => ({ kind: 'hf', name: f.repo.split('/')[1], bytes: f.models?.length ? shownSize(f).bytes : null });
+    const found = r.pageOrder ? mpOrdered(r.found.filter(f => !before.has(f.repo)).map(f => ({ ...pageItem(f), f }))).map(x => x.f) : r.found.filter(f => !before.has(f.repo));
     const shown = [...seen];
     shown[i] = found.map(f => f.repo);
     // The page after this one is now known; a walk that went further keeps its numbers when it is the same page.
     const kept = cursors.slice(0, i + 1);
     if (r.next != null) kept.push(r.next, ...(JSON.stringify(cursors[i + 1]) === JSON.stringify(r.next) ? cursors.slice(i + 2) : []));
-    if (hfKey() === key) mp.hf = { key, busy: false, found, error: '', page: i, cursors: kept, next: r.next != null, seen: shown, total: r.total ?? null, note: r.note ?? '' };
+    if (hfKey() === key) mp.hf = { key, busy: false, found, error: '', page: i, cursors: kept, next: r.next != null, seen: shown, total: r.total ?? null, note: r.note ?? '', pageOrder: !!r.pageOrder };
   } catch (e) {
     if (hfKey() === key) mp.hf = { key, busy: false, found: [], error: e.message, page: i, cursors, next: false, seen };
   }
@@ -498,7 +587,7 @@ async function mpHfAsk(key, i, paged = false) {
 function mpHfSearch(now = false) {
   clearTimeout(mp.hfTimer);
   const q = mp.q.trim();
-  if (q.length < 2 && noFilter() && !mp.terms.size) return;
+  if (q.length < 2 && noFilter() && !mp.terms.size && !mp.moe) return;
   const key = hfKey();
   // Asked again with the same words and sizes (Search pressed after typing): the answer already here or coming stands,
   // unless it was a fault.
@@ -523,6 +612,7 @@ async function mpPopularSizes() {
 async function mpLoad() {
   const [d, m, j, l] = await Promise.all([api('/api/downloads').catch(() => null), api('/api/models').catch(() => null), api('/api/chatmodels/get').catch(() => null), api('/api/hflist').catch(() => null)]);
   if (d && m) mp.data = { image: d.image, helpers: d.helpers, chat: m.chat, runtimes: m.runtimes };
+  if (m) mp.cards = m.cards ?? null;
   if (m) mpFolderLine(m.folder, m.copies ?? [], m.ownFolder);
   if (l) {
     mp.list = l;
@@ -611,6 +701,15 @@ $('#mp-filter-clear').addEventListener('click', () => {
 });
 
 $('#mp-stop').addEventListener('click', mpStop);
+$('#mp-order').addEventListener('click', e => {
+  const b = e.target.closest('[data-order]');
+  if (!b) return;
+  // Pressed once: smallest first (A to Z); pressed again: the other way round.
+  const by = b.dataset.order;
+  mp.order = mp.order === `${by}-asc` ? `${by}-desc` : `${by}-asc`;
+  mpDraw();
+  mpHfSearch(true);
+});
 $('#mp-show').addEventListener('click', e => {
   const b = e.target.closest('[data-show]');
   if (!b) return;

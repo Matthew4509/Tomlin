@@ -108,8 +108,9 @@ export interface ChatRun {
 
 /** How llama-server is started for chat on `device`. `plainTemplates`: llama.cpp's own chat formats, for a model
  * whose template it cannot read (Mistral Nemo's). `card`: the device is a graphics card with memory of its own (a chip
- * built into the processor shares the RAM, so Auto keeps every layer on it there, as measured before). */
-export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' | 'cuda', threads: number, plainTemplates = false, run: ChatRun = { ctx: 8192, cache: 'f16', place: 'auto' }, card = false): string[] {
+ * built into the processor shares the RAM, so Auto keeps every layer on it there, as measured before). `key`: it then
+ * answers only requests that carry it (src/runnerkeys.ts), and its slots page (what each slot is working on) is off. */
+export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' | 'cuda', threads: number, plainTemplates = false, run: ChatRun = { ctx: 8192, cache: 'f16', place: 'auto' }, card = false, key = ''): string[] {
   // Auto on a card: no layer count, so llama.cpp fits it; otherwise every layer goes to the chip (none on the CPU).
   const fits = device !== 'cpu' && run.place === 'auto' && card;
   const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx), '--no-webui', ...(fits ? [] : ['-ngl', device === 'cpu' ? '0' : '999'])];
@@ -117,5 +118,6 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   if (run.place === 'ram' && device !== 'cpu') args.push('--cpu-moe');
   if (threads > 0) args.push('-t', String(threads));
   if (plainTemplates) args.push('--no-jinja');
+  if (key) args.push('--api-key', key, '--no-slots');
   return args;
 }

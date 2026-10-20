@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const cfg = require('./config');
-const { runAudit, summarise } = require('./audit');
+const { summarise } = require('./audit');
+const { auditOffThread } = require('./audit-run');
 const { liveOpts } = require('./live-state');
 const { autoDetails, readPrivateList } = require('./disclosure');
 const judged = require('./judged');
@@ -61,12 +62,27 @@ function withRecords(p, a) {
   return { ...a, findings, records };
 }
 
-// target: the local copy's address when one is running (null: the project's files only).
+// target: the local copy's address when one is running (null: the project's files only). The scan itself runs in a
+// low-priority process of its own (lib/audit-run.js); one scan per project at a time.
+const scanning = new Map(); // project key -> when its scan started
+function scanBusy(p) {
+  const at = scanning.get(keyOf(p.dir));
+  if (!at) return null;
+  const e = new Error(p.name + ' is already being scanned (started at ' + new Date(at).toTimeString().slice(0, 5) + ', from this window or another). Its report opens where that scan was started; to see it here when it ends, use … › Last audit.');
+  e.status = 409;
+  return e;
+}
 async function auditProject(p, target) {
-  const opts = { skip: p.auditSkip, skipOwn: p.auditSkipOwn, include: p.auditInclude, judged: judgedFor(p), notes: ownNotes(p), disclosure: disclosureContext(p), ...(p.liveUrl ? { liveUrl: p.liveUrl, ...liveOpts(p.liveUrl) } : {}) };
-  const a = withRecords(p, await runAudit(p.dir, target, opts));
-  fs.writeFileSync(file(p.id), JSON.stringify(a, null, 2));
-  return a;
+  const busy = scanBusy(p);
+  if (busy) throw busy;
+  const k = keyOf(p.dir);
+  scanning.set(k, Date.now());
+  try {
+    const opts = { skip: p.auditSkip, skipOwn: p.auditSkipOwn, include: p.auditInclude, judged: judgedFor(p), notes: ownNotes(p), disclosure: disclosureContext(p), ...(p.liveUrl ? { liveUrl: p.liveUrl, ...liveOpts(p.liveUrl) } : {}) };
+    const a = withRecords(p, await auditOffThread(p.dir, target, opts));
+    fs.writeFileSync(file(p.id), JSON.stringify(a, null, 2));
+    return a;
+  } finally { scanning.delete(k); }
 }
 
 // After a judgement changes: the last audit's findings (set-aside ones included) judged again, without a new scan.

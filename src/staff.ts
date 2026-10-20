@@ -224,6 +224,18 @@ export function nowModel(m: { model?: string | null; group?: string[]; active?: 
   return m.active && list.includes(m.active) ? m.active : m.model && !m.model.startsWith('remote:') ? m.model : null;
 }
 
+type Runs = { model?: string | null; group?: string[]; active?: string | null };
+/**
+ * The model on this PC a hire ran on before their model was changed, when nobody else runs on it: the one to unload
+ * (otherwise the new one loads beside it while the memory says there is room). null when it is the same model, it
+ * was on a linked PC, or another hire still runs on it.
+ */
+export function modelLeft(before: Runs, after: Runs, others: Runs[]): string | null {
+  const old = nowModel(before);
+  if (!old || old === nowModel(after)) return null;
+  return others.some(o => nowModel(o) === old) ? null : old;
+}
+
 /**
  * Every hire's first lines. Said as what to do, not what not to say: naming a habit to avoid makes small models do it
  * (the old line listed "scanning, installing" and "/image", and answers came back with notes repeating it). Code goes

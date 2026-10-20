@@ -1,9 +1,13 @@
-// The categories and prompts a Bridge starts with: nine kinds of expert, five prompts each. Words in [brackets] are for
-// the person to fill in before pasting. Written once into <data>/prompts.json the first time it is read; after that
+// The categories and prompts a Bridge starts with: the Bridge's own start-line prompt, then nine kinds of expert, five
+// prompts each. Words in [brackets] are for the person to fill in before pasting. Written once into <data>/prompts.json the first time it is read; after that
 // they are the person's own to rename, edit or delete, and a deleted starter never comes back.
 'use strict';
+const { START_LINE_TITLE, START_LINE_PROMPT } = require('./start-line');
 
 const STARTERS = [
+  ['bridge', 'TOMLIN', [
+    [START_LINE_TITLE, START_LINE_PROMPT],
+  ]],
   ['seo', 'SEO specialist', [
     ['Content brief for a keyword', 'Act as an SEO strategist. Build a content brief for the keyword "[keyword]": the search intent, 5 related keywords, the angle competitors miss, an H1 and H2 outline, and the word count to aim for.'],
     ['Title tags and meta descriptions', 'Write 5 title tags (under 60 characters) and 5 meta descriptions (under 155 characters) for a page about [topic]. Put the main keyword near the front and give a reason to click.'],
@@ -76,7 +80,15 @@ function starters(now) {
     categories.push({ id: 'starter-' + id, name, created: now });
     list.forEach(([title, text], i) => prompts.push({ id: 'starter-' + id + '-' + (i + 1), category: 'starter-' + id, title, text, created: now, updated: now }));
   }
-  return { categories, prompts };
+  return { categories, prompts, added: ADDED.slice() };
 }
 
-module.exports = { starters };
+// Starters that came after the first release: a file made before them gets each one ONCE (see prompts.js), and the
+// file remembers it, so one the person deletes never comes back.
+const ADDED = ['bridge'];
+function addedStarter(id, now) {
+  const s = starters(now);
+  return { category: s.categories.find(c => c.id === 'starter-' + id), prompts: s.prompts.filter(p => p.category === 'starter-' + id) };
+}
+
+module.exports = { starters, addedStarter, ADDED };

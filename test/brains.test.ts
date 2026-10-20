@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanTurns, flatten, isIntern, modelForStyle, modelStem, orderChoices, parseRef, pickBrain, ranOn, refsOf, remoteRef, sameModel, styleCoverage, styleOfMode, withCover, type BackupChoice, type PictureModel } from '../src/brains.ts';
+import { cleanTurns, flatten, isIntern, modelForStyle, modelStem, orderChoices, parseRef, pcLabels, tidyChoices, pickBrain, ranOn, refsOf, remoteRef, sameModel, styleCoverage, styleOfMode, withCover, type BackupChoice, type PictureModel } from '../src/brains.ts';
 
 test('a brain is a model here or a paired PC; anything else is no brain', () => {
   assert.deepEqual(parseRef('qwen3-8b-q4_k_m'), { kind: 'here', id: 'qwen3-8b-q4_k_m' });
@@ -106,4 +106,13 @@ test('backups: the same model first, then not an intern, then ready, then bigger
   const c = (ref: string, model: string, ready: boolean, same: boolean, intern: boolean): BackupChoice => ({ ref, pc: ref, model, ready, same, intern });
   const list = [c('a', 'Qwen-2B', true, false, true), c('b', 'Qwen-9B', false, true, false), c('c', 'Gemma-4B', true, false, true), c('d', 'Qwen-14B', true, false, false)];
   assert.deepEqual(orderChoices(list).map(x => x.ref), ['b', 'd', 'c', 'a']);
+});
+
+test('backups: the same PC and model offered twice is one row; two linked PCs with one name are told apart by address', () => {
+  const c = (pc: string, model: string, ready = false): BackupChoice => ({ ref: `${pc}|${model}|${ready}`, pc, model, ready, same: false, intern: false });
+  // Two copies of one file (TOMLIN's folder and another folder): one row, the one that answers now kept.
+  const rows = tidyChoices([c('This PC', 'Huihui-Ministral-3B-Abliterated-Q4_K_M'), c('This PC', 'Huihui-Ministral-3B-Abliterated-Q4_K_M', true), c('Worker PC', 'Huihui-Ministral-3B-Abliterated-Q4_K_M')]);
+  assert.deepEqual(rows.map(r => [r.pc, r.ready]), [['This PC', true], ['Worker PC', false]]);
+  const labels = pcLabels([{ id: 'a', name: 'Worker PC', url: 'http://192.168.1.20:8741' }, { id: 'b', name: 'Worker PC', url: 'http://192.168.1.31:8741' }, { id: 'c', name: 'Z240', url: 'http://192.168.1.40:8741' }]);
+  assert.deepEqual(labels, { a: 'Worker PC (192.168.1.20)', b: 'Worker PC (192.168.1.31)', c: 'Z240' });
 });

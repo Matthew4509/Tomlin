@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { starters } = require('./prompt-starters');
+const { starters, addedStarter, ADDED } = require('./prompt-starters');
 
 const MAX_TITLE = 120;
 const MAX_TEXT = 20000;
@@ -37,7 +37,22 @@ function read(file) {
     const lost = prompts.filter(p => !seen.has(p.category));
     if (lost.length && !seen.has('mine')) categories.unshift({ id: 'mine', name: 'My prompts', created: new Date().toISOString() });
     for (const p of lost) p.category = 'mine';
-    return { categories, prompts };
+    // A starter added in a later version goes in once, at the front; the file then remembers it was given.
+    const added = Array.isArray(s.added) ? s.added.filter(x => typeof x === 'string') : [];
+    const owed = ADDED.filter(id => !added.includes(id));
+    if (!owed.length) return { categories, prompts, added };
+    const now = new Date().toISOString();
+    for (const id of owed.reverse()) {
+      const st = addedStarter(id, now);
+      if (!seen.has(st.category.id)) { categories.unshift(st.category); seen.add(st.category.id); }
+      prompts.unshift(...st.prompts.filter(p => !prompts.some(q => q.id === p.id)));
+      added.push(id);
+    }
+    const st = { categories, prompts, added };
+    // Only a read: a file that cannot be written now (read-only, held by antivirus) still shows the list, and the
+    // starter is offered again on the next read. An edit that saves reports the error as before.
+    try { save(file, st); } catch {}
+    return st;
   }
   const now = new Date().toISOString();
   const st = starters(now);
@@ -53,7 +68,7 @@ const load = file => read(file);
 function save(file, st) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ categories: st.categories, prompts: st.prompts }, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify({ categories: st.categories, prompts: st.prompts, ...(st.added ? { added: st.added } : {}) }, null, 2));
   require('./settings').swapIn(tmp, file);
 }
 

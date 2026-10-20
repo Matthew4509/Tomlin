@@ -1,4 +1,4 @@
-// The Bridge part as a whole: This PC numbers, the Git program check, Stop all, stopping a port another program holds,
+// The Bridge part as a whole: This PC numbers, the start-line prompt, the Git program check, Stop all, stopping a port another program holds,
 // the folder picker, Scan folders, token recount and the live check of every site. Setup, shortcuts, Start with Windows,
 // Uninstall and Quit are TOMLIN's own (its installer, Nodes and memory, its icon by the clock), so they are not here.
 'use strict';
@@ -12,6 +12,7 @@ const cfg = require('../config');
 const gitProgram = require('../git-program');
 const disclosure = require('../disclosure');
 const bringIn = require('../import');
+const { START_LINE_PROMPT, START_LINE_TITLE } = require('../start-line');
 
 // Audits › Private details: the page sees labels and lengths, never the values (they live in data/ only).
 const privateDetails = () => ({ details: disclosure.listForPage(cfg.PRIVATE_FILE),
@@ -24,6 +25,8 @@ const get = {
   // About › Bring in from Myia Bridge: the Myia Bridge folders found beside the projects.
   '/api/import': () => ({ candidates: bringIn.candidates() }),
   '/api/private-details': privateDetails,
+  // The start-line prompt (the empty project list, a project with no start command): the same text as the starter on Prompts.
+  '/api/start-prompt': () => ({ title: START_LINE_TITLE, text: START_LINE_PROMPT }),
   // The Git program's version. Asks GitHub for the newest one only when the person has ticked that on.
   '/api/git-program': ({ url }) => gitProgram.status({ online: gitOnline(), fresh: url.searchParams.get('fresh') === '1' }),
 };

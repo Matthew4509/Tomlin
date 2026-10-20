@@ -54,6 +54,12 @@ images.recipe = id => {
   return r?.kind && r.recipe ? r.recipe : null;
 };
 
+/**
+ * Started once as a test by the copy it is to replace, over an empty home of its own (src/newcopy.ts): it must answer,
+ * and reaches nothing outside that home (no Bridge part, no sharing, no linked PCs, no window, no program rebuilt).
+ */
+const TEST_START = process.env.TOMLIN_TEST_START === '1';
+
 await store.settings();
 // The host is off: a host still chosen in old settings hands over to the first hire who chats, once, here (a window
 // reading its chat changes nothing).
@@ -62,7 +68,7 @@ startJobs();
 startOwed();
 await startQueue();
 // The Bridge part: projects, local copies, audits, git, live sites and prompts (/bridge/).
-startBridge();
+if (!TEST_START) startBridge();
 
 // ---- Routes ----
 
@@ -159,6 +165,7 @@ server.listen(PORT, '127.0.0.1', () => {
   setInterval(clear, 3_600_000).unref();
   console.log(`TOMLIN ${VERSION} is running at http://127.0.0.1:${PORT}  (nothing is loaded until you press Connect; ${process.env.TOMLIN_TRAY === '1' ? 'quit it from its icon by the clock' : 'close this window to stop'})`);
   console.log(`Your chats, staff, pictures and downloaded models are kept in ${HOME.home}`);
+  if (TEST_START) return;
   // A new copy started by Start TOMLIN.cmd after an update from a linked PC: it answered, so it is kept (no going back).
   if (process.env.TOMLIN_PREV) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
   // Started again after a new copy failed to start: "Start with Windows", pointed at that copy, points here again.

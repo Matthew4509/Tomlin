@@ -6,12 +6,14 @@
 // runners (moved, so nothing is downloaded again). Before a new version first uses the data, data/ is zipped into
 // backups/ (the last 5 are kept). Import and restore run at the NEXT start, before anything opens a file.
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { cp, mkdir, readdir, rename, rm, rmdir, stat, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { writeAtomic } from './atomic.ts';
+import { entriesWhy, unpackedWhy, zipEntries } from './newcopy.ts';
 import { PIN_FILE, pinKey, type RuntimePin } from './runtimes.ts';
 
 const run = promisify(execFile);
@@ -182,6 +184,13 @@ const stamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1)
 export const SNAP_PROFILE = './bridge/snaps/profile';
 /** Also left out: Push live's connections, secrets and push records (sealed for this Windows account, and they stay in place). */
 export const HOSTING = './bridge/hosting';
+/**
+ * Left out of a restore point kept on another PC (Back up to a linked PC), with the keys to the linked PCs in
+ * settings.json: this PC's sharing code and paired links, and its PIN. That PC keeps the chats, never the keys.
+ */
+const NOT_ELSEWHERE = ['share.json', 'app-lock.json'];
+/** In a restore point kept on another PC: says what was left out, so putting it back keeps this PC's own. */
+export const ELSEWHERE_MARK = 'kept-elsewhere.json';
 const tar = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar');
 
 export interface Backup {
@@ -205,27 +214,60 @@ export async function listBackups(home: Home): Promise<Backup[]> {
   return out.sort((a, b) => b.name.localeCompare(a.name));
 }
 
+/** settings.json without the keys to the linked PCs (each keeps its name and address; its token is empty). */
+function withoutKeys(text: string): string {
+  const s = JSON.parse(text) as { remotes?: unknown };
+  const remotes = Array.isArray(s.remotes) ? s.remotes.map(r => {
+    const { token: _token, key: _key, ...rest } = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+    return { ...rest, token: '' };
+  }) : s.remotes;
+  return JSON.stringify({ ...s, remotes });
+}
+
 /**
  * Zips data/ into backups/ ("<date> <label>.zip") and keeps the last 5. Returns the file name. The zip is made in a
  * folder of its own and moved in when it is whole, so a backup that failed or was cut off is never listed as one.
+ * forOtherPc: a restore point to keep on another PC, without this PC's keys to its linked PCs, sharing code and PIN.
  */
-export async function backup(home: Home, label: string): Promise<string> {
+export async function backup(home: Home, label: string, o: { forOtherPc?: boolean } = {}): Promise<string> {
   await mkdir(home.backups, { recursive: true });
   const name = `${stamp()} ${label.replace(/[^\w .()-]+/g, '-')}.zip`;
   const making = join(home.backups, MAKING);
   await mkdir(making, { recursive: true });
   const part = join(making, name);
+  const side = join(making, `${name}.side`);
   try {
     // Windows' own tar makes zip files (-a picks the format from the name); the runner list is about live processes,
     // and a save's half-written copy (*.tmp) is not data. The Bridge's throwaway browser profile for page snapshots
     // (src/bridge/snaps.js) is not data either, and Windows can refuse to let it be read (a locked browser file): with
     // it in, every backup failed ("Permission denied" on its Affiliation Database).
-    await run(tar(), ['-a', '-c', '-f', part, '--exclude', 'runners.json', '--exclude', '*.tmp', '--exclude', SNAP_PROFILE, '--exclude', HOSTING, '-C', home.data, '.'], { windowsHide: true, maxBuffer: 1 << 20 });
+    const args = ['-a', '-c', '-f', part, '--exclude', 'runners.json', '--exclude', '*.tmp', '--exclude', SNAP_PROFILE, '--exclude', HOSTING];
+    if (o.forOtherPc) {
+      // Its top-level entries are named one by one (tar's --exclude would also match bridge/settings.json), and
+      // settings.json comes from a folder beside, without the keys.
+      const left = ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE];
+      const top = (await readdir(home.data)).filter(n => !left.includes(n) && !n.endsWith('.tmp'));
+      await mkdir(side, { recursive: true });
+      const extra = [ELSEWHERE_MARK];
+      const settings = await readFile(join(home.data, 'settings.json'), 'utf8').catch(() => null);
+      if (settings !== null) {
+        try {
+          await writeFile(join(side, 'settings.json'), withoutKeys(settings));
+        } catch {
+          throw new Error('your settings file could not be read, so no restore point was made to send (it would have carried the keys to your linked PCs)');
+        }
+        extra.push('settings.json');
+      }
+      await writeFile(join(side, ELSEWHERE_MARK), JSON.stringify({ left: ['the keys to the linked PCs (settings.json)', ...NOT_ELSEWHERE] }, null, 1));
+      args.push('-C', home.data, ...top, '-C', side, ...extra);
+    } else args.push('-C', home.data, '.');
+    await run(tar(), args, { windowsHide: true, maxBuffer: 1 << 20 });
     await rename(part, join(home.backups, name));
   } catch (e) {
     await rm(part, { force: true }).catch(() => undefined);
     throw e;
   } finally {
+    await rm(side, { recursive: true, force: true }).catch(() => undefined);
     // Gone once empty (another backup still being made keeps it).
     await rmdir(making).catch(() => undefined);
   }
@@ -257,16 +299,59 @@ async function swapData(home: Home, fresh: string): Promise<void> {
 }
 
 /**
- * What every backup leaves out on purpose and keeps in place (Push live's connections, secrets and push records):
- * moved from the old data into the new before the old goes, unless the new data brought its own.
+ * What a backup leaves out on purpose and keeps in place (Push live's connections, secrets and push records; and, from a
+ * restore point kept on another PC, this PC's sharing code and PIN): moved from the old data into the new before the
+ * old goes, unless the new data brought its own.
  */
 async function carryKept(old: string, data: string): Promise<void> {
-  const rel = HOSTING.split('/').slice(1);
-  const from = join(old, ...rel);
-  const to = join(data, ...rel);
-  if (!existsSync(from) || existsSync(to)) return;
-  await mkdir(dirname(to), { recursive: true });
-  await rename(from, to);
+  for (const rel of [HOSTING.split('/').slice(1), ...NOT_ELSEWHERE.map(f => [f])]) {
+    const from = join(old, ...rel);
+    const to = join(data, ...rel);
+    if (!existsSync(from) || existsSync(to)) continue;
+    await mkdir(dirname(to), { recursive: true });
+    await rename(from, to);
+  }
+}
+
+/** A restore point kept on another PC, unpacked at `fresh`: each linked PC takes this PC's key to it as it is now. */
+async function keysFromHere(fresh: string, data: string): Promise<void> {
+  const read = async (f: string) => JSON.parse(await readFile(f, 'utf8')) as { remotes?: Record<string, unknown>[] };
+  const back = await read(join(fresh, 'settings.json')).catch(() => null);
+  if (!back || !Array.isArray(back.remotes)) return;
+  const now = await read(join(data, 'settings.json')).catch(() => ({ remotes: [] as Record<string, unknown>[] }));
+  const mine = new Map((Array.isArray(now.remotes) ? now.remotes : []).map(r => [r.id, r]));
+  back.remotes = back.remotes.map(r => {
+    const m = mine.get(r.id);
+    return m ? { ...r, token: m.token, ...(m.key ? { key: m.key } : {}) } : r;
+  });
+  await writeAtomic(join(fresh, 'settings.json'), JSON.stringify(back));
+}
+
+// ---- Restore points kept on another PC: what was sent is recorded here, and what comes back is checked ----
+
+/** In backups/: the SHA-256 of each restore point sent to another PC, by name (the newest 50). */
+const SENT_FILE = '.sent.json';
+async function sha256Of(file: string): Promise<string> {
+  const h = createHash('sha256');
+  for await (const chunk of createReadStream(file)) h.update(chunk);
+  return h.digest('hex');
+}
+const readSent = async (dir: string) => JSON.parse(await readFile(join(dir, SENT_FILE), 'utf8').catch(() => '{}')) as Record<string, string>;
+
+/** Notes the restore point `file` (named `name`) as sent to another PC. */
+export async function recordSent(dir: string, name: string, file: string): Promise<void> {
+  const sent = { ...(await readSent(dir).catch(() => ({}))), [name]: await sha256Of(file) };
+  await writeAtomic(join(dir, SENT_FILE), JSON.stringify(Object.fromEntries(Object.entries(sent).slice(-50)), null, 1));
+}
+
+/**
+ * Whether `file`, brought back as `name`, is what was sent: '' when it is; 'unchecked' when there is no record of it
+ * (sent before the record was kept, or the record went with this PC's data); else why it is refused.
+ */
+export async function broughtBackWhy(dir: string, name: string, file: string): Promise<string> {
+  const want = (await readSent(dir).catch(() => ({} as Record<string, string>)))[name];
+  if (!want) return 'unchecked';
+  return (await sha256Of(file)) === want ? '' : 'the restore point that came back is not the one this PC sent (it was changed on that PC, or cut short), so it was not kept';
 }
 
 /** A swap cut off last time: finished (the new data is in place) or undone (data.old goes back). */
@@ -379,11 +464,33 @@ export async function bringIn(home: Home, root: string, from: string, appVersion
 export async function restore(home: Home, name: string, appVersion: string): Promise<string> {
   const zip = join(home.backups, basename(name));
   if (!existsSync(zip)) return `Nothing was restored: the backup "${name}" is no longer in ${home.backups}.`;
+  const no = (why: string) => `Nothing was restored: ${why.charAt(0).toLowerCase()}${why.slice(1).replace(/\.$/, '')}. Your data is as it was.`;
+  // Its own listing first (a restore point can come back from another PC): no link, no name that climbs out. Data can
+  // be any size, so no count or size limit here.
+  const any = { entries: Infinity, bytes: Infinity };
+  const listed = await zipEntries(zip).then(e => entriesWhy(e, any), () => 'that backup could not be read as a zip');
+  if (listed) return no(listed);
   // Unpacked first: the backup of the data as it is now could push the oldest backup (maybe this one) out of the 5.
   const fresh = `${home.data}.restoring`;
   await rm(fresh, { recursive: true, force: true });
   await mkdir(fresh, { recursive: true });
-  await run(tar(), ['-x', '-f', zip, '-C', fresh], { windowsHide: true, maxBuffer: 1 << 20 });
+  try {
+    await run(tar(), ['-x', '-f', zip, '-C', fresh], { windowsHide: true, maxBuffer: 1 << 20 });
+  } catch (e) {
+    await rm(fresh, { recursive: true, force: true });
+    return no(`that backup could not be opened (${((e as Error).message || '').split('\n').pop()?.trim().slice(0, 160) || 'tar refused it'})`);
+  }
+  const opened = await unpackedWhy(fresh, null, any);
+  if (opened) {
+    await rm(fresh, { recursive: true, force: true });
+    return no(opened);
+  }
+  // Kept on another PC: it holds no keys to the linked PCs, no sharing code and no PIN, so this PC's own stay.
+  const elsewhere = existsSync(join(fresh, ELSEWHERE_MARK));
+  if (elsewhere) {
+    await keysFromHere(fresh, home.data);
+    await rm(join(fresh, ELSEWHERE_MARK), { force: true });
+  }
   // The data as it is now is kept first; without that copy nothing is replaced.
   let kept: string;
   try {
@@ -394,7 +501,7 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   }
   await swapData(home, fresh);
   const v = readVersion(home);
-  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".`;
+  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Nodes and memory).' : ''}`;
   await writeVersion(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
   return note;
 }

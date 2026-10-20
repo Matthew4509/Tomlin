@@ -520,11 +520,13 @@ async function main() {
   let firstId = null;
   let catId = null;
   const mine = list => list.filter(p => p.category === catId);
-  await check('prompts: a fresh Bridge has the nine starter categories, five prompts each', async () => {
+  await check('prompts: a fresh Bridge has its start-line prompt first, then the nine starter categories, five prompts each', async () => {
     const r = (await api('/api/prompts')).json;
-    assert.strictEqual(r.categories.length, 9);
+    assert.strictEqual(r.categories.length, 10);
+    assert.strictEqual(r.categories[0].name, 'TOMLIN');
+    assert.strictEqual(r.prompts.filter(p => p.category === r.categories[0].id).length, 1);
     assert(r.categories.some(c => c.name === 'Photographer'));
-    for (const c of r.categories) assert.strictEqual(r.prompts.filter(p => p.category === c.id).length, 5, c.name);
+    for (const c of r.categories.slice(1)) assert.strictEqual(r.prompts.filter(p => p.category === c.id).length, 5, c.name);
     assert.deepStrictEqual((await api('/api/prompts')).json, r, 'reading twice gives the same list');
   });
   await check('prompts: a new category goes at the end; a name already used (any case) or empty is refused', async () => {

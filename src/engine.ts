@@ -1,6 +1,7 @@
 // Talking to the model: how each family of model is asked, and the streaming client for llama.cpp's server (its
 // OpenAI-style /v1/chat/completions). The plain functions are tested in test/engine.test.ts.
 import { usedFromTimings, type Used } from './meter.ts';
+import { runnerHeaders } from './runnerkeys.ts';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -306,7 +307,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
   try {
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
       // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word.
       body: JSON.stringify({ messages: turnsFor(turns, style), stream: true, max_tokens: maxTokens, ...style.sampling, ...(opts.onReading ? { return_progress: true } : {}) }),
       signal: ac.signal,

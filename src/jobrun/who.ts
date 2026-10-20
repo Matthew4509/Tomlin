@@ -1,7 +1,8 @@
 // Who answers: a model on this PC, a linked PC's, or a hire's own brains with their fallback and backup.
 import { CONTINUE_ASK, NoPrefill, streamChat, repeatCut, type AskOpts, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
-import { nowModel, type StaffMember } from '../staff.ts';
+import { matchModel, nowModel, type StaffMember } from '../staff.ts';
+import { chatNeed, memOfReport, ramFit } from '../calc.ts';
 import type { Pane } from '../pane.ts';
 import { scope } from '../meter.ts';
 import { d, sleep } from './shared.ts';
@@ -96,7 +97,8 @@ export async function candidate(ref: string): Promise<brains.Candidate> {
       }
       return h.model ? { ref, ready: true, loadable: false, why: '' } : { ref, ready: false, loadable: false, why: `"${r.name}" has no chat model loaded` };
     } catch {
-      return { ref, ready: false, loadable: false, why: `"${r.name}" is off or not answering` };
+      // Named with its address when another linked PC has the same name (two "Worker PC"s).
+      return { ref, ready: false, loadable: false, why: `"${brains.pcLabels(s.remotes)[r.id] ?? r.name}" is off or not answering` };
     }
   }
   if (b.kind !== 'here') return { ref, ready: false, loadable: false, why: '' };
@@ -226,28 +228,39 @@ export async function backupChoices(m: StaffMember): Promise<{ own: string; choi
   const own = ownModelName(m);
   const choices: brains.BackupChoice[] = [];
   const others: { pc: string; why: string }[] = [];
+  // Two linked PCs with one name ("Worker PC") are told apart by their address.
+  const label = brains.pcLabels(s.remotes);
+  // For the window's filters: whether each model fits the memory of the PC it would answer on, and its size against
+  // the hire's level.
+  const fitOn = (mem: { ram: number; vram: number }, bytes: number) => (bytes ? ramFit(Math.round(chatNeed(bytes)), mem) : null);
+  const levelOf = (name: string, bytes: number) => matchModel(m, { name, bytes }).against;
+  const here = memOfReport(d.memory());
   for (const x of d.chatList()) {
     if (mine.includes(x.id)) continue;
     const c = await candidate(x.id);
-    if (c.ready || c.loadable) choices.push({ ref: x.id, pc: 'This PC', model: x.name, ready: c.ready, same: brains.sameModel(own, x.name), intern: brains.isIntern(own, x.name) });
+    if (c.ready || c.loadable) choices.push({ ref: x.id, pc: 'This PC', pcId: 'here', model: x.name, ready: c.ready, same: brains.sameModel(own, x.name), intern: brains.isIntern(own, x.name), fit: fitOn(here, x.bytes), level: levelOf(x.name, x.bytes) });
   }
   await Promise.all(s.remotes.map(async r => {
     const ref = `remote:${r.id}`;
-    if (r.backupsOnly) return void others.push({ pc: r.name, why: 'it is set to Backups only' });
+    const name = label[r.id] ?? r.name;
+    if (r.backupsOnly) return void others.push({ pc: name, why: 'it is set to Backups only' });
     try {
       const h = await hello(r, 3000);
-      if (h.away) return void others.push({ pc: r.name, why: 'its owner is using it for now' });
-      // The models it lets linked PCs use: one not loaded there loads first (ready is false: it takes a while).
-      for (const x of h.models) {
+      if (h.away) return void others.push({ pc: name, why: 'its owner is using it for now' });
+      // The chat models it lets linked PCs use (its picture models cannot answer a chat): one not loaded there loads
+      // first (ready is false: it takes a while).
+      const chatModels = h.models.filter(x => x.kind !== 'image');
+      const there = memOfReport(h.memory);
+      for (const x of chatModels) {
         const at = brains.remoteRef(r.id, x.id);
-        if (!mine.includes(at)) choices.push({ ref: at, pc: r.name, model: x.name, ready: x.loaded, same: brains.sameModel(own, x.name), intern: brains.isIntern(own, x.name) });
+        if (!mine.includes(at)) choices.push({ ref: at, pc: name, pcId: r.id, model: x.name, ready: x.loaded, same: brains.sameModel(own, x.name), intern: brains.isIntern(own, x.name), fit: fitOn(there, x.bytes), level: levelOf(x.name, x.bytes) });
       }
-      if (h.models.length || mine.includes(ref)) return;
-      if (!h.model) others.push({ pc: r.name, why: 'on, with no chat model loaded (its owner connects one there, or ticks the models other PCs may use)' });
-      else choices.push({ ref, pc: r.name, model: h.model, ready: true, same: brains.sameModel(own, h.model), intern: brains.isIntern(own, h.model) });
+      if (chatModels.length || mine.includes(ref)) return;
+      if (!h.model) others.push({ pc: name, why: 'on, with no chat model loaded (its owner connects one there, or ticks the models other PCs may use)' });
+      else choices.push({ ref, pc: name, pcId: r.id, model: h.model, ready: true, same: brains.sameModel(own, h.model), intern: brains.isIntern(own, h.model), fit: null, level: levelOf(h.model, 0) });
     } catch {
-      others.push({ pc: r.name, why: 'off or not answering' });
+      others.push({ pc: name, why: 'off or not answering' });
     }
   }));
-  return { own, choices: brains.orderChoices(choices), others };
+  return { own, choices: brains.orderChoices(brains.tidyChoices(choices)), others };
 }
