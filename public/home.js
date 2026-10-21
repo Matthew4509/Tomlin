@@ -643,6 +643,7 @@ function modelTile(x) {
         if (ok) modelSay(x.id, '');
         else refreshNodes();
       }) : null,
+      x.kind === 'chat' && !x.ollama ? app.finderButton(x.id, { name: x.name, link: true }) : null,
       hide, del),
     say ? el('p', { class: 'hint fault-line', role: 'status', text: say }) : null);
 }
@@ -1069,7 +1070,8 @@ function drawOthers(pcs) {
             el('h4', { text: head }),
             el('ul', {}, ...list.map(m => {
               const bit = m.busy ? (m.kind === 'image' ? 'busy: drawing for someone now' : 'busy: answering someone now') : m.loaded ? 'loaded' : '';
-              return el('li', {}, `${m.name}${bit ? ` (${bit})` : ''}`, m.kind !== 'image' && m.guessers?.length ? guessPick(p, m) : null);
+              return el('li', {}, `${m.name}${bit ? ` (${bit})` : ''}`, m.kind !== 'image' && m.guessers?.length ? guessPick(p, m) : null,
+                m.kind !== 'image' && p.can?.includes('tune') ? el('div', { class: 'guess-pick' }, app.finderButton(`remote:${p.id}:${m.id}`, { name: m.name, pcName: p.name, link: true })) : null);
             })))),
           p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network: connect PCs, Sharing permissions).` }) : null,
           el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Hire staff on it', 'data-key': `hire:${p.id}`, title: `Opens Hire staff with ${p.name} picked: then choose one of its models`, onclick: () => app.openHire?.({ pc: p.id }) })))

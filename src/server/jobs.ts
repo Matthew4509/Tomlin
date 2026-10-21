@@ -17,6 +17,7 @@ import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
 import { tellJob } from './notices.ts';
 import { memoryNow } from './thispc.ts';
 import { fetchHere } from './hf.ts';
+import { finderBusy, tuneDoor } from './finder.ts';
 
 // ---- Jobs (src/jobrun.ts) ----
 
@@ -99,6 +100,8 @@ export function startJobs(): void {
     onNodeAsk: (name, hours) => void notifier.tell('stuck', `${name}: ${askText(hours)}. Answer it on Home.`, 'nodes:').catch(() => undefined),
     autostart: startupOf,
     fetch: fetchHere,
+    tune: tuneDoor,
+    tuneBusy: finderBusy,
     carry: {
       // A chat model's files: its first part and the parts beside it. Ollama keeps its own (named by Ollama): not sent.
       chatFiles: id => {

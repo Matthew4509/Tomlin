@@ -4,7 +4,9 @@
 // the setting in its own settings, as if set at its own screen. The doors are in src/jobrun/node.ts (/worker/run-set)
 // and src/jobrun/copies.ts (runSetOn); tested in test/runset.test.ts and test/runseton.test.ts.
 
-export const TUNE_TICK = 'Allow host to test and change model run settings';
+import type { RunOptions } from './store.ts';
+
+export const TUNE_TICK ='Allow host to test and change model run settings';
 
 export interface Listed {
   id: string;
@@ -23,6 +25,44 @@ const family = (name: string) => name.toLowerCase().split('-')[0];
 export function guessersFor(m: Listed, list: Listed[]): string[] {
   if (m.id.startsWith(OLLAMA)) return [];
   return list.filter(x => x.id !== m.id && !x.id.startsWith(OLLAMA) && family(x.name) === family(m.name) && x.bytes < m.bytes / 2).map(x => x.id);
+}
+
+const DEFAULT = { ctx: 8192, cache: 'f16', place: 'auto' } as const;
+
+/**
+ * A model's run settings as saved or sent, kept only as known values (src/store.ts RunOptions): anything else is
+ * dropped, never kept as raw flags. `id` is the model they are for, `list` this PC's chat models, `contexts` the sizes
+ * offered. Saved before F8, cpuMoe: true is the experts in RAM.
+ */
+export function cleanRunWith(raw: unknown, id: string, list: Listed[], contexts: number[]): RunOptions {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const whole = (v: unknown, lo: number, hi: number) => (Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi ? (v as number) : 0);
+  const ctx = contexts.includes(Number(r.ctx)) ? Number(r.ctx) : DEFAULT.ctx;
+  const cache = r.cache === 'q8_0' || r.cache === 'q4_0' ? r.cache : 'f16';
+  const moeCpu = whole(r.moeCpu, 1, 999);
+  let place: RunOptions['place'] = r.place === 'card' || r.place === 'ram' || r.place === 'auto' ? r.place : r.place === 'layers' && moeCpu ? 'layers' : r.cpuMoe === true ? 'ram' : 'auto';
+  if (place === 'layers' && !moeCpu) place = 'auto';
+  const model = list.find(m => m.id === id);
+  const draft = typeof r.draft === 'string' && r.draft && model && guessersFor(model, list).includes(r.draft) ? r.draft : '';
+  const threads = whole(r.threads, 1, 256);
+  const f = (r.found && typeof r.found === 'object' ? r.found : null) as Record<string, unknown> | null;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 10) / 10 : null);
+  const str = (v: unknown, n: number) => (typeof v === 'string' && v.length <= n && !/[\u0000-\u001f<>]/.test(v) ? v : null);
+  const found = f && str(f.at, 40) && !Number.isNaN(Date.parse(String(f.at))) && str(f.build, 40) !== null && str(f.runner, 20) !== null && str(f.card, 120) !== null && num(f.write) !== null && num(f.read) !== null
+    ? { at: String(f.at), build: String(f.build), runner: String(f.runner), card: String(f.card), write: num(f.write)!, read: num(f.read)! }
+    : null;
+  return {
+    ctx,
+    cache,
+    place,
+    ...(place === 'layers' ? { moeCpu } : {}),
+    ...(r.fitMargin === 256 || r.fitMargin === 512 ? { fitMargin: r.fitMargin } : {}),
+    ...(r.fa === 'on' || (r.fa === 'off' && cache === 'f16') ? { fa: r.fa } : {}),
+    ...(threads ? { threads } : {}),
+    ...(r.spec === 'ngram' ? { spec: 'ngram' as const } : {}),
+    ...(draft ? { draft, ...(r.draftOn === 'ram' ? { draftOn: 'ram' as const } : {}), ...(r.draftCache === 'q8_0' ? { draftCache: 'q8_0' as const } : {}) } : {}),
+    ...(found ? { found } : {}),
+  };
 }
 
 /** What a host asked, checked against this PC's chat models: the model and its guessing model ('' = none), or why not. */

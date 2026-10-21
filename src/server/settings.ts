@@ -9,7 +9,7 @@ import * as claude from '../claude.ts';
 import * as keep from '../keep.ts';
 import { clearDamaged, damaged } from '../atomic.ts';
 import { HOME, PORT, ROOT, type Routes, VERSION, chatModels, json, publicSettings, ready, staff, store } from './core.ts';
-import { askedOf, chatList, cleanRun, images, threadsOf } from './panes.ts';
+import { askedOf, chatList, cleanRun, images, runOf, threadsOf } from './panes.ts';
 import { setWho, whoId } from './people.ts';
 import { jobRoutes } from './jobs.ts';
 
@@ -194,7 +194,8 @@ export const settingsPost: Routes = {
       await store.saveSettings({ draftDays: days });
       await images.gallery.clearDrafts(days).catch(() => 0);
     }
-    if (typeof b.runModel === 'string' && chatModels.path(b.runModel)) await store.saveSettings({ run: { [b.runModel]: cleanRun(b.run) } });
+    // The chat gear sends what it shows; a setup the speed finder chose (its other fields) is kept.
+    if (typeof b.runModel === 'string' && chatModels.path(b.runModel)) await store.saveSettings({ run: { [b.runModel]: cleanRun({ ...runOf(await store.settings(), b.runModel), ...(b.run && typeof b.run === 'object' ? b.run : {}) }, b.runModel) } });
     return json(res, 200, { ...publicSettings(await store.saveSettings({ [pane]: change })), ...(opened !== null ? { opened } : {}) });
   },
   '/api/keep': async ({ res, b }) => keepAction(res, b),

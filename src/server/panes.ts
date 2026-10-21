@@ -15,6 +15,7 @@ import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
 import { TONES } from '../persona.ts';
 import { cacheBytes, modelShape, type ModelShape } from '../gguf.ts';
+import { cleanRunWith } from '../runset.ts';
 import { DEFAULT_RUN, type RunOptions, type Settings } from '../store.ts';
 import { shortBuild } from '../update.ts';
 import { BUILD, GB, HOME, ROOT, type Routes, VERSION, apiError, body, cachedCopies, chatModels, gbText, hardware, hidden, json, publicSettings, runtimes, sampler, shortName, store } from './core.ts';
@@ -161,7 +162,7 @@ export function fit(bytes: number, pane: 'chat' | 'image') {
 // ---- How each chat model is started: context size, cache type, experts in RAM ----
 
 /** Context sizes offered (tokens). */
-const CONTEXTS = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
+export const CONTEXTS = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
 /** Each chat model's shape (layers, heads...), read from its header once; null when it could not be read. */
 const shapes = new Map<string, ModelShape | null>();
 export async function loadShapes(): Promise<void> {
@@ -173,13 +174,9 @@ export async function loadShapes(): Promise<void> {
 }
 void loadShapes().catch(() => undefined);
 
-export const runOf = (s: Settings, id: string): RunOptions => {
-  const r = s.run[id] as (Partial<RunOptions> & { cpuMoe?: boolean }) | undefined;
-  // Saved before F8: the "expert weights in RAM" tick.
-  // A guessing model counts only while it is still on this PC (and is not the model itself).
-  const draft = typeof r?.draft === 'string' && r.draft !== id && chatModels.path(r.draft) ? r.draft : '';
-  return { ctx: r?.ctx ?? DEFAULT_RUN.ctx, cache: r?.cache ?? DEFAULT_RUN.cache, place: r?.place ?? (r?.cpuMoe ? 'ram' : DEFAULT_RUN.place), ...(draft ? { draft } : {}) };
-};
+/** This PC's chat models as src/runset.ts checks them (a guessing model counts only while it is still on this PC). */
+const listed = () => chatModels.list().map(m => ({ id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes }));
+export const runOf = (s: Settings, id: string): RunOptions => (s.run[id] ? cleanRunWith(s.run[id], id, listed(), CONTEXTS) : { ...DEFAULT_RUN });
 /** The guessing model's file and its own context cache (0 with none): counted wherever the model's memory is. */
 const draftBytes = (run: RunOptions) => {
   const d = run.draft ? chatModels.list().find(m => m.id === run.draft) : undefined;
@@ -199,15 +196,8 @@ export const cardMem = () => (cards => ({ n: cards.length, total: cards.reduce((
 const cardFor = (device: Device) => device !== 'cpu' && hardware.gpus.some(g => !g.integrated && (g.total ?? 0) > 0 && (device !== 'cuda' || g.vendor === 'nvidia'));
 /** How the connected chat model was started (for the jobs' room in the context and the worker's hello). */
 
-export function cleanRun(raw: unknown): RunOptions {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const ctx = CONTEXTS.includes(Number(r.ctx)) ? Number(r.ctx) : DEFAULT_RUN.ctx;
-  const cache = r.cache === 'q8_0' || r.cache === 'q4_0' ? r.cache : 'f16';
-  const place = r.place === 'card' || r.place === 'ram' || r.place === 'auto' ? r.place : r.cpuMoe === true ? 'ram' : 'auto';
-  // A guessing model: another chat model on this PC, by its id; anything else is none.
-  const draft = typeof r.draft === 'string' && r.draft && chatModels.path(r.draft) ? r.draft : '';
-  return { ctx, cache, place, ...(draft ? { draft } : {}) };
-}
+/** A model's run settings as sent or saved, only known values kept (src/runset.ts cleanRunWith). */
+export const cleanRun = (raw: unknown, id: string): RunOptions => cleanRunWith(raw, id, listed(), CONTEXTS);
 
 /** Bytes the context cache takes for this model and options (0 when its shape is unknown). */
 export function contextBytes(id: string, run: RunOptions): number {
@@ -271,13 +261,14 @@ const chatNeed = (file: number, cache: number) => (file + cache) * 1.1 + 0.8 * G
  */
 /** One placement at a time: two loads asked together (a job step and a node's switch) never pick the same runner. */
 let placing: Promise<unknown> = Promise.resolve();
-export function connectChat(id: string, asked: Asked, threads: number, main = false): Promise<{ ok: true; runner: Pane } | { error: string }> {
-  const turn = placing.then(() => placeChat(id, asked, threads, main));
+export function connectChat(id: string, asked: Asked, threads: number, main = false, tryRun?: RunOptions): Promise<{ ok: true; runner: Pane } | { error: string }> {
+  const turn = placing.then(() => placeChat(id, asked, threads, main, tryRun));
   placing = turn.catch(() => undefined);
   return turn;
 }
 
-async function placeChat(id: string, asked: Asked, threads: number, main: boolean): Promise<{ ok: true; runner: Pane } | { error: string }> {
+/** `tryRun`: the speed finder's try, used for this load only (nothing is saved). */
+async function placeChat(id: string, asked: Asked, threads: number, main: boolean, tryRun?: RunOptions): Promise<{ ok: true; runner: Pane } | { error: string }> {
   const path = chatModels.path(id);
   if (!path) return { error: `The model ${id} is not in the models folder any more. Pick another.` };
   const entry = chatModels.list().find(m => m.id === id)!;
@@ -290,7 +281,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   if (at.already) return { ok: true, runner };
   const expected = s.loadSeconds[`chat:${id}`] ?? Math.round(entry.bytes / (150 * 2 ** 20)) + 4;
   const ready = async (port: number) => (await fetch(`http://127.0.0.1:${port}/health`)).ok;
-  const run = runOf(s, id);
+  const run = tryRun ?? runOf(s, id);
   runnerRun.set(runner, run);
   const draftPath = run.draft ? chatModels.path(run.draft) : null;
   const started = { ...run, draft: draftPath ?? undefined };
@@ -300,7 +291,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     asked !== 'cpu' ? missingCardRunner('llama', hardware.gpus, d => runtimes.installed('llama', d)) : '',
     asked === 'auto' && autoSkipsGpu('llama') ? `Auto picked the CPU: faster for chat than the built-in graphics chip (choose GPU to use it anyway).` : '',
     run.ctx !== DEFAULT_RUN.ctx || run.cache !== 'f16' ? `Context ${run.ctx.toLocaleString()} tokens${run.cache !== 'f16' ? `, ${run.cache} cache` : ''}.` : '',
-    asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
+    asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'layers' ? `The experts of the first ${run.moeCpu} layers in RAM, the rest on the graphics card.` : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
     beside.length ? `Loaded beside ${runnersOf.namesOf(beside)}.` : '',
     draftName ? `Guessing model: ${draftName} (it guesses the next few words, this model checks them; the answer is this model's own).` : '',
   ].filter(Boolean);
@@ -334,7 +325,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
 
 // ---- Try each way (PLAN F8 M3): load a chat model each way it can be placed on this PC, measure, keep the fastest ----
 
-const PLACE_WORDS: Record<RunOptions['place'], string> = { auto: 'Auto (fill the card, the rest in RAM)', card: 'Every layer on the graphics chip', ram: 'Expert weights in RAM' };
+const PLACE_WORDS: Record<RunOptions['place'], string> = { auto: 'Auto (fill the card, the rest in RAM)', card: 'Every layer on the graphics chip', ram: 'Expert weights in RAM', layers: 'The experts of some layers in RAM, the rest on the card' };
 type TryRow = { place: RunOptions['place']; words: string; perSecond: number | null; note: string };
 let tryJob: { id: string; name: string; rows: TryRow[]; state: 'running' | 'done' | 'stopped'; now: string; was: RunOptions['place']; best: RunOptions['place'] | null } | null = null;
 let tryStopped = false;

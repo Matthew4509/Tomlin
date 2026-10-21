@@ -535,6 +535,7 @@
 
     <h4 id="help-speed">Speed</h4>
     <p class="hint">Every answer is timed: tokens written a second, and how fast the prompt was read (a token is about three quarters of a word). <b>Test speed</b> runs one example prompt (about 150 words) on a person's model, a linked PC's or a model here, and times it; it is under Edit Staff, on This PC: models and updates, and under Staff on other PCs. The left panel shows each person's expected speed ("17 tok/s"): the average of their last answers once there are three, else the test. A person's Speed shows the test as the baseline, the average, and a chart of the recent answers. Only numbers are kept (in <code>speed.json</code>), never what was asked or answered.</p>
+    <p class="hint"><b>Find the fastest setup</b> (beside Test speed on a model's row, on a linked PC's card, and under Edit staff; offered once after a hire) starts the same model a few different ways and times each with the same example prompts: a smaller card margin, more of a mixture-of-experts model on the card, a guessing model, flash attention, threads, copy-ahead. Quick takes about 5 minutes for a small model, Full longer; the time is shown first. It keeps the model's own context unless you tick other sizes to test. One is recommended only when it is more than 5% faster and leaves 0.5 GB of the card free. Nothing changes until <b>Go with this config</b>; <b>Undo</b> goes back. On a linked PC it runs there, once its owner ticks <b>Allow host to test and change model run settings</b>.</p>
 
     <h4 id="help-pc-costs">Uptime and costs</h4>
     <p class="hint">Press a PC in the left panel (My PC, or a linked PC) for its window: how long TOMLIN has run there and how long the PC has been on, how many of this PC's once-a-minute checks it answered in the last 7 days, and its total tokens (read and written, from every answer its chat models wrote, for anyone; pictures are not counted). Give it, if you like, its power draw while a model works (watts) and the price of a kWh in US dollars: then each project's power cost is worked out (watts × working hours ÷ 1,000 × price), beside the same tokens at the Claude Opus 5.5 API's and the ChatGPT API's list prices, with the least of them marked. Only working time counts, never the PC sitting idle. Tokens are counted three ways: read new, read from the cache (the start of the chat the model read on the turn before: no work, but an API still bills it at its lower cached price), and written; the API figures price them that way, and say what they would be without caching. Each linked PC keeps its own log of the work it did for this PC, per project, and that log is the final tally (read once a minute and when its window opens); a project's Overview shows its tokens and cost over every PC. The prices were checked on the date shown and can be changed there. A linked PC needs 2.0.40 or later for its own log (2.0.39 for uptime and totals).</p>
@@ -578,7 +579,7 @@
       <div class="connect-row chat-tools">
         <button class="btn primary connect" type="button">Connect</button>
         <details class="pane-settings">
-          <summary class="btn quiet gear" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
+          <summary class="btn quiet gear" title="Model settings" aria-label="Model settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
           <div class="settings-box">
             <label class="field model-field"><span>Model</span><select class="model"></select></label>
             <label class="check live-stats-row"><input type="checkbox" id="live-stats"> Enable live stats</label>
@@ -658,7 +659,7 @@
         <label class="field grow"><span>Model</span><select class="model"></select></label>
         <button class="btn primary connect" type="button">Connect</button>
         <details class="pane-settings">
-          <summary class="btn quiet gear" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
+          <summary class="btn quiet gear" title="Model settings" aria-label="Model settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></summary>
           <div class="settings-box">
             <label class="field"><span>Run on</span><select class="device"><option value="auto">Auto</option><option value="gpu">GPU</option><option value="cpu">CPU</option></select></label>
             <label class="field"><span>CPU cores to use</span><input class="threads" type="number" min="0" step="1"></label>
@@ -904,6 +905,8 @@
 <dialog id="backup-dlg" class="small-dlg" aria-labelledby="backup-title"></dialog>
 <!-- After Hire staff, for a hire who chats: start a chat with them now, or not now (team.js afterHire). -->
 <dialog id="hired-dlg" class="small-dlg" aria-labelledby="hired-title"></dialog>
+<!-- Find the fastest setup (finder.js): what it tries, each try as it is timed, the results and Go with this config. -->
+<dialog id="finder-dlg" class="small-dlg finder-dlg" aria-labelledby="finder-title"></dialog>
 
 <dialog id="impact-dlg" class="small-dlg" aria-labelledby="impact-title">
   <form class="help-body private-form" id="impact-form">
@@ -1512,6 +1515,7 @@
 <script src="app.js"></script>
 <script src="chatview.js"></script>
 <script src="speed.js"></script>
+<script src="finder.js"></script>
 <script src="lock.js"></script>
 <script src="images.js"></script>
 <script src="team.js"></script>

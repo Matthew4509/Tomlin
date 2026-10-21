@@ -108,3 +108,29 @@ test('a node\'s hello says each chat model\'s guessing model and the ones it cou
   assert.ok(!bad[0].guessers!.includes('x\ny'));
   assert.ok(bad[0].guessers!.length <= 40);
 });
+
+test('a model\'s run settings are kept only as known values: every field checked, a guessing model only of its own family', () => {
+  const CTX = [4096, 8192, 16384, 32768, 65536];
+  const clean = (raw: unknown, id = A3B.id) => rs.cleanRunWith(raw, id, LIST, CTX);
+  assert.deepEqual(clean(undefined), { ctx: 8192, cache: 'f16', place: 'auto' });
+  // Saved before F8: the "expert weights in RAM" tick.
+  assert.equal(clean({ cpuMoe: true }).place, 'ram');
+  const full = clean({ ctx: 65536, cache: 'q8_0', place: 'layers', moeCpu: 30, fitMargin: 512, fa: 'on', threads: 3, spec: 'ngram', draft: Q08.id, draftOn: 'ram', draftCache: 'q8_0', found: { at: '2026-10-21T03:00:00.000Z', build: 'abc123', runner: 'vulkan', card: 'GTX 1060 6GB', write: 13.4, read: 40.2 } });
+  assert.deepEqual(full, { ctx: 65536, cache: 'q8_0', place: 'layers', moeCpu: 30, fitMargin: 512, fa: 'on', threads: 3, spec: 'ngram', draft: Q08.id, draftOn: 'ram', draftCache: 'q8_0', found: { at: '2026-10-21T03:00:00.000Z', build: 'abc123', runner: 'vulkan', card: 'GTX 1060 6GB', write: 13.4, read: 40.2 } });
+  // Anything else is dropped, never kept as raw flags.
+  const bad = clean({ ctx: 12345, cache: 'q2', place: 'gpu', moeCpu: -1, fitMargin: 100, fa: 'maybe', threads: 9999, spec: 'lookup', draft: GEMMA.id, draftOn: 'disk', draftCache: 'q4_0', args: ['--rpc', 'x'], found: { at: 'x' } });
+  assert.deepEqual(bad, { ctx: 8192, cache: 'f16', place: 'auto' });
+  // N of --n-cpu-moe only with its placement, and a whole number.
+  assert.equal(clean({ place: 'layers' }).place, 'auto');
+  assert.equal(clean({ place: 'layers', moeCpu: 2.5 }).place, 'auto');
+  assert.equal(clean({ place: 'auto', moeCpu: 30 }).moeCpu, undefined);
+  // A guessing model must be smaller and of the same family, on this PC; not itself.
+  assert.equal(clean({ draft: Q4B.id }).draft, Q4B.id);
+  assert.equal(clean({ draft: A3B.id }).draft, undefined);
+  assert.equal(clean({ draft: Q4B.id }, Q2B.id).draft, undefined);
+  assert.equal(clean({ draft: 'C:\models\Qwen3.5-0.8B-Q4_K_M.gguf' }).draft, undefined);
+  // Its placement and cache mean nothing without one.
+  assert.deepEqual(clean({ draftOn: 'ram', draftCache: 'q8_0' }), { ctx: 8192, cache: 'f16', place: 'auto' });
+  // Flash attention off cannot go with a smaller cache (it needs it on).
+  assert.equal(clean({ cache: 'q8_0', fa: 'off' }).fa, undefined);
+});

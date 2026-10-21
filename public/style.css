@@ -860,6 +860,23 @@ dialog#profile::backdrop { background: rgba(0,0,0,.55); }
 
 dialog.small-dlg { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); width: min(480px, 94vw); padding: 16px; }
 dialog.small-dlg::backdrop { background: rgba(0,0,0,.55); }
+dialog.finder-dlg { width: min(720px, 96vw); max-height: 92vh; overflow: auto; }
+.finder h3 { margin: 12px 0 4px; font-size: var(--fs-md); }
+.finder-sizes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
+.finder-plan { margin: 0 0 6px; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.finder-ctx-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
+.finder-rows { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 4px; }
+.finder-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.finder-mark { width: 1.2em; text-align: center; font-weight: 700; }
+.finder-row.is-done .finder-mark { color: var(--good); }
+.finder-row.is-failed .finder-mark { color: var(--bad); }
+.finder-results { display: grid; gap: 6px; margin: 8px 0; }
+.finder-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); }
+.finder-result.is-best { border-color: var(--accent); background: var(--accent-soft); }
+.finder-fig { font-size: var(--fs-sm); color: var(--ink-soft); }
+.finder-tag { grid-column: 1 / -1; font-size: var(--fs-sm); font-weight: 600; }
+.finder-more { grid-column: 1 / -1; font-size: var(--fs-sm); }
+.finder-info { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 /* Backup when a PC is off: wider, so each model is a PC | Model row. */
 dialog#backup-dlg { width: min(860px, 96vw); max-height: 92vh; }
 .backup-send h3, #backup-dlg h3 { margin: 14px 0 6px; font-size: var(--fs-md); }
@@ -1807,7 +1824,7 @@ dialog#jobs { width: min(1240px, 96vw); max-height: 92vh; min-height: min(640px,
 .pc-card > .rail-row { width: 100%; }
 .pc-desk { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 6px 2px; border-bottom: 1px dashed var(--line); }
 .desk-face { border: 0; background: transparent; padding: 2px; border-radius: 50%; cursor: grab; }
-.desk-face .rail-avatar { width: 30px; height: 30px; font-size: 11px; }
+.desk-face .rail-avatar { width: 30px; height: 30px; font-size: 12px; }
 .desk-face .sdot { width: 12px; height: 12px; border-width: 2px; }
 .desk-face:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .rail-staff-item[draggable="true"] { cursor: grab; }

@@ -677,6 +677,16 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     // A linked PC sets how one of this PC's models runs (its Guessing model), only with this PC's owner's tick and by
     // ids checked against this PC's own models (src/runset.ts); not while someone here is using it.
+    // The speed finder, asked by a linked PC: only with this PC's owner's tick, not while someone here is using it; the
+    // node picks and runs its own tries on its own models (src/server/finder.ts), only ids and sizes cross.
+    if (p.startsWith('/worker/tune-')) {
+      const action = p.slice('/worker/tune-'.length);
+      if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
+      if (away && (action === 'start' || action === 'apply' || action === 'undo')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (!d.tune) return workerJson(res, 404, { error: `${shareState.name} cannot test setups.` });
+      const a = await d.tune(action, body, who.name);
+      return workerJson(res, a.status, a.json);
+    }
     if (p === '/worker/run-set') {
       if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
       if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
@@ -699,6 +709,9 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     // A linked PC from before 2.0.31 asking for one of this PC's hires: they are retired (a node lends only its models).
     if (p === '/worker/switch') return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
     // Awaited, so a fault in it is answered below (not left hanging until the linked PC gives up).
+    // A speed test running here: work from linked PCs waits for it (they ask again).
+    const tuning = d.tuneBusy?.() ?? '';
+    if (tuning && (p === '/worker/draw' || p === '/worker/run')) return workerJson(res, 409, { error: `Busy: ${tuning}.`, busy: true });
     if (p === '/worker/draw') return await workerDraw(body, res, who.name, keepOf(who));
     if (p === '/worker/run') {
       const b = body;

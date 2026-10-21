@@ -563,6 +563,9 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.57:** **Find the fastest setup** for a chat model, here or on a linked PC (its tick): Quick or Full, the time
+  shown first, recommended only when over 5% faster with 0.5 GB of card free; Go with this config, or Undo.
+  First-run hints name the Hire staff button; the panels' gears are called Model settings.
 - **2.0.56:** Locked, TOMLIN unloads your picture model after 2 idle minutes (its runner takes no key; the lock says so);
   a node keeps one loaded for a linked PC 10 minutes. The app lock PIN is hashed at a higher cost (made again at your
   next right PIN). Linking pauses after 20 wrong codes; large requests capped before their seal; a PC's name must stay on the home network.

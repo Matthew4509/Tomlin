@@ -272,6 +272,28 @@ export async function runSetOn(b: Record<string, unknown>) {
   }
 }
 
+/**
+ * The speed finder on a linked PC (its own tries, on its own models, run there): preview, start, state, stop, apply or
+ * undo, passed on with only the model id, the size, the context sizes ticked and a row id from that PC's own last test.
+ */
+export async function tuneOn(b: Record<string, unknown>) {
+  const action = String(b.action ?? '');
+  if (!['preview', 'start', 'state', 'stop', 'apply', 'undo'].includes(action)) return { status: 400, body: { error: 'No such speed test step.' } };
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  const pc = (await netPcs()).find(x => x.id === r.id)!;
+  const why = runset.tuneWhy(pc);
+  if (why && action !== 'state' && action !== 'stop') return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
+  const ask = { model: String(b.model ?? ''), size: b.size === 'full' ? 'full' : 'quick', contexts: Array.isArray(b.contexts) ? b.contexts.map(Number).filter(Number.isFinite).slice(0, 6) : [], row: String(b.row ?? '') };
+  try {
+    return { status: 200, body: { ...(await wireFor(r).ask(`/worker/tune-${action}`, ask)), pc: r.id, pcName: r.name } };
+  } catch (e) {
+    const { status, said } = e as { status?: number; said?: string };
+    if (status === 403 && said) return { status: 403, body: { error: said } };
+    return { status: status === 400 || status === 404 ? status : 409, body: { error: (e as Error).message } };
+  }
+}
+
 /** A linked PC's restore points of this PC's data. */
 export async function keptOn(pcId: string | null) {
   const r = (await d.store.settings()).remotes.find(x => x.id === pcId);

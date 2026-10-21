@@ -356,6 +356,8 @@ app.afterHire = async hired => {
   if (team.data.staff.some(s => s.kind === 'chat')) app.nobodyToTalkTo = false;
   // A new hire who chats: asked first ("Start chat now"); yes turns this window's chat to them (the server no longer
   // turns every window's chat to them). One with no model opens their profile instead (below).
+  // A chat model never tested by the speed finder: offered first ("about N minutes"); Skip keeps its settings.
+  if (hired?.kind === 'chat' && hired.model) await app.offerFinder?.(hired.model, '');
   const start = hired?.kind === 'chat' && hired.model ? await askStartChat(hired) : false;
   const turned = start ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
   // A new artist draws in this window's Images pane (Draw as), asked by this window: the server no longer picks them.
@@ -880,7 +882,9 @@ function drawEdit() {
     : settingsTab === 'pc'
     ? [
       // How fast their model answers, first: the figures on the left; the chart and Test speed on the right.
-      image ? null : el('section', { class: 'profile-section profile-speed' }, el('h3', { text: 'Speed' }), app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true })),
+      image ? null : el('section', { class: 'profile-section profile-speed' }, el('h3', { text: 'Speed' }), app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true }),
+        // The model's own setup: tried several ways and the fastest recommended (on the PC the model is on).
+        m.model ? el('div', { class: 'team-actions' }, app.finderButton(m.model)) : null),
       pcPicker(m, section),
       section('Models', modelOptions(m)),
       SHOW_AUDITION ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),

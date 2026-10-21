@@ -103,13 +103,21 @@ export interface ChatRun {
    * rest in RAM, the experts first on a mixture-of-experts model. 'card': every layer on the chip. 'ram': every expert
    * in RAM and the rest on the card (a big mixture-of-experts model on a small card).
    */
-  place: 'auto' | 'card' | 'ram';
+  place: 'auto' | 'card' | 'ram' | 'layers';
   /**
    * A guessing model's file (speculative drafts): a small model of the same family guesses the next few words and the
    * big one checks them in one pass. The answer is the big model's own; only the speed changes. On a card it sits on the
-   * card with the big one; on the CPU in RAM.
+   * card with the big one (unless draftOn is 'ram'); on the CPU in RAM.
    */
   draft?: string;
+  /** The speed setups (src/speedfinder.ts; RunOptions in src/store.ts says what each one is). */
+  moeCpu?: number;
+  fitMargin?: number;
+  fa?: 'on' | 'off';
+  threads?: number;
+  spec?: 'ngram';
+  draftOn?: 'ram';
+  draftCache?: 'q8_0';
 }
 
 /** How llama-server is started for chat on `device`. `plainTemplates`: llama.cpp's own chat formats, for a model
@@ -120,14 +128,20 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   // Auto on a card: no layer count, so llama.cpp fits it; otherwise every layer goes to the chip (none on the CPU).
   const fits = device !== 'cpu' && run.place === 'auto' && card;
   const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx), '--no-webui', ...(fits ? [] : ['-ngl', device === 'cpu' ? '0' : '999'])];
+  // llama.cpp's own fit keeps 1024 MB free on each card unless told a smaller margin.
+  if (fits && run.fitMargin) args.push('-fitt', String(run.fitMargin));
   if (run.cache !== 'f16') args.push('-fa', 'on', '-ctk', run.cache, '-ctv', run.cache);
+  else if (run.fa && device !== 'cpu') args.push('-fa', run.fa);
   if (run.place === 'ram' && device !== 'cpu') args.push('--cpu-moe');
-  if (threads > 0) args.push('-t', String(threads));
+  if (run.place === 'layers' && run.moeCpu && device !== 'cpu') args.push('--n-cpu-moe', String(run.moeCpu));
+  const t = run.threads && run.threads > 0 ? run.threads : threads;
+  if (t > 0) args.push('-t', String(t));
   if (plainTemplates) args.push('--no-jinja');
   if (key) args.push('--api-key', key, '--no-slots');
   if (run.draft) {
-    args.push('--spec-type', 'draft-simple', '-md', run.draft, '-ngld', device === 'cpu' ? '0' : '999');
+    args.push('--spec-type', 'draft-simple', '-md', run.draft, '-ngld', device === 'cpu' || run.draftOn === 'ram' ? '0' : '999');
     if (run.cache !== 'f16') args.push('-ctkd', run.cache, '-ctvd', run.cache);
-  }
+    else if (run.draftCache) args.push('-ctkd', run.draftCache, '-ctvd', run.draftCache);
+  } else if (run.spec === 'ngram') args.push('--spec-type', 'ngram-mod');
   return args;
 }

@@ -36,3 +36,27 @@ test('Staff, Jobs and Files open as pages, not windows over the page', () => {
   assert.match(home, /if \(homeUi\.view === asPage\.view\) setView\(asPage\.back\);/);
   assert.match(read('index.html'), /<section class="models-page app-page setup-page" id="setup-page"/);
 });
+
+test('the empty-state hints name the Hire staff button that is on screen, not a menu path that no longer exists', () => {
+  const pages = ['app.js', 'homeview.js', 'index.html'].map(read).join('\n');
+  // The Set up menu has "Staff: hire and edit", not "Staff": the old four-step path sent people looking for nothing.
+  assert.doesNotMatch(pages, /Set up, Staff, Hire staff/);
+  assert.match(read('app.js'), /NOBODY_YET = '[^']*press Hire staff/);
+  assert.match(read('homeview.js'), /'Hire someone first: press Hire staff[^']*'/);
+});
+
+test('one name for one thing: Hire staff everywhere, the gears say Model settings, no jargon in the first-run line, no text under 12px', () => {
+  const homeview = read('homeview.js');
+  // The set-up card's button says what it does, like the left panel (not "Team").
+  assert.match(homeview, /u\.staff \? 'Manage staff' : 'Hire staff'/);
+  assert.doesNotMatch(homeview, /'Team', \(\) =>/);
+  // The line under the project form: a Hire staff button and plain words, never "a LLM model".
+  assert.doesNotMatch(homeview, /LLM model/);
+  assert.match(homeview, /#home-staff-line'\)\.replaceChildren\(/);
+  // The panels' gears are the model's own settings: named so, apart from Settings in the top bar.
+  const html = read('index.html');
+  assert.doesNotMatch(html, /class="btn quiet gear" title="Settings"/);
+  assert.match(html, /class="btn quiet gear" title="Model settings" aria-label="Model settings"/);
+  // The font floor: no size under 12px.
+  for (const m of read('style.css').matchAll(/font-size:\s*(\d+)px/g)) assert.ok(Number(m[1]) >= 12, m[0]);
+});

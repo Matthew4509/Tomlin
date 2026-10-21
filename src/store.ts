@@ -56,9 +56,34 @@ export interface RunOptions {
   ctx: number;
   cache: 'f16' | 'q8_0' | 'q4_0';
   /** Where the weights go on a graphics device (src/llama.ts ChatRun). Settings saved before kept cpuMoe: true = 'ram'. */
-  place: 'auto' | 'card' | 'ram';
+  place: 'auto' | 'card' | 'ram' | 'layers';
+  /** With place 'layers': the experts of the first N layers in RAM, the rest on the card. */
+  moeCpu?: number;
+  /** MB llama.cpp's own fit leaves free on the card (unset: its 1024). */
+  fitMargin?: 256 | 512;
+  /** Flash attention (unset: llama.cpp's own choice, or on with a smaller cache). */
+  fa?: 'on' | 'off';
+  /** Threads for this model (unset: the PC's chat threads). */
+  threads?: number;
+  /** Copy-ahead: guesses from the words already in the chat (no second model). */
+  spec?: 'ngram';
   /** A guessing model (another chat model's id on this PC) started beside it; none: ''. */
   draft?: string;
+  /** The guessing model in RAM, not on the card. */
+  draftOn?: 'ram';
+  /** The guessing model's own smaller context cache. */
+  draftCache?: 'q8_0';
+  /** Where a setup the speed finder chose came from (src/speedfinder.ts). */
+  found?: RunFound;
+}
+
+export interface RunFound {
+  at: string;
+  build: string;
+  runner: string;
+  card: string;
+  write: number;
+  read: number;
 }
 
 export interface Remote {

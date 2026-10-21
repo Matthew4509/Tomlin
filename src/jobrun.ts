@@ -27,7 +27,7 @@ import { d, useDeps } from './jobrun/shared.ts';
 import { canKeep, canThink, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, copyFrom, fetchOn, keptOn, network, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
+import { backupTo, bringBack, copyFrom, fetchOn, keptOn, network, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
 import { applyShare, askHost, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
@@ -126,6 +126,9 @@ export interface JobDeps {
   unloadAll: (still?: () => boolean) => Promise<void>;
   /** A download a linked main PC asks this node to make itself (/worker/fetch-start, -state, -stop; src/server/hf.ts fetchHere). */
   fetch: (path: string, b: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> }>;
+  /** The speed finder a linked PC asks for (/worker/tune-*; src/server/finder.ts tuneDoor), and what it says while one runs here. */
+  tune?: (action: string, b: Record<string, unknown>, by: string) => Promise<{ status: number; json: Record<string, unknown> }>;
+  tuneBusy?: () => string;
   /** Told when a linked PC says "I need to log off for now" (its name). */
   onNodeAway?: (name: string) => void;
   /** Told when someone at a linked PC sends "I need to use the pc, please log out for N hours" (its name, the hours). */
@@ -323,6 +326,7 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/runner': reply(await runnerTo(b)); return true;
     case '/api/network/runner-remove': reply(await runnerOff(b)); return true;
     case '/api/network/run-set': reply(await runSetOn(b)); return true;
+    case '/api/network/tune': reply(await tuneOn(b)); return true;
     case '/api/network/stop': d.json(res, 200, { stopped: transfers.stop(String(b.id ?? '')) }); return true;
     default: return false;
   }

@@ -480,7 +480,7 @@ function drawContext() {
   cache.value = m.run.cache;
   // Where it runs (PLAN F8): only where it makes a difference, a card with memory of its own or a mixture-of-experts model.
   const place = $('#ctx-place');
-  const ways = [['auto', 'Auto: fill the card, the rest in RAM'], ['card', 'Every layer on the graphics chip'], ...(m.moe ? [['ram', 'The experts (most of this model) in RAM, the rest on the card']] : [])];
+  const ways = [['auto', 'Auto: fill the card, the rest in RAM'], ['card', 'Every layer on the graphics chip'], ...(m.moe ? [['ram', 'The experts (most of this model) in RAM, the rest on the card']] : []), ...(m.run.place === 'layers' ? [['layers', `The experts of the first ${m.run.moeCpu} layers in RAM, the rest on the card`]] : [])];
   place.replaceChildren(...ways.map(([v, t]) => el('option', { value: v, text: t })));
   place.value = ways.some(([v]) => v === m.run.place) ? m.run.place : 'auto';
   $('#ctx-place-row').hidden = !(m.places?.length || m.moe);
@@ -1232,7 +1232,7 @@ function openingNote(text) {
 
 /** The message box of a chat kept to read (its person left the team, or was a node's hire): home.js and chats.js. */
 const READ_ONLY_BOX = 'This chat is kept to read: press New chat to carry on';
-const NOBODY_YET = 'Nobody to talk to yet: hire someone first (Settings, Set up, Staff, Hire staff). Pick their PC and model, and their chat opens here.';
+const NOBODY_YET = 'Nobody to talk to yet: press Hire staff (on the left) to hire someone. Pick their PC and model, and their chat opens here.';
 app.nobodyYet = NOBODY_YET;
 const EMPTY_CHAT = 'No messages yet.';
 app.emptyChat = EMPTY_CHAT;

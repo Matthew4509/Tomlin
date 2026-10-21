@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cacheBytes, modelShape, readHeader, shapeOf } from '../src/gguf.ts';
+import { cacheBytes, expertWeights, modelShape, readHeader, shapeOf } from '../src/gguf.ts';
 
 /** A tiny GGUF file: header values only, no tensors. */
 function gguf(values: Array<[string, 'u32' | 'str' | 'u32s' | 'strs', unknown]>): Buffer {
@@ -64,4 +64,49 @@ test('hybrid and sliding-window models count only the layers that keep the whole
   // An unknown family with a window: counted in full (never under-estimated).
   assert.equal(shapeOf(m({ 'general.architecture': 'new', 'new.block_count': 2, 'new.attention.head_count': 2, 'new.embedding_length': 256, 'new.attention.sliding_window': 512 }))!.swaEvery, 0);
   assert.equal(shapeOf(m({ 'general.architecture': 'x' })), null);
+});
+
+test('a mixture-of-experts file\'s expert weights per layer are read from its tensor list (sizes by quant type)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'gguf-'));
+  try {
+    const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+    const u64 = (n: number) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+    const str = (s: string) => Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s)]);
+    // Q4_K (12): 144 bytes a block of 256; Q6_K (14): 210 a block of 256; F32 (0): 4 a value; Q8_0 (8): 34 a block of 32.
+    const tensors: Array<[string, number[], number]> = [
+      ['token_embd.weight', [1024, 4096], 14],
+      ['blk.0.attn_q.weight', [1024, 1024], 8],
+      ['blk.0.ffn_gate_exps.weight', [1024, 512, 8], 12],
+      ['blk.0.ffn_up_exps.weight', [1024, 512, 8], 12],
+      ['blk.0.ffn_down_exps.weight', [512, 1024, 8], 14],
+      ['blk.0.ffn_norm.weight', [1024], 0],
+      ['blk.1.attn_q.weight', [1024, 1024], 8],
+      ['blk.1.ffn_gate_up_exps.weight', [1024, 1024, 8], 12],
+      ['blk.1.ffn_down_exps.weight', [512, 1024, 8], 14],
+    ];
+    const head = [Buffer.from('GGUF'), u32(3), u64(tensors.length), u64(1), str('general.architecture'), u32(8), str('qwen35moe')];
+    const infos = tensors.flatMap(([name, dims, type]) => [str(name), u32(dims.length), ...dims.map(u64), u32(type), u64(0)]);
+    const file = join(dir, 'moe.gguf');
+    await writeFile(file, Buffer.concat([...head, ...infos]));
+    const w = await expertWeights(file);
+    const q4k = (n: number) => (n / 256) * 144;
+    const q6k = (n: number) => (n / 256) * 210;
+    const layer0 = q4k(1024 * 512 * 8) * 2 + q6k(512 * 1024 * 8);
+    const layer1 = q4k(1024 * 1024 * 8) + q6k(512 * 1024 * 8);
+    assert.ok(w, 'read');
+    assert.equal(w!.layers, 2);
+    assert.equal(w!.perLayer, Math.round((layer0 + layer1) / 2));
+    const rest = q6k(1024 * 4096) + 2 * (1024 * 1024 / 32) * 34 + 1024 * 4;
+    assert.equal(w!.rest, Math.round(rest));
+
+    // A dense file has no expert weights; a quant type not known gives null (the finder then works it out from the file size).
+    const dense = join(dir, 'dense.gguf');
+    await writeFile(dense, Buffer.concat([Buffer.from('GGUF'), u32(3), u64(1), u64(0), str('blk.0.attn_q.weight'), u32(2), u64(1024), u64(1024), u32(8), u64(0)]));
+    assert.equal((await expertWeights(dense))?.perLayer, 0);
+    const odd = join(dir, 'odd.gguf');
+    await writeFile(odd, Buffer.concat([Buffer.from('GGUF'), u32(3), u64(1), u64(0), str('blk.0.ffn_up_exps.weight'), u32(3), u64(256), u64(256), u64(8), u32(77), u64(0)]));
+    assert.equal(await expertWeights(odd), null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

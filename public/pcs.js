@@ -277,6 +277,8 @@
       });
       acts.push(hide, del);
     }
+    // Find the fastest setup: a chat model here, or one a linked PC lends (that PC runs the test on itself).
+    if (x.kind === 'chat' && !x.ollama) acts.unshift(app.finderButton(v.here ? x.id : `remote:${v.id}:${x.id}`, { name: x.name, pcName: v.name, link: true }));
     return el('li', { class: `pc-model${x.hidden ? ' hidden-model' : ''}` },
       el('span', { class: 'pc-model-text' },
         el('strong', { text: x.name }),

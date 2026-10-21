@@ -68,6 +68,36 @@ test('a guessing model (speculative drafts): started beside the big one, on the 
   assert.ok(!chatArgs('big.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, true).some(a => a.startsWith('--spec') || a === '-md'));
 });
 
+test('the speed setups: each new run setting gives its own flags, and old settings give exactly today\'s', () => {
+  const base = { ctx: 8192, cache: 'f16' as const, place: 'auto' as const };
+  const tail = (a: string[]) => a.slice(a.indexOf('--no-webui') + 1);
+  // Old settings: nothing new.
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 4, false, base, true)), ['-t', '4']);
+  // A smaller card margin for llama.cpp's own fit: only where it fits (Auto on a card of its own).
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, fitMargin: 512 }, true)), ['-fitt', '512']);
+  assert.ok(!chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, place: 'card', fitMargin: 512 }, true).includes('-fitt'));
+  assert.ok(!chatArgs('m.gguf', 9000, 'cpu', 0, false, { ...base, fitMargin: 512 }).includes('-fitt'));
+  // The experts of the first N layers in RAM, the rest on the card.
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, place: 'layers', moeCpu: 30 }, true)), ['-ngl', '999', '--n-cpu-moe', '30']);
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'cpu', 0, false, { ...base, place: 'layers', moeCpu: 30 })), ['-ngl', '0']);
+  // Flash attention on or off (with a smaller cache it is on already).
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, fa: 'off' }, true)), ['-fa', 'off']);
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, fa: 'on' }, true)), ['-fa', 'on']);
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, cache: 'q8_0', fa: 'off' }, true)), ['-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0']);
+  assert.ok(!chatArgs('m.gguf', 9000, 'cpu', 0, false, { ...base, fa: 'on' }).includes('-fa'));
+  // Threads for this model, over the PC's own figure.
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'cpu', 4, false, { ...base, threads: 3 })).slice(-2), ['-t', '3']);
+  // Copy-ahead (no second model).
+  assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, spec: 'ngram' }, true)), ['--spec-type', 'ngram-mod']);
+  // A guessing model in RAM beside a model on the card, and its own smaller cache.
+  const d = chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, draft: 'C:/d.gguf', draftOn: 'ram', draftCache: 'q8_0' }, true);
+  assert.deepEqual(d.slice(d.indexOf('--spec-type')), ['--spec-type', 'draft-simple', '-md', 'C:/d.gguf', '-ngld', '0', '-ctkd', 'q8_0', '-ctvd', 'q8_0']);
+  // A guessing model wins over copy-ahead (one speculative kind at a time).
+  const both = chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ...base, draft: 'C:/d.gguf', spec: 'ngram' }, true);
+  assert.equal(both.filter(a => a === '--spec-type').length, 1);
+  assert.ok(both.includes('draft-simple'));
+});
+
 test('a chat template the runner cannot read is recognised, so the runner tries its plain formats', () => {
   const nemo = 'While executing FilterExpression at line 12, column 122 in source:';
   assert.ok(TEMPLATE_FAULT.test(nemo));

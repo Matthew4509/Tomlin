@@ -84,6 +84,17 @@ class Reader {
 
 /** Every header value whose key is wanted (arrays of numbers kept when short; long lists skipped). */
 export async function readHeader(path: string, wanted: (key: string) => boolean): Promise<Map<string, Value>> {
+  return (await readFile(path, wanted, false)).values;
+}
+
+interface Tensor {
+  name: string;
+  dims: number[];
+  type: number;
+}
+
+/** The header values wanted and, when asked, the tensor list after them (names, sizes and quant types; no weights). */
+async function readFile(path: string, wanted: (key: string) => boolean, withTensors: boolean): Promise<{ values: Map<string, Value>; tensors: Tensor[] }> {
   const size = (await stat(path)).size;
   const fh = await open(path, 'r');
   try {
@@ -91,7 +102,7 @@ export async function readHeader(path: string, wanted: (key: string) => boolean)
     if ((await r.u32()) !== 0x46554747) throw new Error('This is not a GGUF model file.');
     const version = await r.u32();
     if (version < 2) throw new Error('This GGUF file is too old to read.');
-    await r.u64();
+    const tensorCount = Number(await r.u64());
     const count = Number(await r.u64());
     const out = new Map<string, Value>();
     for (let k = 0; k < count && k < 10_000; k++) {
@@ -115,9 +126,55 @@ export async function readHeader(path: string, wanted: (key: string) => boolean)
         if (wanted(key)) out.set(key, v);
       }
     }
-    return out;
+    const tensors: Tensor[] = [];
+    for (let k = 0; withTensors && k < tensorCount && k < 100_000; k++) {
+      const name = await r.str();
+      const n = await r.u32();
+      if (n > 8) throw new Error('A tensor has too many dimensions.');
+      const dims: number[] = [];
+      for (let i = 0; i < n; i++) dims.push(Number(await r.u64()));
+      const type = await r.u32();
+      await r.u64();
+      tensors.push({ name, dims, type });
+    }
+    return { values: out, tensors };
   } finally {
     await fh.close();
+  }
+}
+
+/** ggml's quant types: bytes a block and values a block (llama.cpp's ggml.c type traits). */
+const TYPE_SIZE: Record<number, [number, number]> = {
+  0: [4, 1], 1: [2, 1], 2: [18, 32], 3: [20, 32], 6: [22, 32], 7: [24, 32], 8: [34, 32], 9: [36, 32],
+  10: [84, 256], 11: [110, 256], 12: [144, 256], 13: [176, 256], 14: [210, 256], 15: [292, 256],
+  16: [66, 256], 17: [74, 256], 18: [98, 256], 19: [50, 256], 20: [18, 32], 21: [110, 256], 22: [82, 256], 23: [136, 256],
+  24: [1, 1], 25: [2, 1], 26: [4, 1], 27: [8, 1], 28: [8, 1], 29: [56, 256], 30: [2, 1], 34: [54, 256], 35: [66, 256], 39: [17, 32],
+};
+
+/**
+ * A mixture-of-experts file's expert weights: bytes a layer (the average over the layers that have experts; 0 for a
+ * dense model) and the bytes of everything else. Read from the tensor list, not the weights. Null when it cannot be read
+ * or a quant type is not known.
+ */
+export async function expertWeights(path: string): Promise<{ layers: number; perLayer: number; rest: number } | null> {
+  try {
+    const { tensors } = await readFile(path, () => false, true);
+    let experts = 0;
+    let rest = 0;
+    const layers = new Set<string>();
+    for (const t of tensors) {
+      const size = TYPE_SIZE[t.type];
+      if (!size) return null;
+      const bytes = (t.dims.reduce((a, b) => a * b, 1) / size[1]) * size[0];
+      const m = /^blk\.(\d+)\.ffn_\w*_exps\./.exec(t.name);
+      if (m) {
+        experts += bytes;
+        layers.add(m[1]);
+      } else rest += bytes;
+    }
+    return { layers: layers.size, perLayer: layers.size ? Math.round(experts / layers.size) : 0, rest: Math.round(rest) };
+  } catch {
+    return null;
   }
 }
 

@@ -147,7 +147,7 @@ function setupCards() {
     el('h3', { text: `Setup progress ${steps.filter(Boolean).length}/${steps.length} start setup now:` }),
     el('div', { class: 'setup-grid' },
       card(u.chatModels > 0, 'Add a chat model', u.chatModels ? `${u.chatModels} chat model${u.chatModels > 1 ? 's' : ''} found.` : 'TOMLIN needs at least one chat model on this PC. Models shows which ones fit.', 'Models', () => app.openModels()),
-      card(u.staff > 0, 'Hire your first staff member', u.staff ? `${u.staff} on the team.` : 'Give a person a name, a role (coder, writer, artist…) and a level. They appear in the list on the left.', 'Team', () => (u.staff ? $('#team-open').click() : app.openHire())),
+      card(u.staff > 0, 'Hire your first staff member', u.staff ? `${u.staff} on the team.` : 'Give a person a name, a role (coder, writer, artist…) and a level. They appear in the list on the left.', u.staff ? 'Manage staff' : 'Hire staff', () => (u.staff ? $('#team-open').click() : app.openHire())),
       card(u.pcs > 0, 'Link another PC (optional)', [u.pcs ? `${u.pcs} PC${u.pcs > 1 ? 's' : ''} linked.` : '', u.pcsBroken?.length ? `${u.pcsBroken.map(n => `"${n}"`).join(', ')} need${u.pcsBroken.length > 1 ? '' : 's'} linking again: its old link no longer works.` : '', !u.pcs && !u.pcsBroken?.length ? 'Use a stronger PC on your home network for some of the work.' : ''].filter(Boolean).join(' '), 'Other PCs', () => app.openPcs()),
       card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Network: connect PCs', () => openNodes())));
 }
@@ -214,7 +214,7 @@ async function refresh() {
     }
     // A chat with someone no longer on the team (or a retired node hire) is read, not carried on.
     $('#chat-input').placeholder = chatUi.open && chatUi.open.here === false ? READ_ONLY_BOX
-      : app.nobodyToTalkTo ? 'Hire someone first: Settings, Set up, Staff, Hire staff'
+      : app.nobodyToTalkTo ? 'Hire someone first: press Hire staff on the left'
       : `Message ${app.inSentence?.(talking ? talking.name : chatUi.people.find(p => p.who === 'manager')?.name ?? 'The host') ?? 'the host'}…`;
     drawRail();
     drawHome();
@@ -323,7 +323,7 @@ function drawHomeAsk() {
     pick.value = homeAsk.pm;
   }
   // Said only when nobody is hired yet: the drop-down says the rest.
-  $('#home-staff-line').textContent = staff.length ? '' : 'Hire staff (staff connects a LLM model to a PC or node).';
+  $('#home-staff-line').replaceChildren(...(staff.length ? [] : [el('button', { class: 'link', type: 'button', text: 'Hire staff', onclick: () => app.openHire() }), ' first: each hire answers on a chat model, on this PC or a linked one.']));
   $('#home-staff-line').hidden = !!staff.length;
 }
 drawHomeAsk();

@@ -27,6 +27,8 @@ test('two PCs: the host sets a linked PC\'s Guessing model only with the node\'s
     writeFileSync(join(chat, A3B), 'G'.repeat(4000));
     writeFileSync(join(chat, Q08), 'G'.repeat(500));
     writeFileSync(join(chat, GEMMA), 'G'.repeat(300));
+    // A speed setup saved there before (the experts of 30 layers in RAM, flash attention off): kept through every change.
+    writeFileSync(join(nodeDir, 'data', 'settings.json'), JSON.stringify({ run: { [A3B]: { ctx: 8192, cache: 'f16', place: 'layers', moeCpu: 30, fa: 'off' } } }));
     const noOllama = join(top, 'no-ollama');
     mkdirSync(noOllama);
     const node = await startPc({ root: ROOT, home: nodeDir, env: { OLLAMA: noOllama } });
@@ -61,6 +63,7 @@ test('two PCs: the host sets a linked PC\'s Guessing model only with the node\'s
 
     // Set: kept in the node's own settings, everything else of that model's setup as it was.
     const before = await runThere(A3B);
+    assert.equal(before.moeCpu, 30, JSON.stringify(before));
     const set = await host.post('/api/network/run-set', { pc, model: A3B, draft: Q08 });
     assert.equal(set.status, 200, JSON.stringify(set.body));
     assert.match(set.body.said, /Qwen3\.5-0\.8B/);
@@ -88,6 +91,11 @@ test('two PCs: the host sets a linked PC\'s Guessing model only with the node\'s
     await refused({ model: 'Nope-7B.gguf', draft: '' }, 404, /not on/);
     // A flag list sent along is not read: the ids alone decide (here a refused id, so nothing changes).
     await refused({ model: A3B, draft: GEMMA, args: ['--spec-type', 'draft-simple', '-md', 'C:\\x.gguf'] }, 400, /same family/);
+
+    // The node's own chat gear sends only what it shows: the speed setup stays.
+    const gear = await node.post('/api/settings', { pane: 'chat', runModel: A3B, run: { ctx: 16384, cache: 'f16', place: 'layers', draft: Q08 } });
+    assert.equal(gear.status, 200, JSON.stringify(gear.body));
+    assert.deepEqual(await runThere(A3B), { ctx: 16384, cache: 'f16', place: 'layers', moeCpu: 30, fa: 'off', draft: Q08 });
 
     // None takes it off.
     const none = await host.post('/api/network/run-set', { pc, model: A3B, draft: '' });
