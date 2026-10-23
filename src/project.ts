@@ -300,10 +300,12 @@ export function suggestHires(all: Candidate[], words = ''): Suggestion[] {
 export interface Quick { name: string; folder: string; about: string; prompt: string }
 
 /** The four fields cleaned; the prompt (or, without one, the description) is what gets planned. */
-export function cleanQuick(raw: Record<string, unknown>, folder: string): Quick | { error: string } {
+/** `nameOnly`: "+ New project…" in a chat's project list: the name is enough (the chat holds what it is about). */
+export function cleanQuick(raw: Record<string, unknown>, folder: string, nameOnly = false): Quick | { error: string } {
   const about = line(raw.about, 200);
   const prompt = String(raw.prompt ?? '').replace(/\r/g, '').trim().slice(0, 1500);
-  if (!prompt && !about) return { error: 'Type the prompt first: what should exist when it is finished?' };
+  if (nameOnly && !line(raw.name, 80)) return { error: 'Type a name for the new project first.' };
+  if (!prompt && !about && !nameOnly) return { error: 'Type the prompt first: what should exist when it is finished?' };
   const name = line(raw.name, 80) || `Project ${folder}`;
   return { name, folder, about, prompt };
 }
@@ -318,7 +320,7 @@ export function quickScope(q: Quick, hope: string | null = null): string {
     'SCOPE CARD',
     `Project: ${q.name}`,
     statement ? `Statement: ${statement}` : '',
-    q.prompt ? `What is asked:\n${q.prompt}` : `Statement: ${q.about}`,
+    q.prompt ? `What is asked:\n${q.prompt}` : q.about ? `Statement: ${q.about}` : 'Started from a chat: what it is about is in its chats.',
   ];
   if (hope) rows.push(`Hope, not promised: ${line(hope, 120)}`);
   return rows.filter(Boolean).join('\n');

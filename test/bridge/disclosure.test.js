@@ -378,6 +378,22 @@ async function main() {
   const selfFound = self.findings;
   check('the Bridge part\'s own files scan clean', () => assert.strictEqual(selfFound.length, 0, selfFound.map(f => f.rule + '@' + f.where + ' ' + f.title).join('\n  ')));
 
+  // The scratch git folder of a TOMLIN that was ended by force (no exit event) is swept by the next one, and the next
+  // one's own is gone when it ends. One of a process still running is left alone.
+  const { spawn, spawnSync } = require('child_process');
+  const deadKid = spawnSync(process.execPath, ['-e', '0']), aliveKid = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
+  const deadOne = path.join(os.tmpdir(), 'bridge-disclosure-' + deadKid.pid + '-test01'), liveOne = path.join(os.tmpdir(), 'bridge-disclosure-' + aliveKid.pid + '-test02');
+  for (const d of [deadOne, liveOne]) fs.mkdirSync(d, { recursive: true });
+  const plain = fs.mkdtempSync(path.join(tmp, 'no-git-'));
+  fs.writeFileSync(path.join(plain, 'a.txt'), 'hello');
+  const kid = spawnSync(process.execPath, ['-e', "require('./src/bridge/disclosure').disclosurePass(process.argv[1], {}).then(() => console.log(require('fs').readdirSync(require('os').tmpdir()).filter(n => n.startsWith('bridge-disclosure-' + process.pid + '-')).length))", plain], { cwd: APP, encoding: 'utf8', timeout: 60000 });
+  check('a scratch git folder left by a TOMLIN that was ended is swept; one still in use is not; its own goes at exit', () => {
+    assert.strictEqual(kid.stdout.trim(), '1', kid.stdout + kid.stderr);
+    assert(!fs.existsSync(deadOne) && fs.existsSync(liveOne), 'dead swept, live kept');
+    assert.strictEqual(fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('bridge-disclosure-' + kid.pid + '-')).length, 0, 'its own removed at exit');
+  });
+  aliveKid.kill(); fs.rmSync(liveOne, { recursive: true, force: true });
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(failures ? failures + ' FAILED' : 'all passed');
   process.exit(failures ? 1 : 0);

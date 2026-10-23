@@ -260,7 +260,7 @@ function plConnectDialog(kind, back) {
     h('label', { class: 'fld-label' }, 'User name'), h('div', { class: 'field' }, user)];
   if (kind === 'cpanel') kids.push(
     h('label', { class: 'fld-label' }, 'Password'), h('div', { class: 'field' }, pass),
-    h('p', { class: 'muted pl-small' }, 'Used once to make TOMLIN\'s own token in your cPanel (Security, Manage API Tokens: it is named TOMLIN_ and this PC\'s name), then dropped: nothing on this PC keeps your password. Disconnect deletes the token again.'),
+    h('p', { class: 'muted pl-small' }, 'Used once to make TOMLIN\'s own token in your cPanel (Security, Manage API Tokens: it is named TOMLIN_ and this PC\'s name), then dropped: nothing on this PC keeps your password. Disconnect deletes the token again. The token can do everything your cPanel account can (cPanel makes no smaller kind) until it is deleted; for a site you only send files to, SFTP needs no token.'),
     h('label', { class: 'fld-label' }, 'Or a token (accounts with two-step sign-in)'), h('div', { class: 'field' }, token),
     h('p', { class: 'muted pl-small' }, 'The server name is in your hosting welcome email, or in cPanel under General Information ("Server Name"). Your own domain often has the wrong certificate for cPanel\'s port.'));
   if (kind === 'ftps') kids.push(

@@ -124,7 +124,7 @@ function modelOptions(m) {
 }
 
 /**
- * Related models on this PC this person may also use (backup LLMs), the first choice being the default (a linked PC's
+ * Related models on this PC this person may also use (backup chat models), the first choice being the default (a linked PC's
  * wake can load one of them). Those likely to fit this PC's memory now come first, under their own heading, then the
  * others. Only for a first choice on this PC: otherwise there is nothing to tick, and nothing is shown.
  */
@@ -133,7 +133,7 @@ function groupOptions(m) {
   const image = m.kind === 'image';
   const here = visibleModels(m.models, ...(m.group ?? [])).filter(x => (!image || x.installed) && x.id !== m.model);
   const box = el('fieldset', { class: 'pick-set team-group' }, el('legend', { text: `Other models ${m.name} may use` }));
-  box.append(el('p', { class: 'hint', text: 'Their default is the first choice above. A backup LLM is optional, and can allow for fast switching if required.' }));
+  box.append(el('p', { class: 'hint', text: 'Their default is the first choice above. A backup chat model is optional, and can allow for fast switching if required.' }));
   if (!here.length) box.append(el('p', { class: 'hint' }, image ? 'No other picture model is downloaded here. ' : 'No other chat model is on this PC. ',
     el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(); } }), '.'));
   const list = new Set(m.group ?? []);
@@ -325,27 +325,34 @@ $('#team-get-models').addEventListener('click', () => {
 });
 
 /** After Hire staff (hire.js): the rest of the page catches up, and a hire with no model opens their profile. */
-/** After a hire who chats (with a model): "Start chat now" (true) or "Not now" (false), in a small window. */
-function askStartChat(hired) {
+/**
+ * After a hire who chats (with a model), one small window: "Start chat now" ('chat'), "Find the fastest setup" ('test',
+ * only when their model was never tested; it opens the test, which runs only on its own Start) or "Not now" ('no').
+ */
+function askStartChat(hired, offer) {
   const box = $('#hired-dlg');
+  const first = hired.name.split(/\s+/)[0];
   return new Promise(done => {
     // Answered once: a button, or Escape (cancel, which fires at once; a close event can come late, after the next ask).
     let answered = false;
-    const end = yes => {
+    const end = pick => {
       if (answered) return;
       answered = true;
       box.close();
-      done(yes);
+      done(pick);
     };
+    const mins = offer?.minutes ? ` (Quick: about ${offer.minutes} minute${offer.minutes === 1 ? '' : 's'})` : '';
     box.replaceChildren(el('div', { class: 'help-body' },
       el('h2', { id: 'hired-title', text: `${hired.name} is hired.` }),
-      el('p', { text: `Start a chat with ${hired.name.split(/\s+/)[0]} now?` }),
+      el('p', { text: `Start a chat with ${first} now?` }),
+      offer ? el('p', { class: 'hint', text: `${first}'s model has not been speed-tested here yet. Find the fastest setup starts it a few ways, times each and recommends one${mins}; it starts only when you press Start the test, and nothing changes until you choose. You can also run it later from Edit staff.` }) : null,
       el('div', { class: 'team-actions' },
-        el('button', { class: 'btn primary', type: 'button', text: 'Start chat now', onclick: () => end(true) }),
-        el('button', { class: 'btn', type: 'button', text: 'Not now', onclick: () => end(false) }))));
+        el('button', { class: 'btn primary', type: 'button', text: 'Start chat now', onclick: () => end('chat') }),
+        offer ? el('button', { class: 'btn', type: 'button', text: 'Find the fastest setup', onclick: () => end('test') }) : null,
+        el('button', { class: 'btn', type: 'button', text: 'Not now', onclick: () => end('no') }))));
     box.oncancel = e => {
       e.preventDefault();
-      end(false);
+      end('no');
     };
     box.showModal();
     box.querySelector('.btn.primary').focus();
@@ -354,12 +361,13 @@ function askStartChat(hired) {
 
 app.afterHire = async hired => {
   if (team.data.staff.some(s => s.kind === 'chat')) app.nobodyToTalkTo = false;
-  // A new hire who chats: asked first ("Start chat now"); yes turns this window's chat to them (the server no longer
-  // turns every window's chat to them). One with no model opens their profile instead (below).
-  // A chat model never tested by the speed finder: offered first ("about N minutes"); Skip keeps its settings.
-  if (hired?.kind === 'chat' && hired.model) await app.offerFinder?.(hired.model, '');
-  const start = hired?.kind === 'chat' && hired.model ? await askStartChat(hired) : false;
-  const turned = start ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
+  // A new hire who chats: one window ("X is hired"): Start chat now turns this window's chat to them (the server no
+  // longer turns every window's chat to them); a model never through the speed finder also gets "Find the fastest
+  // setup", which opens the test (it runs only on its own Start). One with no model opens their profile (below).
+  const talks = hired?.kind === 'chat' && !!hired.model;
+  const pick = talks ? await askStartChat(hired, await app.finderOffer?.(hired.model)) : 'no';
+  if (pick === 'test') await app.openFinder?.(hired.model, { name: hired.name });
+  const turned = pick === 'chat' ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
   // A new artist draws in this window's Images pane (Draw as), asked by this window: the server no longer picks them.
   if (hired?.kind === 'image') await api('/api/settings', { imageAs: hired.id }).catch(() => undefined);
   await app.loadChats?.();
@@ -498,7 +506,7 @@ function drawHost(said0 = '') {
   const save = el('button', { class: 'btn', type: 'button', text: 'Use this model' });
   save.addEventListener('click', async () => {
     if (!sel.value) {
-      note.textContent = list.length ? 'Pick a model in the list first.' : 'Get a chat model first: Settings, Set up, Add a model.';
+      note.textContent = list.length ? 'Pick a model in the list first.' : 'Get a chat model first: Set up, Models: add or remove.';
       return;
     }
     try {
@@ -539,7 +547,7 @@ function drawHost(said0 = '') {
           el('p', { class: 'hint', text: `Model: ${row?.modelName || 'none picked yet'} · ${row?.text ?? ''}` })),
         el('div', { class: 'profile-actions' }, use))),
     section('Model', el('div', { class: 'team-hire' }, el('label', { class: 'field' }, el('span', { text: 'Default model' }), sel), save), note),
-    section('What the host is for', el('p', { text: `The one you talk to when you are not talking to someone you hired: it is here from the first start, before anyone is hired. It has no role or level, runs no job steps and keeps no notebook of its own (it reads the team notebook). How it talks (Standard, Professional, Friend) is in the chat's settings (the gear). Staff are the people you hire: a role, a level, their own model and a fallback, a notebook, and job steps in their role.` })),
+    section('What the host is for', el('p', { text: `The one you talk to when you are not talking to someone you hired. It has no role or level, runs no job steps and keeps no notebook of its own (it reads the team notebook). How it talks (Standard, Professional, Friend) is in the chat's settings (the gear). Staff are the people you hire: a role, a level, their own model and a fallback, a notebook, and job steps in their role.` })),
     section('Name', rename));
 }
 
@@ -789,7 +797,7 @@ function pcPicker(m, section) {
     if (here) body = el('p', { class: 'hint', text: `${first} works here now.` });
     else if (x.backupsOnly) body = el('p', { class: 'hint', text: 'Set to Backups only: it takes no staff.' });
     else if (shut) body = el('p', { class: 'hint', text: x.activity === 'owner' ? 'Its owner is using it just now: try again later.' : 'It is not answering just now: switch it on, then try again.' });
-    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It shares no ${m.kind === 'image' ? 'picture' : 'chat'} models with this PC: tick them on that PC (Network: connect PCs), or send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
+    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It shares no ${m.kind === 'image' ? 'picture' : 'chat'} models with this PC: tick them on that PC (Network), or send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
     else {
       const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
       // Each model there says whether it fits there; one too big for that PC cannot be picked.

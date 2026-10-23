@@ -53,6 +53,8 @@ export interface LaunchSpec {
   /** Resolves true once the runner answers on `port`. */
   ready: (port: number) => Promise<boolean>;
   device: Device;
+  /** Which build of that device's runner it is ('cuda13' for the CUDA 13.4 one), for what a start says it ran on. */
+  runner?: string;
   /** Most seconds to wait; a big model read from a hard disk can take minutes. */
   timeoutSeconds: number;
 }
@@ -68,7 +70,7 @@ export function runnerEnv(device: Device, base: NodeJS.ProcessEnv = process.env)
 }
 
 /** The last chat runner start on this PC: on which device, seconds until it answered, and its own lines about the card. */
-export let lastStart: { device: Device; seconds: number | null; lines: string[] } | null = null;
+export let lastStart: { device: Device; runner?: string; seconds: number | null; lines: string[] } | null = null;
 
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -82,6 +84,32 @@ export function freePort(): Promise<number> {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Whole lines from pieces of a stream: a line's start is held until its end comes. Progress bars redraw with a
+ * carriage return, so it ends a line too. A held part past 4,000 characters is let go as it is, and so is a picture
+ * runner's progress bar; `rest()` gives what is held when the stream ends.
+ */
+export function lineSplitter(): ((piece: string) => string[]) & { rest: () => string[] } {
+  let held = '';
+  const split = (piece: string) => {
+    const parts = (held + piece).split(/\r\n|\r|\n/);
+    held = parts.pop() ?? '';
+    // A "\r" at the very end may be the first half of "\r\n": the "\n" then makes an empty line, which is dropped.
+    // The picture runner's bar ends in its rate with no line end ("| 3/20 - 1.20s/it"): it is whole, and shown now.
+    if (held.length > 4000 || /\d\/\d+ - [\d.]+(s\/it|it\/s)\s*$/.test(held)) {
+      parts.push(held);
+      held = '';
+    }
+    return parts.filter(Boolean);
+  };
+  const rest = () => {
+    const last = held;
+    held = '';
+    return last ? [last] : [];
+  };
+  return Object.assign(split, { rest });
+}
 
 /** Loading stages from what llama-server and sd-server print, so the bar can say what it is doing. */
 function stageOf(line: string): string | null {
@@ -101,6 +129,8 @@ export class Worker {
   private child: ChildProcess | null = null;
   private log: string[] = [];
   private errors: string[] = [];
+  /** This start's lines about the devices it found and used (runnerpush.startFact), from the first on. */
+  facts: string[] = [];
   /** Lines from the runner, for listeners (image progress reads them). */
   onLine: ((line: string) => void) | null = null;
   onExit: (() => void) | null = null;
@@ -138,9 +168,10 @@ export class Worker {
     const key = randomBytes(24).toString('hex');
     this.log = [];
     this.errors = [];
+    this.facts = [];
     const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: runnerEnv(spec.device) });
     const started = Date.now();
-    const start = this.pane === 'chat' ? { device: spec.device, seconds: null as number | null, lines: [] as string[] } : null;
+    const start = this.pane === 'chat' ? { device: spec.device, ...(spec.runner ? { runner: spec.runner } : {}), seconds: null as number | null, lines: [] as string[] } : null;
     if (start) lastStart = start;
     leftovers.started(child.pid, spec.exe);
     this.child = child;
@@ -148,12 +179,12 @@ export class Worker {
     const base = `http://127.0.0.1:${port}`;
     remember(base, key);
     this.view = { ...this.view, device: spec.device, pid: child.pid ?? null, stage: 'Starting the runner' };
-    const keep = (b: Buffer) => {
-      // Progress bars redraw with a carriage return, so it ends a line too.
-      const lines = b.toString().split(/\r\n|\r|\n/).filter(Boolean);
+    const keep = (lines: string[]) => {
       this.log = [...this.log, ...lines].slice(-60);
       this.errors = [...this.errors, ...lines.filter(l => /\b(error|failed|out of memory)\b|^\S+\s+E\s|FilterExpression|unknown (test|filter)/i.test(l))].slice(-8);
-      if (start) start.lines = [...start.lines, ...lines.filter(startFact)].slice(0, 12);
+      const facts = lines.filter(startFact);
+      if (facts.length && this.facts.length < 40) this.facts = [...this.facts, ...facts].slice(0, 40);
+      if (start) start.lines = [...start.lines, ...facts].slice(0, 12);
       for (const l of lines) {
         if (this.view.state === 'loading') {
           const s = stageOf(l);
@@ -162,8 +193,13 @@ export class Worker {
         this.onLine?.(l);
       }
     };
-    child.stdout?.on('data', keep);
-    child.stderr?.on('data', keep);
+    // Each stream on its own, whole lines only: a pipe cuts a line anywhere, and a cut "using device CUDA0" line once
+    // made a start on the card look like one on the CPU.
+    for (const stream of [child.stdout, child.stderr]) {
+      const split = lineSplitter();
+      stream?.on('data', (b: Buffer) => keep(split(b.toString())));
+      stream?.on('end', () => keep(split.rest()));
+    }
     let exited = false;
     child.on('exit', code => {
       exited = true;

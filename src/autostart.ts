@@ -48,7 +48,7 @@ export function startupScript(root: string, env: NodeJS.ProcessEnv = process.env
   const launcher = launcherIn(root).replace(/%/g, '%%');
   return [
     '@echo off',
-    'rem Made by TOMLIN (Network: connect PCs: "Start TOMLIN when this PC starts"). Untick it there to remove this file.',
+    'rem Made by TOMLIN (Network: "Start TOMLIN when this PC starts"). Untick it there to remove this file.',
     `start "TOMLIN" /min "${launcher}"`,
     '',
   ].join('\r\n');

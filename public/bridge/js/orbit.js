@@ -6,14 +6,18 @@
 // program's (◐) is stopped the same way, with no question first; the fight runs while it closes. Empty sky = a harmless miss. A site stopped any other way (Stop, Stop all) also blows up here; a
 // new one launches up from the horizon. ----
 const orbitEls = new Map(), dying = new Set();
+// Folded (off the Projects page) or hidden: the satellites are not drawn, so nothing is fired or burst.
+const folded = () => $('orbit').hidden || $('orbit').classList.contains('fold');
 const hashOf = t => { let x = 0; for (const c of t) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 function orbitPoint(el) { const o = $('orbit').getBoundingClientRect(), b = el.getBoundingClientRect(); return [b.left - o.left + b.width / 2, b.top - o.top + b.height / 2]; }
 function fire(x, y) {
+  if (folded()) return;
   const o = $('orbit'), sx = o.clientWidth / 2, sy = o.clientHeight - 41, dx = x - sx, dy = y - sy;
   const beam = h('i', { class: 'beam', style: 'left:' + sx + 'px;top:' + sy + 'px;width:' + Math.hypot(dx, dy).toFixed(1) + 'px;--a:' + Math.atan2(dy, dx).toFixed(4) + 'rad' });
   o.append(beam); setTimeout(() => beam.remove(), 340);
 }
 function burst(x, y, n, big) {
+  if (folded()) return;
   const o = $('orbit');
   if (big) { const f = h('i', { class: 'flash', style: 'left:' + x + 'px;top:' + y + 'px' }); o.append(f); setTimeout(() => f.remove(), 500); }
   for (let i = 0; i < n; i++) {
@@ -38,7 +42,7 @@ function salvo(fromEl, n, gap, targets) {
 // to aim at, down to the atmosphere over the ground station.
 function missile(fromEl, toEl) {
   const o = $('orbit');
-  if (!fromEl || !fromEl.isConnected || !o.clientWidth || calm() || o.querySelectorAll('.missile').length >= 90) return;
+  if (!fromEl || !fromEl.isConnected || !o.clientWidth || folded() || calm() || o.querySelectorAll('.missile').length >= 90) return;
   const [x0, y0] = orbitPoint(fromEl.querySelector('.sat-body'));
   const W = o.clientWidth, H = o.clientHeight;
   const aimed = toEl && toEl.isConnected;
@@ -180,12 +184,19 @@ function renderOrbit() {
     if (!el) { el = makeSat(); orbitEls.set(x.id, el); sky.append(el); }
     fillSat(el, x);
   }
-  const n = orbitEls.size;
-  $('orbit').classList.toggle('empty', !n);
-  $('orbit-hint').textContent = n ? n + ' in orbit · click one to shoot it down (stops it) · ↗ opens it' : '';
-  $('orbit-empty').hidden = !!n;
+  const n = orbitEls.size, run = runningSplit(), o = $('orbit');
+  // The split only while it adds up (a site being shot down has left the sky but not yet the list).
+  const count = n + ' in orbit' + (run.other.length && run.n === n ? ' (' + run.words + ')' : '');
+  $('orbit-hint').textContent = !n ? '' : o.classList.contains('fold') ? count : count + ' · click one to shoot it down (stops it) · ↗ opens it';
+  // Nothing in orbit: the banner goes, once the last one's explosion has played.
+  clearTimeout(orbitHide);
+  if (n || dying.size) o.hidden = false;
+  else if (!o.hidden) orbitHide = setTimeout(() => { if (!orbitEls.size && !dying.size) o.hidden = true; }, 700);
 }
+let orbitHide = 0;
+$('orbit-go').addEventListener('click', e => { e.stopPropagation(); show('projects'); });
 $('orbit').addEventListener('click', e => {
+  if ($('orbit').classList.contains('fold')) return show('projects');
   if (e.target.closest('.sat')) return;
   const o = $('orbit').getBoundingClientRect(), x = e.clientX - o.left, y = e.clientY - o.top;
   fire(x, y); setTimeout(() => burst(x, y, 5), 110);

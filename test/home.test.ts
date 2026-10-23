@@ -35,7 +35,9 @@ test('a picture step, failed tests, then all done without a report, each say wha
   const failed = job([step('a', 'coder', 'done')], { tests: { label: 'node --test', ok: false, at: '2026-10-03T12:40:00Z', output: '', seconds: 2 } });
   assert.equal(jobItem(failed, null, false, false, staff)!.kind, 'tests');
   const done = job([step('a', 'coder', 'done'), step('b', 'writer', 'skipped')]);
-  assert.equal(jobItem(done, null, false, false, staff)!.text, 'All 2 steps are done. Please review the result.');
+  // A skipped step is finished, never "done".
+  assert.equal(jobItem(done, null, false, false, staff)!.text, 'All steps finished: 1 done, 1 skipped. Please review the result.');
+  assert.equal(jobItem(job([step('a', 'coder', 'done'), step('b', 'writer', 'done')]), null, false, false, staff)!.text, 'All 2 steps are done. Please review the result.');
   assert.equal(jobItem(done, null, true, false, staff), null, 'finished with its report: nothing to do');
 });
 

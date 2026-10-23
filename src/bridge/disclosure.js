@@ -303,7 +303,16 @@ const lines0 = s => String(s).split('\0').filter(Boolean);
 let scratchGit = null;
 async function scratchGitDir() {
   if (scratchGit && fs.existsSync(scratchGit)) return scratchGit;
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-disclosure-'));
+  // Named for this process: one left by a TOMLIN that was ended by force (no exit event) is swept here next time.
+  try {
+    for (const n of fs.readdirSync(os.tmpdir())) {
+      const pid = Number((/^bridge-disclosure-(\d+)-\w+$/.exec(n) || [])[1]);
+      if (!pid || pid === process.pid) continue;
+      try { process.kill(pid, 0); continue; } catch (e) { if (e.code === 'EPERM') continue; }
+      fs.rmSync(path.join(os.tmpdir(), n), { recursive: true, force: true });
+    }
+  } catch {}
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-disclosure-' + process.pid + '-'));
   const r = await git(null, ['init', '--bare', '-q', d]);
   scratchGit = r.ok ? d : null;
   process.once('exit', () => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });

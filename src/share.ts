@@ -136,11 +136,11 @@ export async function homeNetworkWhy(url: string, look: Lookup = lookupAll): Pro
   try {
     found = await look(host);
   } catch (e) {
-    return `${host} could not be found on your home network (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}). Check the name, or use the address shown on that PC under Network: connect PCs.`;
+    return `${host} could not be found on your home network (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}). Check the name, or use the address shown on that PC under Network.`;
   }
   const outside = found.map(f => f.address).filter(a => !isPrivateAddress(a));
-  if (!found.length) return `${host} could not be found on your home network. Use the address shown on that PC under Network: connect PCs.`;
-  return outside.length ? `${host} points to ${outside.join(', ')}, which is not on your home network, so nothing was sent to it. Use the address shown on that PC under Network: connect PCs (for example 192.168.1.20:8741).` : null;
+  if (!found.length) return `${host} could not be found on your home network. Use the address shown on that PC under Network.`;
+  return outside.length ? `${host} points to ${outside.join(', ')}, which is not on your home network, so nothing was sent to it. Use the address shown on that PC under Network (for example 192.168.1.20:8741).` : null;
 }
 
 /** A worker address as typed ("192.168.1.20", "192.168.1.20:8741", "http://desk.local:8741/") -> "http://host:port", or null. */
@@ -183,6 +183,8 @@ export interface ShareState {
   models?: string[];
   /** What linked PCs may do here besides using those models (src/carry.ts): copy them, keep restore points, send models. None until ticked. */
   allow?: Allow;
+  /** Max mode: minutes with nobody using this PC before it lends its card memory (src/maxlend.ts; 5 unless changed). */
+  lendIdle?: number;
   /** The last update a linked PC pushed here (src/update.ts): to which version, by whom, when. */
   updated?: { version: string; by: string; at: string } | null;
 }

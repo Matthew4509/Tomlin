@@ -1,6 +1,6 @@
 // This PC's install, in My PC (the PC window): Repair install (src/repair.ts), Shortcut to desktop, and starting the
-// installed program (TOMLIN.exe) in place of a copy started from a folder. Start with Windows goes through /api/share, as
-// the tick in Network: connect PCs does.
+// installed program (TOMLIN.exe) in place of a copy started from a folder. Start TOMLIN when this PC starts goes through /api/share, as
+// the tick in Network does.
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { startupDir, startupFileIn } from '../autostart.ts';
@@ -13,7 +13,7 @@ export const HANDED_OVER = 78;
 
 const me = () => ({ here: ROOT, version: VERSION });
 
-/** True when the Start with Windows file starts this program. */
+/** True when the Start TOMLIN when this PC starts file starts this program. */
 async function startupStarts(exe: string): Promise<boolean> {
   const dir = startupDir();
   return !!dir && (await readFile(startupFileIn(dir), 'utf8').catch(() => '')) === inst.startupScriptFor(exe);
@@ -37,7 +37,7 @@ async function view() {
     steps: plan.steps.map(s => s.say),
     left: plan.left,
     desktop: desk ? { there: desk.there, target: desk.target, opens: desk.opens } : null,
-    // On when Start with Windows starts this copy, or the install's program (after Repair install, from a folder copy).
+    // On when Start TOMLIN when this PC starts starts this copy, or the install's program (after Repair install, from a folder copy).
     autostart: (await startupOf.on().catch(() => false)) || (await startupStarts(plan.exe)),
     // Started from a folder while a whole install of this version (or newer) is there: the installed program can take over.
     canSwitch: plan.outside && process.env.TOMLIN_TRAY !== '1' && !!inst.installExe(VERSION),

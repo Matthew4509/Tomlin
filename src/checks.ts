@@ -23,8 +23,20 @@ export interface CheckResult {
 
 interface Ran { code: number | null; out: string; timedOut: boolean }
 
-/** Runs a program without a shell, with a time limit; output capped. */
-export function run(exe: string, args: string[], opts: { cwd?: string; timeoutMs?: number; shell?: boolean; maxChars?: number } = {}): Promise<Ran> {
+/**
+ * The environment a test run gets (Run tests runs code a model wrote): what the four test commands need to find
+ * themselves and their files (the PC's own folders, temp folders, the user's folders, language settings, Python's, npm's
+ * and Node's own folders), and nothing else. Anything named like a key, a token or a password is left out even then,
+ * and so are TOMLIN's own settings.
+ */
+const TEST_ENV = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|USERPROFILE|HOME|HOMEDRIVE|HOMEPATH|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|COMMONPROGRAMFILES\(X86\)|COMMONPROGRAMW6432|PUBLIC|ALLUSERSPROFILE|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|PROCESSOR_IDENTIFIER|OS|USERNAME|USERDOMAIN|COMPUTERNAME|LANG|LANGUAGE|TZ|LC_\w+|PYTHON\w*|VIRTUAL_ENV|CONDA_\w+|PIP_\w+|NODE_PATH|NPM_CONFIG_\w+|NVM_\w+)$/i;
+const SECRET_NAME = /(TOKEN|SECRET|PASSW|_PWD|PWD$|API_?KEY|ACCESS_?KEY|PRIVATE|CREDENTIAL|AUTH|COOKIE|SESSION|^TOMLIN_|^SHELBY_)/i;
+export function testEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && TEST_ENV.test(k) && !SECRET_NAME.test(k)));
+}
+
+/** Runs a program without a shell, with a time limit; output capped. `env`: its environment (this one's by default). */
+export function run(exe: string, args: string[], opts: { cwd?: string; timeoutMs?: number; shell?: boolean; maxChars?: number; env?: NodeJS.ProcessEnv } = {}): Promise<Ran> {
   return new Promise(resolve => {
     let out = '';
     let timedOut = false;
@@ -32,7 +44,7 @@ export function run(exe: string, args: string[], opts: { cwd?: string; timeoutMs
     let child: import('node:child_process').ChildProcess;
     try {
       // Node's own markers are left out: a parent's NODE_TEST_CONTEXT makes a child `node --test` skip every file.
-      const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^NODE_(OPTIONS|TEST_CONTEXT|CHANNEL_FD|UNIQUE_ID)$/.test(k)));
+      const env = Object.fromEntries(Object.entries(opts.env ?? process.env).filter(([k]) => !/^NODE_(OPTIONS|TEST_CONTEXT|CHANNEL_FD|UNIQUE_ID)$/.test(k)));
       child = spawn(exe, args, { cwd: opts.cwd, shell: opts.shell ?? false, windowsHide: true, env: { ...env, FORCE_COLOR: '0', NO_COLOR: '1' } });
     } catch (e) {
       return resolve({ code: -1, out: (e as Error).message, timedOut: false });
@@ -117,9 +129,17 @@ export async function syntaxCheck(files: { path: string; text: string }[]): Prom
             continue;
           }
         }
-        const name = `f${i}.${ext === '.mjs' || ext === '.mts' || isModule(js) ? 'mjs' : 'cjs'}`;
+        const module = ext === '.mjs' || ext === '.mts' || isModule(js);
+        const name = `f${i}.${module ? 'mjs' : 'cjs'}`;
         await writeFile(join(dir, name), js);
-        const r = await run(process.execPath, ['--check', name], { cwd: dir });
+        let r = await run(process.execPath, ['--check', name], { cwd: dir });
+        // As Node runs a file with no "type" of its own: one that fails as a plain script only for module syntax
+        // (top-level await, with no import) runs as a module. The plain script's error is the one told.
+        if (r.code !== 0 && !module) {
+          const asModule = `f${i}.mjs`;
+          await writeFile(join(dir, asModule), js);
+          if ((await run(process.execPath, ['--check', asModule], { cwd: dir })).code === 0) r = { ...r, code: 0 };
+        }
         out.push({ path: f.path, tool, ok: r.code === 0, message: r.code === 0 ? '' : tidyError(r.out, dir, f.path) });
       } else if (ext === '.py' && (await hasTool('python'))) {
         const name = `f${i}.py`;
@@ -168,7 +188,7 @@ export async function runTests(id: string, cwd: string): Promise<{ ok: boolean; 
   if (!t) return { error: 'That is not one of the test commands TOMLIN can run.' };
   if (t.needs && !(await hasTool(t.needs))) return { error: `${t.label} needs ${t.needs}, which is not installed on this PC (or only the Windows Store shortcut is).` };
   const t0 = Date.now();
-  const r = await run(t.exe, t.args, { cwd, timeoutMs: 60_000, shell: t.shell, maxChars: 12_000 });
+  const r = await run(t.exe, t.args, { cwd, timeoutMs: 60_000, shell: t.shell, maxChars: 12_000, env: testEnv(process.env) });
   const output = `${r.timedOut ? 'Stopped after 60 seconds (the tests took too long or waited for input).\n' : ''}${tidyTestOutput(r.out, cwd)}`;
   return { ok: r.code === 0 && !r.timedOut, label: t.label, output, seconds: Math.round((Date.now() - t0) / 100) / 10 };
 }

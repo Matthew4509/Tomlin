@@ -2,6 +2,7 @@
 // for hours. Kept in data/queue.json; each PC does one item at a time, items for different PCs run side by side. What
 // comes back waits on Home ("Review photos for …", "Review documents for …", "Reply and answer"), written by code.
 import { randomBytes } from 'node:crypto';
+import { stepCount } from '../jobs.ts';
 import { join } from 'node:path';
 import { readData, updateData } from '../atomic.ts';
 import * as brains from '../brains.ts';
@@ -208,9 +209,9 @@ async function runProject(it: QItem, signal: AbortSignal, st: { stage: string })
   if ('busy' in r) return { state: 'failed', error: 'Another project is working now (busy)' };
   const job = await jobRoutes.loadJob(it.project);
   const total = job?.steps.length ?? 0;
-  const done = job?.steps.filter(s => s.status !== 'todo').length ?? 0;
-  const far = `${done} of ${total} steps done`;
-  if (r.kind === 'finished') return { state: 'done', result: `All ${total} steps done${saved ? `, ${saved} saved by the queue` : ''}.` };
+  const count = stepCount(job?.steps ?? []);
+  const far = count.words;
+  if (r.kind === 'finished') return { state: 'done', result: `${count.skipped ? count.words : `All ${total} step${total === 1 ? '' : 's'} done`}${saved ? `, ${saved} saved by the queue` : ''}.` };
   if (r.kind === 'picture') {
     const pic: QItem = { id: newId(), kind: 'picture', state: 'waiting', title: r.brief || r.title, prompt: r.brief || r.title, added: new Date().toISOString(), project: it.project, projectName: it.projectName, step: r.n };
     // Straight after the project, so its picture is next in line for the artist's PC.

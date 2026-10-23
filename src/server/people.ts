@@ -1,20 +1,23 @@
 // Who a chat can be with, which chat is open, the Chats tab's list and the profile photos.
 import type { ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import * as brains from '../brains.ts';
 import { WHO, whoOf, cleanName } from '../persona.ts';
 import { levelOf, roleOf, type StaffMember } from '../staff.ts';
 import { isFaceKey, visibleFaces } from '../faces.ts';
 import { LOOK_OPTIONS, cleanLook } from '../look.ts';
 import * as mute from '../mute.ts';
-import { cleanTitle, subjectFor, whoKind, type ChatInfo } from '../chats.ts';
+import { cleanTitle, recentEntries, subjectFor, whoKind, type ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
-import { HOST_NAME, HOST_ON, type Route, type Routes, chats, faces, json, mutes, publicSettings, shortName, staff, staffId, store } from './core.ts';
+import { HOME, HOST_NAME, HOST_ON, SECURITY_HEADERS, type Route, type Routes, chatLogs, chats, faces, json, mutes, publicSettings, shortName, staff, staffId, store, workspaceDir } from './core.ts';
 import { chatList, images } from './panes.ts';
 import { chatWork, stopChats } from './answering.ts';
 import { docStore, liveAnswers } from './chat.ts';
 import { jobRoutes } from './jobs.ts';
-import { moveChatFiles, saveToOf } from './places.ts';
+import { moveChatFiles, projectFolder, saveToOf } from './places.ts';
+import { bridgePictures } from './bridge.ts';
+import { Previews } from '../previews.ts';
 
 export const whoList = () => [...WHO.map(({ id, name, hint }) => ({ id, name, hint })), ...staff.list().filter(m => !roleOf(m.role).kind).map(m => ({ id: 'staff:' + m.id, name: m.name + ' (' + roleOf(m.role).name + ', ' + levelOf(m.level).name + ')', hint: roleOf(m.role).hint, staff: true }))];
 export const whoId = (v: unknown) => staffId(v) ?? whoOf(v).id;
@@ -165,8 +168,54 @@ async function chatsView() {
     return { ...c, name: p.name, avatar: p.avatar, role: p.role, here: chatPersonHere(c.who), pictures: pics[c.id] ?? 0 };
   });
   const open = await openChat();
-  return { chats: list, current: open ? open.id : '', people };
+  // "Recent chats" in the left panel: projects as one entry each, chats in no project on their own (src/chats.ts).
+  const ids = [...new Set(list.map(c => c.project).filter((p): p is string => !!p))];
+  const live = new Set((await Promise.all(ids.map(async p => ((await projectKnown(p)) ? p : '')))).filter(Boolean));
+  const recent = recentEntries(list, p => live.has(p), await chats.pinnedProjects());
+  return { chats: list, current: open ? open.id : '', people, recent, previews: await previewsView([...live]) };
 }
+
+// ---- Chat previews (src/previews.ts): a picture of each project's running site beside its chats in a person's window ----
+
+/** A project's folder on disk when it has one of its own in the workspace (the top of the workspace is not a site). */
+async function siteFolder(project: string): Promise<string | null> {
+  const f = await projectFolder(project);
+  return f ? join(await workspaceDir(), ...f.split('/')) : null;
+}
+const previews = new Previews(join(HOME.data, 'previews.json'), { folderOf: siteFolder, find: bridgePictures.find, take: bridgePictures.take });
+
+/** A message sent in a chat of this project: the day's picture, in the background (never holds up the message). */
+export async function previewsTake(project: string | undefined): Promise<void> {
+  try {
+    await previews.use();
+    if (project) await previews.firstMessage(project);
+  } catch (e) {
+    console.error('A chat preview picture was not taken:', e);
+  }
+}
+
+/** Each project's picture time and icon, and its short description (the name alone often says nothing). */
+async function previewsView(projects: string[]) {
+  const pics = await previews.view(projects).catch(() => ({} as Awaited<ReturnType<Previews['view']>>));
+  const out: Record<string, { at: number | null; icon: boolean; about: string }> = {};
+  for (const p of projects) {
+    const job = await jobRoutes.loadJob(p);
+    const info = job ? null : await jobRoutes.projectInfo(p);
+    const about = job ? (job.name ? job.goal : '') : info?.name ? info.goal : '';
+    out[p] = { at: pics[p]?.at ?? null, icon: !!pics[p]?.icon, about: String(about ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) };
+  }
+  return out;
+}
+
+/** GET /api/previews/picture?project= (or /icon): the picture or icon the Bridge keeps for that project's folder. */
+const previewFile = (which: 'picture' | 'icon'): Route => async ({ res, url }) => {
+  const dir = await siteFolder(String(url.searchParams.get('project') ?? ''));
+  const f = dir ? bridgePictures.file(dir, which) : null;
+  const data = f ? await readFile(f.file).catch(() => null) : null;
+  if (!f || !data) return json(res, 404, { error: 'No picture of this project yet.' });
+  res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': f.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+  return void res.end(data);
+};
 
 /** The chats being answered now, by whom and where (job steps are Home's own line). */
 /** The person a chat's `who` names. The host answers as a plain way of talking (Standard, Professional, Friend). */
@@ -197,7 +246,13 @@ export async function faceFile(face: RegExpExecArray, res: ServerResponse): Prom
 
 /** GET requests answered here, by path. */
 export const peopleGet: Routes = {
-  '/api/chats': async ({ res }) => json(res, 200, await chatsView()),
+  '/api/chats': async ({ res }) => {
+    // Opening the page is a use: after a 5-hour gap a new "day" of chat preview pictures starts.
+    await previewsTake(undefined);
+    return json(res, 200, await chatsView());
+  },
+  '/api/previews/picture': previewFile('picture'),
+  '/api/previews/icon': previewFile('icon'),
   '/api/faces': async ({ res }) => json(res, 200, await facesView()),
 };
 
@@ -265,10 +320,17 @@ export const peoplePost: Routes = {
     return json(res, 200, { chat: now && { ...now, saveTo: await saveToOf(now) }, said, ...(await chatsView()) });
   },
   '/api/chats/pin': async ({ res, b }) => {
-    // {id, on}: pinned chats sit under Projects in the left panel and stay there until unpinned.
+    // {id, on}: a pinned chat sits at the top of Recent chats (or of its project's list there) until unpinned.
     const c = await chats.get(b.id);
     if (!c) return json(res, 404, { error: 'That chat is not there any more (it may have been deleted in another window). Pick another from the list.' });
     await chats.mark(c.id, { pinned: b.on === true });
+    return json(res, 200, await chatsView());
+  },
+  '/api/chats/pin-project': async ({ res, b }) => {
+    // {project, on}: a project pinned to the top of "Recent chats" in the left panel, until unpinned.
+    const project = String(b.project ?? '');
+    if (!project || !(await projectKnown(project))) return json(res, 404, { error: 'That project is not in this workspace any more. Pick another from the list.' });
+    await chats.pinProject(project, b.on === true);
     return json(res, 200, await chatsView());
   },
   '/api/chats/rename': async ({ res, b }) => {
@@ -302,6 +364,7 @@ export const peoplePost: Routes = {
     const pictures = await images.gallery.forgetChat(c.id, b.pictures === 'delete');
     await chats.remove(c.id);
     await docStore.drop(c.id);
+    await chatLogs.drop(c.id);
     const m = await mutes.get();
     if (m.items[`chat:${c.id}`]) await mutes.save(mute.set(m, `chat:${c.id}`, 'off'));
     return json(res, 200, { ok: true, pictures, deleted: b.pictures === 'delete' });

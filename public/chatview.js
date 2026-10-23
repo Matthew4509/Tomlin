@@ -9,15 +9,7 @@ function drawLarge(l) {
   if (!l) return;
   const write = el('button', { class: 'btn primary', type: 'button', text: 'Write a handoff and start fresh' });
   const ignore = el('button', { class: 'btn quiet', type: 'button', text: 'Ignore' });
-  write.addEventListener('click', () => {
-    if (streamingHere()) return;
-    large.hidden = true;
-    log.querySelector('.empty')?.remove();
-    const out = el('div', { class: 'msg assistant' }, typingNote('Writing the handoff'));
-    log.append(out);
-    log.scrollTop = log.scrollHeight;
-    talk('/api/chat/handoff', chatNamed(), out, '');
-  });
+  write.addEventListener('click', writeHandoff);
   ignore.addEventListener('click', () => {
     large.hidden = true;
     api('/api/chat/large', chatNamed()).catch(() => undefined);
@@ -28,6 +20,18 @@ function drawLarge(l) {
       : `This chat is getting large: it fills about ${l.fill}% of what the model can read. Past 100% the oldest messages are only summarised. A handoff carries the work into a new chat that starts clear.` }),
     el('div', { class: 'team-actions' }, write, ignore));
 }
+
+/** The handoff written into a new chat that carries on from this one (the bar's button, and Memory's in a layered chat). */
+function writeHandoff() {
+  if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then try again.');
+  large.hidden = true;
+  log.querySelector('.empty')?.remove();
+  const out = el('div', { class: 'msg assistant' }, typingNote('Writing the handoff'));
+  log.append(out);
+  log.scrollTop = log.scrollHeight;
+  talk('/api/chat/handoff', chatNamed(), out, '');
+}
+app.writeHandoff = writeHandoff;
 
 /** A chat's lines on screen, and who and what it is (chats.js draws the title and the left panel). */
 /**
@@ -52,6 +56,7 @@ function showChat(r) {
   drawChat(r.lines, r.chat);
   syncSend(r.chat?.id ?? '');
   setThink(!!r.chat?.think);
+  setWeb(!!r.chat?.web);
   // Where this chat's last answer ran, for the chat head ("Rowan · Coder · on laptop 9B").
   app.lastRan = [...r.lines].reverse().find(l => l.ran && !l.picture)?.ran ?? '';
   app.onChat?.(r.chat ?? null);
@@ -133,7 +138,7 @@ function send(message, from = '', agree = false, now = false) {
   log.append(out);
   log.scrollTop = log.scrollHeight;
   large.hidden = true;
-  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(thinkOn() ? { think: true } : {}) }, out, message, from);
+  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}) }, out, message, from);
 }
 
 /**
@@ -299,7 +304,7 @@ async function talk(url, body, out, message, from = '') {
           }
           if (data.large && here()) drawLarge(data.large);
           const secs = ((performance.now() - t0) / 1000).toFixed(1);
-          const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', data.note]);
+          const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', webLine(data.tools), data.note]);
           if (stats) out.append(stats);
           if (data.text && !data.saved && !data.continued) {
             // A chat made by this first message is not open in the list yet: the person picked for it is.
@@ -381,6 +386,11 @@ $('#chat-form').addEventListener('submit', e => {
   const message = input.value.trim();
   if (!message) return;
   if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then send.');
+  // "find: words" opens Find in this chat with them (chatlog.js), where this chat keeps a log; it is not sent.
+  if (/^\s*find\s*:\s*\S/i.test(message) && app.findInChat?.(message.replace(/^\s*find\s*:\s*/i, ''))) {
+    input.value = '';
+    return;
+  }
   // Pictures are drawn in an artist's own chat, from the words as typed: "/image ..." here says who to ask.
   if (/^\/image\b/i.test(message)) {
     input.value = '';
@@ -419,7 +429,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   const state = app.status?.panes.chat.state;
   if (state === 'loading' || state === 'unloading') return app.chatNote(`The chat model is ${state === 'loading' ? 'still loading' : 'unloading'}: send again once it says Connected.`);
   const m = (app.models?.chat ?? []).find(x => x.id === p.model.value && x.installed !== false);
-  if (!m) return app.chatNote('No chat model is on this PC yet, so nobody can answer. Get one under Settings, Set up, Add a model, then press Connect beside it.');
+  if (!m) return app.chatNote('No chat model is on this PC yet, so nobody can answer. Get one under Set up, Models: add or remove, then press Connect beside it.');
   const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';
   // Send in the Send to card was the ask (it said a model loads first), unless the model does not fit: that is asked.
   if (!(card.asked && !tight) && !(await askHere($('#chat-ask'), `No model is loaded for this chat yet (nothing loads by itself).${tight} Load ${m.name} and send your message?`, `Load ${m.name} and send`, 'Not now', !!tight))) return;

@@ -1,5 +1,6 @@
 // Talking to linked PCs over the encrypted link: hellos, their models as brains, pictures drawn there, their meters.
 import * as share from '../share.ts';
+import { cleanUse, type ToolUse } from '../webtools.ts';
 import * as link from '../link.ts';
 import { cleanReading, type AskOpts } from '../engine.ts';
 import * as brains from '../brains.ts';
@@ -50,7 +51,7 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
   // The last lock for a "Backups only" PC: nothing that is work for it, whatever asked (read now, not from `r`).
   if (WORK_PATHS.has(path) && backupsOnly(r.id)) throw new Error(backupsOnlyWhy(r.name));
   const keys = link.keysOf(r.key);
-  if (!keys) throw Object.assign(new Error(`"${r.name}" was linked before links were encrypted. Link it again: Other PCs, Find PCs on my network, then its setup code.`), { relink: true });
+  if (!keys) throw Object.assign(new Error(`"${r.name}" was linked before links were encrypted. Link it again: Network, Find PCs on my network, then its setup code.`), { relink: true });
   const req = link.sealRequest(keys, path, payload);
   const id = link.requestId(req.box);
   await onHomeNetwork(r);
@@ -68,7 +69,7 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
 const WORK_PATHS = new Set(['/worker/run', '/worker/draw', '/worker/switch', '/worker/carry-offer', '/worker/carry-put']);
 /** Set to "Backups only" on this PC (as saved now). */
 export const backupsOnly = (id: string) => d.store.peek()?.remotes.find(x => x.id === id)?.backupsOnly === true;
-export const backupsOnlyWhy = (name: string) => `"${name}" is set to Backups only: it keeps backups and does no other work. To use it for staff again, untick Backups only on its card (Network: connect PCs, Linked PCs).`;
+export const backupsOnlyWhy = (name: string) => `"${name}" is set to Backups only: it keeps backups and does no other work. To use it for staff again, untick Backups only on its card (Network, Linked PCs).`;
 
 /** A link from before the encryption: said as it is, not as "could not be reached". */
 const relink = (e: unknown) => (e as { relink?: boolean }).relink === true;
@@ -217,13 +218,14 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
     if (rid) signal.addEventListener('abort', stop, { once: true });
     try {
       let res = await once(body, signal);
-      if (!res.ok) throw new Error(`"${r.name}": ${String(((await res.json().catch(() => ({}))) as Record<string, unknown>).error ?? `answered ${res.status}`)}${res.status === 401 ? '. Link it again under Network: connect PCs, Find other PCs.' : ''}`);
+      if (!res.ok) throw new Error(`"${r.name}": ${String(((await res.json().catch(() => ({}))) as Record<string, unknown>).error ?? `answered ${res.status}`)}${res.status === 401 ? '. Link it again under Network, Find other PCs.' : ''}`);
       let lostAt = 0;
       for (;;) {
         try {
           brain.last = null;
           brain.thought = null;
           brain.cut = false;
+          brain.tools = null;
           // A linked PC's speed comes back on its done line (an older PC sends none), and is kept here for that PC; so
           // does its working when it thought first (Think), which streams while it thinks.
           const text = await share.readStream(res, onText, (ev, data) => {
@@ -238,6 +240,9 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
               brain.last = keepRemoteSpeed(r, String(data.model ?? shared?.name ?? h.model ?? ''), data.speed);
               // Stopped at its length limit there (2.0.43 on): Continue is offered here.
               brain.cut = data.cut === true;
+              // What it searched for and read on the web there (Web on, 2.0.58 on).
+              const tools = (Array.isArray(data.tools) ? data.tools : []).slice(0, 40).map(cleanUse).filter((u): u is ToolUse => !!u);
+              if (tools.length) brain.tools = tools;
               // What that PC used for it (2.0.39 on), counted for that PC under the project this is for.
               const used = cleanUsed(data.usage);
               if (used) d.usage(r.id, used, String(data.model ?? shared?.name ?? ''));
@@ -279,10 +284,10 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
   const brain: Brain = {
     label: `${shared?.name ?? h.model} on ${r.name}`,
     ctx: shared?.ctx ?? h.ctx,
-    ask: (system, user, maxTokens, onText, signal) => run({ system, user, maxTokens }, onText, signal),
+    ask: (system, user, maxTokens, onText, signal, opts) => run({ system, user, maxTokens, ...(opts?.web && h.can.includes('web') ? { web: opts.web } : {}) }, onText, signal),
     // An older worker takes one message: the conversation is written into it.
     // `plain` and `think` go with it; an older PC does not read them and asks with its own settings.
-    chat: (turns, maxTokens, onText, signal, opts) => run(h.can.includes('turns') ? { turns, maxTokens, ...(opts?.plain ? { plain: true } : {}), ...(opts?.think ? { think: true } : {}) } : { ...brains.flatten(turns), maxTokens }, onText, signal, opts?.onThought, opts?.rid, opts?.onReading),
+    chat: (turns, maxTokens, onText, signal, opts) => run(h.can.includes('turns') ? { turns, maxTokens, ...(opts?.plain ? { plain: true } : {}), ...(opts?.think ? { think: true } : {}), ...(opts?.web && h.can.includes('web') ? { web: opts.web } : {}) } : { ...brains.flatten(turns), maxTokens }, onText, signal, opts?.onThought, opts?.rid, opts?.onReading),
     last: null,
   };
   return brain;
@@ -312,10 +317,13 @@ export const owedTaken = (r: Remote, rids: string[]) => workerPost(r, '/worker/t
 
 /** A linked PC's figures for one answer: kept for that PC and model (src/speed.ts), and handed back for the speed line. */
 function keepRemoteSpeed(r: Remote, model: string, raw: unknown): Brain['last'] {
-  const s = raw && typeof raw === 'object' ? (raw as { write?: unknown; tokens?: unknown; read?: unknown }) : null;
+  const s = raw && typeof raw === 'object' ? (raw as { write?: unknown; tokens?: unknown; read?: unknown; readTokens?: unknown }) : null;
   const write = Number(s?.write);
   if (!s || !(write > 0)) return null;
-  const speed = { write, tokens: Math.round(Number(s.tokens) || 0), ...(Number(s.read) > 0 ? { read: Number(s.read) } : {}) };
+  // readTokens: how much it read this turn (a node from 2.0.58 says; an older one does not, and its read speed is then
+  // never used to size a chat's layers).
+  const readTokens = Math.round(Number(s.readTokens) || 0);
+  const speed = { write, tokens: Math.round(Number(s.tokens) || 0), ...(Number(s.read) > 0 ? { read: Number(s.read) } : {}), ...(readTokens > 0 ? { readTokens } : {}) };
   if (model) d.speeds.add(speedKeys.pcKey(r.id, model), model, r.name, speed, 'answer');
   return speed;
 }
@@ -488,14 +496,15 @@ export const lastHello = (id: string) => seen.get(id) ?? null;
 /**
  * A paired PC's meters now, for the top bar while a chat with someone on it is open: 'on' with the figures, 'old' when
  * its TOMLIN is from before meters were shared, 'off' when it does not answer in 2.5 s, 'gone' when it is not linked.
- * `model`: the chat model loaded there, as its last hello said (about once a minute), or null.
+ * `model`: the chat model loaded there, as its last hello said (about once a minute), or null. `chatModel`: the model
+ * the open chat uses there (its id on that PC, '' for none): the only one the asking keeps loaded there.
  */
-export async function nodeStats(pc: string): Promise<{ state: 'on'; stats: nodestaff.NodeStats; name: string; model: string | null } | { state: 'old' | 'off' | 'gone'; name: string; model: string | null }> {
+export async function nodeStats(pc: string, chatModel = ''): Promise<{ state: 'on'; stats: nodestaff.NodeStats; name: string; model: string | null } | { state: 'old' | 'off' | 'gone'; name: string; model: string | null }> {
   const r = (await d.store.settings()).remotes.find(x => x.id === pc);
   if (!r) return { state: 'gone', name: '', model: null };
   const model = seen.get(pc)?.model ?? null;
   try {
-    const res = await linkFetch(r, '/worker/stats', {}, AbortSignal.timeout(2500));
+    const res = await linkFetch(r, '/worker/stats', { model: chatModel }, AbortSignal.timeout(2500));
     if (res.status === 404) return { state: 'old', name: r.name, model };
     const stats = res.ok ? nodestaff.cleanStats(await res.json().catch(() => null)) : null;
     return stats ? { state: 'on', stats, name: r.name, model } : { state: 'off', name: r.name, model };
@@ -508,6 +517,12 @@ export async function nodeStats(pc: string): Promise<{ state: 'on'; stats: nodes
 export const canKeep = (ref: string) => {
   const x = brains.parseRef(ref);
   return x.kind === 'remote' && !!seen.get(x.pc)?.can.includes('outbox');
+};
+
+/** A hire's linked PC can run the web tools for an answer (Web on): it said so in its last hello (2.0.58 on). */
+export const canWeb = (ref: string) => {
+  const x = brains.parseRef(ref);
+  return x.kind === 'remote' && !!seen.get(x.pc)?.can.includes('web');
 };
 
 /** A hire's linked PC can think first when asked (Think): it said so in its last hello (2.0.31 on). */

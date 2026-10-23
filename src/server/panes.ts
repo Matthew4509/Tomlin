@@ -2,10 +2,16 @@
 import { usedFromTimings } from '../meter.ts';
 import { cardFit } from '../calc.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { existsSync } from 'node:fs';
 import { freemem } from 'node:os';
+import { dirname, join } from 'node:path';
+import type { RpcProgram } from '../maxlend.ts';
+import { cardsOf, listDevices, type Card } from '../devices.ts';
+import { runnerEnv } from '../worker.ts';
 import { log } from '../log.ts';
 import type { Gpu } from '../hardware.ts';
-import { type Device, missingCardRunner } from '../runtimes.ts';
+import { type Device, missingCardRunner, RUNNER_NAMES, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName } from '../runtimes.ts';
+import { noCardStart } from '../runnerpush.ts';
 import { chatArgs, TEMPLATE_FAULT, whyItFailed } from '../llama.ts';
 import { Pane } from '../pane.ts';
 import * as runnersOf from '../runners.ts';
@@ -15,7 +21,8 @@ import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
 import { TONES } from '../persona.ts';
 import { cacheBytes, modelShape, type ModelShape } from '../gguf.ts';
-import { cleanRunWith } from '../runset.ts';
+import { cleanRunWith, devicesForRun, guessersFor } from '../runset.ts';
+import { cleanFoldWait } from '../layers.ts';
 import { DEFAULT_RUN, type RunOptions, type Settings } from '../store.ts';
 import { shortBuild } from '../update.ts';
 import { BUILD, GB, HOME, ROOT, type Routes, VERSION, apiError, body, cachedCopies, chatModels, gbText, hardware, hidden, json, publicSettings, runtimes, sampler, shortName, store } from './core.ts';
@@ -24,6 +31,7 @@ import { whoList } from './people.ts';
 import { paneJob } from './pictures.ts';
 import { readSpeedsNow } from './thispc.ts';
 import { jobRoutes } from './jobs.ts';
+import { maxPcs, rpcFor } from '../jobrun/maxhost.ts';
 
 // The chat runners (src/runners.ts): one llama-server per chat model loaded at once. A loaded model stays until it is
 // dropped or another needs its place: the next model goes beside it when it fits, else the least recently used goes.
@@ -134,13 +142,55 @@ async function status() {
       image: { ...paneStatus(images.pane), idleMinutes: s.image.idleMinutes, threadsSetting: s.image.threads, job: paneJob(), working: images.busy() },
     },
     serving: jobRoutes.servingNow(),
+    // A4: new PCs asking for a linked PC's backups kept here, for the pop-up (the Network page lists them too).
+    claims: jobRoutes.claimsWaiting(),
   };
 }
 
 // ---- Models and fit ----
 
 /** Will a model of `bytes` fit in what is free now? Counts back what this pane's own loaded model would free. */
-export function fit(bytes: number, pane: 'chat' | 'image') {
+/**
+ * Card choice (src/devices.ts): the graphics cards this PC's card runners can use, biggest first, read once from each
+ * installed runner (and again when the runners installed change). Empty until read, or with no card of its own.
+ */
+let cardList: Card[] = [];
+let cardsRead: { key: string; done: Promise<Card[]> } | null = null;
+/**
+ * A card runner that cannot use any card here, and why: its own device list was empty (a CUDA build with no NVIDIA
+ * driver, or none for the card), or a start of it said so (runnerpush.noCardStart). Auto skips it until the runners
+ * installed here change; it is never tried only to load the model on the CPU.
+ */
+const noCard = new Map<Device, string>();
+export function readCards(): Promise<Card[]> {
+  const exes = (['cuda', 'vulkan'] as const).map(d => ({ d, exe: hardware.gpus.length ? runtimes.exe('llama', d) : null })).filter((x): x is { d: 'cuda' | 'vulkan'; exe: string } => !!x.exe && (x.d !== 'cuda' || hardware.gpus.some(g => g.vendor === 'nvidia')));
+  const key = exes.map(x => x.exe).join('|');
+  if (cardsRead?.key !== key) {
+    noCard.clear();
+    cardsRead = {
+      key,
+      done: Promise.all(exes.map(x => listDevices(x.exe, runnerEnv(x.d)))).then(lists => {
+        // An NVIDIA card here that the CUDA runner does not list: that runner cannot use it.
+        const at = exes.findIndex(x => x.d === 'cuda');
+        if (at >= 0 && !lists[at].length && cardsRead?.key === key) noCard.set('cuda', `the CUDA runner (${runtimes.pins[runtimes.id('llama', 'cuda')]?.name ?? 'CUDA'}) lists no card it can use on this PC`);
+        return (cardList = cardsOf(lists, hardware.gpus.filter(g => g.integrated).map(g => g.name)));
+      }),
+    };
+  }
+  return cardsRead.done;
+}
+/** The cards as last read (reading them again in the background when the runners changed). */
+export function cardsNow(): Card[] {
+  void readCards();
+  return cardList;
+}
+/** The memory of the cards a model may use: the ones chosen for it when any of them is here, else every chat card. */
+function cardBytesFor(ids: string[] | undefined): number[] {
+  const chosen = ids?.length ? cardList.filter(c => c.ids.some(id => ids.includes(id))) : [];
+  return chosen.length ? chosen.map(c => c.total) : chatCards().map(g => g.total ?? 0);
+}
+
+export function fit(bytes: number, pane: 'chat' | 'image', cardIds?: string[]) {
   // Chat: what the model that would be swapped out frees (the least recently used one not answering).
   const out = pane === 'chat' ? runnerLooks().filter(r => r.model && r.state === 'connected' && !r.busy).sort((a, b) => a.usedAt - b.usedAt)[0] : null;
   const own = pane === 'chat' ? out?.ram ?? 0 : panes[pane].view.pid ? sampler.latest.processes[panes[pane].view.pid!]?.ram ?? 0 : 0;
@@ -148,9 +198,9 @@ export function fit(bytes: number, pane: 'chat' | 'image') {
   // A chat model on a card of its own needs RAM only for what does not fit on the card (PLAN F8): the cards' memory,
   // less llama.cpp's margin of 1 GB on each, less what the other loaded models already hold there. An estimate:
   // other programs on the card are not counted, and llama.cpp's own fit reads the real free memory when it loads.
-  const cards = pane === 'chat' ? chatCards() : [];
+  const cards = pane === 'chat' ? cardBytesFor(cardIds) : [];
   const held = cards.length ? [...runners.filter(p => p.view.model && p.view.model !== out?.model), images.pane].reduce((n, p) => n + (p.view.pid ? sampler.latest.processes[p.view.pid]?.gpuDedicated ?? 0 : 0), 0) : 0;
-  const card = Math.max(0, cards.reduce((n, g) => n + (g.total ?? 0) - GB, 0) - held);
+  const card = Math.max(0, cards.reduce((n, total) => n + total - GB, 0) - held);
   const need = Math.max(0.8 * GB, bytes * 1.1 + 0.8 * GB - card);
   const other = pane === 'chat' ? images.pane : chat;
   const otherOn = other.view.state === 'connected' || other.view.state === 'loading';
@@ -175,7 +225,7 @@ export async function loadShapes(): Promise<void> {
 void loadShapes().catch(() => undefined);
 
 /** This PC's chat models as src/runset.ts checks them (a guessing model counts only while it is still on this PC). */
-const listed = () => chatModels.list().map(m => ({ id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes }));
+const listed = () => chatModels.list().map(m => ({ id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes, ...((shapes.get(m.id)?.mtp ?? 0) > 0 ? { mtp: true } : {}), ...(shapes.get(m.id)?.vocab ? { vocab: shapes.get(m.id)!.vocab } : {}) }));
 export const runOf = (s: Settings, id: string): RunOptions => (s.run[id] ? cleanRunWith(s.run[id], id, listed(), CONTEXTS) : { ...DEFAULT_RUN });
 /** The guessing model's file and its own context cache (0 with none): counted wherever the model's memory is. */
 const draftBytes = (run: RunOptions) => {
@@ -212,7 +262,7 @@ export function chatList() {
     const shape = shapes.get(m.id);
     // What each context size costs in memory, for the settings hint (only sizes the model was trained for, and 8k).
     const cost = shape ? Object.fromEntries((['f16', 'q8_0', 'q4_0'] as const).map(c => [c, Object.fromEntries(CONTEXTS.filter(n => n <= Math.max(8192, shape.trainedContext || 8192)).map(n => [n, Math.round(cacheBytes(shape, n, c))]))])) : null;
-    return { id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes, where: m.where, fit: fit(m.bytes + contextBytes(m.id, run) + draftBytes(run), 'chat'), run, trained: shape?.trainedContext ?? null, moe: (shape?.experts ?? 0) > 0, places: placesHere(m.id), cost, reading: readSpeedsNow()[m.id] ?? null };
+    return { id: m.id, name: m.file.split('/').pop()!.replace(/\.gguf$/i, ''), bytes: m.bytes, where: m.where, fit: fit(m.bytes + contextBytes(m.id, run) + draftBytes(run), 'chat', run.cards), run, trained: shape?.trainedContext ?? null, moe: (shape?.experts ?? 0) > 0, mtp: (shape?.mtp ?? 0) > 0, guessers: guessersFor(listed().find(x => x.id === m.id) ?? { id: m.id, name: '', bytes: m.bytes }, listed()), places: placesHere(m.id), cost, reading: readSpeedsNow()[m.id] ?? null, foldWait: cleanFoldWait(s?.foldWait?.[m.id]) };
   });
 }
 
@@ -222,13 +272,57 @@ export function chatList() {
  */
 function devicesFor(engine: 'llama' | 'sd', asked: Asked): Device[] {
   const gpu: Device[] = [];
-  if (hardware.gpus.some(g => g.vendor === 'nvidia') && runtimes.installed(engine, 'cuda')) gpu.push('cuda');
-  if (hardware.gpus.length && runtimes.installed(engine, 'vulkan')) gpu.push('vulkan');
+  const found = (d: Device) => engine !== 'llama' || !noCard.has(d);
+  if (hardware.gpus.some(g => g.vendor === 'nvidia') && runtimes.usable(engine, 'cuda') && found('cuda')) gpu.push('cuda');
+  if (hardware.gpus.length && runtimes.installed(engine, 'vulkan') && found('vulkan')) gpu.push('vulkan');
   const cpu: Device[] = runtimes.installed(engine, 'cpu') ? ['cpu'] : [];
   if (asked === 'cpu') return cpu;
   if (asked === 'gpu') return gpu;
   if (autoSkipsGpu(engine)) return cpu.length ? cpu : gpu;
   return [...gpu, ...cpu];
+}
+
+/**
+ * Max mode on a node (src/maxlend.ts): the RPC server beside the chat runner Auto would start here (a card's first, the
+ * CPU's with no card, or with only one built into the processor), or null when no runner here has one.
+ */
+export function rpcProgram(): RpcProgram | null {
+  for (const device of devicesFor('llama', 'auto')) {
+    const exe = runtimes.exe('llama', device);
+    const rpc = exe ? join(dirname(exe), process.platform === 'win32' ? 'ggml-rpc-server.exe' : 'ggml-rpc-server') : '';
+    if (rpc && existsSync(rpc)) return { exe: rpc, device, threads: store.peek()?.chat.threads ?? 0 };
+  }
+  return null;
+}
+
+/**
+ * The card runners installed here for chat, in the order Auto tries them (the CUDA builds this PC can use, the one that
+ * suits its card first, then Vulkan): the speed finder tries each one against the one in use.
+ */
+export function cardRunners(): RunnerName[] {
+  const out: RunnerName[] = [];
+  for (const d of devicesFor('llama', 'gpu')) {
+    if (d === 'vulkan') out.push('vulkan');
+    if (d === 'cuda') for (const id of runtimes.order('llama', 'cuda')) if (runtimes.installedPin(id) && runnerOfPin(id)) out.push(runnerOfPin(id) as RunnerName);
+  }
+  return out;
+}
+
+/** The runner a model is held to when that build is installed here and this PC can use it; undefined: Auto. */
+function heldRunner(run: RunOptions): RunnerName | undefined {
+  const r = run.runner;
+  return r && RUNNER_NAMES.includes(r) && cardRunners().includes(r) ? r : undefined;
+}
+
+/** The program a chat start on `device` runs: the build the model is held to, or the one Auto picks here. */
+function chatExe(device: Device, held: RunnerName | undefined): { exe: string; runner?: string } {
+  if (held && runnerDevice(held) === device) {
+    const exe = runtimes.exePin(RUNNER_PINS[held]);
+    if (exe) return { exe, runner: held };
+  }
+  const id = runtimes.id('llama', device);
+  const named = runnerOfPin(id);
+  return { exe: runtimes.exePin(id)!, ...(named ? { runner: named } : {}) };
 }
 
 /** True when Auto should use the CPU even though a graphics chip is there (only a built-in one, for chat). */
@@ -284,27 +378,42 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   const run = tryRun ?? runOf(s, id);
   runnerRun.set(runner, run);
   const draftPath = run.draft ? chatModels.path(run.draft) : null;
-  const started = { ...run, draft: draftPath ?? undefined };
+  // Max mode (hidden: TOMLIN_MAX names the linked PCs): their cards join this load as more devices.
+  const max = maxPcs().length ? await rpcFor() : null;
+  const started = { ...run, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };
   const draftName = draftPath ? draftPath.split(/[\\/]/).pop()!.replace(/\.gguf$/i, '') : '';
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
   const notes = [
     asked !== 'cpu' ? missingCardRunner('llama', hardware.gpus, d => runtimes.installed('llama', d)) : '',
+    asked !== 'cpu' && noCard.size ? `Skipped: ${[...noCard.values()].join('; ')}.` : '',
     asked === 'auto' && autoSkipsGpu('llama') ? `Auto picked the CPU: faster for chat than the built-in graphics chip (choose GPU to use it anyway).` : '',
     run.ctx !== DEFAULT_RUN.ctx || run.cache !== 'f16' ? `Context ${run.ctx.toLocaleString()} tokens${run.cache !== 'f16' ? `, ${run.cache} cache` : ''}.` : '',
     asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'layers' ? `The experts of the first ${run.moeCpu} layers in RAM, the rest on the graphics card.` : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
     beside.length ? `Loaded beside ${runnersOf.namesOf(beside)}.` : '',
     draftName ? `Guessing model: ${draftName} (it guesses the next few words, this model checks them; the answer is this model's own).` : '',
+    max?.lent.length ? `Max mode: borrowing the card memory of ${max.lent.map(n => `"${n}"`).join(' and ')}.` : '',
+    ...(max?.notes ?? []),
   ].filter(Boolean);
+  const held = heldRunner(run);
   const loading = runner.connect({
     model: id,
     modelName: name,
     asked,
     threads,
-    devices: devicesFor('llama', asked),
+    // A runner saved for this model (the speed finder's CUDA 12, CUDA 13 or Vulkan row) is the only one it starts on,
+    // when it is installed and this PC can use it.
+    devices: devicesForRun(devicesFor('llama', asked), held && runnerDevice(held)),
     expectedSeconds: expected,
-    build: device => ({ exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
-    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { exe: runtimes.exe('llama', device)!, args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
+    build: device => ({ ...chatExe(device, held), args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
+    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { ...chatExe(device, held), args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
     why: whyItFailed,
+    // A card start that put the model on the CPU counts as failed (Max mode's lent cards aside): the next device is
+    // tried, and Auto skips that runner from now on.
+    started: (device, facts) => {
+      const why = started.rpc?.length ? '' : noCardStart(device, facts);
+      if (why) noCard.set(device, why);
+      return why;
+    },
     note: notes.join(' ') || undefined,
   });
   // What it holds once loaded, beside what was expected, goes in the log: a fit refusal that looked wrong (a model
@@ -518,7 +627,7 @@ export const panesGet: Routes = {
   '/api/models': async ({ res }) => {
     await loadShapes();
     const cards = cardMem();
-    return json(res, 200, { cards, chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id), card: cardFit(m.bytes, cards) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id) })), runtimes: runtimeList(), folder: chatModels.other(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
+    return json(res, 200, { cards, cardList: cardsNow(), chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id), card: cardFit(m.bytes, cards) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id) })), runtimes: runtimeList(), folder: chatModels.other(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
   },
   '/api/place/try': async ({ res }) => json(res, 200, { job: tryView() }),
   '/v1/models': async ({ res }) => json(res, 200, { object: 'list', data: [chat, images.pane].filter(x => x.view.state === 'connected').map(x => ({ id: x.view.model, object: 'model', owned_by: 'tomlin' })) }),

@@ -318,7 +318,7 @@ export function updateSide(d: UpdateNodeDeps) {
   // The same version is taken too when it is other files (both build ids known and different): the build id says what
   // code each copy is, so one number held by two apps no longer stops the update.
   const why = (version: unknown, build?: unknown): string | null => {
-    if (!d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network: connect PCs).`;
+    if (!d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`;
     if (!d.restarts) return `TOMLIN on "${d.pcName()}" was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself. Install it there with Install TOMLIN.cmd (or start it with Start TOMLIN.cmd), then update it again.`;
     if (!isVersion(version)) return 'the update did not say its version.';
     if (newer(version, d.version)) return null;

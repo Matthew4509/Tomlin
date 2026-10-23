@@ -85,6 +85,8 @@ function barBox() {
   return box;
 }
 
+/** The chat's Connect before anyone who chats is hired: what a press says, and its tooltip. */
+const HIRE_FIRST = 'Hire someone first: Connect loads the model the person you talk to thinks with, and nobody is hired yet. Press Hire staff on the left.';
 const STATE_TEXT = { disconnected: 'Disconnected', loading: 'Loading…', connected: 'Connected', unloading: 'Unloading…', failed: 'Failed' };
 const DEVICE_TEXT = { cpu: 'CPU', vulkan: 'graphics chip (Vulkan)', cuda: 'NVIDIA card (CUDA)' };
 
@@ -244,7 +246,7 @@ function drawBar(s) {
   drawActive(s);
 }
 
-/** "Models active": a line for the chat models (LLM; two or more can be loaded, one runner each) and one for pictures. */
+/** "Models active": a line for the chat models (two or more can be loaded, one runner each) and one for pictures. */
 function drawActive(s) {
   const chip = (v, kind) => {
     // Short on the bar: no file tags (Q4_K_M, -it); the full name is in the tooltip.
@@ -270,7 +272,7 @@ function drawActive(s) {
   const llm = [s.panes.chat, ...(s.panes.chatAlso ?? [])].filter(live);
   const pics = [s.panes.image].filter(live);
   const rows = [];
-  if (llm.length) rows.push(el('div', { class: 'active-row' }, el('span', { class: 'active-k', text: 'LLM' }), ...llm.map(v => chip(v, 'Chat model'))));
+  if (llm.length) rows.push(el('div', { class: 'active-row' }, el('span', { class: 'active-k', text: 'Chat' }), ...llm.map(v => chip(v, 'Chat model'))));
   if (pics.length) rows.push(el('div', { class: 'active-row' }, el('span', { class: 'active-k', text: 'Images' }), ...pics.map(v => chip(v, 'Picture model'))));
   if (!rows.length) rows.push(el('span', { class: 'hint', text: 'No models loaded' }));
   const box = $('#loaded');
@@ -340,7 +342,13 @@ function drawPane(name, v) {
   if (was !== v.state) drawFit(name);
   const on = v.state === 'connected' || v.state === 'loading';
   p.connect.textContent = v.state === 'loading' ? 'Cancel loading' : on ? 'Disconnect' : v.state === 'unloading' ? 'Unloading…' : 'Connect';
-  p.connect.classList.toggle('primary', !on);
+  // Nobody hired yet: the chat's Connect looks greyed and says why when pressed (there is nobody for the model to answer as).
+  const nobody = name === 'chat' && !on && !!app.nobodyToTalkTo;
+  p.connect.classList.toggle('primary', !on && !nobody);
+  p.connect.classList.toggle('looks-off', nobody);
+  p.connect.title = nobody ? HIRE_FIRST : '';
+  // Someone was hired since the press: what it said no longer holds.
+  if (!nobody && p.said?.dataset.sig === `${HIRE_FIRST}|`) showFault(p.said, null);
   // Pressable with no model picked: the press says why (a greyed button explains nothing in Firefox or on a phone).
   p.connect.disabled = v.state === 'unloading';
   // While loaded, the list shows what is loaded (it may have been loaded by another program through the API).
@@ -467,12 +475,15 @@ function drawContext() {
   const cache = $('#ctx-cache');
   const hint = $('#ctx-hint');
   const off = !m;
-  size.disabled = cache.disabled = off;
+  size.disabled = cache.disabled = $('#fold-wait').disabled = off;
   if (!m) {
     size.replaceChildren();
     hint.textContent = '';
+    drawFold(null);
     return;
   }
+  $('#fold-wait').value = String(m.foldWait ?? 4);
+  drawFold(m);
   const sizes = (app.models.contexts ?? [8192]).filter(n => !m.trained || n <= Math.max(8192, m.trained) || n === m.run.ctx);
   const ps = m.reading?.perSecond;
   size.replaceChildren(...sizes.map(n => el('option', { value: String(n), text: `${tokensText(n)} tokens${n === 8192 ? ' (default)' : ''}${m.trained && n > m.trained ? ' (over its training)' : ''}${ps ? ` · ${readTime(n, ps)} to read` : ''}` })));
@@ -488,10 +499,23 @@ function drawContext() {
   // refuses one whose words list differs.
   const draft = $('#ctx-draft');
   const family = x => String(x.name).toLowerCase().split('-')[0];
-  const smaller = (app.models.chat ?? []).filter(x => x.id !== m.id && !x.id.startsWith('ollama:') && family(x) === family(m) && x.bytes < m.bytes / 2);
-  draft.replaceChildren(el('option', { value: '', text: 'None' }), ...smaller.map(x => el('option', { value: x.id, text: `${x.name} · ${gb(x.bytes)}` })));
-  draft.value = smaller.some(x => x.id === m.run.draft) ? m.run.draft : '';
-  $('#ctx-draft-row').hidden = !smaller.length;
+  // The server says which models can guess for this one (the same words list); an older answer, by name.
+  const smaller = (app.models.chat ?? []).filter(x => (m.guessers ? m.guessers.includes(x.id) : x.id !== m.id && !x.id.startsWith('ollama:') && family(x) === family(m) && x.bytes < m.bytes / 2));
+  draft.replaceChildren(el('option', { value: '', text: 'None' }), ...(m.mtp ? [el('option', { value: 'mtp', text: 'Built-in (MTP): the model guesses for itself' })] : []), ...smaller.map(x => el('option', { value: x.id, text: `${x.name} · ${gb(x.bytes)}` })));
+  draft.value = m.run.spec === 'mtp' && m.mtp ? 'mtp' : smaller.some(x => x.id === m.run.draft) ? m.run.draft : '';
+  $('#ctx-draft-row').hidden = !smaller.length && !m.mtp;
+  // Card choice (src/devices.ts): with two cards or more, the model can be held to one; its guessing model can sit on
+  // another card, or in RAM.
+  const cards = app.models.cardList ?? [];
+  const onCard = ids => cards.findIndex(c => c.ids.some(id => (ids ?? []).includes(id)));
+  const cardSel = $('#ctx-cards');
+  cardSel.replaceChildren(el('option', { value: '', text: 'Every card (Auto)' }), ...cards.map((c, i) => el('option', { value: String(i), text: `Only the ${c.label} · ${gb(c.total)}` })));
+  cardSel.value = m.run.cards?.length && onCard(m.run.cards) >= 0 ? String(onCard(m.run.cards)) : '';
+  $('#ctx-cards-row').hidden = cards.length < 2;
+  const draftCard = $('#ctx-draft-card');
+  draftCard.replaceChildren(el('option', { value: '', text: cards.length > 1 ? 'The model\'s own cards' : 'The card, with the model' }), ...(cards.length > 1 ? cards.map((c, i) => el('option', { value: String(i), text: `The ${c.label}` })) : []), el('option', { value: 'ram', text: 'RAM (the CPU guesses; no card room)' }));
+  draftCard.value = m.run.draftOn === 'ram' ? 'ram' : m.run.draftCard?.length && onCard(m.run.draftCard) >= 0 && cards.length > 1 ? String(onCard(m.run.draftCard)) : '';
+  $('#ctx-draft-card-row').hidden = !cards.length || !draft.value || draft.value === 'mtp';
   $('#ctx-try-row').hidden = !(m.places?.length > 1);
   drawTry();
   const bytes = m.cost?.[m.run.cache]?.[m.run.ctx];
@@ -500,7 +524,7 @@ function drawContext() {
     bytes != null ? `${gb(total)} in all (model ${gb(m.bytes)} + context ${gb(bytes)}).` : 'Context memory unknown for this file.',
     m.trained ? `Trained up to ${tokensText(m.trained)}.` : '',
     ps ? `Reads about ${Math.round(ps)} tokens a second here: a full ${tokensText(m.run.ctx)} takes ${readTime(m.run.ctx, ps)} before the first word.` : 'Reading speed: measured from its first answers.',
-    ps && m.run.ctx / ps > 600 ? 'A smaller context answers sooner; the chat offers a handoff before it fills.' : '',
+    ps && m.run.ctx / ps > 600 ? (m.run.ctx >= 16384 ? 'A chat sends only its latest messages word for word, and its log keeps what matters from the older ones (the fold wait, below), so it is not read whole each time.' : 'A smaller context answers sooner; the chat offers a handoff before it fills.') : '',
   ].filter(Boolean).join(' ');
   hint.title = 'A bigger context lets a job step read bigger files, but uses more memory and makes long prompts slower.';
 }
@@ -509,7 +533,19 @@ async function saveContext() {
   const id = panes.chat.model.value;
   if (!id) return;
   try {
-    await api('/api/settings', { pane: 'chat', runModel: id, run: { ctx: Number($('#ctx-size').value), cache: $('#ctx-cache').value, place: $('#ctx-place').value, draft: $('#ctx-draft').value } });
+    const cards = app.models.cardList ?? [];
+    const idsAt = v => (v !== '' && cards[Number(v)] ? cards[Number(v)].ids : []);
+    const where = $('#ctx-draft-card').value;
+    // The built-in guesser is not a model: it is kept as the run's own guess (and dropped when another is chosen).
+    const guess = $('#ctx-draft').value;
+    const was = (app.models.chat ?? []).find(x => x.id === id)?.run;
+    await api('/api/settings', { pane: 'chat', runModel: id, run: {
+      ctx: Number($('#ctx-size').value), cache: $('#ctx-cache').value, place: $('#ctx-place').value, draft: guess === 'mtp' ? '' : guess,
+      ...(guess === 'mtp' ? { spec: 'mtp' } : was?.spec === 'mtp' ? { spec: null } : {}),
+      // Only what is shown is sent: a hidden choice keeps what was saved.
+      ...(!$('#ctx-cards-row').hidden ? { cards: idsAt($('#ctx-cards').value) } : {}),
+      ...(!$('#ctx-draft-card-row').hidden ? { draftOn: where === 'ram' ? 'ram' : null, draftCard: where === 'ram' ? [] : idsAt(where) } : {}),
+    } });
     app.models = await api('/api/models');
     drawContext();
     drawFit('chat');
@@ -566,7 +602,34 @@ async function reconnect(name) {
   }
   poll();
 }
-for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft']) $(id).addEventListener('change', saveContext);
+for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft', '#ctx-cards', '#ctx-draft-card']) $(id).addEventListener('change', saveContext);
+
+// ---- Fold wait (src/layers.ts): how long a fold in a chat of 16k or more may spend reading, kept per model ----
+/** What the wait keeps word for word at this model's read speed, as src/layers.ts shortTokens works it out (with a 2,000-token log above). */
+function drawFold(m) {
+  const minutes = Number($('#fold-wait').value) || 4;
+  const ps = m?.reading?.perSecond;
+  const keep = ps ? Math.max(2000, Math.floor(ps * minutes * 60 - 2000)) : 0;
+  $('#fold-hint').textContent = !m ? '' : ps
+    ? `In a chat of 16k or more, when the latest messages pass a size, the oldest stop being sent word for word and the chat log keeps what matters (a fold); that turn reads the rest again. Reading about ${Math.round(ps)} tokens a second here, ${minutes} min keeps about ${keep.toLocaleString('en-GB')} tokens of the latest messages word for word. Longer keeps more, but each fold waits longer.`
+    : `In a chat of 16k or more, how long a fold may spend reading the latest messages again. What it keeps word for word shows here once this model has answered on this PC (its reading speed is measured then).`;
+}
+$('#fold-wait').addEventListener('change', async () => {
+  const id = panes.chat.model.value;
+  const m = (app.models?.chat ?? []).find(x => x.id === id);
+  const minutes = Number($('#fold-wait').value);
+  if (!m) return;
+  try {
+    await api('/api/chat/foldwait', { model: id, minutes });
+    m.foldWait = minutes;
+    drawFold(m);
+    gearSaved('chat', false);
+  } catch (err) {
+    $('#fold-wait').value = String(m.foldWait ?? 4);
+    drawFold(m);
+    gearSaid('chat', `Not saved: ${err.message}`);
+  }
+});
 
 // ---- Try each way (PLAN F8): load the model each way, measure, keep the fastest ----
 function drawTry() {
@@ -648,10 +711,14 @@ for (const name of ['chat', 'image']) {
         p.connect.disabled = true;
         await api(`/api/panes/${name}/unload`, {});
       } else {
+        if (name === 'chat' && app.nobodyToTalkTo) {
+          showFault(p.said, HIRE_FIRST);
+          return;
+        }
         if (!p.model.value) {
           const none = ![...p.model.options].some(o => o.value && !o.disabled);
           showFault(p.said, none
-            ? `No ${name === 'chat' ? 'chat' : 'picture'} model is on this PC yet, so there is nothing to connect. Get one under Settings, Set up, Add a model; it shows in the list beside Connect once it is downloaded.`
+            ? `No ${name === 'chat' ? 'chat' : 'picture'} model is on this PC yet, so there is nothing to connect. Get one under Set up, Models: add or remove (in the left panel); it shows in the list beside Connect once it is downloaded.`
             : 'Pick a model in the list beside Connect first, then press Connect.');
           return;
         }
@@ -859,7 +926,7 @@ function codeSaveLabel() {
   const name = $('#code-save-name').value.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   const there = codeSaving.files.has(name);
   $('#code-save-go').textContent = there ? `Replace ${name.split('/').pop()}` : 'Save';
-  $('#code-save-where').textContent = `${there ? `${name} is already there: it is kept as ${name}.bak, then replaced. ` : ''}It goes in the Files folder${codeSaving.folder ? `, ${codeSaving.folder}` : ''}. To use another folder: Settings, Set up, Files and blog writer.`;
+  $('#code-save-where').textContent = `${there ? `${name} is already there: it is kept as ${name}.bak, then replaced. ` : ''}It goes in the Files folder${codeSaving.folder ? `, ${codeSaving.folder}` : ''}. To use another folder: Set up, Files and blog writer (in the left panel).`;
 }
 async function openCodeSave(code, name) {
   codeSaving.code = code;
@@ -888,7 +955,7 @@ $('#code-save-form').addEventListener('submit', async e => {
   try {
     const r = await api('/api/files/save', { path: $('#code-save-name').value.trim(), text: codeSaving.code, create: true });
     codeDlg.close();
-    app.chatNote(`Saved ${r.path}${codeSaving.folder ? ` in ${codeSaving.folder}` : ''}.${r.created ? '' : ` The earlier version is kept as ${r.path}.bak.`} Open it under Settings, Set up, Files and blog writer.`);
+    app.chatNote(`Saved ${r.path}${codeSaving.folder ? ` in ${codeSaving.folder}` : ''}.${r.created ? '' : ` The earlier version is kept as ${r.path}.bak.`} Open it under Set up, Files and blog writer (in the left panel).`);
   } catch (err) {
     codeSaveFault(err.message);
   }
@@ -998,7 +1065,7 @@ function statsLine(figures, rest) {
 }
 
 function speedLine(m) {
-  return statsLine([m.ran, m.perSecond ? `${m.perSecond.toFixed(1)} tokens a second` : ''], [m.sources ? `Read: ${m.sources}` : '', m.note ?? '']);
+  return statsLine([m.ran, m.perSecond ? `${m.perSecond.toFixed(1)} tokens a second` : ''], [m.sources ? `Read: ${m.sources}` : '', webLine(m.tools), m.note ?? '']);
 }
 
 /** "Sent from …" on a message that came with Send to…, "Sent to …" under an answer that was handed on (sendto.js). */
@@ -1162,9 +1229,9 @@ $('#chat-save').addEventListener('click', async () => {
 /** A message he sent, with Copy in its top right corner. */
 const userBubble = text => el('div', { class: 'msg user' }, copyButton(text), text);
 
-/** Under a message: Pin (into the notebook) and, under an answer, Send to… (hand it on). Either may be missing. */
+/** Under a message: Pin (into the notebook), Add to log (chatlog.js) and, under an answer, Send to… (hand it on). Any may be missing. */
 function msgActs(text, answer, who) {
-  const bits = [answer ? replyCopy(text) : null, app.pinButton?.(text), answer ? app.sendButton?.(text, who) : null].filter(Boolean);
+  const bits = [answer ? replyCopy(text) : null, app.pinButton?.(text), app.logButton?.(text), answer ? app.sendButton?.(text, who) : null].filter(Boolean);
   return bits.length ? el('span', { class: 'msg-acts' }, ...bits) : null;
 }
 
@@ -1225,6 +1292,72 @@ thinkPick.addEventListener('click', e => {
   api('/api/chat/think', { chatId: app.chatId ?? '', on: thinkOn() }).catch(() => undefined);
 });
 
+/** Web for the chat on screen (the switch in the chat box): the model may search the web and read pages; kept on the chat by the server. */
+const webPick = $('#web-pick');
+const webOn = () => webPick.getAttribute('aria-pressed') === 'true';
+function setWeb(on) {
+  webPick.setAttribute('aria-pressed', String(on));
+  webPick.textContent = on ? 'Web: on' : 'Web: off';
+}
+webPick.addEventListener('click', () => {
+  setWeb(!webOn());
+  api('/api/chat/web', { chatId: app.chatId ?? '', on: webOn() }).catch(() => undefined);
+});
+
+/** What an answer looked up on the web (Web on), in words for the line under it ('' when nothing). */
+function webLine(uses) {
+  if (!Array.isArray(uses) || !uses.length) return '';
+  const one = u => (u.name === 'web_search' ? `searched “${u.input}” (${u.said})` : u.ok ? `read ${u.said}` : `did not read ${u.input} (${u.said})`);
+  return `Web: ${uses.map(one).join('; ')}`;
+}
+
+/** Settings, Web search: which engine a chat with Web on searches with, and its key or address. */
+app.webSearchBox = () => {
+  const now = app.models?.settings?.webSearch ?? { provider: 'duckduckgo' };
+  const said = el('p', { class: 'hint', role: 'status' });
+  const radio = (value, text) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'web-search', value, checked: now.provider === value }), ` ${text}`);
+  const key = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Brave Search key', placeholder: now.hasKey ? 'A key is saved: paste a new one to change it' : 'Paste your Brave Search key' });
+  const url = el('input', { type: 'url', spellcheck: 'false', 'aria-label': 'SearXNG address', placeholder: 'http://192.168.0.5:8888', value: now.url ?? '' });
+  const keyRow = el('div', { class: 'field' }, el('span', { text: 'Brave Search key' }), key);
+  const urlRow = el('div', { class: 'field' }, el('span', { text: 'SearXNG address' }), url);
+  const box = el('fieldset', { class: 'colours-pick web-search' },
+    el('legend', { text: 'Web search' }),
+    el('p', { class: 'hint', text: 'Where a chat with Web on searches (the Web switch beside Quick and Think). Your search words go to that engine; the pages the model reads come straight to this PC, and a page on this PC or your home network is never opened. A page is opened only at an address given in the chat: a search result, a link on a page it read, or one you wrote.' }),
+    radio('duckduckgo', 'DuckDuckGo: no key needed'),
+    radio('brave', 'Brave Search: with your own key (brave.com/search/api)'),
+    keyRow,
+    radio('searxng', 'SearXNG of your own: its address (turn on its JSON format in settings.yml)'),
+    urlRow,
+    said);
+  const pick = () => box.querySelector('input[name="web-search"]:checked')?.value ?? 'duckduckgo';
+  const show = () => {
+    keyRow.hidden = pick() !== 'brave';
+    urlRow.hidden = pick() !== 'searxng';
+  };
+  const save = async (extra = {}) => {
+    try {
+      const s = await api('/api/settings', { webSearch: { provider: pick(), url: url.value.trim(), ...extra } });
+      app.models.settings.webSearch = s.webSearch;
+      key.value = '';
+      key.placeholder = s.webSearch.hasKey ? 'A key is saved: paste a new one to change it' : 'Paste your Brave Search key';
+      const why = s.webSearch.provider !== pick() ? 'That address is not one a search engine can be reached at: DuckDuckGo is used.' : pick() === 'brave' && !s.webSearch.hasKey ? 'Saved. Brave Search needs its key before it can search.' : pick() === 'searxng' && !s.webSearch.url ? 'Saved. SearXNG needs its address before it can search.' : 'Saved.';
+      said.textContent = why;
+      forget.hidden = !s.webSearch.hasKey;
+    } catch (error) {
+      said.textContent = `Not saved: ${error.message}`;
+    }
+  };
+  const forget = el('button', { class: 'btn quiet', type: 'button', text: 'Remove the saved key', hidden: !now.hasKey, onclick: () => save({ key: '' }) });
+  keyRow.append(forget);
+  box.addEventListener('change', e => {
+    show();
+    if (e.target === key) save({ key: key.value.trim() });
+    else save();
+  });
+  show();
+  return box;
+};
+
 /** A chat that carries on from an earlier one: the handoff it opened with, folded at the top. */
 function openingNote(text) {
   return el('details', { class: 'msg system opening' }, el('summary', { text: 'Carries on from an earlier chat: the handoff it started with' }), el('div', { class: 'opening-text' }, formatted(text)));
@@ -1244,7 +1377,7 @@ function drawChat(lines, chat) {
   if (chat?.opening) log.append(openingNote(chat.opening));
   // Nobody to talk to (the host is off for now and nobody who chats is hired yet): says where to hire someone (home.js).
   if (!lines.length) log.append(el('p', { class: 'empty', text: !chat && app.nobodyToTalkTo ? NOBODY_YET : EMPTY_CHAT }));
-  for (const l of lines) log.append(el('div', { class: `msg ${l.failed ? 'system' : l.role}${l.refused ? ' refused' : ''}` }, l.role === 'user' && !l.picture && l.content ? copyButton(l.content) : null, l.thought?.text ? thoughtFold(l.thought.text, l.thought.seconds, true) : null, l.picture ? pictureBubble(l.picture, l.content) : l.role === 'assistant' ? formatted(l.content) : l.content, l.picture ? (l.ran ? speedLine({ ran: `drawn ${l.ran}` }) : null) : l.failed ? null : speedLine(l), sentLine(l), l.picture || l.refused || l.failed || l.ran === 'written by the app, no model' ? null : msgActs(l.content, l.role === 'assistant', chat?.who)));
+  for (const l of lines) log.append(el('div', { class: `msg ${l.failed ? 'system' : l.role}${l.refused ? ' refused' : ''}${l.recalled ? ' recalled' : ''}` }, l.role === 'user' && !l.picture && l.content ? copyButton(l.content) : null, l.thought?.text ? thoughtFold(l.thought.text, l.thought.seconds, true) : null, l.picture ? pictureBubble(l.picture, l.content) : l.role === 'assistant' ? formatted(l.content) : l.content, l.picture ? (l.ran ? speedLine({ ran: `drawn ${l.ran}` }) : null) : l.failed ? null : speedLine(l), sentLine(l), l.picture || l.refused || l.failed || l.ran === 'written by the app, no model' ? null : msgActs(l.content, l.role === 'assistant', chat?.who)));
   // An answer a linked PC is still writing (the connection was lost part-way): Reconnect under it.
   lines.forEach((l, i) => { if (l.waiting) log.children[i + (chat?.opening ? 1 : 0)]?.append(reconnectLine(l.waiting)); });
   watchOwed(lines.some(l => l.waiting) ? chat?.id ?? '' : '');

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RETIRED_NODE_HIRE, cleanShared, cleanStats, modelRefusal, parseNodeWho, sharedList } from '../src/nodestaff.ts';
+import { RETIRED_NODE_HIRE, afterRun, cleanShared, cleanStats, keepAll, keepChat, modelRefusal, parseNodeWho, sharedList, statsModel, type LoadedFor } from '../src/nodestaff.ts';
 import { modelsOf, nowModel } from '../src/staff.ts';
 
 test('an old chat with a hire who lived on a linked PC is still recognised, and the retirement says the way on', () => {
@@ -74,4 +74,66 @@ test('a linked PC may run any model still on the node; busy is said as busy (it 
   assert.match(modelRefusal('gone.gguf', o)!.error, /not on "Worker PC" any more/);
   assert.equal(modelRefusal('gone.gguf', o)!.busy, undefined);
   assert.deepEqual(modelRefusal('a.gguf', { ...o, busy: true }), { error: 'A-9B is answering something else on "Worker PC" now.', busy: true });
+});
+
+test('a chat model loaded for a linked PC stays 10 minutes unused (not 60 seconds), and the node page says so', async () => {
+  const { CHAT_DROP_MS } = await import('../src/nodestaff.ts');
+  assert.equal(CHAT_DROP_MS, 10 * 60_000);
+  const { readFileSync } = await import('node:fs');
+  const home = readFileSync(new URL('../public/home.js', import.meta.url), 'utf8');
+  assert.match(home, /dropped by itself after 10 minutes unused/);
+  assert.doesNotMatch(home, /after 60 seconds unused/);
+});
+
+// Four models loaded on a node for the same linked PC (as a speed test of several files leaves them), one for another PC.
+const loadedAt = (t: number): LoadedFor => new Map([
+  ['a.gguf', { by: new Set(['Laptop']), links: new Set(['L1']), at: t }],
+  ['b.gguf', { by: new Set(['Laptop']), links: new Set(['L1']), at: t }],
+  ['c.gguf', { by: new Set(['Laptop']), links: new Set(['L1']), at: t }],
+  ['d.gguf', { by: new Set(['Other']), links: new Set(['L2']), at: t }],
+]);
+const ats = (m: LoadedFor) => Object.fromEntries([...m].map(([id, v]) => [id, v.at]));
+
+test('an open chat\'s meters keep only the model that chat uses, never every model loaded for that PC', () => {
+  const m = loadedAt(0);
+  keepChat(m, 'L1', 'b.gguf', 500);
+  assert.deepEqual(ats(m), { 'a.gguf': 0, 'b.gguf': 500, 'c.gguf': 0, 'd.gguf': 0 });
+  // Another PC's chat cannot keep it, and a model not loaded for that PC is not kept.
+  keepChat(m, 'L2', 'a.gguf', 900);
+  assert.deepEqual(ats(m), { 'a.gguf': 0, 'b.gguf': 500, 'c.gguf': 0, 'd.gguf': 0 });
+  // No model named (a chat whose model is not on this PC, or an older main PC): nothing is kept.
+  keepChat(m, 'L1', '', 900);
+  assert.deepEqual(ats(m), { 'a.gguf': 0, 'b.gguf': 500, 'c.gguf': 0, 'd.gguf': 0 });
+});
+
+test('an answer for a linked PC keeps every model loaded for it; a refused or failed run keeps nothing', () => {
+  const m = loadedAt(0);
+  afterRun(m, 'L1', false, 700);
+  assert.deepEqual(ats(m), { 'a.gguf': 0, 'b.gguf': 0, 'c.gguf': 0, 'd.gguf': 0 });
+  afterRun(m, 'L1', true, 800);
+  assert.deepEqual(ats(m), { 'a.gguf': 800, 'b.gguf': 800, 'c.gguf': 800, 'd.gguf': 0 });
+  keepAll(m, 'L2', 900);
+  assert.equal(m.get('d.gguf')!.at, 900);
+});
+
+test('the model a chat\'s meters name: a linked PC\'s model in the hire\'s brain, only for that PC', () => {
+  assert.equal(statsModel('remote:420e6432:Qwen3.5-35B-A3B-Q4_K_M.gguf', '420e6432'), 'Qwen3.5-35B-A3B-Q4_K_M.gguf');
+  assert.equal(statsModel('remote:420e6432:Qwen3.5-35B-A3B-Q4_K_M.gguf', 'aaaaaaaa'), '');
+  assert.equal(statsModel('remote:420e6432', '420e6432'), '');
+  assert.equal(statsModel('qwen3.5-4b-q4_k_m.gguf', '420e6432'), '');
+  assert.equal(statsModel(null, '420e6432'), '');
+});
+
+test('the node keeps models through these rules only: the meters name the chat\'s model, a run keeps all only after an answer', async () => {
+  const { readFileSync } = await import('node:fs');
+  const node = readFileSync(new URL('../src/jobrun/node.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(node, /function stillThere/);
+  assert.match(node, /keepChat\(loadedForPc, keepOf\(who\), typeof body\.model === 'string' \? body\.model : '', Date\.now\(\)\)/);
+  assert.match(node, /afterRun\(loadedForPc, link, answered, Date\.now\(\)\)/);
+  const links = readFileSync(new URL('../src/jobrun/links.ts', import.meta.url), 'utf8');
+  assert.match(links, /linkFetch\(r, '\/worker\/stats', \{ model: chatModel \}/);
+  const thispc = readFileSync(new URL('../src/server/thispc.ts', import.meta.url), 'utf8');
+  assert.match(thispc, /nodestaff\.statsModel\(/);
+  const chats = readFileSync(new URL('../public/chats.js', import.meta.url), 'utf8');
+  assert.match(chats, /\/api\/node\/stats\?pc=\$\{encodeURIComponent\(pc\)\}&who=\$\{encodeURIComponent\(meters\.who\)\}/);
 });

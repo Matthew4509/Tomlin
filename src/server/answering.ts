@@ -7,10 +7,12 @@ import { systemFor, toneOf } from '../persona.ts';
 import { nowModel, staffSystem, roleOf, isPlain, type StaffMember } from '../staff.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
-import { HOST_NAME, type Routes, chats, json, notebooks, staff, staffId, store } from './core.ts';
+import { buildLayered, cleanFoldWait, LAYER_MIN_CTX, layeredFor, layerReadSpeed, type Layered } from '../layers.ts';
+import { HOST_NAME, type Routes, chatLogs, chats, json, notebooks, staff, staffId, store } from './core.ts';
 import { chat, lastUsed, main, runOn } from './panes.ts';
 import { chatPeople, personFor, sendTarget } from './people.ts';
-import { chatQuery, namedChat } from '../chats.ts';
+import { readSpeedsNow } from './thispc.ts';
+import { chatQuery, namedChat, type ChatInfo } from '../chats.ts';
 
 // ---- Chat ----
 
@@ -129,8 +131,26 @@ export function notebooksOf(who: string): { own: string | null; name: string } {
 /** The context size each chat last answered with (so "What ... is reading" shows the right one before a model loads). */
 export const lastContext = new Map<string, { ctx: number; at: number; model: string }>();
 
-/** The one context builder for a chat turn with the manager or a hire. */
-export async function chatContext(who: string, member: StaffMember | undefined, history: ChatLine[], message: string, ctx: number, opening?: string, docs?: string, docsWhole?: string, squeeze?: number): Promise<memory.ChatContext> {
+/** What a chat turn needs to be built in layers (src/layers.ts): the chat, its tick, the read speed, the fold wait. */
+export interface LayerAsk {
+  /** '' for a chat not made yet. */
+  chatId: string;
+  off?: boolean;
+  readPerSecond: number;
+  foldMinutes: number;
+}
+
+/**
+ * The layer facts for a chat answered by `modelId`: the read speed from that model's big reads here (else the speed
+ * finder's measured read; on a linked PC, its last big read in this chat) and the fold wait set for it in Model settings.
+ */
+export async function layerAsk(info: ChatInfo | null | undefined, modelId: string, away: boolean): Promise<LayerAsk> {
+  const s = await store.settings();
+  return { chatId: info?.id ?? '', off: info?.layersOff, readPerSecond: away ? info?.readSpeed ?? 0 : layerReadSpeed(readSpeedsNow()[modelId], s.run[modelId]?.found?.read), foldMinutes: cleanFoldWait(s.foldWait?.[modelId]) };
+}
+
+/** The one context builder for a chat turn with the manager or a hire: in layers when `layers` says so and it is 16K+. */
+export async function chatContext(who: string, member: StaffMember | undefined, history: ChatLine[], message: string, ctx: number, opening?: string, docs?: string, docsWhole?: string, squeeze?: number, layers?: LayerAsk): Promise<memory.ChatContext | Layered> {
   const books = notebooksOf(who);
   // An answer a linked PC still owes, with nothing written yet, is not a turn: the model is not shown an empty answer.
   history = history.filter(l => !(l.waiting && !l.content.trim()));
@@ -140,7 +160,12 @@ export async function chatContext(who: string, member: StaffMember | undefined, 
   const { tone } = await store.settings();
   const [team, own] = await Promise.all([notebooks.read('team'), books.own ? notebooks.read(books.own) : Promise.resolve<memory.NoteLine[] | null>(null)]);
   const card = member ? staffSystem(member, toneOf(member.tone ?? tone).prompt) : systemFor(who, tone, store.peek()?.managerName ?? '');
-  return memory.buildChat({ ctx, maxAnswer: ANSWER_CEILING, card, rules: memory.SUGGEST_RULE, team, own, name: books.name, history, message, opening, docs, docsWhole, squeeze });
+  const x = { ctx, maxAnswer: ANSWER_CEILING, card, rules: memory.SUGGEST_RULE, team, own, name: books.name, history, message, opening, docs, docsWhole, squeeze };
+  if (layers && layeredFor(ctx, false, layers.off)) {
+    const f = layers.chatId ? await chatLogs.read(layers.chatId) : { lines: [], sent: null };
+    return buildLayered({ ...x, log: f.lines, sent: f.sent, readPerSecond: layers.readPerSecond, foldMinutes: layers.foldMinutes });
+  }
+  return memory.buildChat(x);
 }
 
 /**
@@ -158,12 +183,19 @@ async function readingView(q: URLSearchParams): Promise<Record<string, unknown> 
   if (nodestaff.parseNodeWho(who)) return { error: 'This chat keeps its own memory, apart from Memory: there is nothing to show here.', status: 400 };
   const member = staffId(who) ? staff.get(who.slice(6)) : undefined;
   const last = open ? lastContext.get(open.id) : undefined;
-  // Before the first answer in this run, the size is the one set for their model here (or the connected model's).
+  // Before the first answer in this run, the size is the one set for their model here (or the connected model's). The
+  // host's chat with nothing loaded yet: the one set for the host's own model, which Connect loads.
   const own = member ? nowModel(member) ?? member.model ?? '' : '';
-  const ctx = last?.ctx ?? (own && !own.startsWith('remote:') ? (s.run[own]?.ctx ?? DEFAULT_RUN.ctx) : runOn(main()).ctx);
-  const built = await chatContext(who, member, open ? await chats.lines(open.id) : [], '', ctx, open?.opening);
+  const host = main().view.model ?? '';
+  const ctx = last?.ctx ?? (own && !own.startsWith('remote:') ? (s.run[own]?.ctx ?? DEFAULT_RUN.ctx) : !member && !host && s.hostModel ? s.run[s.hostModel]?.ctx ?? DEFAULT_RUN.ctx : runOn(main()).ctx);
+  const modelId = member ? own : host || s.hostModel;
+  const ask = await layerAsk(open, modelId, modelId.startsWith('remote:'));
+  const built = await chatContext(who, member, open ? await chats.lines(open.id) : [], '', ctx, open?.opening, undefined, undefined, undefined, ask);
   const books = notebooksOf(who);
-  return { name: books.name, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', ctx: built.ctx, answerTokens: built.answerTokens, room: built.room, used: built.used, parts: built.parts, model: last?.model ?? '', measured: !!last };
+  // The layers of this chat for Memory: on or off, and what a fold costs here. `can`: the tick does something here
+  // (16K or more, not a Default hire).
+  const layers = { on: !open?.layersOff, can: layeredFor(ctx, isPlain(member), false), plain: isPlain(member), min: LAYER_MIN_CTX, layered: 'layered' in built, foldMinutes: ask.foldMinutes, readPerSecond: ask.readPerSecond, ...('layered' in built ? { older: built.older, shortTokens: built.shortTokens, foldTokens: built.foldTokens, foldSeconds: built.foldSeconds, waiting: built.logWaiting } : {}) };
+  return { name: books.name, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', ctx: built.ctx, answerTokens: built.answerTokens, room: built.room, used: built.used, parts: built.parts, model: last?.model ?? '', measured: !!last, chat: open?.id ?? '', layers };
 }
 
 /** Asks the connected chat model once, without the chat history (enhance prompt, alt text). */

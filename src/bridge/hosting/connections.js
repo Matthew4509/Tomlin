@@ -5,6 +5,8 @@
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
+const dns = require('dns');
+const { isPrivateIp } = require('../live');
 const vault = require('./vault');
 const store = require('./store');
 const cpanel = require('./cpanel');
@@ -22,8 +24,22 @@ function cleanHost(text) {
   if (!t) return { error: 'Type the server name, like server123.yourhost.com.' };
   if (!/^[a-z0-9.-]+$/.test(t) || t.length > 253) return { error: '"' + text + '" is not a server name. Type it like server123.yourhost.com (no https:// needed).' };
   if (!t.includes('.') && !(TEST() && t === 'localhost')) return { error: '"' + t + '" is not a full server name. Type it like server123.yourhost.com.' };
-  if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.)/.test(t) && !TEST()) return { error: t + ' is this PC or your home network, not a web host.' };
+  if ((t === 'localhost' || t.endsWith('.localhost') || t.endsWith('.local') || (/^\d{1,3}(\.\d{1,3}){3}$/.test(t) && isPrivateIp(t))) && !TEST()) return { error: t + ' is this PC or your home network, not a web host.' };
   return { host: t, port: portIn ? Number(portIn) : null };
+}
+
+// A name that points at this PC or the home network is not a web host either (a typing slip, or a name made to point
+// there): looked up before a password or a key is sent to it. A name that is not found is left to the connection,
+// which says so in its own words.
+async function homeHostWhy(host) {
+  if (TEST()) return '';
+  try {
+    const list = await dns.promises.lookup(host, { all: true });
+    const bad = list.find(a => isPrivateIp(a.address));
+    return bad ? host + ' points at this PC or your home network (' + bad.address + '), not a web host.' : '';
+  } catch {
+    return '';
+  }
 }
 const cleanPort = (v, dflt) => { const n = Number(v); return Number.isInteger(n) && n > 0 && n < 65536 ? n : dflt; };
 // A user name is never read as an option by ssh or curl (one starting with "-" would be), and has no space, quote or @.
@@ -35,6 +51,8 @@ const pcTag = () => os.hostname().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/
 async function connectCpanel(body) {
   const h = cleanHost(body.host);
   if (h.error) return { ok: false, error: h.error };
+  const home = await homeHostWhy(h.host);
+  if (home) return { ok: false, error: home };
   const user = cleanUser(body.user);
   if (!user) return { ok: false, error: 'Type your cPanel user name (it is in your hosting welcome email).' };
   const password = typeof body.password === 'string' ? body.password : '';
@@ -69,6 +87,8 @@ async function connectCpanel(body) {
 async function connectFtps(body) {
   const h = cleanHost(body.host);
   if (h.error) return { ok: false, error: h.error };
+  const home = await homeHostWhy(h.host);
+  if (home) return { ok: false, error: home };
   const user = cleanUser(body.user);
   const password = typeof body.password === 'string' ? body.password : '';
   if (!user || !password) return { ok: false, error: 'Type the FTP account\'s user name and password (your hosting panel, FTP Accounts).' };
@@ -89,6 +109,8 @@ async function connectFtps(body) {
 async function startSftp(body) {
   const h = cleanHost(body.host);
   if (h.error) return { ok: false, error: h.error };
+  const home = await homeHostWhy(h.host);
+  if (home) return { ok: false, error: home };
   const user = cleanUser(body.user);
   if (!user) return { ok: false, error: 'Type the account\'s user name (for cPanel hosts, your cPanel user name).' };
   try {
@@ -170,4 +192,4 @@ function sweepTemps(maxAgeMs = 20 * 60 * 1000) {
   return n;
 }
 
-module.exports = { connectCpanel, connectFtps, startSftp, test, disconnect, transport, cleanHost, KINDS, hostKeyOf, sweepTemps };
+module.exports = { connectCpanel, connectFtps, startSftp, test, disconnect, transport, cleanHost, homeHostWhy, KINDS, hostKeyOf, sweepTemps };

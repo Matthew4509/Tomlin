@@ -2,6 +2,7 @@
 // heads, head size, trained context, and whether it is a mixture-of-experts model. From those, how much memory a
 // context of N tokens costs. The header is read in small pieces; the long token lists are skipped, never kept.
 // The plain functions are tested in test/gguf.test.ts.
+import { createHash } from 'node:crypto';
 import { open, stat } from 'node:fs/promises';
 
 export interface ModelShape {
@@ -17,7 +18,21 @@ export interface ModelShape {
   /** Sliding-window models: the window in tokens, and one full layer in every `swaEvery` (the others keep only the window). 0 = none. */
   swaWindow: number;
   swaEvery: number;
+  /**
+   * Layers of the model's own guesser (an MTP head, `<arch>.nextn_predict_layers`): it guesses the next few words from
+   * inside the model, with no second model. 0 or unset: none, and the runner refuses to start such a file with one.
+   */
+  mtp?: number;
+  /**
+   * Its words list, as llama.cpp compares two models for guessing (src/runset.ts sameWordsList): the tokenizer kind,
+   * how many words, the start and end words, and a hash of the words from the 6th to the 32,005th. Unset: not known.
+   */
+  vocab?: string;
 }
+
+/** The window of a words list that is hashed: llama.cpp skips the first five words when it compares two lists. */
+const WORDS_FROM = 5;
+const WORDS_TO = 32_005;
 
 /** One full-context layer in every N, for sliding-window families whose header does not say (llama.cpp's own values). */
 const SWA_EVERY: Record<string, number> = { gemma2: 2, gemma3: 6, gemma3n: 5, cohere2: 4 };
@@ -35,7 +50,7 @@ class Reader {
     this.fh = fh;
     this.size = size;
   }
-  private async need(n: number): Promise<void> {
+  async need(n: number): Promise<void> {
     if (this.buf.length - this.at >= n) return;
     const keep = this.buf.subarray(this.at);
     const want = Math.max(n - keep.length, 1 << 16);
@@ -46,6 +61,8 @@ class Reader {
     this.at = 0;
     if (this.buf.length < n) throw new Error('The model file ends inside its header.');
   }
+  /** The next `n` bytes (need(n) first). */
+  take(n: number): Buffer { const b = this.buf.subarray(this.at, this.at + n); this.at += n; return b; }
   async u32() { await this.need(4); const v = this.buf.readUInt32LE(this.at); this.at += 4; return v; }
   async u64() { await this.need(8); const v = this.buf.readBigUInt64LE(this.at); this.at += 8; return v; }
   async skip(n: number) { while (n > 0) { const step = Math.min(n, 1 << 20); await this.need(step); this.at += step; n -= step; } }
@@ -113,7 +130,20 @@ async function readFile(path: string, wanted: (key: string) => boolean, withTens
         const n = Number(await r.u64());
         const keep = wanted(key) && itemType !== 8 && n <= 4096;
         const items: Value[] = [];
-        if (itemType === 8) for (let i = 0; i < n; i++) await r.skip(Number(await r.u64()));
+        if (itemType === 8 && wanted(key)) {
+          // A list of words wanted (the tokenizer's): kept as its length and a hash of a fixed window of it, not whole.
+          const hash = createHash('sha1');
+          for (let i = 0; i < n; i++) {
+            const len = Number(await r.u64());
+            if (i >= WORDS_FROM && i < WORDS_TO) {
+              if (len > 1 << 20) throw new Error('A header text is too long.');
+              await r.need(len);
+              hash.update(r.take(len));
+              hash.update('\u0000');
+            } else await r.skip(len);
+          }
+          out.set(key, `${n}:${hash.digest('hex').slice(0, 20)}`);
+        } else if (itemType === 8) for (let i = 0; i < n; i++) await r.skip(Number(await r.u64()));
         else if (keep) for (let i = 0; i < n; i++) items.push(await r.scalar(itemType));
         else {
           const sizes: Record<number, number> = { 0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8 };
@@ -209,7 +239,11 @@ export function shapeOf(h: Map<string, Value>): ModelShape | null {
   // A sliding window counts only when we know which layers use it; otherwise every layer is counted in full (the safe side).
   const swaWindow = num(g('attention.sliding_window'));
   const swaEvery = swaWindow ? num(g('attention.sliding_window_pattern')) || SWA_EVERY[arch] || 0 : 0;
-  return { arch, layers, attentionLayers, kvHeads, keyLength, valueLength, trainedContext: num(g('context_length')), experts: num(g('expert_count')), swaWindow: swaEvery ? swaWindow : 0, swaEvery };
+  const mtp = num(g('nextn_predict_layers'));
+  const words = h.get('tokenizer.ggml.tokens');
+  const kind = h.get('tokenizer.ggml.model');
+  const vocab = typeof kind === 'string' && kind && typeof words === 'string' && /^\d+:[0-9a-f]+$/.test(words) ? `${String(h.get('tokenizer.ggml.model') ?? '')}|${words.split(':')[0]}|${num(h.get('tokenizer.ggml.bos_token_id'))}|${num(h.get('tokenizer.ggml.eos_token_id'))}|${words.split(':')[1]}` : '';
+  return { arch, layers, attentionLayers, kvHeads, keyLength, valueLength, trainedContext: num(g('context_length')), experts: num(g('expert_count')), swaWindow: swaEvery ? swaWindow : 0, swaEvery, ...(mtp > 0 ? { mtp } : {}), ...(vocab ? { vocab } : {}) };
 }
 
 export const CACHE_BYTES: Record<string, number> = { f16: 2, q8_0: 34 / 32, q4_0: 18 / 32 };
@@ -230,7 +264,7 @@ export async function modelShape(path: string): Promise<ModelShape | null> {
   if (!s) return null;
   const key = `${path}|${s.size}|${s.mtimeMs}`;
   if (!cache.has(key)) {
-    const archKeys = /^(general\.architecture|[\w.]+\.(block_count|attention\.head_count(_kv)?|attention\.(key|value)_length|embedding_length|context_length|expert_count|full_attention_interval|attention\.sliding_window(_pattern)?))$/;
+    const archKeys = /^(general\.architecture|[\w.]+\.(block_count|attention\.head_count(_kv)?|attention\.(key|value)_length|embedding_length|context_length|expert_count|full_attention_interval|attention\.sliding_window(_pattern)?|nextn_predict_layers)|tokenizer\.ggml\.(model|tokens|bos_token_id|eos_token_id))$/;
     cache.set(key, readHeader(path, k => archKeys.test(k)).then(shapeOf).catch(() => null));
   }
   return cache.get(key)!;

@@ -1,5 +1,5 @@
 {
-  "note": "The model runners TOMLIN uses, each pinned to one release and checked by SHA-256 before it is unpacked. A build is unpacked into runtime/<id>/. CUDA builds are for NVIDIA cards (CUDA 12 still runs Pascal cards such as the Quadro P2000; CUDA 13 does not). Change a pin only on purpose.",
+  "note": "The model runners TOMLIN uses, each pinned to one release and checked by SHA-256 before it is unpacked. A build is unpacked into runtime/<id>/. CUDA builds are for NVIDIA cards. The chat runner has two: CUDA 12.4 still runs Pascal cards such as the Quadro P2000 (CUDA 13 does not), and CUDA 13.4 carries code made for RTX 50 cards. `cuda` lists the GPU code inside a build (sm levels, read from its ggml-cuda.dll: `native` code made for that level, `ptx` code the driver compiles at the first start for that level and newer) and the oldest NVIDIA driver for each kind; src/runtimes.ts picks the build per card from it. Change a pin only on purpose.",
   "runtimes": {
     "llama-cpu": {
       "engine": "llama", "device": "cpu", "name": "llama.cpp b11284, CPU", "licence": "MIT",
@@ -10,10 +10,19 @@
       "parts": [{ "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-vulkan-x64.zip", "bytes": 33126908, "sha256": "69c70371c2c9fe3e80859cdbb48596aed3e4265627e470a90d5a9f66dd6779d5" }]
     },
     "llama-cuda": {
-      "engine": "llama", "device": "cuda", "name": "llama.cpp b11284, CUDA 12.4 (NVIDIA)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "engine": "llama", "device": "cuda", "name": "llama.cpp b11284, CUDA 12.4 (NVIDIA, older cards too)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "cuda": { "version": "12.4", "native": [86, 89], "ptx": [50, 61, 70, 75, 80, 90], "driver": "551.61" },
       "parts": [
         { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-cuda-12.4-x64.zip", "bytes": 262896552, "sha256": "5045d2f8f85337208c8528d03e7368f73c3f118fc127a52f9f129178bbb2cab0" },
         { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/cudart-llama-bin-win-cuda-12.4-x64.zip", "bytes": 391443627, "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6" }
+      ]
+    },
+    "llama-cuda13": {
+      "engine": "llama", "device": "cuda", "name": "llama.cpp b11284, CUDA 13.4 (NVIDIA, RTX 20 series and newer)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "cuda": { "version": "13.4", "native": [86, 89, 120, 121], "ptx": [75, 80, 90], "driver": "580", "jitDriver": "615" },
+      "parts": [
+        { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-win-cuda-13.4-x64.zip", "bytes": 152532074, "sha256": "561237327bccd555d435ee51e96072b8e5495b807f5b536b96ae234484920604" },
+        { "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/cudart-llama-bin-win-cuda-13.4-x64.zip", "bytes": 423535356, "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668" }
       ]
     },
     "sd-cpu": {

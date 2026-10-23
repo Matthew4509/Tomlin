@@ -170,7 +170,7 @@ server.listen(PORT, '127.0.0.1', () => {
   if (TEST_START) return;
   // A new copy started by Start TOMLIN.cmd after an update from a linked PC: it answered, so it is kept (no going back).
   if (process.env.TOMLIN_PREV) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
-  // Started again after a new copy failed to start: "Start with Windows", pointed at that copy, points here again.
+  // Started again after a new copy failed to start: "Start TOMLIN when this PC starts", pointed at that copy, points here again.
   const failed = process.env.TOMLIN_FAILED;
   if (failed) void autostart(failed).on().then(async on => { if (on) await startupOf.set(true); }).then(() => console.log(`The new version in ${failed} did not start, so this version runs again.`)).catch(() => undefined);
   // Start TOMLIN.cmd asks for the browser only now, once the page can answer (opened earlier, it showed "can't reach this page").

@@ -1,6 +1,7 @@
 // This PC as a node for other PCs: its share settings and its worker door. Linking other PCs to this one is
 // linking.ts; giving way to its owner ("I need to use the pc") is giveway.ts.
 import { statSync } from 'node:fs';
+import { callWords, cleanWebAsk, WEB_ROUNDS, WEB_TOOLS, WebTurn } from '../webtools.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces, uptime } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,13 +9,14 @@ import { randomBytes } from 'node:crypto';
 import * as jobs from '../jobs.ts';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
-import { everyFew, type AskOpts, type ChatTurn } from '../engine.ts';
+import { everyFew, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as carry from '../carry.ts';
 import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
+import * as owner from '../owner.ts';
 import * as update from '../update.ts';
 import { lastStart } from '../worker.ts';
 import { cleanRid, Outbox, type Follower, type Kept, type Lock } from '../outbox.ts';
@@ -25,6 +27,8 @@ import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
+import { endLoan, lendView, lentTo, maxUpgrade } from './maxnode.ts';
+import { cleanLendIdle } from '../maxlend.ts';
 
 // ---- This PC as a worker for other PCs (off unless its owner turns it on) ----
 
@@ -55,7 +59,7 @@ export function lanList(): { address: string; via: string }[] {
 }
 
 export function shareView() {
-  return { on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), runChanges, shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */
@@ -127,15 +131,107 @@ function nodePairKey(): Promise<Buffer> {
 /** Where a link's restore points and pushed update are kept here (see share.ts `keep`). */
 const keepOf = (who: share.ShareState['paired'][number]) => who.keep ?? who.from ?? who.hash.slice(0, 16);
 
+// ---- A3 + A4 (src/owner.ts): whose backups a folder here holds, and a new PC asking for them ----
+
+/** Wrong backup PINs and codes, as wrong setup codes are counted: 5 from one address, 20 from all, in 10 minutes. */
+const claimGuard = new share.PinGuard();
+const CLAIMS_FILE = 'claims.json';
+/** Claims made here (the newest 50), read at start. */
+let claims: owner.Claim[] = [];
+const saveClaims = () => d.store.writeJson(CLAIMS_FILE, claims);
+
+/** Claims waiting for this PC's owner (none older than 7 days), for the Network page and the pop-up. */
+export function claimsWaiting() {
+  return claims.filter(c => owner.claimState(c) === 'waiting').map(({ id, name, pc, linkedAt, at }) => ({ id, name, pc, linkedAt, at }));
+}
+
+/** What the new PC is told about its claim. */
+function claimView(c: owner.Claim) {
+  const state = owner.claimState(c);
+  const here = `"${shareState.name}"`;
+  const said = state === 'waiting' ? `Waiting for the owner of ${shareState.name} to allow it. They see it on that PC (a pop-up, and on its Network page) for ${owner.CLAIM_DAYS} days.`
+    : state === 'allowed' ? `Allowed. The restore points and projects of "${c.name}" on ${here} are this PC's now: bring the newest one back below.`
+    : state === 'denied' ? `The owner of ${here} did not allow it.`
+    : `Nobody on ${here} answered within ${owner.CLAIM_DAYS} days. Ask again.`;
+  return { id: c.id, state, name: c.name, said };
+}
+
+/** A3: a linked PC's backup name, backup PIN (a hash) and recovery codes (hashes), kept beside its restore points. */
+async function ownerSet(b: Record<string, unknown>, who: share.ShareState['paired'][number]): Promise<{ status: number; json: Record<string, unknown> }> {
+  if (!carry.cleanAllow(shareState.allow).backup) return { status: 403, json: { error: `"${shareState.name}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network).` } };
+  const keep = keepOf(who);
+  const owners = await owner.readOwners(d.carry.keptRoot);
+  const mine = owners.find(o => o.keep === keep);
+  const codes = owner.cleanCodeHashes(b.codes ?? []);
+  if (!codes) return { status: 400, json: { error: 'the recovery codes were not sent in the expected form.' } };
+  const dir = carry.keptFolder(d.carry.keptRoot, keep);
+  // The codes alone (a new set made, or one used, on that PC): only once a name is kept here.
+  if (b.codesOnly === true) {
+    if (!mine) return { status: 404, json: { error: 'no backup name is kept here for that PC yet.' } };
+    await owner.writeOwnerFile(dir, { ...mine.file, codes: owner.mergeCodes(mine.file.codes, codes) });
+    return { status: 200, json: { ok: true, name: mine.file.name } };
+  }
+  const name = owner.cleanBackupName(b.name);
+  const pin = owner.cleanPinHash(b.pin);
+  if (!name || !pin) return { status: 400, json: { error: 'the backup name or PIN was not sent in the expected form.' } };
+  if (owner.nameTaken(owners, name, keep)) return { status: 409, json: { error: `the backup name "${name}" is taken on "${shareState.name}". Pick another one.`, taken: true } };
+  await owner.writeOwnerFile(dir, { name, pin, codes: mine ? owner.mergeCodes(mine.file.codes, codes) : codes, at: new Date().toISOString() });
+  return { status: 200, json: { ok: true, name } };
+}
+
+/**
+ * A4: a new PC asks for the backups kept under a name, with the backup PIN or a recovery code. The try is counted
+ * before the slow check, and a wrong name gets the same answer as a wrong PIN. A right one waits for this PC's owner.
+ */
+async function claimAsk(b: Record<string, unknown>, who: share.ShareState['paired'][number], ip: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const wait = claimGuard.lockedFor(ip) || claimGuard.pausedFor();
+  if (wait) return { status: 429, json: { error: `too many wrong backup names, PINs or codes. Wait ${wait} minute${wait > 1 ? 's' : ''}, then try again.` } };
+  const had = claims.find(c => c.newHash === who.hash && owner.claimState(c) === 'waiting');
+  if (had) return { status: 200, json: claimView(had) };
+  claimGuard.wrong(ip);
+  const got = await owner.checkClaim(await owner.readOwners(d.carry.keptRoot), b.name, { pin: b.pin, code: b.code }, (keep, f) => owner.writeOwnerFile(carry.keptFolder(d.carry.keptRoot, keep), f));
+  if (!got) return { status: 403, json: { error: `that backup name and PIN (or recovery code) do not match any backups on "${shareState.name}".` } };
+  claimGuard.right(ip);
+  if (got.keep === keepOf(who)) return { status: 409, json: { error: 'these backups are this PC\'s already.' } };
+  const c: owner.Claim = { id: randomBytes(8).toString('hex'), name: got.name, oldKeep: got.keep, newHash: who.hash, pc: who.name, linkedAt: who.at, ip, at: new Date().toISOString(), state: 'waiting' };
+  claims = [...claims.filter(x => x.newHash !== who.hash), c].slice(-50);
+  await saveClaims();
+  d.onClaim?.(c.name, c.pc);
+  return { status: 200, json: claimView(c) };
+}
+
+/** This PC's owner answers a claim (Network page or the pop-up; the app lock PIN was checked). Don't allow counts as a wrong try. */
+async function answerClaim(id: unknown, allow: boolean): Promise<{ ok: true } | { error: string }> {
+  const c = claims.find(x => x.id === id);
+  if (!c || owner.claimState(c) !== 'waiting') return { error: 'That request is not waiting any more (answered already, or older than 7 days).' };
+  if (allow) {
+    const next = owner.allowClaim(shareState.paired, c, keepOf);
+    if ('error' in next) return next;
+    shareState.paired = next;
+    await saveShare();
+    void readKept();
+  } else claimGuard.wrong(c.ip);
+  claims = claims.map(x => (x === c ? { ...x, state: allow ? 'allowed' : 'denied', answeredAt: new Date().toISOString() } : x));
+  await saveClaims();
+  return { ok: true };
+}
+
 /** The doors for copies between linked PCs (src/carry.ts): what this PC's owner lets them do is read at each request. Made by startNode. */
 let carryNode: ReturnType<typeof carry.nodeSide>;
 /** The doors for a runner a linked PC sends here (src/runnerpush.ts). */
 let runnerNode: ReturnType<typeof runnerpush.runnerSide>;
 
-/** What this PC says about its runners in its hello: its NVIDIA card and driver, its CUDA runner, its last chat start. */
+/**
+ * What this PC says about its runners in its hello: its NVIDIA card and driver, each CUDA build of the chat runner (how
+ * it is here, why it cannot take it, the one that suits its card), its last chat start.
+ */
 function runnerHello(): runnerpush.RunnerHello {
   const s = runnerNode?.state('llama-cuda') ?? { state: 'none' as const, said: '' };
-  return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('cuda', shareState.name), cuda: s.state, said: s.said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null };
+  const rt = d.runner.runtimes;
+  const pins = Object.fromEntries(rt.idsOf('llama', 'cuda').map(id => [id, { state: runnerNode?.state(id).state ?? 'none', why: d.runner.why(id, shareState.name) }]));
+  const best = rt.order('llama', 'cuda')[0];
+  const said = Object.keys(pins).map(id => runnerNode?.state(id).said ?? '').find(Boolean) ?? s.said;
+  return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('llama-cuda', shareState.name), cuda: s.state, pins, ...(best ? { best } : {}), said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null };
 }
 
 /** The doors for updates pushed by a linked PC (src/update.ts). Made by startNode. */
@@ -155,7 +251,7 @@ async function rawBody(req: IncomingMessage, limit: number): Promise<Buffer> {
 
 /** Each answer to a linked PC is sealed with that link's keys (src/link.ts); set per request once its token and seal are checked. */
 const sealers = new WeakMap<ServerResponse, { keys: Buffer; id: string; n: number }>();
-const taken = new link.Seen();
+export const taken = new link.Seen();
 
 function workerJson(res: ServerResponse, status: number, value: unknown) {
   const s = sealers.get(res);
@@ -255,13 +351,13 @@ const lending = new Set<string>();
 
 /**
  * Models this PC loaded because a linked PC asked for them (not loaded here by its owner), with the PCs using each and
- * when one last did: an answer, or the 3-second meters of a chat with it open there. After 60 seconds of neither, the
+ * when one last did: an answer, or the 3-second meters of a chat with it open there. After 10 minutes of neither, the
  * model is dropped by itself. Someone at this PC chatting on it makes it theirs: it then stays, as their models do.
  * Each PC is known by its link (keepOf), not its name: two PCs both called "TOMLIN" never keep each other's
  * models. `by` holds the names, for the Nodes page.
  */
-const loadedForPc = new Map<string, { by: Set<string>; links: Set<string>; at: number }>();
-const UNUSED_DROP_MS = 60_000;
+const loadedForPc: nodestaff.LoadedFor = new Map();
+const UNUSED_DROP_MS = nodestaff.CHAT_DROP_MS;
 function loadedFor(id: string, pc: string, link: string, fresh: boolean) {
   const had = loadedForPc.get(id);
   if (had) {
@@ -272,17 +368,11 @@ function loadedFor(id: string, pc: string, link: string, fresh: boolean) {
 }
 /** The picture model this PC loaded because a linked PC asked to draw on it (one picture model loads at a time). */
 let pictureFor: { id: string; by: Set<string>; links: Set<string>; at: number } | null = null;
-/**
- * A linked PC is still there: the models loaded for it stay. An answer or a picture keeps all of them; the meters of
- * an open chat (`chatOnly`) keep its chat models only, never the picture model it drew on minutes ago.
- */
-function stillThere(link: string, chatOnly = false) {
-  for (const v of loadedForPc.values()) if (v.links.has(link)) v.at = Date.now();
-  if (!chatOnly && pictureFor?.links.has(link)) pictureFor.at = Date.now();
-}
+// Which loaded models stay (src/nodestaff.ts): an answer keeps every chat model loaded for that PC; the meters of an
+// open chat keep only the model that chat uses, never the picture model; a refused or failed run keeps none.
 
 /**
- * The models linked PCs are using on this PC now: loaded for them (dropped by itself after 60 s unused, 10 minutes for a picture model) or answering
+ * The models linked PCs are using on this PC now: loaded for them (dropped by itself after 10 minutes unused, the same for a picture model) or answering
  * (drawing) for one now. Shown on this PC's Nodes page, and checked before someone here uses one of them.
  */
 export function linkedUse(): { id: string; name: string; kind: 'chat' | 'image'; pcs: string[]; busy: boolean }[] {
@@ -357,9 +447,11 @@ async function runSetHere(b: Record<string, unknown>, by: string): Promise<{ sta
   if ('error' in ask) return { status: ask.status, json: { error: ask.error } };
   const { model, draft } = ask;
   const s = await d.store.settings();
-  const { draft: _was, ...rest } = d.runOf(s, model.id);
-  await d.store.saveSettings({ run: { [model.id]: { ...rest, ...(draft ? { draft } : {}) } } });
-  const draftName = chats.find(m => m.id === draft)?.name ?? '';
+  const { draft: _was, spec: wasSpec, ...rest } = d.runOf(s, model.id);
+  const builtIn = draft === runset.BUILT_IN;
+  const spec = builtIn ? 'mtp' : wasSpec === 'mtp' ? undefined : wasSpec;
+  await d.store.saveSettings({ run: { [model.id]: { ...rest, ...(spec ? { spec } : {}), ...(draft && !builtIn ? { draft } : {}) } } });
+  const draftName = builtIn ? 'its own built-in guesser (MTP)' : chats.find(m => m.id === draft)?.name ?? '';
   runChanges.unshift({ model: model.id, name: model.name, draft, draftName, by, at: new Date().toISOString() });
   runChanges.length = Math.min(runChanges.length, 5);
   console.log(`"${by}" set the guessing model for ${model.name} on this PC to ${draftName || 'none'}.`);
@@ -378,6 +470,18 @@ async function runSetHere(b: Record<string, unknown>, by: string): Promise<{ sta
 /** How a linked PC asked for its chat: plain (a Default hire), Think; the working streams back once a second. */
 function askOpts(b: Record<string, unknown>, send: Send): AskOpts {
   return { plain: b.plain === true, think: b.think === true, onThought: everyFew(1000, (text: string, seconds: number) => send('thinking', { text, seconds })), onReading: everyFew(1000, r => send('reading', r)) };
+}
+
+/**
+ * The web tools for an answer a linked PC asked with Web on: run here, with this PC's own search engine (Settings, Web
+ * search) and its own home network kept out; what they did goes back with the answer. Null when it was not asked.
+ */
+async function webFor(b: Record<string, unknown>, send: Send): Promise<{ turn: WebTurn; box: ToolBox } | null> {
+  const ask = cleanWebAsk(b.web);
+  if (!ask) return null;
+  const search = (await d.store.settings()).webSearch ?? { provider: 'duckduckgo' as const };
+  const turn = new WebTurn(ask.seed, { search, perCall: ask.perCall, total: ask.total, onStatus: text => send('status', { text }) });
+  return { turn, box: { defs: WEB_TOOLS, run: (n, a, s, r) => turn.run(n, a, s, r), rounds: WEB_ROUNDS, onCall: (n, a) => send('status', { text: callWords(n, a) }) } };
 }
 
 /**
@@ -427,6 +531,7 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
   const name = d.chatList().find(m => m.id === id)!.name;
   const fresh = runner?.view.state !== 'connected';
   lending.add(id);
+  let answered = false;
   await runFor(res, keep, `Answering for ${forPc}`, { pc: forPc, link, project: projectOf(b) }, async (send, signal) => {
     try {
       const got = await brainForRef(id, forPc, 'on that PC', text => send('status', { text }), signal);
@@ -436,16 +541,19 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
         if (!told) send('status', { text: `${name} is answering someone at that PC first.` });
         told = true;
       }
-      if (turns) await got.brain.chat(turns, maxTokens, text => send('text', { text }), signal, askOpts(b, send));
-      else await got.brain.ask(ask.system, ask.user, maxTokens, text => send('text', { text }), signal);
-      send('done', { model: name, speed: got.brain.last ?? null, thought: got.brain.thought ?? null, usage: usedHere(), ...(got.brain.cut ? { cut: true } : {}) });
+      const web = got.here ? await webFor(b, send) : null;
+      if (turns) await got.brain.chat(turns, maxTokens, text => send('text', { text }), signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
+      else await got.brain.ask(ask.system, ask.user, maxTokens, text => send('text', { text }), signal, web ? { tools: web.box } : undefined);
+      send('done', { model: name, speed: got.brain.last ?? null, thought: got.brain.thought ?? null, usage: usedHere(), ...(got.brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
+      answered = true;
     } catch (e) {
       send('error', { text: (e as Error).message });
     } finally {
       lending.delete(id);
       // Stopped (or failed) after it had loaded but before it was counted: still loaded for that PC, so it drops too.
       if (fresh && !loadedForPc.has(id) && d.runnerFor(id)?.view.state === 'connected') loadedFor(id, forPc, link, true);
-      stillThere(link);
+      nodestaff.afterRun(loadedForPc, link, answered, Date.now());
+      if (answered && pictureFor?.links.has(link)) pictureFor.at = Date.now();
     }
   });
 }
@@ -559,11 +667,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const locked = guard.lockedFor(ip);
       if (locked) return workerJson(res, 429, { error: `Too many wrong PINs from this PC. Try again in ${locked} minute${locked > 1 ? 's' : ''}.` });
       const paused = guard.pausedFor();
-      if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network: connect PCs).` });
+      if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network).` });
       const b = await d.body(req, 4096);
       // F7 E1: only the encrypted link. A main PC from before it is told to update.
       if (Number(b.v) !== link.LINK_VERSION || typeof b.pub !== 'string') return workerJson(res, 426, { error: 'this PC now uses an encrypted link. Update TOMLIN on this main PC, then link again.' });
-      if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network: connect PCs there. Type it and link again.', needPin: true });
+      if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
       if (!shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
@@ -571,7 +679,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const got = link.nodeAnswer(await nodePairKey(), b, { id: shareState.id, name: shareState.name }, token);
       if (!got) {
         guard.wrong(ip);
-        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network: connect PCs.' : 'wrong setup code. Type the code shown on that PC under Network: connect PCs (8 letters and numbers).' });
+        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network.' : 'wrong setup code. Type the code shown on that PC under Network (8 letters and numbers).' });
       }
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a
       // working link off the end of the list. A real retry from the main PC makes a new one. Checked before the wrong-try
@@ -601,7 +709,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (!who) return workerJson(res, 401, { error: 'that PC no longer knows this one (it was removed there, or set up again)' });
     // Every message from here on is sealed both ways (F7 E1): one that does not open is refused.
     const keys = link.keysOf(who.key);
-    if (!keys) return workerJson(res, 401, { error: 'this link was made before links were encrypted. Link this PC again from the main PC (Other PCs, Find PCs on my network, then the setup code).' });
+    if (!keys) return workerJson(res, 401, { error: 'this link was made before links were encrypted. Link this PC again from the main PC (Network, Find PCs on my network, then the setup code).' });
     if (req.method !== 'POST') return workerJson(res, 405, { error: 'this PC only takes sealed messages. Update TOMLIN on the main PC.' });
     // A piece of a file (a model or a restore point sent here): the request rides in a header, the piece is the body.
     const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put' || p === '/worker/runner-put';
@@ -638,16 +746,16 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // The disk that keeps other PCs' backups here (read at once, no program started), so they see the room left.
       const disk = await carry.diskOf(d.carry.keptRoot);
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello() });
+      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
       // The connected models are named (every model here is lent).
       const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id);
       const img = imageHello();
-      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello() });
+      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
     }
     // This PC's meters for the head of a paired PC's chat with someone here: read from what the sampler measured in
     // the last second for this PC's own top bar, so asking every few seconds adds no measuring here.
     if (p === '/worker/stats') {
-      stillThere(keepOf(who), true);
+      nodestaff.keepChat(loadedForPc, keepOf(who), typeof body.model === 'string' ? body.model : '', Date.now());
       return workerJson(res, 200, d.stats());
     }
     // The main PC's answer to "I need to use the pc, please log out for N hours": yes logs out here for those hours.
@@ -658,6 +766,19 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p === '/worker/back') {
       const r = await comeBack(body.confirm === true, who.name);
       return workerJson(res, r.status, r.body);
+    }
+    // A3 + A4: a backup name and PIN kept here; a new PC asking for the backups kept under one.
+    if (p === '/worker/owner-set') {
+      const a = await ownerSet(body, who);
+      return workerJson(res, a.status, a.json);
+    }
+    if (p === '/worker/claim') {
+      const a = await claimAsk(body, who, ip);
+      return workerJson(res, a.status, a.json);
+    }
+    if (p === '/worker/claim-state') {
+      const c = claims.findLast(x => x.newHash === who.hash);
+      return c ? workerJson(res, 200, claimView(c)) : workerJson(res, 404, { error: 'no request from this PC was made there.' });
     }
     const carryDoor = p.startsWith('/worker/carry-') || p.startsWith('/worker/backup-') || p.startsWith('/worker/update-') || p.startsWith('/worker/git-');
     if (away && (carryDoor || ['/worker/switch', '/worker/draw', '/worker/run'].includes(p))) return workerJson(res, 503, { error: `I need to log off for now: someone is using ${shareState.name} (since ${new Date(away.since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}). Its work goes to other PCs until it is started again.`, away: away.since });
@@ -682,7 +803,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p.startsWith('/worker/tune-')) {
       const action = p.slice('/worker/tune-'.length);
       if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
-      if (away && (action === 'start' || action === 'apply' || action === 'undo')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (away && (action === 'start' || action === 'apply' || action === 'undo' || action === 'smaller')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
       if (!d.tune) return workerJson(res, 404, { error: `${shareState.name} cannot test setups.` });
       const a = await d.tune(action, body, who.name);
       return workerJson(res, a.status, a.json);
@@ -740,9 +861,10 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       return await runFor(res, keep, `Working on a step for ${who.name}`, { pc: who.name, link: keepOf(who), project: projectOf(b) }, async (send, signal) => {
         try {
           const brain = localBrain('');
-          if (turns) await brain.chat(turns, maxTokens, text => send('text', { text }), signal, askOpts(b, send));
-          else await brain.ask(system, user, maxTokens, text => send('text', { text }), signal);
-          send('done', { model: d.chat.view.modelName ?? '', speed: brain.last ?? null, thought: brain.thought ?? null, usage: usedHere(), ...(brain.cut ? { cut: true } : {}) });
+          const web = await webFor(b, send);
+          if (turns) await brain.chat(turns, maxTokens, text => send('text', { text }), signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
+          else await brain.ask(system, user, maxTokens, text => send('text', { text }), signal, web ? { tools: web.box } : undefined);
+          send('done', { model: d.chat.view.modelName ?? '', speed: brain.last ?? null, thought: brain.thought ?? null, usage: usedHere(), ...(brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
         } catch (e) {
           send('error', { text: (e as Error).message });
         }
@@ -784,6 +906,7 @@ async function applyNow(): Promise<void> {
   if (shareServer) {
     const s = shareServer;
     shareServer = null;
+    await endLoan(shareState.on ? 'its link part started again' : 'sharing was turned off there');
     // A step still streaming would hold the port open: sharing off means off now.
     await new Promise<void>(r => { s.close(() => r()); s.closeAllConnections(); });
   }
@@ -795,6 +918,8 @@ async function applyNow(): Promise<void> {
     return;
   }
   const srv = createServer(workerRoute);
+  // Max mode's sealed stream (src/jobrun/maxnode.ts) opens as an Upgrade on the same port.
+  srv.on('upgrade', (req, socket, head) => void maxUpgrade(req, socket, head));
   await new Promise<void>(resolve => {
     srv.once('error', e => {
       shareError = `Could not open port ${shareState.port}: ${(e as NodeJS.ErrnoException).code === 'EADDRINUSE' ? 'another program is using it. Choose another port.' : (e as Error).message}`;
@@ -813,6 +938,7 @@ export async function startShare() {
   } finally {
     shareRead();
   }
+  claims = owner.cleanClaims(await d.store.readJson<unknown>(CLAIMS_FILE, []).catch(() => []));
   // Each PC has its own setup code, made the first time and kept.
   if (!shareState.code || !/^[0-9a-f]{8}$/.test(shareState.id)) {
     shareState.code ||= share.newCode();
@@ -860,6 +986,11 @@ export async function setShare(b: Record<string, unknown>) {
     const ok = await d.appPinCheck(b.appPin);
     if ('error' in ok) return { status: ok.status, body: { error: ok.error, needAppPin: true } };
   }
+  // A4: Allow / Don't allow a new PC's request for a linked PC's backups.
+  if (typeof b.claimId === 'string') {
+    const r = await answerClaim(b.claimId, b.claimAllow === true);
+    if ('error' in r) return { status: 409, body: r };
+  }
   if (b.away === true) {
     const r = await goAway();
     if ('error' in r) return { status: 409, body: r };
@@ -878,6 +1009,7 @@ export async function setShare(b: Record<string, unknown>) {
   shareState.port = port;
   if ('pinOn' in b) shareState.pinOn = b.pinOn === true;
   if ('allow' in b) shareState.allow = carry.cleanAllow(b.allow);
+  if ('lendIdle' in b) shareState.lendIdle = cleanLendIdle(b.lendIdle);
   if (b.newPin === true || (shareState.pinOn && !shareState.pin)) shareState.pin = share.newPin();
   if (b.newCode === true) shareState.code = share.newCode();
   // By the link's own id (its token's fingerprint): the list can change while the page shows it (a PC links meanwhile).
@@ -920,7 +1052,7 @@ export function startNode(): void {
   runnerNode = runnerpush.runnerSide({
     runtimes: d.runner.runtimes,
     pcName: () => shareState.name,
-    why: device => d.runner.why(device, shareState.name),
+    why: id => d.runner.why(id, shareState.name),
     inUse: device => d.runner.inUse(device),
     onChange: () => console.log(`The CUDA runner on this PC changed (a linked PC sent it, or took it away).`),
   });
@@ -975,7 +1107,7 @@ export function startNode(): void {
       else if (d.busy(r)) loadedForPc.delete(id);
       else if (Date.now() - v.at > UNUSED_DROP_MS) {
         loadedForPc.delete(id);
-        console.log(`Dropping ${r.view.modelName ?? id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 1000} s.`);
+        console.log(`Dropping ${r.view.modelName ?? id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 60_000} minutes.`);
         void r.disconnect().catch(() => undefined);
       }
     }

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { readHardware, Sampler } from '../hardware.ts';
 import { logConsole, openLog } from '../log.ts';
 import { overlaps } from '../workspace.ts';
-import { Runtimes } from '../runtimes.ts';
+import { cudaOrder, Runtimes } from '../runtimes.ts';
 import { Models } from '../models.ts';
 import { Store, type ChatLine, type Settings } from '../store.ts';
 import * as leftovers from '../leftovers.ts';
@@ -20,6 +20,7 @@ import * as notes from '../notes.ts';
 import * as notify from '../notify.ts';
 import { Chats, whoKind } from '../chats.ts';
 import * as memory from '../memory.ts';
+import { ChatLogs } from '../layers.ts';
 import { Speeds } from '../speed.ts';
 import { Hidden } from '../hidden.ts';
 import { cachedOtherModelDirs } from '../oldcopies.ts';
@@ -37,7 +38,7 @@ export const HOST_NAME = 'The host';
  * confusing). Off: no host row, no new chat with it, its old chats kept to read; staff do the talking. true brings it back.
  */
 export const HOST_ON = false;
-export const HOST_OFF = 'The host is switched off for now, so this chat is kept to read. Talk to one of your staff instead: pick them in the left panel, or hire someone with Hire staff (Settings, Set up, Staff).';
+export const HOST_OFF = 'The host is switched off for now, so this chat is kept to read. Talk to one of your staff instead: pick them in the left panel, or hire someone (Set up, Staff: hire and edit, in the left panel).';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const PORT = Number(process.env.TOMLIN_PORT ?? 8740);
@@ -78,13 +79,13 @@ export const startupOf = autostart(ROOT);
  * reaches whoever asked first.
  */
 export async function restartInto(dir: string): Promise<void> {
-  // "Start with Windows" meant the app, not the folder: it now starts the new copy.
+  // "Start TOMLIN when this PC starts" meant the app, not the folder: it now starts the new copy.
   if (await startupOf.on().catch(() => false)) await autostart(dir).set(true).catch(() => undefined);
   await writeFile(join(ROOT, NEXT_COPY_FILE), dir);
   setTimeout(() => process.exit(RESTART_INTO), 1500).unref();
 }
 export const ready = await keep.prepare(HOME, ROOT, VERSION, {
-  // "Start with Windows" pointed at the copy imported from: it now starts this one (the tick meant the app, not the folder).
+  // "Start TOMLIN when this PC starts" pointed at the copy imported from: it now starts this one (the tick meant the app, not the folder).
   repoint: async from => (await autostart(from).on()) && (await startupOf.set(true), true),
 });
 if (ready.state === 'too-new') {
@@ -104,6 +105,8 @@ store.onChatSaved = async (file, lines) => {
 };
 // The team notebook and one per hire (src/memory.ts).
 export const notebooks = new memory.Notebooks(store);
+// Each layered chat's log and what its last fold sent (src/layers.ts).
+export const chatLogs = new ChatLogs(store);
 await chats.moveOld(await readdir(store.dir).catch(() => [] as string[]));
 // No chat open yet (the first start with chats): the latest one with whoever is chosen opens.
 if (!(await chats.get(store.peek()!.chatId))) await store.saveSettings({ chatId: (await chats.latestFor(whoKind(store.peek()!.who)))?.id ?? '' });
@@ -127,6 +130,8 @@ export const faces = new Faces(join(store.dir, 'faces'));
 // Each PC's name, make and model and photo as you know it (src/pcprofile.ts), kept in data/pc-profiles.
 export const pcProfiles = new PcProfileStore(join(store.dir, 'pc-profiles'));
 export const hardware = await readHardware();
+// Which CUDA build this PC tries first comes from its NVIDIA cards and the code each build carries.
+runtimes.order = (engine, device) => (device === 'cuda' ? cudaOrder(runtimes.pins, engine, hardware.gpus, hardware.nvidiaDriver ?? null) : runtimes.idsOf(engine, device));
 export const sampler = new Sampler(hardware);
 sampler.start();
 // Closing the window (or Ctrl+C) ends the model processes too: exit handlers run on these signals.
@@ -237,7 +242,9 @@ export const gbText = (n: number) => `${(n / GB).toFixed(1)} GB`;
 
 /** Settings as the page may see them: the worker PCs' keys stay on the server. */
 export function publicSettings(s: Settings) {
-  return { ...s, remotes: s.remotes.map(({ id, name, url }) => ({ id, name, url })) };
+  // A Brave Search key stays on this PC: the page is told only that one is saved.
+  const { key, ...web } = s.webSearch ?? { provider: 'duckduckgo' as const };
+  return { ...s, remotes: s.remotes.map(({ id, name, url }) => ({ id, name, url })), webSearch: { ...web, hasKey: !!key } };
 }
 
 /** "Qwen3.5-0.8B-Q4_K_M" -> "Qwen3.5-0.8B": the name a person knows, without the file's packing. */

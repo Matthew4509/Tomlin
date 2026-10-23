@@ -464,10 +464,11 @@
   const chatMode = () => world.chatMode ?? (world.chatMode = app.chatMode());
   /** Watch's Thoughts column (above the shop) and the Chat list in its header. */
   const fullThoughts = el('section', { class: 'office-thoughts office-side-thoughts', 'aria-label': 'Thoughts' });
-  const chatPick = el('select', { class: 'office-chat-pick', 'aria-label': 'Office chat', title: 'Thoughts beside the office: Everything (what they do, banter and chit-chat), Work only (what they do), or Off', onchange: e => app.setChatMode(e.target.value) },
-    el('option', { value: 'all', text: 'Everything' }), el('option', { value: 'work', text: 'Work only' }), el('option', { value: 'off', text: 'Off' }));
+  const CHAT_WAYS = [['all', 'Everything', 'What they do, banter and chit-chat'], ['work', 'Work only', 'Only what they do'], ['off', 'Off', 'No office chat']];
+  const chatPick = el('div', { class: 'g-shelves office-chat-pick', role: 'group', 'aria-label': 'Office chat' },
+    ...CHAT_WAYS.map(([v, text, title]) => el('button', { class: 'g-shelf', type: 'button', 'data-chat': v, title, text, onclick: () => app.setChatMode(v) })));
   function syncChatPick() {
-    chatPick.value = chatMode();
+    for (const b of chatPick.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.chat === chatMode()));
   }
   const ago = at => {
     const m = Math.floor((Date.now() - at) / 60000);
@@ -476,13 +477,14 @@
   /** What decides when a message list is drawn again: a message added, the setting, and each minute for the "ago". */
   const thoughtsKey = () => `${world.thoughts.length}|${world.thoughts.at(-1)?.at ?? 0}|${chatMode()}|${Math.floor(Date.now() / 60000)}`;
   /** The latest `n` messages, newest at the bottom, each with its writer's small head; or why there are none. */
-  function thoughtsParts(n) {
-    const head = el('b', { class: 'office-thoughts-title', text: 'Thoughts' });
+  function thoughtsParts(n, big = false) {
+    // In Watch, headed like the shop panel beside it; under the small office, a short title like the panel's others.
+    const head = big ? el('div', { class: 'office-thoughts-head' }, el('h3', { text: 'Thoughts' }), el('span', { class: 'hint', text: 'What they do and say' })) : el('b', { class: 'office-thoughts-title', text: 'Thoughts' });
     if (chatMode() === 'off') return [head, el('p', { class: 'hint' }, 'The office chat is off. ', el('button', { class: 'btn quiet', type: 'button', text: 'Turn it on', onclick: () => app.setChatMode('all') }))];
     const list = world.thoughts.slice(-n).map(t => el('li', { class: `office-msg${Date.now() - t.at < 1500 ? ' new' : ''}${t.kind === 'work' ? ' work' : ''}` },
       app.avatar ? app.avatar(`staff:${t.id}`, t.who.slice(0, 2).toUpperCase()) : el('span'),
       el('div', { class: 'office-msg-body' }, el('div', {}, el('strong', { text: t.who }), el('span', { class: 'hint', text: ` ${ago(t.at)}` })), el('div', { text: t.text }))));
-    return [head, list.length ? el('ul', { class: 'office-msgs' }, ...list) : el('p', { class: 'hint', text: 'Quiet for now: what they do and say shows here.' })];
+    return [head, list.length ? el('ul', { class: 'office-msgs' }, ...list) : el('p', { class: 'hint', text: big ? 'Quiet for now.' : 'Quiet for now: what they do and say shows here.' })];
   }
   /** Show general chit-chat: ticked is Everything, unticked Work only (Off is under Chat in Watch). */
   function chitTick() {
@@ -499,9 +501,8 @@
     if (!text || !p?.row || world.people.get(p.id) !== p || p.leaving || p.firing) return;
     const mode = chatMode();
     if (mode === 'off' || (mode === 'work' && kind !== 'work')) return;
-    const now = Date.now();
-    const last = [...chatQueue].reverse().find(t => t.id === p.id) ?? [...world.thoughts].reverse().find(t => t.id === p.id);
-    if (last?.text === text && (kind === 'work' || !last.at || now - last.at < 600000)) return;
+    const B = window.officeBanter;
+    if (B?.saidLately([...world.thoughts, ...chatQueue], { id: p.id, text, kind })) return;
     chatQueue.push({ id: p.id, who: p.row.name, text, kind });
     if (chatQueue.length > THOUGHTS_WAITING) chatQueue.shift();
   }
@@ -553,9 +554,13 @@
   function atEase(p) {
     const t = p.target;
     const B = window.officeBanter;
-    if (!t || !B || !p.row || chatMode() !== 'all' || ['desk', 'boardroom', 'gone', 'run'].includes(t.area) || Math.random() > 0.3) return;
+    if (!t || !B || !p.row || chatMode() !== 'all' || ['desk', 'boardroom', 'gone', 'run'].includes(t.area) || Math.random() > 0.2) return;
+    // Spaced out across the office: one line every CHIT_GAP_MS at most.
+    if (Date.now() - (world.chitAt ?? 0) < B.CHIT_GAP_MS) return;
     const list = t.pizza ? B.AT_EASE[world.food] : B.AT_EASE[t.rest?.id] ?? B.AT_EASE[t.area];
-    if (list?.length) think(p, list[Math.floor(Math.random() * list.length)]);
+    if (!list?.length) return;
+    world.chitAt = Date.now();
+    think(p, list[Math.floor(Math.random() * list.length)]);
   }
   /**
    * Payday: on a Thursday (this PC's clock), once, with two or more in who wrote different amounts today, they compare
@@ -1987,7 +1992,7 @@
   function tell(v) {
     if (v.kind === 'full' && v.thoughtsTold !== thoughtsKey()) {
       v.thoughtsTold = thoughtsKey();
-      fullThoughts.replaceChildren(...thoughtsParts(THOUGHTS_FULL), chitTick() ?? '');
+      fullThoughts.replaceChildren(...thoughtsParts(THOUGHTS_FULL, true), chitTick() ?? '');
       // The newest message is at the bottom: kept in view.
       fullThoughts.scrollTop = fullThoughts.scrollHeight;
     }
@@ -2156,7 +2161,7 @@
   const purseLine = el('p', { class: 'office-purse' });
   const fullHead = el('div', { class: 'office-full-head' },
     el('div', { class: 'office-full-title' }, el('h2', { id: 'office-full-title', text: 'Staff overview' }), purseLine),
-    el('span', { class: 'office-full-tools' }, el('label', { class: 'office-chat-label' }, 'Chat ', chatPick), awardBtn, undoAwardBtn, pizzaBtn, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => full.close() })));
+    el('span', { class: 'office-full-tools' }, el('span', { class: 'office-chat-label' }, el('span', { text: 'Chat' }), chatPick), awardBtn, undoAwardBtn, pizzaBtn, el('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => full.close() })));
   const fullSaid = el('p', { class: 'hint office-said', 'aria-live': 'polite' });
   /** What the window has to say (a purchase, an award, why not): at the foot of the menu, where the buying is done. */
   const fullSay = words => {
@@ -2457,12 +2462,21 @@
     const cans = el('div', { class: 'vend-glass', 'aria-hidden': 'true' }, ...Array.from({ length: 12 }, (_, i) => el('span', { class: `vend-can c${i % 4}` })));
     const coin = el('button', { type: 'button', class: 'vend-coin', onclick: insert }, el('span', { class: 'vend-slot', 'aria-hidden': 'true' }), el('span', { text: free ? 'Press for free drinks' : `Insert a ${coinOf(energy?.price ?? 0)}-token coin` }));
     const awake = [...world.people.values()].filter(buzzing).length;
+    const hireBtn = el('button', { type: 'button', class: 'btn primary', text: 'Hire staff', hidden: true, onclick: () => {
+      vendDlg.close();
+      full.close();
+      app.openHire?.();
+    } });
     if (free) show('FREE DRINKS', 'Energy drinks for everyone in · on the house');
     else show('INSERT COIN', `Energy drinks for everyone in · ${num(energy?.price ?? 0)} tokens`);
     showBalance();
     async function insert() {
       if (!energy) return show('OUT OF ORDER', 'The office did not list the drinks: close this and open the office again.');
-      if (!drinkers().length) return show('NOBODY HERE', 'Hire someone first: then there is someone to drink it.');
+      if (!drinkers().length) {
+        // The way out: Hire staff beside Close (the machine and the office close, the Hire staff window opens).
+        hireBtn.hidden = false;
+        return show('NOBODY HERE', 'Hire someone first: then there is someone to drink it. Hire staff is below.');
+      }
       const still = Math.max(0, ...[...world.people.values()].map(p => (buzzing(p) ? p.hyperUntil - world.time : 0)));
       if (still > 0) return show('STILL BUZZING', `They are on the last cans for ${Math.ceil(still)} s more. Try again after.`);
       if ((world.purse?.left ?? 0) < energy.price) return show('NOT ENOUGH TOKENS', `${num(energy.price - (world.purse?.left ?? 0))} more to go: every token your staff write adds to it.`);
@@ -2496,7 +2510,7 @@
       el('div', { class: 'vend-body' }, cans, el('div', { class: 'vend-side' }, screen, coin, balance)),
       tray,
       el('p', { class: 'vend-note', text: `Everyone in the office gets a can and, for a minute, walks and talks three times as fast.${awake ? ' Some are still buzzing from the last ones.' : ''}` }),
-      el('div', { class: 'vend-foot' }, el('button', { type: 'button', class: 'btn', text: 'Close', onclick: () => vendDlg.close() }))));
+      el('div', { class: 'vend-foot' }, hireBtn, el('button', { type: 'button', class: 'btn', text: 'Close', onclick: () => vendDlg.close() }))));
     vendDlg.showModal();
     coin.focus();
   }

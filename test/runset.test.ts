@@ -20,10 +20,10 @@ test('the node tick "Allow host to test and change model run settings" is its ow
   assert.equal(carry.NO_ALLOW.tune, false);
   assert.equal(carry.cleanAllow({}).tune, false);
   assert.equal(carry.cleanAllow({ tune: 'yes' }).tune, false);
-  assert.equal(carry.cleanAllow({ tune: true }).tune, true);
+  assert.equal(carry.cleanAllow({ tune: true, lend: true }).tune, true);
   // A node that had "Allow all" before this tick: Allow all shows unticked until the new one is ticked too.
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: false }), false);
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true }), true);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: false, lend: false }), false);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true }), true);
 });
 
 test('a guessing model is another chat model of the same family on that PC, at most half the size; never Ollama, never another family', () => {
@@ -67,7 +67,7 @@ test('what a host may ask: one of the node\'s chat models and one of its guesser
 });
 
 test('the host asks only a node that is on, not in use by its owner, and new enough; the tick itself is the node\'s to check', () => {
-  const pc = (o: Record<string, unknown> = {}) => ({ name: 'Worker PC', ok: true, away: null, can: ['models', 'tune'], allow: { ...carry.NO_ALLOW, tune: true }, ...o }) as Parameters<typeof rs.tuneWhy>[0];
+  const pc = (o: Record<string, unknown> = {}) => ({ name: 'Worker PC', ok: true, away: null, can: ['models', 'tune'], allow: { ...carry.NO_ALLOW, tune: true, lend: true }, ...o }) as Parameters<typeof rs.tuneWhy>[0];
   assert.equal(rs.tuneWhy(pc()), '');
   assert.match(rs.tuneWhy(pc({ ok: false })), /off or not answering/);
   assert.match(rs.tuneWhy(pc({ away: '2026-10-21T03:00:00Z' })), /being used by its owner/);
@@ -133,4 +133,18 @@ test('a model\'s run settings are kept only as known values: every field checked
   assert.deepEqual(clean({ draftOn: 'ram', draftCache: 'q8_0' }), { ctx: 8192, cache: 'f16', place: 'auto' });
   // Flash attention off cannot go with a smaller cache (it needs it on).
   assert.equal(clean({ cache: 'q8_0', fa: 'off' }).fa, undefined);
+});
+
+test('a model\'s runner is kept only as CUDA or Vulkan, and a saved runner is the only one it starts on when installed', () => {
+  const CTX = [4096, 8192, 16384, 32768, 65536];
+  assert.equal(rs.cleanRunWith({ runner: 'vulkan' }, A3B.id, LIST, CTX).runner, 'vulkan');
+  assert.equal(rs.cleanRunWith({ runner: 'cuda' }, A3B.id, LIST, CTX).runner, 'cuda');
+  assert.equal(rs.cleanRunWith({ runner: 'cpu' }, A3B.id, LIST, CTX).runner, undefined);
+  assert.equal(rs.cleanRunWith({ runner: 'rocm' }, A3B.id, LIST, CTX).runner, undefined);
+  assert.deepEqual(rs.devicesForRun(['cuda', 'vulkan', 'cpu'], 'vulkan'), ['vulkan']);
+  assert.deepEqual(rs.devicesForRun(['cuda', 'vulkan', 'cpu'], undefined), ['cuda', 'vulkan', 'cpu']);
+  // Its runner removed from that PC since: Auto again, never a failed start.
+  assert.deepEqual(rs.devicesForRun(['vulkan', 'cpu'], 'cuda'), ['vulkan', 'cpu']);
+  // CPU chosen for the PC: the CPU, whatever the model's runner.
+  assert.deepEqual(rs.devicesForRun(['cpu'], 'vulkan'), ['cpu']);
 });

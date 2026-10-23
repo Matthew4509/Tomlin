@@ -107,6 +107,9 @@ async function openNotebook() {
     return;
   }
   const parts = [];
+  // This chat's own log first, where the chat keeps one (chatlog.js).
+  const chatLog = await app.chatLogSection?.(r);
+  if (chatLog) parts.push(chatLog);
   if (r.scope !== 'team') parts.push(await notebookList(r.scope, `${r.name}'s memory`, `Only ${r.name} reads these, in chats and in the job steps ${r.name} runs.`));
   parts.push(await notebookList('team', 'Team memory', TEAM_HINT));
   $('#notebook-body').replaceChildren(...parts);
@@ -153,14 +156,21 @@ app.onChat = chat => {
     before?.(chat);
   }
 };
+let openChatId = '';
 function notebookButtons(chat) {
   const who = String(chat?.who ?? '');
-  const changed = who !== openWho || !chat;
+  // Another chat with the same person counts too: each chat has its own log and its own layers tick.
+  const changed = who !== openWho || !chat || (chat?.id ?? '') !== openChatId;
   openWho = who;
+  openChatId = chat?.id ?? '';
   const off = who.startsWith('node:');
   $('#notebook-open').hidden = off;
-  // The button says whose: "What Theo remembers".
-  if (!off && changed) api(readingAddress(chat?.id, who)).then(r => ($('#notebook-open').title = `What ${r.name} and the team remember: see, change or delete each line`)).catch(() => undefined);
+  if (off) app.chatLayers?.(null);
+  // The button says whose: "What Theo remembers". Add to log and Find show where this chat keeps a log.
+  if (!off && changed) api(readingAddress(chat?.id, who)).then(r => {
+    $('#notebook-open').title = `What ${r.name} and the team remember: see, change or delete each line`;
+    if ((app.chatId ?? '') === (r.chat ?? '')) app.chatLayers?.(r.layers);
+  }).catch(() => undefined);
 }
 
 /** A Pin under a message: its text (first 300 characters) becomes a line in this chat's notebook. */

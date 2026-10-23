@@ -1,4 +1,4 @@
-// Hire staff: one window for every way in (Home's role icons, the Staff window, HIRE STAFF in the left panel, a PC's
+// Hire staff: one window for every way in (Home's role icons, the Staff window, Hire staff in the left panel, a PC's
 // window). Left: the profile (their look, name, role, level, and what they will run on). Right: the PC first, then the
 // models on that PC as cards with the memory each needs, then Hire staff. The level starts at the size of the model
 // picked (src/staff.ts levelOfSize) and can be changed: it only orders suggestions, never limits them.
@@ -170,7 +170,7 @@
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
     const p = hs.pc ? d().pcs.find(x => x.id === hs.pc) : null;
     const empty = q && offered(hs.pc).length ? [el('p', { class: 'hint', text: `No ${thing} on ${pcName(hs.pc)} match "${hs.q.trim()}".` })]
-      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} shares no ${thing} with this PC. On that PC, open Network: connect PCs and tick the models other PCs may use.` })]
+      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} shares no ${thing} with this PC. On that PC, open Network and tick the models other PCs may use.` })]
       : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => { dlg.close(); app.openModels(kind() === 'image' ? 'image' : 'chat'); } }), '.')];
     // The model kept when it is still offered; else the one loaded now on this PC; else the first on the list.
     if (!list.some(c => c.id === hs.model)) {
@@ -220,7 +220,7 @@
 
   function drawAllModels() {
     const block = $('#hs-all-block');
-    // Only with other PCs linked: alone, Add a model is where models come from.
+    // Only with other PCs linked: alone, Models: add or remove is where models come from.
     block.hidden = !d()?.pcs.length;
     if (block.hidden) return;
     const target = hs.pc;
@@ -294,7 +294,7 @@
   async function follow(e, id, words) {
     for (;;) {
       const t = (await api('/api/network/transfers').catch(() => null))?.transfers?.find(x => x.id === id);
-      if (!t) throw new Error('the copy is no longer listed: look in My local LLMs (Network: connect PCs)');
+      if (!t) throw new Error('the copy is no longer listed: look in Models on my other PCs (Network)');
       if (t.state === 'done') return t;
       if (t.state !== 'working') throw new Error(t.said || 'it stopped');
       hs.moving.set(e.key, { ...hs.moving.get(e.key), said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
@@ -321,7 +321,7 @@
         local = hs.net?.mine.find(m => m.kind === k && keyOf(k, m.id) === e.key)?.id ?? null;
       }
       if (target) {
-        if (!local) throw new Error('it came to this PC but is not listed here yet: send it from My local LLMs');
+        if (!local) throw new Error('it came to this PC but is not listed here yet: send it from Models on my other PCs');
         const r = await api('/api/network/send', { pc: target, model: local, kind: k });
         await follow(e, r.transfer.id, `Sending to ${pcName(target)}`);
       }
@@ -436,7 +436,7 @@
     box.focus();
   };
   $('#hs-random').addEventListener('click', () => app.randomName($('#hs-name')));
-  // Add new: the Models page (Add a model), as "get a model" does.
+  // Add new: the Models page (Models: add or remove), as "get a model" does.
   $('#hs-add-model').addEventListener('click', () => {
     dlg.close();
     app.openModels(kind() === 'image' ? 'image' : 'chat');

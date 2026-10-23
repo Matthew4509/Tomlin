@@ -123,3 +123,26 @@ test('payday: the figures are their real tokens today; nothing when they are the
 test('chit-chat lines for every place they rest in the office', () => {
   for (const spot of ['coffee', 'vending', 'lunch', 'tv', 'library', 'chat', 'nap', 'treadmill', 'weights', 'arcade', 'window', 'pizza', 'break', 'beach', 'volley', 'stretch']) assert.ok(B.AT_EASE[spot]?.length, spot);
 });
+
+test('a chit-chat line is not said again within 10 minutes by anyone; a work line only skips its own straight repeat', () => {
+  const now = 1_000_000_000;
+  const said = [
+    { id: 'qwen', text: 'Coffee first, then answers.', kind: 'chat', at: now - 3 * 60_000 },
+    { id: 'tessa', text: 'Answered in "A".', kind: 'work', at: now - 60_000 },
+  ];
+  // The same chit-chat from someone else 3 minutes later: left out (his paste: two hires, the same line, minutes apart).
+  assert.equal(B.saidLately(said, { id: 'qwen35', text: 'Coffee first, then answers.', kind: 'chat' }, now), true);
+  // And from the same person: left out.
+  assert.equal(B.saidLately(said, { id: 'qwen', text: 'Coffee first, then answers.', kind: 'chat' }, now), true);
+  // Ten minutes on: allowed again.
+  assert.equal(B.saidLately(said, { id: 'qwen', text: 'Coffee first, then answers.', kind: 'chat' }, now + 8 * 60_000), false);
+  // A work line: only the person's own straight repeat is left out; a later real one with other lines between is said.
+  assert.equal(B.saidLately(said, { id: 'tessa', text: 'Answered in "A".', kind: 'work' }, now), true);
+  assert.equal(B.saidLately([...said, { id: 'tessa', text: 'Answering you in "A".', kind: 'work', at: now }], { id: 'tessa', text: 'Answered in "A".', kind: 'work' }, now), false);
+  // Waiting in the queue counts too (no time yet).
+  assert.equal(B.saidLately([{ id: 'x', text: 'Leg day.', kind: 'chat' }], { id: 'y', text: 'Leg day.', kind: 'chat' }, now), true);
+});
+
+test('general chit-chat is spaced out across the office', () => {
+  assert.equal(B.CHIT_GAP_MS, 90_000);
+});

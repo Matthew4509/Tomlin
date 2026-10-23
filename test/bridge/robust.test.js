@@ -138,6 +138,15 @@ async function main() {
     const r = platform.runnable(path.join(WS, 'tool.cmd'), ['a&calc']);
     assert(r.error && /command/.test(r.error), JSON.stringify(r));
   });
+  await check('S3: a .cmd script whose path has % ! " or a line break is refused (cmd reads them inside quotes); & is quoted', () => {
+    if (process.platform !== 'win32') return;
+    for (const p of ['a/x" & calc & "y.cmd', 'a/%PATH%/y.cmd', 'a/b!c/y.cmd', 'a/x\ny.cmd']) {
+      const r = platform.runnable(p, []);
+      assert(r.error && /Rename that folder/.test(r.error), p + ': ' + JSON.stringify(r));
+    }
+    const ok = platform.runnable(path.join(WS, 'R&D', 'tool.cmd'), ['dev']);
+    assert(!ok.error && ok.args.at(-1).includes('"' + path.join(WS, 'R&D', 'tool.cmd') + '"'), JSON.stringify(ok));
+  });
 
   // ---- 3. Live addresses (L1, S11) ----
   await check('L1: another tenant of a shared host is not "the site itself"', () => {

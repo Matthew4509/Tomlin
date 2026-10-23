@@ -25,7 +25,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const url = share.cleanWorkerUrl(b.url);
     if (!url) return { status: 400, body: { error: 'That PC\'s address is not one on your home network. Press "Find PCs on my network" again, or type the address shown on that PC (for example 192.168.1.20:8741).' } };
     const code = share.cleanCode(b.code);
-    if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network: connect PCs (for example ABCD-EFGH).' } };
+    if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network (for example ABCD-EFGH).' } };
     const pin = String(b.pin ?? '').replace(/\D/g, '');
     // A name (desk.local) must point inside the home network before anything is sent to it (S6).
     const outside = await share.homeNetworkWhy(url);

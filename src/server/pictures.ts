@@ -140,7 +140,7 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
   }
   const v = images.pane.view;
   const want = first?.kind === 'here' ? first.id : v.state === 'connected' ? v.model ?? null : null;
-  if (!want || !images.has(want)) return { error: artist ? `${by} has no picture model on this PC: give them one under Staff, then add it again.` : 'Nobody on the team draws, and no picture model is connected: hire an artist (Settings, Set up, Staff), then add it again.' };
+  if (!want || !images.has(want)) return { error: artist ? `${by} has no picture model on this PC: give them one under Staff, then add it again.` : 'Nobody on the team draws, and no picture model is connected: hire an artist (Set up, Staff: hire and edit, in the left panel), then add it again.' };
   if (!(v.model === want && v.state === 'connected')) {
     const name = shortName(images.list().find(m => m.id === want)?.name) || 'the picture model';
     const dropped = await roomForPicture(want);

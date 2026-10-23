@@ -2,6 +2,7 @@
 // waiting on disk and the state of the models, never by a model: a small model does not reliably report what it did.
 // Plain functions, tested in test/home.test.ts; the server gathers the facts and the page draws them.
 import type { Job } from './jobs.ts';
+import { stepCount } from './jobs.ts';
 import type { ChatLine } from './store.ts';
 
 /** A step that came back and is waiting for the person (kept on disk as jobs/<id>/waiting.json until saved or discarded). */
@@ -105,11 +106,12 @@ export function jobItem(job: Job, waiting: Waiting | null, hasReport: boolean, r
   }
   if (i < 0) {
     if (hasReport) return null;
-    return { ...base, kind: 'report', text: `All ${total} steps are done. Please review the result.`, detail: job.tests ? 'The tests passed. The end-of-job report is not written yet.' : 'No tests run yet, and the end-of-job report is not written yet.', action: 'Open the job', staffId: null };
+    const c = stepCount(job.steps);
+    return { ...base, kind: 'report', text: c.skipped ? `All steps finished: ${c.done} done, ${c.skipped} skipped. Please review the result.` : `All ${total} step${total === 1 ? ' is' : 's are'} done. Please review the result.`, detail: job.tests ? 'The tests passed. The end-of-job report is not written yet.' : 'No tests run yet, and the end-of-job report is not written yet.', action: 'Open the job', staffId: null };
   }
-  const done = job.steps.filter(s => s.status !== 'todo').length;
+  const c = stepCount(job.steps);
   const who = whoFor(job.steps[i].role, staff);
-  return { ...base, kind: done ? 'paused' : 'ready', text: done ? `Paused before step ${i + 1} of ${total}: ${short(job.steps[i].title, 60)}.` : `Not started. Step 1 of ${total}: ${short(job.steps[i].title, 60)}.`, detail: `${done} of ${total} done. Next: ${who.name}.`, action: 'Open the job', staffId: who.id };
+  return { ...base, kind: c.finished ? 'paused' : 'ready', text: c.finished ? `Paused before step ${i + 1} of ${total}: ${short(job.steps[i].title, 60)}.` : `Not started. Step 1 of ${total}: ${short(job.steps[i].title, 60)}.`, detail: `${c.done} of ${total} done${c.skipped ? `, ${c.skipped} skipped` : ''}. Next: ${who.name}.`, action: 'Open the job', staffId: who.id };
 }
 
 /** Items that need the person, newest first within each kind, in the order of jobItem's weights. Paused jobs and jobs never started come apart. */
@@ -131,10 +133,9 @@ export interface Recent { job: string; name: string; goal: string; detail: strin
 export function recentProjects(list: Job[], unplanned: { id: string; name: string; goal: string; at: string; chat?: string }[], runningId: string | null, max = 6): Recent[] {
   const out: Recent[] = list.map(job => {
     const total = job.steps.length;
-    const done = job.steps.filter(s => s.status !== 'todo').length;
-    const detail = runningId === job.id ? `Working on it now · ${done} of ${total} steps done`
-      : done === total ? `All ${total} step${total === 1 ? '' : 's'} done`
-      : done ? `${done} of ${total} steps done`
+    const c = stepCount(job.steps);
+    const detail = runningId === job.id ? `Working on it now · ${c.words}`
+      : c.all || c.finished ? c.words
       : `Not started · ${total} step${total === 1 ? '' : 's'} planned`;
     return { job: job.id, name: short(job.name || job.goal, 80), goal: short(job.goal), detail, action: 'Open', plan: false, at: job.updated || job.created };
   });
@@ -149,7 +150,7 @@ export function recentProjects(list: Job[], unplanned: { id: string; name: strin
 /** The "Working now" line for a running job action, with how far the job is. */
 export function workingLine(r: Running, job: Job | null, staff: Person[], now = Date.now()) {
   const total = job?.steps.length ?? 0;
-  const done = job?.steps.filter(s => s.status !== 'todo').length ?? 0;
+  const { done, skipped } = stepCount(job?.steps ?? []);
   const who = whoFor(r.kind === 'plan' ? 'planner' : r.kind === 'review' || r.kind === 'final' ? 'reviewer' : r.role, staff);
   let text: string;
   if (r.kind === 'plan') text = `${cap(who.name)} is making a plan.`;
@@ -157,7 +158,7 @@ export function workingLine(r: Running, job: Job | null, staff: Person[], now = 
   else if (r.kind === 'review') text = `${cap(who.name)} is reading step ${(r.n ?? 0) + 1}.`;
   else if (r.n == null) text = 'Starting the next step.';
   else text = `${cap(who.name)} is on step ${r.n + 1} of ${total}: ${short(r.title, 60)}.`;
-  return { job: r.jobId, goal: short(r.goal), text, stage: short(r.stage, 160), done, total, seconds: Math.max(0, Math.round((now - r.startedAt) / 1000)), staffId: who.id };
+  return { job: r.jobId, goal: short(r.goal), text, stage: short(r.stage, 160), done, skipped, total, seconds: Math.max(0, Math.round((now - r.startedAt) / 1000)), staffId: who.id };
 }
 
 export type State = 'on' | 'waking' | 'asleep' | 'off' | 'none';
@@ -482,7 +483,7 @@ export type Rooms = ReturnType<typeof roomsOf>;
  * answers, but refuses this PC: the link was removed there, or it was set up again), with what it said.
  */
 export function pcState(r: { ok: boolean; model?: string | null; image?: { name: string | null } | null; away?: string | null; answered?: boolean; relink?: boolean; error?: string }): { state: State; text: string } {
-  if (!r.ok && (r.answered || r.relink)) return { state: 'off', text: `Not linked any more: ${String(r.error ?? 'it refused this PC').replace(/[.\s]+$/, '')}. Link it again under Other PCs` };
+  if (!r.ok && (r.answered || r.relink)) return { state: 'off', text: `Not linked any more: ${String(r.error ?? 'it refused this PC').replace(/[.\s]+$/, '')}. Link it again under Network` };
   if (!r.ok) return { state: 'off', text: 'Off: not answering' };
   // Someone at that PC pressed "I need to use the pc" (F7 E5).
   if (r.away) return { state: 'off', text: 'Logged off: "I need to log off for now"' };
@@ -500,7 +501,7 @@ export type JobEvent = { at: string } & (
   | { type: 'split'; n: number; parts: number; files: string[][]; worker: string; room: number }
   | { type: 'moved'; n: number; role: string; from: string; to: string; why: string }
   | { type: 'step'; n: number; title: string; role: string; worker: string; notes: string[] }
-  | { type: 'result'; n: number; role: string; files: string[]; flags: number; worker: string; tries: number; notes: string[] }
+  | { type: 'result'; n: number; role: string; files: string[]; flags: number; worker: string; tries: number; notes: string[]; web?: string }
   | { type: 'failed'; n: number; role: string; error: string }
   | { type: 'saved'; n: number; files: string[]; auto: boolean; left: number }
   | { type: 'discard'; n: number }
@@ -576,7 +577,10 @@ export function roomLines(events: JobEvent[], job: Job, staff: Person[]): RoomLi
     return { at, from: cap(w.name), fromId: w.id, to, text, side: 'staff', needs };
   };
   const title = (n: number) => short(job.steps[n]?.title ?? `step ${n + 1}`, 60);
-  const allDone = (at: string) => mgr(at, `All ${total} steps are done. Please review the result: run the tests or ask for the end-of-job report.`, 'You', true);
+  const allDone = (at: string) => {
+    const c = stepCount(job.steps);
+    return mgr(at, `${c.skipped ? `All steps finished: ${c.done} done, ${c.skipped} skipped` : `All ${total} step${total === 1 ? ' is' : 's are'} done`}. Please review the result: run the tests or ask for the end-of-job report.`, 'You', true);
+  };
   if (!events.length) {
     lines.push(mgr(job.created, `The plan for "${short(job.goal)}" has ${total} step${total === 1 ? '' : 's'}. This job was made before job rooms, so the lines below come from its plan file.`));
     job.steps.forEach((s, n) => {
@@ -599,7 +603,7 @@ export function roomLines(events: JobEvent[], job: Job, staff: Person[]): RoomLi
         lines.push(by(e.role, e.at, `On it.${e.notes.length ? ` Reading your note${e.notes.length > 1 ? 's' : ''} with the brief.` : ''} (${workerName(e.worker)})`));
         break;
       }
-      case 'result': lines.push(by(e.role, e.at, `Finished step ${e.n + 1}, please review. ${e.files.length ? `Wrote ${e.files.join(', ')}` : 'No files came back'} · ${e.flags ? `${e.flags} check${e.flags > 1 ? 's' : ''} to look at` : 'every check passed'}${e.tries > 1 ? ` · ${e.tries} tries` : ''}.`, 'You', true)); break;
+      case 'result': lines.push(by(e.role, e.at, `Finished step ${e.n + 1}, please review. ${e.files.length ? `Wrote ${e.files.join(', ')}` : 'No files came back'} · ${e.flags ? `${e.flags} check${e.flags > 1 ? 's' : ''} to look at` : 'every check passed'}${e.tries > 1 ? ` · ${e.tries} tries` : ''}${e.web ? ` · Web: ${e.web}` : ''}.`, 'You', true)); break;
       case 'failed': lines.push(e.error === 'Stopped.' ? you(e.at, `Stopped step ${e.n + 1}.`) : by(e.role, e.at, `Step ${e.n + 1} stopped: ${short(e.error, 240)}`, 'You', true)); break;
       case 'saved':
         lines.push(e.auto ? mgr(e.at, `Saved step ${e.n + 1}: every check passed.${e.files.length ? ` (${e.files.join(', ')})` : ''}`) : you(e.at, `Saved step ${e.n + 1}${e.files.length ? ` (${e.files.join(', ')})` : ''}.`));

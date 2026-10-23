@@ -7,7 +7,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cacheBytes, expertWeights, modelShape } from '../gguf.ts';
 import { runFinder, request, timingsOf, type FinderRun } from '../finderrun.ts';
-import { estimateMinutes, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
+import { cardsNow, estimateMinutes, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
 import { guessersFor, type Listed } from '../runset.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import { hereKey } from '../speed.ts';
@@ -15,8 +15,9 @@ import { shortBuild } from '../update.ts';
 import type { RunOptions } from '../store.ts';
 import { lastStart } from '../worker.ts';
 import { BUILD, HOME, type Routes, chatModels, hardware, json, sampler, speeds, store } from './core.ts';
-import { CONTEXTS, chatCards, cleanRun, connectChat, runOf, runOn, runnerFor, runners } from './panes.ts';
+import { CONTEXTS, cardRunners, chatCards, cleanRun, connectChat, readCards, runOf, runOn, runnerFor, runners } from './panes.ts';
 import { answeringBusy, endAnswer, takeChat } from './answering.ts';
+import { SMALLER_NAME, getSmaller, offerView, smallerOffer, type SmallerOffer } from './smaller.ts';
 
 const GB = 2 ** 30;
 const FILE = join(HOME.data, 'speed-finder.json');
@@ -48,10 +49,12 @@ async function factsFor(id: string, run: RunOptions): Promise<{ pc: PcFacts; mod
   const g = guessersFor(m, list).map(x => list.find(y => y.id === x)!).sort((a, b) => a.bytes - b.bytes)[0];
   const gShape = g ? await modelShape(chatModels.path(g.id) ?? '') : null;
   const card = cardNow();
+  // Every card the runners can use (biggest first, as cardNow's): the finder's card rows choose among them.
+  const known = card ? await readCards() : [];
   const s = await store.settings();
   return {
-    pc: { cards: card ? [card] : [], cores: hardware.cores, threads: s.chat.threads, models: list },
-    model: { ...m, moe, layers, expertsPerLayer: perLayer, rest, ctxBytes: shape ? cacheBytes(shape, run.ctx, run.cache) : 0, guesser: g ? { ...g, ctxBytes: gShape ? cacheBytes(gShape, run.ctx, 'f16') : 0 } : null },
+    pc: { cards: card ? [{ ...card, ids: known[0]?.ids ?? [] }, ...known.slice(1).map(c => ({ name: c.label, total: c.total, free: c.total, ids: c.ids }))] : [], cores: hardware.cores, threads: s.chat.threads, models: list, runners: cardRunners() },
+    model: { ...m, moe, ...((shape?.mtp ?? 0) > 0 ? { mtp: true } : {}), layers, expertsPerLayer: perLayer, rest, ctxBytes: shape ? cacheBytes(shape, run.ctx, run.cache) : 0, guesser: g ? { ...g, ctxBytes: gShape ? cacheBytes(gShape, run.ctx, 'f16') : 0 } : null },
   };
 }
 
@@ -72,6 +75,28 @@ function held(id: string): { cardBytes: number; ramBytes: number; borrowed: numb
 
 // ---- What a test would try ----
 
+/** The smaller file of the same model that would sit wholly on the card (src/server/smaller.ts), or why there is none. */
+async function smallerFor(id: string, f: { pc: PcFacts; model: ModelFacts }, run: RunOptions, now: NowFacts, size: 'quick' | 'full'): Promise<{ offer: SmallerOffer | null; why: string }> {
+  const loaded = runnerFor(id)?.view.state === 'connected';
+  const g = run.draft && run.draftOn !== 'ram' ? f.model.guesser : null;
+  try {
+    return await smallerOffer({
+      name: f.model.name.replace(/-\d{5}-of-\d{5}$/i, ''),
+      bytes: f.model.bytes,
+      card: f.pc.cards[0] ?? null,
+      held: loaded ? held(id)?.cardBytes ?? null : null,
+      spilled: now.spilled,
+      moe: f.model.moe,
+      cacheBytes: f.model.ctxBytes,
+      extra: g ? g.bytes + g.ctxBytes + 0.3 * GB : 0,
+      measured: speeds.expect(hereKey(id)),
+      size,
+    });
+  } catch (e) {
+    return { offer: null, why: `it could not be worked out (${(e as Error).message})` };
+  }
+}
+
 /** What the test would try for `id` (Quick or Full), how long each takes, what is left out and why. */
 export async function preview(id: string, size: 'quick' | 'full', contexts: number[] = []) {
   const s = await store.settings();
@@ -86,13 +111,16 @@ export async function preview(id: string, size: 'quick' | 'full', contexts: numb
   const quick = setupsFor(f.pc, f.model, now, 'quick').rows.length;
   const full = setupsFor(f.pc, f.model, now, 'full').rows.length + 1;
   const last = (await saved())[id];
+  const smaller = await smallerFor(id, f, run, now, size);
   return {
     status: 200,
     body: {
       model: id,
       name: f.model.name,
       rows: plan.rows.map(({ id: rid, name, why, tight }) => ({ id: rid, name, why, tight: tight === true })),
-      left: plan.left,
+      left: smaller.why ? [...plan.left, { name: SMALLER_NAME, why: smaller.why }] : plan.left,
+      // A download, not a try: offered on its own, and nothing is downloaded until its own Download button is pressed.
+      smaller: smaller.offer ? offerView(smaller.offer) : null,
       minutes: { quick: estimateMinutes(quick, figures), full: estimateMinutes(full, figures) },
       ctx: run.ctx,
       found: run.found ?? null,
@@ -168,7 +196,7 @@ export async function start(id: string, size: 'quick' | 'full', contexts: number
   void runFinder({
     rows: setupsFor(f.pc, f.model, nowFacts(f, saved0, null), size, ctxs).rows,
     // Once it is loaded as it is now, the rows are picked from what it really holds on the card.
-    plan: mem => setupsFor({ ...f.pc, cards: cardNow() ? [cardNow()!] : [] }, f.model, nowFacts(f, saved0, mem.cardBytes), size, ctxs).rows as Setup[],
+    plan: mem => setupsFor({ ...f.pc, cards: cardsNow(f.pc.cards, cardNow()) }, f.model, nowFacts(f, saved0, mem.cardBytes), size, ctxs).rows as Setup[],
     again: size === 'full',
     stopped,
     onChange: r => {
@@ -243,12 +271,23 @@ export async function apply(id: string, rowId: string): Promise<{ status: number
   const s = await store.settings();
   const before = runOf(s, id);
   const card = cardNow();
-  const chosen = cleanRun({ ...row.run, found: { at: k.at, build: shortBuild(BUILD), runner: lastStart?.device ?? 'cpu', card: card ? `${card.name} ${Math.round(card.total / GB)} GB` : 'CPU', write: row.write ?? 0, read: row.read ?? 0 } }, id);
+  const chosen = cleanRun({ ...row.run, found: { at: k.at, build: shortBuild(BUILD), runner: lastStart?.runner ?? lastStart?.device ?? 'cpu', card: card ? `${card.name} ${Math.round(card.total / GB)} GB` : 'CPU', write: row.write ?? 0, read: row.read ?? 0 } }, id);
   await store.saveSettings({ run: { [id]: chosen } });
   if (row.write) speeds.add(hereKey(id), nameOf(chatModels.list().find(m => m.id === id)?.file ?? id), 'this PC', { write: row.write, tokens: 220, ...(row.read ? { read: row.read } : {}), ...(row.firstWord ? { first: row.firstWord } : {}) }, 'test');
   await keep(id, { ...k, before, appliedAt: new Date().toISOString(), applied: rowId });
   const loaded = await reload(id);
   return { status: 200, body: { said: `Saved: ${row.name}.${loaded}`, run: chosen } };
+}
+
+/** Download the smaller file on offer (the finder window's Download button, its size shown). */
+export async function downloadSmaller(id: string, b: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+  const s = await store.settings();
+  const run = runOf(s, id);
+  const f = await factsFor(id, run);
+  if (!f) return { status: 404, body: { error: 'That model is not on this PC any more (deleted or moved?).' } };
+  const on = runnerFor(id)?.view.state === 'connected' && JSON.stringify(runOn(runnerFor(id)!)) === JSON.stringify(run) ? held(id) : null;
+  const sm = await smallerFor(id, f, run, nowFacts(f, run, on?.cardBytes ?? null), b.size === 'full' ? 'full' : 'quick');
+  return getSmaller(b, sm.offer);
 }
 
 /** Undo: the setup from before Go with this config. */
@@ -299,6 +338,10 @@ export async function tuneDoor(action: string, b: Record<string, unknown>, by: s
     const r = await undo(id);
     return { status: r.status, json: r.body };
   }
+  if (action === 'smaller') {
+    const r = await downloadSmaller(id, b);
+    return { status: r.status, json: r.body };
+  }
   return { status: 404, json: { error: 'No such speed test door.' } };
 }
 
@@ -322,6 +365,10 @@ export const finderPost: Routes = {
   },
   '/api/speed/find/undo': async ({ res, b }) => {
     const r = await undo(String(b.model ?? ''));
+    return json(res, r.status, r.body);
+  },
+  '/api/speed/find/smaller': async ({ res, b }) => {
+    const r = await downloadSmaller(String(b.model ?? ''), b);
     return json(res, r.status, r.body);
   },
 };

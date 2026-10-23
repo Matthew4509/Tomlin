@@ -6,6 +6,7 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { cpus, freemem, totalmem } from 'node:os';
 import { promisify } from 'node:util';
+import { ccFromName, ccNumber } from './runtimes.ts';
 
 const run = promisify(execFile);
 
@@ -34,6 +35,11 @@ export interface Gpu {
   /** Its own memory in bytes, when it has some (an Intel chip built into the processor shares the RAM instead). */
   total: number | null;
   integrated: boolean;
+  /**
+   * An NVIDIA card's sm level (compute capability 8.6 is 86): from nvidia-smi, else from its name; null when neither
+   * says. Which CUDA build suits the card comes from it (src/runtimes.ts cudaOrder).
+   */
+  cc?: number | null;
 }
 
 export interface HardwareInfo {
@@ -152,15 +158,20 @@ export async function readHardware(): Promise<HardwareInfo> {
   // Each card once: two cards of the same make have the same name, so a card already matched is not matched again.
   const matched = new Set<Gpu>();
   const smi = await nvidiaCards();
+  const caps = smi.length ? await nvidiaCaps() : [];
   info.nvidiaDriver = smi.find(g => g.driver)?.driver ?? null;
-  for (const g of smi) {
+  for (const [k, g] of smi.entries()) {
     const known = info.gpus.find(x => x.vendor === 'nvidia' && !matched.has(x) && (x.name.includes(g.name) || g.name.includes(x.name)));
     if (known) matched.add(known);
-    if (known) known.total = g.total;
-    else info.gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false });
+    const cc = caps.length === smi.length ? caps[k] : null;
+    if (known) {
+      known.total = g.total;
+      known.cc = cc;
+    } else info.gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false, cc });
   }
   // No nvidia-smi answered for a card: its 4 GB-capped report is checked against the size in its name.
   for (const g of info.gpus) if (g.vendor === 'nvidia' && !matched.has(g)) g.total = totalFromName(g.name, g.total);
+  for (const g of info.gpus) if (g.vendor === 'nvidia') g.cc = g.cc ?? ccFromName(g.name);
   for (const g of info.gpus) if (g.integrated) g.total = null;
   return info;
 }
@@ -196,6 +207,20 @@ async function nvidiaCards(): Promise<Array<{ name: string; total: number; used:
   // Searched every place and none answered: no NVIDIA card, or no driver tool. One that worked before may answer again.
   if (smiAt === undefined) smiAt = null;
   return [];
+}
+
+/**
+ * Each NVIDIA card's sm level, in nvidia-smi's order, asked on its own: a driver too old to know compute_cap refuses the
+ * whole question, and the memory reading must not go with it. [] when it cannot say.
+ */
+async function nvidiaCaps(): Promise<(number | null)[]> {
+  if (!smiAt) return [];
+  try {
+    const { stdout } = await run(smiAt, ['--query-gpu=compute_cap', '--format=csv,noheader'], { windowsHide: true, timeout: 10_000 });
+    return stdout.split(/\r?\n/).filter(l => l.trim()).map(ccNumber);
+  } catch {
+    return [];
+  }
 }
 
 /** The last good reading per process: on a busy PC tasklist can time out, and a loaded model then read as 0 MB. */

@@ -1,4 +1,4 @@
-// Project backups kept on a node as a local git repository (Network: connect PCs, "Enable backups"). The node keeps one bare
+// Project backups kept on a node as a local git repository (Network, "Enable backups"). The node keeps one bare
 // repository for each host that backs up to it ("backups from other PCs/<pc>/projects.git"): every backup is a commit
 // of the host's whole workspace (its projects), so older versions stay, and only files the node does not have yet
 // cross the network. It is a normal git repository (loose objects, refs/heads/main): git, GitHub Desktop or VS Code can

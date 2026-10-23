@@ -66,7 +66,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
       load();
     } catch (er) { e.target.checked = !e.target.checked; e.target.disabled = false; say('The tick did not change: ' + er.message, true); }
   } }), ' Copy this project to my other PCs'));
-  if (!pcs.length) parts.push(h('p', { class: 'warn-line' }, '▲ No other PC is linked yet. In TOMLIN, Network: connect PCs, link another PC, then tick "Enable backups" on that PC (Network: connect PCs, Sharing permissions).'));
+  if (!pcs.length) parts.push(h('p', { class: 'warn-line' }, '▲ No other PC is linked yet. In TOMLIN, Network, Connect a PC, then tick "Enable backups" on that PC (Network, Sharing permissions).'));
   if (!p) {
     for (const pc of pcs.filter(x => x.why)) parts.push(h('p', { class: 'muted node-why' }, '○ ' + pcLabel(pc.name, pc.where) + ': ' + pc.why + '.'));
     parts.push(status);
@@ -86,7 +86,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
       try {
         const x = await api('/api/node-backup/back', { id: r.id, pc: c.pc });
         if (!x.ok) throw new Error(x.error);
-        say('Bringing ' + r.name + ' back from ' + pcLabel(c.pcName, c.where) + ' into a new folder in ' + x.to + '. Nothing in the project is replaced: copy what you need from there. TOMLIN shows the progress under My local LLMs.');
+        say('Bringing ' + r.name + ' back from ' + pcLabel(c.pcName, c.where) + ' into a new folder in ' + x.to + '. Nothing in the project is replaced: copy what you need from there. TOMLIN shows the progress under Models on my other PCs.');
       } catch (e) { say('It was not brought back: ' + e.message, true); }
       back.disabled = false;
     } }, icon(0xE777), 'Bring back');
@@ -111,7 +111,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
   const now = h('button', { class: 'btn accent', type: 'button', onclick: async () => {
     const to = chosen();
     if (!to.length) {
-      return say(!pcs.length ? 'Nothing was backed up: no other PC is linked yet. In TOMLIN, Link another PC, then tick "Enable backups" on that PC.'
+      return say(!pcs.length ? 'Nothing was backed up: no other PC is linked yet. In TOMLIN, Network, Connect a PC, then tick "Enable backups" on that PC.'
         : picks.some(x => !x.pc.why) ? 'Nothing was backed up: no PC is ticked under Back up to. Tick at least one, then press Back up now.'
         : 'Nothing was backed up: none of your linked PCs can take a backup now (the line under each says why).', true);
     }
@@ -157,7 +157,7 @@ async function followBackup(r, ids, pcs, say, box) {
         : 'Backup finished, but TOMLIN no longer lists those copies (was it restarted?). "Copies now" above shows what each PC holds.';
     }
     say(['Backup in progress (' + (copies.length - working.length) + ' of ' + plural(copies.length, 'PC', 'PCs') + ' done):', ...copies.map(line)]);
-    if (Date.now() > until) return ['Still sending after 30 minutes. TOMLIN carries on and shows the progress under My local LLMs.', ...copies.map(line)];
+    if (Date.now() > until) return ['Still sending after 30 minutes. TOMLIN carries on and shows the progress under Models on my other PCs.', ...copies.map(line)];
     await new Promise(ok => setTimeout(ok, 1000));
   }
 }

@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NodeAnswer, Wire } from '../src/carry.ts';
-import { PIN_FILE, Runtimes, type Device } from '../src/runtimes.ts';
+import { PIN_FILE, Runtimes } from '../src/runtimes.ts';
 import * as rp from '../src/runnerpush.ts';
 import { runnerEnv } from '../src/worker.ts';
 import { makeRunnerZips, type RunnerZips } from './runnerzips.ts';
@@ -25,7 +25,7 @@ after(() => {
 const laptop = { key: 'b1b2b3b4', name: 'Laptop' };
 
 /** A node with its own runtimes.json (the same pins as the zips, unless `pins` says otherwise). */
-function aNode(zips: RunnerZips, o: { why?: (d: Device) => string; free?: number; inUse?: () => boolean; pins?: object } = {}) {
+function aNode(zips: RunnerZips, o: { why?: (id: string) => string; free?: number; inUse?: () => boolean; pins?: object } = {}) {
   const root = tmp();
   const pins = join(root, 'runtimes.json');
   writeFileSync(pins, JSON.stringify(o.pins ?? zips.pinsFile('https://example.invalid/b1')));

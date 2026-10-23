@@ -1,6 +1,7 @@
 // What TOMLIN keeps between runs, in the data folder: settings (per pane: last model picked, device, CPU cores, idle
 // unload) and the chat. Written whole each time, through a temporary file, so a crash never leaves half a file.
 import { join } from 'node:path';
+import { cleanSearch, type SearchSetting, type ToolUse } from './webtools.ts';
 import type { Asked } from './worker.ts';
 import { cleanShared, type SharedModel } from './nodestaff.ts';
 import { readData, updateData, writeAtomic } from './atomic.ts';
@@ -33,6 +34,10 @@ export interface Settings {
   workspace: string;
   /** How each chat model is started (by model id): context size, cache type, mixture-of-experts weights in RAM. */
   run: Record<string, RunOptions>;
+  /** Minutes a fold may spend reading, by chat model id (src/layers.ts; unset: 4). Not a run setting: no reload. */
+  foldWait?: Record<string, number>;
+  /** The search engine of a chat with Web on (src/webtools.ts), and its key or address. Unset: DuckDuckGo. */
+  webSearch?: SearchSetting;
   /** RETIRED with "Who does the work" (each job's team took its place): kept in old settings files, read by nothing. */
   jobModels: Record<string, string>;
   /** Worker PCs this one has paired with (the token is this PC's key to that worker). */
@@ -65,14 +70,31 @@ export interface RunOptions {
   fa?: 'on' | 'off';
   /** Threads for this model (unset: the PC's chat threads). */
   threads?: number;
-  /** Copy-ahead: guesses from the words already in the chat (no second model). */
-  spec?: 'ngram';
+  /**
+   * A guess without a second model: copy-ahead ('ngram') from the words already in the chat, or the model's own built-in
+   * guesser ('mtp'), kept only for a file that has one (the runner refuses to start a file without it).
+   */
+  spec?: 'ngram' | 'mtp';
   /** A guessing model (another chat model's id on this PC) started beside it; none: ''. */
   draft?: string;
   /** The guessing model in RAM, not on the card. */
   draftOn?: 'ram';
   /** The guessing model's own smaller context cache. */
   draftCache?: 'q8_0';
+  /** The most words a guess makes at once (--spec-draft-n-max), for a guessing model or the built-in one; unset: llama.cpp's 3. */
+  draftMax?: number;
+  /**
+   * The card runner it starts on, on a PC with more than one (unset: Auto, the CUDA build that suits the card first):
+   * 'cuda' is the CUDA 12.4 build, 'cuda13' the CUDA 13.4 one. Not installed there, or not usable there: Auto.
+   */
+  runner?: 'cuda' | 'cuda13' | 'vulkan';
+  /**
+   * The graphics cards it runs on, as every runner names them (src/devices.ts: "CUDA0", "Vulkan1"); unset: Auto, every
+   * card. A card none of the runner's names match is not used; none left: Auto.
+   */
+  cards?: string[];
+  /** The card its guessing model runs on (the same kind of names); unset: on the model's own cards. */
+  draftCard?: string[];
   /** Where a setup the speed finder chose came from (src/speedfinder.ts). */
   found?: RunFound;
 }
@@ -130,10 +152,14 @@ export interface ChatLine {
   sent?: string[];
   /** What the model worked out before this answer (Think), folded above it; never sent to a model again. */
   thought?: { text: string; seconds: number };
+  /** What it searched for and read on the web for this answer (Web), shown under it; never sent to a model again. */
+  tools?: ToolUse[];
   /** The connection to the linked PC writing this answer was lost: it is still owed (src/outbox.ts), with Reconnect. */
   waiting?: { rid: string; pc: string; name: string };
   /** Said under the answer, never sent to a model ("Collected from Worker PC after the connection was lost."). */
   note?: string;
+  /** An older message brought back with Find in this chat (src/layers.ts recallLine): his line, sent with his next message. */
+  recalled?: boolean;
 }
 
 const DEFAULT_PANE: PaneSettings = { model: null, asked: 'auto', threads: 0, idleMinutes: 0 };
@@ -172,7 +198,7 @@ export class Store {
   private async load(): Promise<Settings> {
     const s = await this.readJson<Partial<Settings>>('settings.json', {});
     // Fields this version does not know (written by a newer copy) are carried through, so going back never erases them.
-    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, jobModels: s.jobModels ?? {}, remotes: (s.remotes ?? []).map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), jobModels: s.jobModels ?? {}, remotes: (s.remotes ?? []).map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
     return this.cache;
   }
 
@@ -182,11 +208,11 @@ export class Store {
   }
 
   /** `run` and `jobModels` are merged key by key; `remotes` is replaced whole. */
-  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; jobModels?: Record<string, string>; remotes?: Remote[]; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
+  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; foldWait?: Record<string, number>; webSearch?: SearchSetting; jobModels?: Record<string, string>; remotes?: Remote[]; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
     await this.settings();
     // Read after the wait: another save may have changed it meanwhile, and its change must stay.
     const s = this.cache!;
-    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
+    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, foldWait: { ...s.foldWait, ...change.foldWait }, webSearch: change.webSearch ?? s.webSearch, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
     const next = this.cache;
     try {
       await this.writeJson('settings.json', next);

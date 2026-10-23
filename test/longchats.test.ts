@@ -94,6 +94,8 @@ test('streamChat says when the length limit cut the answer, and reports the read
     const b = await streamChat(done.base, 'qwen3.5-2b', [{ role: 'user', content: 'hi' }], () => undefined, new AbortController().signal);
     assert.equal(b.cut, false);
     assert.deepEqual(seen[0], ['qwen3.5-2b', 300, 150]);
+    // How much it read this turn travels with the answer (a linked PC passes it on: layers size only from big reads).
+    assert.equal(b.readTokens, 300);
   } finally {
     readings.seen = null;
     await cut.close();

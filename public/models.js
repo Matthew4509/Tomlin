@@ -1,7 +1,7 @@
 // The Models page: a whole page on the right (the left panel stays). Its own side has the search filters (chat model
-// size: Min B / Max B, Min GB / Max GB), Model categories as tick boxes (kinds, Abliterated, Uncensored, MoE's), and
+// size: Smallest / Largest size (billions) and download (GB)), Model categories as tick boxes (kinds, Abliterated, Uncensored, Mixture-of-experts), and
 // Import models (two tiles: Download, Connect); on top, the search box, Search, and All | Not installed | Installed, then
-// My local LLMs. Right of the list's heading, Size and A to Z order the list (pressed again, the other way round).
+// Models on my other PCs. Right of the list's heading, Size and A to Z order the list (pressed again, the other way round).
 // Every model shows two short lines; "See more" opens the rest. Hugging Face's answer comes a page at a time, from the
 // file list (shipped with TOMLIN, or this PC's own after Rescan Hugging Face) or, with none, Hugging Face's own search.
 // Chat models come from Hugging Face (a PC downloads only to itself): each row shows its size before anything is pressed,
@@ -18,7 +18,7 @@ const mp = {
   list: null, listTimer: 0,
   /** Ticked terms (abliterated, uncensored): either one in the name. */
   terms: new Set(),
-  /** MoE's ticked: mixtures of experts only (as well as any term). */
+  /** Mixture-of-experts ticked: mixtures of experts only (as well as any term). */
   moe: false,
   /** Fits my card ticked: only chat models with a size that sits wholly on the graphics cards; cards = {n, total} (/api/models). */
   card: false, cards: null,
@@ -63,7 +63,7 @@ const POPULAR = [
 
 // Model categories as tick boxes: any ticked kind shows; Abliterated / Uncensored (either word in the name) narrow it;
 // none ticked (All models) shows every one.
-const CATS = [['all', 'All models'], ['chat', 'Chat models (LLMs)'], ['image', 'Picture models'], ['helper', 'Helpers'], ['runner', 'Model runners']];
+const CATS = [['all', 'All models'], ['chat', 'Chat models'], ['image', 'Picture models'], ['helper', 'Helpers'], ['runner', 'Model runners']];
 const CAT_NAME = Object.fromEntries(CATS);
 const TERM_NAME = { abliterated: 'Abliterated', uncensored: 'Uncensored' };
 const TERM_TIP = { abliterated: 'Only models with abliterated in the name: their built-in refusals were taken out', uncensored: 'Only models with uncensored in the name' };
@@ -103,7 +103,7 @@ function mpNav() {
           mpDraw();
           mpHfSearch(true);
         })),
-        tick({ 'data-moe': '' }, "MoE's", MOE_TIP, e => {
+        tick({ 'data-moe': '' }, "Mixture-of-experts", MOE_TIP, e => {
           mp.moe = e.target.checked;
           mp.importing = false;
           mpDraw();
@@ -299,7 +299,7 @@ function withTo(key, here, ask, bytes, primary) {
   const name = toName(to);
   const btn = el('button', {
     class: `btn${primary ? ' primary' : ''}`, type: 'button', text: `Download ${MP_GB(bytes)} to ${name}`,
-    title: `${name} downloads it itself, from the internet, into its own models folder: nothing passes through this PC. My local LLMs shows how far it is, with Stop.`,
+    title: `${name} downloads it itself, from the internet, into its own models folder: nothing passes through this PC. Models on my other PCs shows how far it is, with Stop.`,
     onclick: async e => {
       const b = e.currentTarget;
       b.disabled = true;
@@ -323,6 +323,7 @@ function runnerWord(why) {
   if (!why) return '';
   if (/already has it/.test(why)) return ' (has it)';
   if (/no NVIDIA card/.test(why)) return ' (no NVIDIA card)';
+  if (/has no code for/.test(why)) return ' (card too old for it)';
   if (/driver/.test(why)) return ' (driver too old)';
   if (/older TOMLIN/.test(why)) return ' (update it first)';
   if (/Backups only/.test(why)) return ' (backups only)';
@@ -334,18 +335,21 @@ function runnerWord(why) {
 function runnerPick(r) {
   const pcs = mp.net ?? [];
   if (!pcs.length) return null;
-  const has = p => p.runner?.cuda === 'installed';
-  const usable = p => !p.runnerWhy || has(p);
-  const chosen = pcs.find(p => p.id === mp.runnerTo.get(r.id) && usable(p)) ?? pcs.find(p => !p.runnerWhy) ?? pcs.find(has);
+  // Each linked PC says how each CUDA build is there; an older TOMLIN says only how its CUDA 12.4 one is.
+  const there = p => (p.runner?.pins ? p.runner.pins[r.id] : r.id === 'llama-cuda' ? { state: p.runner?.cuda } : null);
+  const whyOf = p => p.runnerWhys?.[r.id] ?? p.runnerWhy;
+  const has = p => there(p)?.state === 'installed';
+  const usable = p => !whyOf(p) || has(p);
+  const chosen = pcs.find(p => p.id === mp.runnerTo.get(r.id) && usable(p)) ?? pcs.find(p => !whyOf(p)) ?? pcs.find(has);
   const sel = el('select', { 'aria-label': `Send ${r.name} to`, onchange: e => { mp.runnerTo.set(r.id, e.target.value); mpDraw(); } },
-    ...pcs.map(p => el('option', { value: p.id, disabled: !usable(p), text: `${toName(p.id)}${runnerWord(p.runnerWhy)}`, title: p.runnerWhy || '' })));
+    ...pcs.map(p => el('option', { value: p.id, disabled: !usable(p), text: `${toName(p.id)}${runnerWord(whyOf(p))}${p.runner?.best === r.id && !has(p) ? ' (suits its card)' : ''}`, title: whyOf(p) || '' })));
   if (chosen) sel.value = chosen.id;
   const said = el('span', { class: 'hint', role: 'status' });
   // No linked PC can take it now: the list says so, and the line beside it says why (one PC) or where to look (several).
   if (!chosen) {
     sel.prepend(el('option', { value: '', text: 'No linked PC can take it now' }));
     sel.value = '';
-    said.textContent = pcs.length === 1 ? pcs[0].runnerWhy : 'Open the list to see why for each PC.';
+    said.textContent = pcs.length === 1 ? whyOf(pcs[0]) : 'Open the list to see why for each PC.';
   }
   let btn = null;
   if (chosen && has(chosen)) {
@@ -367,7 +371,7 @@ function runnerPick(r) {
     const name = toName(chosen.id);
     btn = el('button', {
       class: 'btn primary', type: 'button', text: r.zips ? `Send to ${name}` : `Download ${MP_GB(r.bytes)} here, then send to ${name}`,
-      title: `${r.zips ? 'Sends' : 'Downloads it to this PC (checked), then sends'} it to ${name} over your home network. ${name} checks every file against the build its own TOMLIN names before it unpacks it. Network: connect PCs shows how far it is, with Stop.`,
+      title: `${r.zips ? 'Sends' : 'Downloads it to this PC (checked), then sends'} it to ${name} over your home network. ${name} checks every file against the build its own TOMLIN names before it unpacks it. Network shows how far it is, with Stop.`,
       onclick: async e => {
         const b = e.currentTarget;
         b.disabled = true;
@@ -438,7 +442,13 @@ function runnerButtons(r) {
 /** What a runner row says under its name. */
 function runnerMore(r) {
   if (r.device !== 'cuda') return r.installed ? [] : [`To install it, close TOMLIN and run: npm run fetch -- ${r.id}`];
-  const more = ['For NVIDIA cards: usually faster than the graphics chip (Vulkan) runner. Auto uses it once it is here.'];
+  const more = [
+    r.engine !== 'llama' ? 'For NVIDIA cards: usually faster than the graphics chip (Vulkan) runner. Auto uses it once it is here.'
+      : r.cuda === '13.4' ? 'For NVIDIA cards from the RTX 20 and GTX 16 series on, with code made for RTX 30, 40 and 50 cards. Not for GTX 10 series (Pascal) cards or older.'
+        : 'For NVIDIA cards, older ones too (GTX 750 and newer): RTX 30 and 40 cards have code made for them, other cards have it compiled at their first start.',
+  ];
+  if (r.engine === 'llama' && r.best) more.push(r.installed ? '★ The one that suits this PC\'s card: Auto starts models on it.' : '★ The one that suits this PC\'s card.');
+  else if (r.engine === 'llama' && r.installed && !r.why) more.push('Auto uses the CUDA build that suits the card first; the speed finder tries this one too, and recommends it for a model it runs faster.');
   if (r.why) more.push(r.why);
   if (r.getting?.error) more.push(`✕ ${r.getting.error}`);
   if (r.zips) more.push(`Its files (${MP_GB(r.bytes)}) are kept here for sending to another PC.`);
@@ -647,7 +657,7 @@ function mpMatches(x, q) {
   return q.split(/\s+/).every(w => new RegExp(`(?:^|[^a-z0-9]|(?<=[a-z])(?=\\d))${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(text));
 }
 
-/** The list's heading: the words or the ticked categories, then each other filter ("Chat models (LLMs), up to 2B, Abliterated"). */
+/** The list's heading: the words or the ticked categories, then each other filter ("Chat models, up to 2B, Abliterated"). */
 function mpTitle(q, filtering) {
   const cats = [...mp.cats].map(c => CAT_NAME[c]).join(' + ');
   return [
@@ -655,7 +665,7 @@ function mpTitle(q, filtering) {
     q ? cats : '',
     filtering ? filterText() : '',
     [...mp.terms].map(t => TERM_NAME[t]).join(' or '),
-    mp.moe ? "MoE's" : '',
+    mp.moe ? "Mixture-of-experts" : '',
     { only: 'installed only', hide: 'not installed yet' }[mp.show] ?? '',
   ].filter(Boolean).join(', ');
 }

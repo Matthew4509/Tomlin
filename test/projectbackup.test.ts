@@ -77,3 +77,28 @@ test('a repository whose settings could run a program is not read with git: the 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('git stays inside the project: a broken .git never borrows the repository above it, nor the folder as a bare one', { skip: !hasGit && 'git is not installed' }, async () => {
+  const top = mkdtempSync(join(tmpdir(), 'sm-pb-fence-'));
+  try {
+    // A repository above the project, whose own ignore list would leave secret.txt out.
+    execFileSync('git', ['-C', top, 'init', '-q'], { stdio: 'ignore' });
+    writeFileSync(join(top, '.git', 'info', 'exclude'), 'secret.txt\n');
+    const dir = join(top, 'project');
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    writeFileSync(join(dir, 'a.txt'), 'a');
+    writeFileSync(join(dir, 'secret.txt'), 's');
+    const got = await projectFiles(dir);
+    assert.equal(got.how, 'folder');
+    assert.match(got.note ?? '', /git could not list its files/);
+    assert.deepEqual(got.files.map(f => f.path), ['a.txt', 'secret.txt']);
+    // Bare-repository files at the project's top (an empty .git beside them) are not taken as its repository either.
+    for (const d of ['objects', 'refs']) mkdirSync(join(dir, d));
+    writeFileSync(join(dir, 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(dir, 'config'), '[core]\n\tbare = true\n');
+    const bare = await projectFiles(dir);
+    assert.equal(bare.how, 'folder');
+  } finally {
+    rmSync(top, { recursive: true, force: true });
+  }
+});

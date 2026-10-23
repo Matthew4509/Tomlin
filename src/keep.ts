@@ -216,12 +216,14 @@ export async function listBackups(home: Home): Promise<Backup[]> {
 
 /** settings.json without the keys to the linked PCs (each keeps its name and address; its token is empty). */
 function withoutKeys(text: string): string {
-  const s = JSON.parse(text) as { remotes?: unknown };
+  const s = JSON.parse(text) as { remotes?: unknown; webSearch?: unknown };
   const remotes = Array.isArray(s.remotes) ? s.remotes.map(r => {
     const { token: _token, key: _key, ...rest } = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
     return { ...rest, token: '' };
   }) : s.remotes;
-  return JSON.stringify({ ...s, remotes });
+  // The web search key (Brave's, paid for) stays here too; which engine is used goes with the rest.
+  const { key: _webKey, ...webSearch } = (s.webSearch && typeof s.webSearch === 'object' ? s.webSearch : {}) as Record<string, unknown>;
+  return JSON.stringify({ ...s, remotes, ...(s.webSearch !== undefined ? { webSearch } : {}) });
 }
 
 /**
@@ -315,15 +317,21 @@ async function carryKept(old: string, data: string): Promise<void> {
 
 /** A restore point kept on another PC, unpacked at `fresh`: each linked PC takes this PC's key to it as it is now. */
 async function keysFromHere(fresh: string, data: string): Promise<void> {
-  const read = async (f: string) => JSON.parse(await readFile(f, 'utf8')) as { remotes?: Record<string, unknown>[] };
+  type Settings = { remotes?: Record<string, unknown>[]; webSearch?: Record<string, unknown> };
+  const read = async (f: string) => JSON.parse(await readFile(f, 'utf8')) as Settings;
   const back = await read(join(fresh, 'settings.json')).catch(() => null);
-  if (!back || !Array.isArray(back.remotes)) return;
-  const now = await read(join(data, 'settings.json')).catch(() => ({ remotes: [] as Record<string, unknown>[] }));
-  const mine = new Map((Array.isArray(now.remotes) ? now.remotes : []).map(r => [r.id, r]));
-  back.remotes = back.remotes.map(r => {
-    const m = mine.get(r.id);
-    return m ? { ...r, token: m.token, ...(m.key ? { key: m.key } : {}) } : r;
-  });
+  if (!back || typeof back !== 'object') return;
+  const now: Settings = await read(join(data, 'settings.json')).catch(() => ({ remotes: [] }));
+  if (Array.isArray(back.remotes)) {
+    const mine = new Map((Array.isArray(now.remotes) ? now.remotes : []).map(r => [r.id, r]));
+    back.remotes = back.remotes.map(r => {
+      const m = mine.get(r.id);
+      return m ? { ...r, token: m.token, ...(m.key ? { key: m.key } : {}) } : r;
+    });
+  }
+  // This PC's web search key as it is now (a restore point for another PC carries none).
+  const key = now.webSearch && typeof now.webSearch === 'object' ? now.webSearch.key : undefined;
+  if (typeof key === 'string' && key) back.webSearch = { ...(back.webSearch && typeof back.webSearch === 'object' ? back.webSearch : {}), key };
   await writeAtomic(join(fresh, 'settings.json'), JSON.stringify(back));
 }
 
@@ -501,7 +509,7 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   }
   await swapData(home, fresh);
   const v = readVersion(home);
-  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network: connect PCs).' : ''}`;
+  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no web search key, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network).' : ''}`;
   await writeVersion(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
   return note;
 }

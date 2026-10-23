@@ -11,7 +11,7 @@ export interface FinderDeps {
   /** Loads the model with this setup (not saved). Seconds to load, or the runner's own words why not. */
   load: (run: RunOptions) => Promise<{ seconds: number } | { error: string }>;
   /** One answer to a fixed prompt, with llama-server's own timings. */
-  ask: (kind: 'warm' | 'write' | 'read') => Promise<{ text: string; write: number; read: number; firstWord: number; accepted: number | null }>;
+  ask: (kind: 'warm' | 'write' | 'read' | 'code') => Promise<{ text: string; write: number; read: number; firstWord: number; accepted: number | null }>;
   /** What the runner holds now; cardFree null without a card. */
   memory: () => Promise<{ cardBytes: number; ramBytes: number; borrowed: number; cardFree: number | null }>;
   ramFit: (run: RunOptions) => 'ok' | 'tight' | 'no';
@@ -25,6 +25,8 @@ export interface RowRun extends Setup {
   write: number | null;
   read: number | null;
   copy: number | null;
+  /** Writing speed on the code prompt (a guessing trick often gains more there than on prose). */
+  code: number | null;
   firstWord: number | null;
   loadSeconds: number | null;
   cardBytes: number | null;
@@ -56,6 +58,9 @@ export const LIMIT_MS = 45 * 60_000;
 /** The write prompt: new text (src/speed.ts TEST_PROMPT is the same kind; this one is fixed here so rows compare). */
 export const WRITE_PROMPT = 'Write about 150 words on why people bake their own bread at home. Plain sentences, no lists, no headings.';
 
+/** The code prompt: a small program, where a guessing trick often gains more than on prose (code repeats its words). */
+export const CODE_PROMPT = 'Write a JavaScript function parseCsvLine(line) that splits one line of CSV into an array of fields. A quoted field may hold commas and doubled quotes (""). Add short comments, then three example calls with their results as comments. Code only.';
+
 /** The read prompt: a passage TOMLIN wrote itself (about 800 tokens), then a copy with one word changed. */
 export const READ_PROMPT = `Read this passage, then do what the last line asks.
 
@@ -74,10 +79,10 @@ Next year the lease comes up for renewal. The landlord has said he wants to keep
 Copy the first paragraph back with every "shop" changed to "store". Write nothing else.`;
 
 /** The body every row is sent: the same prompt, temperature 0 and a fixed seed, thinking off, the prompt read again each time. */
-export function request(kind: 'warm' | 'write' | 'read') {
+export function request(kind: 'warm' | 'write' | 'read' | 'code') {
   return {
-    messages: [{ role: 'user', content: kind === 'read' ? READ_PROMPT : WRITE_PROMPT }],
-    max_tokens: kind === 'warm' ? TOKENS.warm : kind === 'write' ? TOKENS.write : TOKENS.copy,
+    messages: [{ role: 'user', content: kind === 'read' ? READ_PROMPT : kind === 'code' ? CODE_PROMPT : WRITE_PROMPT }],
+    max_tokens: kind === 'warm' ? TOKENS.warm : kind === 'write' ? TOKENS.write : kind === 'code' ? TOKENS.code : TOKENS.copy,
     temperature: 0,
     seed: 42,
     cache_prompt: false,
@@ -104,7 +109,7 @@ export function timingsOf(json: unknown): { text: string; write: number; read: n
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 /** How many settings differ from row a's. */
 const changes = (a: RunOptions, b: RunOptions) => new Set([...Object.keys(a), ...Object.keys(b)].filter(k => k !== 'found' && JSON.stringify((a as unknown as Record<string, unknown>)[k]) !== JSON.stringify((b as unknown as Record<string, unknown>)[k]))).size;
-const trick = (r: RunOptions) => !!r.draft || r.spec === 'ngram';
+const trick = (r: RunOptions) => !!r.draft || r.spec === 'ngram' || r.spec === 'mtp';
 
 /**
  * Runs the rows (row a first). `plan`, when given, picks the rows again once the model is loaded as it is now (its
@@ -115,7 +120,7 @@ export async function runFinder(o: { rows: Setup[]; plan?: (mem: { cardBytes: nu
   const clock = o.clock ?? Date.now;
   const start = clock();
   const d = o.deps;
-  const blank = { why: '', write: null, read: null, copy: null, firstWord: null, loadSeconds: null, cardBytes: null, ramBytes: null, borrowed: null, cardFree: null, accepted: null, sameWords: null, spilled: false, ramFit: 'ok' as const, slowLoad: false };
+  const blank = { why: '', write: null, read: null, copy: null, code: null, firstWord: null, loadSeconds: null, cardBytes: null, ramBytes: null, borrowed: null, cardFree: null, accepted: null, sameWords: null, spilled: false, ramFit: 'ok' as const, slowLoad: false };
   const run: FinderRun = { state: 'running', said: '', now: 'Loading the model once, to read its file into memory…', rows: o.rows.map(s => ({ ...s, ...blank, why: '', state: 'waiting' })), best: null, keep: false, why: {}, drift: false };
   const tell = () => o.onChange?.(run);
   const stopped = () => o.stopped?.() === true;
@@ -142,8 +147,9 @@ export async function runFinder(o: { rows: Setup[]; plan?: (mem: { cardBytes: nu
     const writes = [first.write, second.write];
     if (Math.abs(first.write - second.write) > 0.1 * Math.max(first.write, second.write)) writes.push((await d.ask('write')).write);
     const read = await d.ask('read');
+    const code = await d.ask('code');
     const mem = await d.memory();
-    Object.assign(row, { write: median(writes), read: read.read, copy: read.write, firstWord: first.firstWord, accepted: first.accepted ?? read.accepted, cardBytes: mem.cardBytes, ramBytes: mem.ramBytes, borrowed: mem.borrowed, cardFree: mem.cardFree, ramFit: d.ramFit(row.run) });
+    Object.assign(row, { write: median(writes), read: read.read, copy: read.write, code: code.write, firstWord: first.firstWord, accepted: first.accepted ?? read.accepted, cardBytes: mem.cardBytes, ramBytes: mem.ramBytes, borrowed: mem.borrowed, cardFree: mem.cardFree, ramFit: d.ramFit(row.run) });
     if (row === a) aText = first.text;
     else {
       if (trick(row.run) && aText) row.sameWords = sameWords(aText, first.text);

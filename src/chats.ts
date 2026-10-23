@@ -26,6 +26,8 @@ export interface ChatInfo {
   askedLarge?: number;
   /** Think was chosen in this chat's box (the model works an answer out first); Quick when not set. */
   think?: boolean;
+  /** Web was switched on in this chat's box: the model may search the web and read pages (src/webtools.ts). */
+  web?: boolean;
   /** Pinned in the left panel: it stays under Projects, above the recent chats, until unpinned. */
   pinned?: boolean;
   /** The project (its job id) this chat's work belongs to; none = Default, the chats by date. */
@@ -34,6 +36,12 @@ export interface ChatInfo {
   folder?: string;
   /** Started by Lets go! on Home: its first answer is also saved into the project folder as a file, then this is cleared. */
   saveAnswer?: boolean;
+  /** Its "Short, mid and long memory" tick is off (src/layers.ts): it works as a chat under 16K does. */
+  layersOff?: boolean;
+  /** Its last answer was built in layers: no "getting large" bar (the oldest messages stop being sent at a fold, and the log keeps what matters). */
+  layered?: boolean;
+  /** The prompt read speed of its last answer on a linked PC (tokens a second), for the size of its latest messages. */
+  readSpeed?: number;
 }
 
 export const NEW_TITLE = 'New chat';
@@ -111,6 +119,33 @@ export function oldChats(files: string[]): Array<{ file: string; who: string }> 
   });
 }
 
+/** One entry of "Recent chats" in the left panel: a chat in no project, or a project with all its chats. */
+export type RecentEntry =
+  | { kind: 'chat'; id: string; at: string; pinned: boolean }
+  | { kind: 'project'; project: string; at: string; pinned: boolean; newest: string; chats: string[] };
+
+/**
+ * "Recent chats" as one list: a project is one entry (its newest chat shown; its chats pinned first, then newest
+ * first) and a chat in no project (or in one no longer known) is its own; entries by latest use, pinned ones on top. So
+ * many projects never bury a recent chat in no project: each takes one place, as a chat does.
+ */
+export function recentEntries(list: Array<Pick<ChatInfo, 'id' | 'updated' | 'project' | 'pinned'>>, known: (project: string) => boolean, pinnedProjects: string[]): RecentEntry[] {
+  const groups = new Map<string, typeof list>();
+  const out: RecentEntry[] = [];
+  for (const c of list) {
+    if (c.project && known(c.project)) groups.set(c.project, [...(groups.get(c.project) ?? []), c]);
+    else out.push({ kind: 'chat', id: c.id, at: c.updated, pinned: !!c.pinned });
+  }
+  for (const [project, cs] of groups) {
+    const byTime = [...cs].sort((a, b) => b.updated.localeCompare(a.updated));
+    out.push({ kind: 'project', project, at: byTime[0].updated, pinned: pinnedProjects.includes(project), newest: byTime[0].id, chats: [...byTime.filter(c => c.pinned), ...byTime.filter(c => !c.pinned)].map(c => c.id) });
+  }
+  return out.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.at.localeCompare(a.at));
+}
+
+const PINNED_PROJECTS = 'chats/pinned-projects.json';
+const PROJECT_ID = /^[A-Za-z0-9][\w.-]{0,99}$/;
+
 /** Chats left in the list by the private chat (taken out of the app) are never listed or opened; their files stay as they are. */
 const shown = (c: ChatInfo) => c.who !== 'partner';
 
@@ -182,12 +217,29 @@ export class Chats {
   }
 
   /** Changes a chat's own facts (fill, the handoff answer); the title and count are kept by saved(). */
-  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'pinned' | 'saveAnswer'>>): Promise<ChatInfo | null> {
+  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
     const c = (await this.index()).find(x => x.id === id);
     if (!c) return null;
     Object.assign(c, patch);
     await this.write();
     return c;
+  }
+
+  /** The projects pinned to the top of "Recent chats", in the order pinned. */
+  async pinnedProjects(): Promise<string[]> {
+    const got = await this.store.readJson<unknown>(PINNED_PROJECTS, []);
+    return Array.isArray(got) ? got.filter((x): x is string => typeof x === 'string' && PROJECT_ID.test(x)) : [];
+  }
+
+  async pinProject(project: string, on: boolean): Promise<string[]> {
+    if (!PROJECT_ID.test(project)) throw new Error('Not a project.');
+    let out: string[] = [];
+    await this.store.updateJson<unknown>(PINNED_PROJECTS, [], raw => {
+      const now = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && PROJECT_ID.test(x) && x !== project) : [];
+      out = on ? [...now, project] : now;
+      return out;
+    });
+    return out;
   }
 
   /** A new chat with the same person that carries on from `from`, with the handoff it ends with as its opening note. */

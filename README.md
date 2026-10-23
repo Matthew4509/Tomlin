@@ -563,6 +563,16 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.58:** Chats of 16k or more send only their latest messages word for word (sized from the read speed and a fold
+  wait in Model settings), with a chat log and Find. Draw asks to load the picture model; one window after a hire; a
+  linked PC's chat model stays 10 min; MoE models read prompts faster; office chat lines never repeat within 10 min.
+  Import your chats? leads with Decide later and says Import moves the model files; Connect before anyone is hired
+  says why; the vending machine with nobody hired offers Hire staff; project backups keep git inside the project.
+  A CUDA 13.4 runner beside CUDA 12.4 (picked per card; the speed finder tries both). **Web** in chats and jobs: search
+  and read pages (Settings, Web search), at a person's pace (5-7 s between pages on one site, 10 s between searches,
+  3 pages at once and 8 an answer, a wait when a site says slow down). The built-in guesser (MTP); Run tests gets only
+  what the test tools need. Audit fixes: a broken page no longer freezes the app; long chats fold once, not every turn;
+  the speed finder runs its card rows; the web search key stays off other PCs.
 - **2.0.57:** **Find the fastest setup** for a chat model, here or on a linked PC (its tick): Quick or Full, the time
   shown first, recommended only when over 5% faster with 0.5 GB of card free; Go with this config, or Undo.
   First-run hints name the Hire staff button; the panels' gears are called Model settings.

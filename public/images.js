@@ -94,13 +94,53 @@ async function start(path, body) {
 form.addEventListener('submit', async e => {
   e.preventDefault();
   if (!promptBox.value.trim()) return showFault(fault, 'Type what to draw first: what should the picture show?');
-  if (app.status?.panes.image.state !== 'connected' && !app.awayArtist) return showFault(fault, 'The picture model is not loaded yet: press Connect beside it (above), then press Draw again. Nothing loads by itself.');
   // The chat on screen gets the picture ('' = none), named: not whichever chat another window opened last.
   const chat = app.chatId ?? '';
+  if (app.status?.panes.image.state !== 'connected' && !app.awayArtist && !(await loadThenDraw())) return;
+  if ((app.chatId ?? '') !== chat) return showFault(fault, 'The picture model is loaded, but another chat was opened meanwhile, so nothing was drawn. Press Draw again.');
   await start('/api/images/generate', { ...options(), chat });
   // The first thing asked names a new chat, and the chat moves to the top of the list.
   app.afterSend?.(chat);
 });
+/**
+ * Draw with no picture model loaded: asks "Load X and draw?" under Connect, as a chat asks before it sends (nothing loads
+ * by itself), loads it and waits for it. True once it is loaded; false when not (said in the fault box).
+ */
+async function loadThenDraw() {
+  const p = panes.image;
+  const state = app.status?.panes.image.state;
+  if (state === 'loading' || state === 'unloading') {
+    showFault(fault, `The picture model is ${state === 'loading' ? 'still loading' : 'unloading'}: press Draw again once it says Connected.`);
+    return false;
+  }
+  const m = (app.models?.image ?? []).find(x => x.id === p.model.value && x.installed !== false);
+  if (!m) {
+    showFault(fault, 'No picture model is picked, so nothing can draw. Pick one in the list beside Connect (above), or get one under Set up, Models: add or remove.');
+    return false;
+  }
+  const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';
+  if (!(await askHere(p.ask, `No picture model is loaded yet (nothing loads by itself).${tight} Load ${m.name} and draw?`, `Load ${m.name} and draw`, 'Not now', !!tight))) return false;
+  showFault(fault, null);
+  try {
+    await loadModel(m.id, { device: p.device.value, threads: Number(p.threads.value) || 0 });
+  } catch (err) {
+    showFault(fault, `${m.name} did not load: ${err.message}`);
+    return false;
+  }
+  for (let i = 0; i < 1800; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    await poll();
+    const v = app.status?.panes.image;
+    if (v?.state === 'connected') return true;
+    if (v?.state === 'failed' || (v?.state === 'disconnected' && i > 6)) {
+      showFault(fault, `${m.name} did not load${v.error ? `: ${v.error}` : ''}. Press Draw to try again.`);
+      return false;
+    }
+  }
+  showFault(fault, `${m.name} is taking a long time to load. Press Draw again once it says Connected.`);
+  return false;
+}
+
 // Like a chat's message box: Enter draws it, Shift+Enter starts a new line.
 promptBox.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -135,8 +175,8 @@ function stateText(j) {
 
 function drawJob(j) {
   const running = j && RUNNING.includes(j.state);
-  // Draw stays pressable: pressed before Connect, it says what to do instead of doing nothing.
-  goBtn.title = app.status?.panes.image.state !== 'connected' && !app.awayArtist ? 'Connect the picture model first (nothing loads by itself)' : 'Enter in the box does the same';
+  // Draw stays pressable: pressed before Connect, it asks to load the picture model first.
+  goBtn.title = app.status?.panes.image.state !== 'connected' && !app.awayArtist ? 'Draw asks to load the picture model first (nothing loads by itself)' : 'Enter in the box does the same';
   cancelBtn.hidden = !running;
   const wasHidden = progress.hidden;
   progress.hidden = !running;
@@ -372,7 +412,7 @@ function drawTools() {
   $('#g-clear-recent').hidden = !inChat;
   $('#g-clear-all').hidden = !inChat;
   $('#g-picked-n').textContent = picking.ids.size ? `${picking.ids.size} ticked` : 'Tick the pictures to delete, or press × on one';
-  $('#g-del').disabled = !picking.ids.size;
+  // Pressable with nothing ticked (a greyed button says nothing in Firefox): it says why instead.
   $('#g-del').textContent = picking.ids.size ? `Delete ${picking.ids.size} picture${picking.ids.size === 1 ? '' : 's'}` : 'Delete ticked';
   const shown = [...document.querySelectorAll('#gallery .tile')].map(x => x.dataset.id);
   $('#g-all').textContent = shown.length && shown.every(id => picking.ids.has(id)) ? 'Untick all' : 'Tick all';
@@ -445,7 +485,10 @@ $('#g-all').addEventListener('click', () => {
   }
   drawTools();
 });
-$('#g-del').addEventListener('click', () => deletePictures({ ids: [...picking.ids] }, `the ${picking.ids.size} ticked picture${picking.ids.size === 1 ? '' : 's'}`));
+$('#g-del').addEventListener('click', () => {
+  if (!picking.ids.size) return void ($('#g-picked-n').textContent = 'Nothing is ticked yet: tick the pictures to delete first, or press × on one.');
+  deletePictures({ ids: [...picking.ids] }, `the ${picking.ids.size} ticked picture${picking.ids.size === 1 ? '' : 's'}`);
+});
 $('#g-clear-recent').addEventListener('click', () => deletePictures({ chat: app.chatId, which: 'recent' }, "every picture this chat drew today"));
 $('#g-clear-all').addEventListener('click', () => deletePictures({ chat: app.chatId, which: 'all' }, 'every picture in this chat'));
 
@@ -575,7 +618,7 @@ app.onStatus.push(s => {
 
 // ---- Models (download, licence, fit) ----
 
-// The Models page (public/models.js) opens from Settings' Set up menu (Add a model), not the top bar.
+// The Models page (public/models.js) opens from Settings' Set up menu (Models: add or remove), not the top bar.
 
 // ---- "Draw as": the picture specialist (a hire with a picture role) whose way of working shapes each picture ----
 

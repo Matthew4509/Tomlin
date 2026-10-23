@@ -14,8 +14,7 @@ async function runStop(port, job) {
   try { await job(); } finally { stoppingPorts.delete(port); renderRunning(); }
 }
 function renderRunning() {
-  const mine = rows.filter(r => r.running), other = rows.filter(r => !r.running && r.portInUse);
-  const n = mine.length + other.length;
+  const { mine, other, n, words } = runningSplit();
   const shape = [...mine.map(r => r.running.port), ...other.map(r => r.portInUse)].join(',');
   if (shape !== runShape) { runShape = shape; runShapeAt = Date.now(); }
   const item = (r, isMine) => {
@@ -31,8 +30,9 @@ function renderRunning() {
         onclick: () => runStop(port, () => isMine ? stop(r) : stopPort(port)) }, icon(0xE71A)));
   };
   $('runpanel').replaceChildren(
-    h('div', { class: 'run-head' }, 'Running', n ? h('span', { class: 'n' }, String(n)) : null,
+    h('div', { class: 'run-head' }, 'Running', n ? h('span', { class: 'n', title: words }, String(n)) : null,
       n ? h('button', { class: 'linkbtn', type: 'button', onclick: stopAllDialog }, 'Stop all') : null),
+    other.length ? h('div', { class: 'live-sum' }, words) : '', // replaceChildren prints a null as the word "null"
     ...(n ? [...mine.map(r => item(r, true)), ...other.map(r => item(r, false))]
           : [h('div', { class: 'run-empty' }, 'Nothing running. Start one with Run local copy.')]));
 }

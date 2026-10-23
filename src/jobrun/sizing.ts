@@ -133,7 +133,7 @@ export async function seatBrain(team: Team, seat: 'pm' | 'coder' | 'writer' | 'a
     return { brain: got.brain, hire: who.hire, intern: got.intern };
   }
   const best = seats.strongest(await workerPool());
-  if (!best) throw new Error(`Nobody can be ${forWhat} now: no hire has a model that answers or fits, no chat model is connected and no linked PC answers. Hire staff (Settings, Set up, Staff) or connect a model, then try again.`);
+  if (!best) throw new Error(`Nobody can be ${forWhat} now: no hire has a model that answers or fits, no chat model is connected and no linked PC answers. Hire someone (Set up, Staff: hire and edit, in the left panel) or connect a model, then try again.`);
   const got = await brainForRef(best.ref, forWhat, 'in the job\'s Overview (Roles)', stage, signal);
   stage(`${forWhat[0].toUpperCase()}${forWhat.slice(1)} is ${best.label}: the strongest worker available.`);
   return { brain: got.brain, hire: null, intern: false };

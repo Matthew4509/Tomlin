@@ -4,7 +4,7 @@
 // a scratch copy: each item, Close back to where it was opened from, phone width, night).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
 
@@ -41,6 +41,8 @@ test('the empty-state hints name the Hire staff button that is on screen, not a 
   const pages = ['app.js', 'homeview.js', 'index.html'].map(read).join('\n');
   // The Set up menu has "Staff: hire and edit", not "Staff": the old four-step path sent people looking for nothing.
   assert.doesNotMatch(pages, /Set up, Staff, Hire staff/);
+  // Set up is the left panel's own menu, beside Settings, not inside it: no line sends people to "Settings, Set up".
+  for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(n => /\.(js|html)$/.test(n))) assert.doesNotMatch(read(f), /Settings, Set up/, f);
   assert.match(read('app.js'), /NOBODY_YET = '[^']*press Hire staff/);
   assert.match(read('homeview.js'), /'Hire someone first: press Hire staff[^']*'/);
 });

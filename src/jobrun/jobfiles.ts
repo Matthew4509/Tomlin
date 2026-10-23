@@ -113,7 +113,7 @@ export async function allJobs(): Promise<Job[]> {
 }
 
 export async function listJobs() {
-  return (await allJobs()).map(job => ({ id: job.id, name: job.name ?? '', folder: job.folder ?? '', goal: job.goal, steps: job.steps.length, done: job.steps.filter(s => s.status !== 'todo').length, updated: job.updated, hidden: job.hidden === true }));
+  return (await allJobs()).map(job => ({ id: job.id, name: job.name ?? '', folder: job.folder ?? '', goal: job.goal, steps: job.steps.length, done: job.steps.filter(s => s.status === 'done').length, skipped: job.steps.filter(s => s.status === 'skipped').length, updated: job.updated, hidden: job.hidden === true }));
 }
 
 /** The job folder's web files as they would be after saving `proposed`, for the cross-file check. */

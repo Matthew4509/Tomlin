@@ -11,6 +11,7 @@ import * as calc from '../calc.ts';
 import { memoryBar } from '../nodes.ts';
 import * as nodestaff from '../nodestaff.ts';
 import { hereKey, pcKey } from '../speed.ts';
+import { keepBig, type ReadFigure } from '../layers.ts';
 import { DATA_DIR, type Routes, chatModels, hardware, hidden, json, sampler, shortName, speeds, staff, store } from './core.ts';
 import { chatList, images, main, runnerFor, runners, watchedPids } from './panes.ts';
 import { answeringBusy, endAnswer, takeChat } from './answering.ts';
@@ -57,8 +58,9 @@ function thisPcHardware(): calc.Hardware {
 // llama.cpp reports it with every answer; the latest real figure (128 word-pieces read or more, so the start-up cost
 // does not swamp it) is kept per model in data/reading.json. The context picker turns it into "about N min to read a
 // full context here". A smaller sample does not replace a figure from one over 4x its size.
+// `big`: the latest read of 1,000 tokens or more (src/layers.ts keepBig), the figure a long chat's layers size from.
 const READ_FILE = () => join(DATA_DIR, 'reading.json');
-type Reading = { perSecond: number; tokens: number; at: string };
+type Reading = { perSecond: number; tokens: number; at: string; big?: ReadFigure };
 let readSpeeds: Record<string, Reading> | null = null;
 export function readSpeedsNow(): Record<string, Reading> {
   if (!readSpeeds) {
@@ -80,8 +82,12 @@ readings.seen = (model, tokens, perSecond) => {
   if (tokens < 128 || !(perSecond > 0) || !chatModels.list().some(m => m.id === model)) return;
   const all = readSpeedsNow();
   const was = all[model];
-  if (was && tokens * 4 < was.tokens && Date.now() - Date.parse(was.at) < 7 * 86_400_000) return;
-  all[model] = { perSecond: Math.round(perSecond * 10) / 10, tokens, at: new Date().toISOString() };
+  const at = new Date().toISOString();
+  const big = keepBig(was?.big, tokens, perSecond, at);
+  if (was && tokens * 4 < was.tokens && Date.now() - Date.parse(was.at) < 7 * 86_400_000) {
+    if (big === was.big) return;
+    all[model] = { ...was, ...(big ? { big } : {}) };
+  } else all[model] = { perSecond: Math.round(perSecond * 10) / 10, tokens, at, ...(big ? { big } : {}) };
   writeAtomic(READ_FILE(), JSON.stringify(all)).catch(() => undefined);
 };
 
@@ -232,8 +238,14 @@ export const thispcGet: Routes = {
   '/api/nodes': async ({ res }) => json(res, 200, await nodesView()),
   '/api/calc': async ({ res }) => json(res, 200, await calcView()),
   '/api/nodes/others': async ({ res }) => json(res, 200, { pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null })) }),
-  // The meters of the linked PC an open chat's hire works on (the chat head asks every 3 s while it is on screen).
-  '/api/node/stats': async ({ res, url }) => json(res, 200, await jobRoutes.nodeStats(String(url.searchParams.get('pc') ?? ''))),
+  // The meters of the linked PC an open chat's hire works on (the chat head asks every 3 s while it is on screen). The
+  // hire's model there is named, so that PC keeps only it loaded, not every model it loaded for this PC.
+  '/api/node/stats': async ({ res, url }) => {
+    const pc = String(url.searchParams.get('pc') ?? '');
+    const who = String(url.searchParams.get('who') ?? '');
+    const m = who.startsWith('staff:') ? staff.get(who.slice(6)) : undefined;
+    return json(res, 200, await jobRoutes.nodeStats(pc, nodestaff.statsModel(m ? nowModel(m) ?? m.model : null, pc)));
+  },
 };
 
 /** POST requests answered here, by path (the body is read already). */

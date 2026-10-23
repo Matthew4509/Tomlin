@@ -28,6 +28,7 @@ const PICTURE_RUNNING = ['queued', 'starting', 'drawing', 'decoding', 'finishing
 function setView(view) {
   // Leaving a Set up page (Staff, Jobs, Files): its window closes with it.
   if (asPage.dlg?.open && asPage.view !== view) asPage.dlg.close();
+  const was = homeUi.view;
   homeUi.view = view;
   shell.dataset.view = view;
   if (view !== 'rail' && !PAGE_VIEWS.includes(view)) store('view', view);
@@ -41,8 +42,32 @@ function setView(view) {
   drawRail();
   // The top bar shows a linked PC only while a chat with someone on it is on screen (chats.js).
   app.onView?.(view);
+  if (pageFocus && was !== view) focusPage(view);
 }
 app.showPanes = () => setView('chat');
+
+/** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', help: '#help' };
+/** Off for the first view at start: the page opens where it was, focus left alone. */
+let pageFocus = false;
+/**
+ * A page change moves focus to the new page's heading (or the chat's message box), so a keyboard or screen reader is
+ * not left on a button that is no longer on screen. Not while a window is open over it.
+ */
+function focusPage(view) {
+  // A timeout, not a frame: a window in the background draws no frames, and the page has to be shown first.
+  setTimeout(() => {
+    if ([...document.querySelectorAll('dialog[open]')].some(d => !d.classList.contains('as-page'))) return;
+    const page = PAGE_VIEWS.includes(view) ? asPage.dlg : view === 'chat' ? null : $(PAGE_OF[view] ?? '');
+    const target = view === 'chat' ? $('#chat-input') : page && (page.getAttribute('aria-labelledby') ? document.getElementById(page.getAttribute('aria-labelledby')) : page.querySelector('h1, h2'));
+    if (!target || target.offsetParent === null) return;
+    if (!target.matches('input, textarea, select, button, a[href]') && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+  }, 0);
+}
+
+/** A page's name as the left panel says it ("Settings", "Models"), for a Close that says where it goes back to. */
+const viewName = view => (view === 'home' ? 'Home' : view === 'chat' ? 'the chat' : document.querySelector(`[data-setup="${view}"]`)?.textContent.split(':')[0].trim() || 'Settings');
 
 // ---- Set up's pages: Staff, Jobs and Files open as pages beside the Set up menu, not as windows over it ----
 
@@ -71,10 +96,19 @@ function showAsPage(dlg, view) {
     // Closed (its Close button, or the code moving on to something else): back to where it was opened from, unless
     // something else is already on screen.
     dlg.addEventListener('close', () => {
+      // Its Close says plain "Close" again (it may open as a window next time).
+      for (const b of dlg.querySelectorAll('[data-close-to]')) b.textContent = b.dataset.closeTo;
       if (asPage.dlg !== dlg) return;
       asPage.dlg = null;
       if (homeUi.view === asPage.view) setView(asPage.back);
     });
+  }
+  // Shown as a page, its Close names the page it goes back to: "Close (back to Settings)".
+  for (const b of dlg.querySelectorAll('form[method="dialog"] button, [data-close-to]')) {
+    const plain = b.dataset.closeTo ?? b.textContent.trim();
+    if (plain !== 'Close') continue;
+    b.dataset.closeTo = plain;
+    b.textContent = `Close (back to ${viewName(asPage.back)})`;
   }
   // A modal window still open over the page it leaves (the bell's) would cover it.
   for (const d of document.querySelectorAll('dialog[open]')) if (d !== dlg && !host.contains(d)) d.close();
@@ -97,6 +131,7 @@ phone.addEventListener('change', e => {
 });
 // The chat is where the page starts (the Chats tab beside it lists the chats); Home opens first only when it was left open.
 setView(phone.matches ? 'rail' : store('view') === 'home' ? 'home' : 'chat');
+pageFocus = true;
 // The staff list under "Staff" starts open; folding it is kept in this browser.
 $('#rail-staff-fold').open = store('staff-open') !== '0';
 $('#rail-staff-fold').addEventListener('toggle', e => store('staff-open', e.target.open ? '1' : '0'));
@@ -290,7 +325,7 @@ function drawRail() {
     deskDrag(li, s);
     rows.push(li);
   }
-  if (!rows.length) rows.push(el('li', { class: 'rail-empty' }, el('span', { class: 'hint', text: 'Nobody hired yet.' }), el('button', { class: 'btn primary rail-hire', type: 'button', text: 'HIRE STAFF', onclick: () => app.openHire() })));
+  if (!rows.length) rows.push(el('li', { class: 'rail-empty' }, el('span', { class: 'hint', text: 'Nobody hired yet.' }), el('button', { class: 'btn primary rail-hire', type: 'button', text: 'Hire staff', onclick: () => app.openHire() })));
   $('#rail-staff-title').textContent = d.staff.length ? `Staff (${d.staff.length})` : 'Staff';
   keepFocus($('#rail-staff'), rows);
   app.drawChats?.();
@@ -396,7 +431,7 @@ function drawStaffOverview(counts) {
         el('strong', { text: s.name }), el('span', { class: 'so-where', text: where })),
       el('button', { class: 'icon-btn so-chat', type: 'button', title: `Chat with ${s.name}`, 'aria-label': `Chat with ${s.name}`, onclick: () => talkTo(s) }, svgIcon(CHAT_BUBBLE, 18)));
   };
-  const empty = () => el('li', { class: 'home-empty so-empty' }, el('span', { text: 'Nobody hired yet.' }), el('button', { class: 'btn primary', type: 'button', text: 'HIRE STAFF', onclick: () => app.openHire() }));
+  const empty = () => el('li', { class: 'home-empty so-empty' }, el('span', { text: 'Nobody hired yet.' }), el('button', { class: 'btn primary', type: 'button', text: 'Hire staff', onclick: () => app.openHire() }));
   for (const list of [$('#home-staff-overview'), $('#side-staff')]) keepFocus(list, d.staff.length ? d.staff.map(card) : [empty()]);
 }
 
@@ -407,7 +442,7 @@ function deskModels(s, pc) {
   // A hidden model is left out (unless "Show hidden" is ticked): a hire is moved onto models offered for picking.
   const list = visibleModels(team.data?.hireChoices?.[s.kind === 'image' ? 'image' : 'chat'] ?? []);
   // On a linked PC: the models it lets this PC use. "What it has loaded" counts only when something is loaded there:
-  // a PC that shares nothing (its ticks under Network: connect PCs) offers nothing to move to.
+  // a PC that shares nothing (its ticks under Network) offers nothing to move to.
   return pc ? list.filter(c => c.id.startsWith(`remote:${pc}:`) || (c.id === `remote:${pc}` && c.ok !== false)) : list.filter(c => !c.id.startsWith('remote:'));
 }
 
@@ -536,7 +571,7 @@ const timeText = iso => {
   const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
-// ---- Network: connect PCs (this PC as a node, and the models other PCs may use; finding and linking PCs) and This PC:
+// ---- Network (this PC as a node, and the models other PCs may use; finding and linking PCs) and This PC:
 // models and updates (the models on this PC, Update this install) as tiles with their
 // memory bars, and the models on this PC. Every figure comes from /api/nodes (measured by the memory samplers). ----
 
@@ -576,12 +611,12 @@ function drawNodes(n) {
   const msig = JSON.stringify([n.models, homeUi.modelSay]);
   if (msig !== homeUi.drawn.models) {
     homeUi.drawn.models = msig;
-    // Tiles three across, in Standard models, Image creation models and Hidden (the names used for the share list).
+    // Tiles three across, in Chat models, Picture models and Hidden (the names used for the share list).
     const part = (title, list) => (list.length ? [el('h4', { class: 'node-models-sub', text: title }), el('div', { class: 'node-models-grid' }, ...list.map(modelTile))] : []);
     const shown = n.models.filter(x => !x.hidden);
     keepFocus($('#node-models'), n.models.length ? [
-      ...part('Standard models', shown.filter(x => x.kind === 'chat')),
-      ...part('Image creation models', shown.filter(x => x.kind === 'image')),
+      ...part('Chat models', shown.filter(x => x.kind === 'chat')),
+      ...part('Picture models', shown.filter(x => x.kind === 'image')),
       ...part('Hidden', n.models.filter(x => x.hidden)),
     ] : [el('p', { class: 'hint', text: 'No models on this PC yet. Models shows which ones fit.' })]);
   }
@@ -705,23 +740,31 @@ function drawNodeSwitch(n) {
     $('#node-paired').replaceChildren(...(sh.paired.length ? [el('p', { class: 'hint', text: 'PCs linked to this one:' }), ...sh.paired.map((x, k) => el('div', { class: 'job-remote' }, el('span', { text: x.name }), el('span', { class: 'hint', text: x.old ? 'linked before the link was encrypted: link it again from that PC' : `since ${new Date(x.at).toLocaleDateString()}` }),
       el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-paired-ask'), `Stop lending to "${x.name}"? It would need the setup code again.`, `Stop lending to ${x.name}`, 'Keep it linked')) nodeShare({ unpair: k, unpairId: x.id }); } })))] : [el('p', { class: 'hint', text: 'No PC has linked to this one yet.' })]));
   }
+  // A4: new PCs asking for backups kept here, each with Allow / Don't allow (owner.js).
+  app.drawClaims?.(sh.claims);
   drawNodeShare(sh);
   drawNodeAllow(sh);
 }
 
 /**
  * "Sharing permissions": Allow all, Sharing of models, Enable backups, Allow host to update TOMLIN remotely, Allow host
- * to test and change model run settings (sending a model here needs no tick since 2.0.56). Each tick is saved
+ * to test and change model run settings, Lend card memory (Max mode) (sending a model here needs no tick since 2.0.56). Each tick is saved
  * at once (with the app lock PIN); a refused or cancelled PIN puts the ticks back as saved at the next refresh.
  */
 function drawNodeAllow(sh) {
-  const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false };
+  const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false, lend: false };
   if (!homeUi.nodeSaving) {
     for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.checked = a[t.dataset.allow] === true;
     const all = $('#node-allow-all');
-    all.checked = a.pull && a.backup && a.update && a.tune;
-    all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune);
+    all.checked = a.pull && a.backup && a.update && a.tune && a.lend;
+    all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.lend);
+    if (sh.lend) $('#node-lend-idle').value = String(sh.lend.idle);
   }
+  // Max mode: whom this PC lends its card memory to now, or how the last loan ended.
+  const lend = sh.lend;
+  const at = t => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  $('#node-lend-now').hidden = !lend?.to && !lend?.ended;
+  $('#node-lend-now').textContent = lend?.to ? `Lending its card memory to "${lend.to}" since ${at(lend.since)}.` : lend?.ended ? `Last lent to "${lend.ended.to}": ended at ${at(lend.ended.at)} (${lend.ended.why}).` : '';
   // Run settings a linked PC changed here since TOMLIN started (newest first).
   const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   const changes = (sh.runChanges ?? []).slice(0, 3);
@@ -764,7 +807,8 @@ function saveAllow(changed) {
   return nodeShare({ allow: { ...now, ...changed } });
 }
 for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.addEventListener('change', () => saveAllow({}));
-$('#node-allow-all').addEventListener('change', e => saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked }));
+$('#node-allow-all').addEventListener('change', e => saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, lend: e.target.checked }));
+$('#node-lend-idle').addEventListener('change', e => nodeShare({ lendIdle: Number(e.target.value) }));
 
 /** "Models other PCs can use": every model on this PC, listed (nothing to tick: linked PCs may use them all). */
 function drawNodeShare(sh) {
@@ -774,7 +818,7 @@ function drawNodeShare(sh) {
   // Said only while a linked PC uses this PC (nothing when it is idle).
   $('#node-busy').hidden = !use.length;
   $('#node-busy').textContent = use.length
-    ? `Busy for linked PCs now: ${use.map(u => `${u.name} ${u.busy ? (u.kind === 'image' ? 'is drawing for' : 'is answering') : 'is loaded for'} ${pcs(u)}`).join('; ')}.${use.some(u => !u.busy) ? ' A model loaded for a linked PC is dropped by itself after 60 seconds unused (a picture model: 10 minutes after its last picture).' : ''}`
+    ? `Busy for linked PCs now: ${use.map(u => `${u.name} ${u.busy ? (u.kind === 'image' ? 'is drawing for' : 'is answering') : 'is loaded for'} ${pcs(u)}`).join('; ')}.${use.some(u => !u.busy) ? ' A model loaded for a linked PC is dropped by itself after 10 minutes unused (a picture model: 10 minutes after its last picture).' : ''}`
     : '';
   $('#node-busy').dataset.busy = use.some(u => u.busy) ? 'yes' : use.length ? 'loaded' : 'no';
   const list = sh.shareable ?? [];
@@ -785,8 +829,8 @@ function drawNodeShare(sh) {
   const chat = list.filter(m => m.kind !== 'image');
   const pics = list.filter(m => m.kind === 'image');
   $('#node-share-list').replaceChildren(...(list.length ? [
-    ...(chat.length ? [el('p', { class: 'hint', text: 'Standard models:' }), el('ul', {}, ...chat.map(row))] : []),
-    ...(pics.length ? [el('p', { class: 'hint', text: 'Image creation models:' }), el('ul', {}, ...pics.map(row))] : []),
+    ...(chat.length ? [el('p', { class: 'hint', text: 'Chat models:' }), el('ul', {}, ...chat.map(row))] : []),
+    ...(pics.length ? [el('p', { class: 'hint', text: 'Picture models:' }), el('ul', {}, ...pics.map(row))] : []),
   ] : [el('p', { class: 'hint', text: 'No models on this PC yet. Get one under Models: linked PCs can use it straight away.' })]));
   $('#node-share-line').textContent = list.length ? `${list.length} model${list.length > 1 ? 's' : ''}: linked PCs can hire staff on ${list.length > 1 ? 'any of them' : 'it'}.` : '';
 }
@@ -822,6 +866,13 @@ function askAppPin(fault) {
       if (nodePinClosing > 0) nodePinClosing--;
       else end(null);
     };
+    // A1: the app lock may be a password: the box and its words follow the kind.
+    const kind = app.lockKind?.() ?? 'pin';
+    const w = kind === 'password' ? 'password' : 'PIN';
+    app.fitSecret?.($('#node-pin-input'), kind);
+    $('#node-pin-title').textContent = `Type the app lock ${w}`;
+    $('#node-pin-label').textContent = kind === 'password' ? 'Password' : 'PIN';
+    $('#node-pin-about').textContent = `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;
     $('#node-pin-fault').textContent = fault ?? '';
     $('#node-pin-fault').hidden = !fault;
     $('#node-pin-input').value = '';
@@ -967,7 +1018,7 @@ $('#node-scan').addEventListener('click', async () => {
       const again = f.linked && !f.broken ? el('button', { class: 'link', type: 'button', text: 'Not working? Link it again', onclick: e => { form.hidden = false; e.target.remove(); code.focus(); } }) : null;
       return el('article', { class: 'node-card' },
         el('div', { class: 'node-head' }, el('strong', { text: f.name }), el('span', { class: 'hint', text: f.url.replace('http://', '') })),
-        f.broken ? el('span', { class: 'hint', text: 'Linked before, but that link no longer works. Type its setup code (shown on that PC under Network: connect PCs) and press Link again.' })
+        f.broken ? el('span', { class: 'hint', text: 'Linked before, but that link no longer works. Type its setup code (shown on that PC under Network) and press Link again.' })
           : f.linked ? el('span', { class: 'hint ok', text: '✓ Linked from this PC before' }) : null, again,
         form,
         fault);
@@ -1073,9 +1124,9 @@ function drawOthers(pcs) {
               return el('li', {}, `${m.name}${bit ? ` (${bit})` : ''}`, m.kind !== 'image' && m.guessers?.length ? guessPick(p, m) : null,
                 m.kind !== 'image' && p.can?.includes('tune') ? el('div', { class: 'guess-pick' }, app.finderButton(`remote:${p.id}:${m.id}`, { name: m.name, pcName: p.name, link: true })) : null);
             })))),
-          p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network: connect PCs, Sharing permissions).` }) : null,
+          p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network, Sharing permissions).` }) : null,
           el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Hire staff on it', 'data-key': `hire:${p.id}`, title: `Opens Hire staff with ${p.name} picked: then choose one of its models`, onclick: () => app.openHire?.({ pc: p.id }) })))
-        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Network: connect PCs, tick the models other PCs may use.' })) : null,
+        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Network, tick the models other PCs may use.' })) : null,
       // How fast its loaded model answers for this PC (its answers here are timed; Test speed runs the example prompt there).
       p.ok && p.model && !away && !p.backupsOnly ? el('span', { class: 'hint' }, p.speed?.expect ? `Speed: ${app.speedWords(p.speed.expect)} (${p.speed.basis === 'answers' ? `the average of ${p.speed.average.n} answers` : 'tested'}) · ` : 'Speed: not measured yet · ', app.speedLink(`remote:${p.id}`, msg => sayHere($('#node-others-ask'), msg), refreshOthers)) : null,
       el('div', { class: 'team-actions' }, back, el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => {
@@ -1129,7 +1180,7 @@ async function refreshOthers() {
     drawOthers([]);
   }
 }
-/** "Its settings" in a PC's window: Network: connect PCs (this PC as a node, or the linked PCs). */
+/** "Its settings" in a PC's window: Network (this PC as a node, or the linked PCs). */
 app.pcMore = id => (id === 'here' ? openNodes() : app.openPcs());
 
 function openNodes() {
@@ -1358,7 +1409,7 @@ function drawUpdateAll(pcs) {
     const failed = [];
     for (const p of can) await api('/api/network/update', { pc: p.id }).catch(err => failed.push(`"${p.name}": ${err.message}`));
     $('#node-update-all-line').textContent = failed.length ? `Not started on ${failed.join(' ')}` : '';
-    // The updates under way show in My local LLMs, each with its own line.
+    // The updates under way show in Models on my other PCs, each with its own line.
     if (failed.length < can.length) app.openNet?.();
     refreshOthers();
   };

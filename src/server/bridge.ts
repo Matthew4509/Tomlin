@@ -2,7 +2,7 @@
 // started in TOMLIN's own process and drawn on its own page at /bridge/ in its own look. TOMLIN's checks
 // (this PC's address, its own page's origin, the app lock) run first in src/server.ts; this hands the request on.
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HOME, PORT, ROOT, json, sampler } from './core.ts';
@@ -43,6 +43,64 @@ export function startBridge(): void {
     console.error('The Bridge part (projects, audits, prompts) could not start:', error);
   }
 }
+
+interface BridgeProject { id: string; dir: string; name: string }
+interface BridgeParts {
+  keyOf(dir: string): string;
+  state: { projects: BridgeProject[] };
+  refreshProjects(): BridgeProject[];
+  snapshot(p: BridgeProject, force: boolean): Promise<{ ok: boolean; at?: number; error?: string }>;
+  snapFile(p: BridgeProject): string;
+  iconOf(p: BridgeProject): { file: string; type: string } | null;
+  siteUrlOf(p: BridgeProject): Promise<string | null>;
+}
+let parts: BridgeParts | null = null;
+/** The Bridge's own modules, once it has started (null before, and in a copy where it did not start). */
+function bridgeParts(): BridgeParts | null {
+  if (!handle) return null;
+  if (!parts) {
+    const require = createRequire(import.meta.url);
+    const { keyOf } = require('../bridge/projects.js') as Pick<BridgeParts, 'keyOf'>;
+    const { state, refreshProjects } = require('../bridge/state.js') as Pick<BridgeParts, 'state' | 'refreshProjects'>;
+    const { snapshot, snapFile, iconOf } = require('../bridge/snaps.js') as Pick<BridgeParts, 'snapshot' | 'snapFile' | 'iconOf'>;
+    const { siteUrlOf } = require('../bridge/runner.js') as Pick<BridgeParts, 'siteUrlOf'>;
+    parts = { keyOf, state, refreshProjects, snapshot, snapFile, iconOf, siteUrlOf };
+  }
+  return parts;
+}
+/** The Bridge project in this folder (matched by folder only), or null. */
+function projectAt(b: BridgeParts, dir: string): BridgeProject | null {
+  const k = b.keyOf(dir);
+  return b.state.projects.find(p => b.keyOf(p.dir) === k) ?? b.refreshProjects().find(p => b.keyOf(p.dir) === k) ?? null;
+}
+
+/**
+ * A chat preview's picture (src/previews.ts): the Bridge's own picture of the site in a project's folder, its icon, and a
+ * new picture taken only when that site is running (the Bridge never starts a site or Edge for one).
+ */
+export const bridgePictures = {
+  find(dir: string): { at: number | null; icon: boolean } | null {
+    const b = bridgeParts();
+    const p = b && projectAt(b, dir);
+    if (!b || !p) return null;
+    let at: number | null = null;
+    try { at = Math.round(statSync(b.snapFile(p)).mtimeMs); } catch { /* no picture yet */ }
+    return { at, icon: !!b.iconOf(p) };
+  },
+  async take(dir: string): Promise<{ ok: boolean; running: boolean }> {
+    const b = bridgeParts();
+    const p = b && projectAt(b, dir);
+    if (!b || !p || !(await b.siteUrlOf(p))) return { ok: false, running: false };
+    return { ok: (await b.snapshot(p, true)).ok, running: true };
+  },
+  /** The picture's file, or the icon's file and type, for the window to show. */
+  file(dir: string, which: 'picture' | 'icon'): { file: string; type: string } | null {
+    const b = bridgeParts();
+    const p = b && projectAt(b, dir);
+    if (!b || !p) return null;
+    return which === 'icon' ? b.iconOf(p) : existsSync(b.snapFile(p)) ? { file: b.snapFile(p), type: 'image/png' } : null;
+  },
+};
 
 /** A project row's mark: its newest copy on a linked PC, and whether the project changed since. */
 export function rowsOf(v: BridgeBackups | null) {

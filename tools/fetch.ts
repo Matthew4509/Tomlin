@@ -6,7 +6,7 @@
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Runtimes, type Device, type Engine } from '../src/runtimes.ts';
+import { Runtimes } from '../src/runtimes.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const runtimes = new Runtimes(join(ROOT, 'runtime'), join(ROOT, 'runtimes.json'));
@@ -38,12 +38,12 @@ for (const id of ids) {
     process.exitCode = 1;
     continue;
   }
-  if (runtimes.installed(pin.engine as Engine, pin.device as Device)) {
+  if (runtimes.installedPin(id)) {
     console.log(`${pin.name}: already here.`);
     continue;
   }
   let shown = -1;
-  await runtimes.install(pin.engine, pin.device, p => {
+  await runtimes.installPin(id, p => {
     const pc = Math.floor((p.got / p.bytes) * 100);
     if (pc !== shown && pc % 10 === 0) console.log(`${pin.name}: ${p.checking ? 'checking' : `${pc}%`}`);
     shown = pc;

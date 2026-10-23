@@ -68,14 +68,20 @@ export interface ProjectFiles {
 }
 
 const require = createRequire(import.meta.url);
-const gitstate = require('./bridge/gitstate.js') as { gitConfigRisky(dir: string): boolean };
+const gitstate = require('./bridge/gitstate.js') as {
+  gitConfigRisky(dir: string): boolean;
+  fenced(dir: string): { args: string[]; env: Record<string, string> };
+};
 
 /** `git ls-files`: what git keeps of a repository (saved, and new but not ignored). null when git cannot say. */
 function gitList(dir: string): Promise<{ paths: string[] } | { error: string }> {
+  // Kept inside the project folder, as the Bridge's git calls are: git never takes the folder itself as a bare
+  // repository, nor a repository above it (neither had their settings checked).
+  const fence = gitstate.fenced(dir);
   return new Promise(done => {
-    execFile('git', ['-c', 'core.fsmonitor=false', '-C', dir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    execFile('git', ['-c', 'core.fsmonitor=false', ...fence.args, '-C', dir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
       timeout: 60_000, windowsHide: true, maxBuffer: 256 * 2 ** 20,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...fence.env },
     }, (err, stdout) => {
       if (err) return done({ error: (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'Git is not installed on this PC' : 'git could not list its files' });
       done({ paths: [...new Set(String(stdout).split('\0').filter(Boolean))] });

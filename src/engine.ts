@@ -207,6 +207,8 @@ export interface Streamed {
   perSecond: number;
   /** Tokens of the prompt read a second (0 when the model did not say). */
   read: number;
+  /** How many tokens of the prompt it read this turn (what was cached not counted; 0 when it did not say). */
+  readTokens?: number;
   /** True when the answer stopped because it reached its length limit (not because it was finished). */
   cut: boolean;
   /** What the model worked out before its answer ('' when it did not think), and for how many seconds. */
@@ -237,6 +239,27 @@ export interface AskOpts {
   rid?: string;
   /** How far the model is through reading the prompt, before the first word (a long chat takes minutes on a slow PC). */
   onReading?: (r: Reading) => void;
+  /** Tools the model may call while it answers (a chat with Web on: src/webtools.ts). */
+  tools?: ToolBox;
+  /** Web on, for an answer a linked PC writes: its web tools run there (src/jobrun/links.ts remoteBrain). */
+  web?: { seed: string[]; perCall: number; total: number };
+  /** Inside a round of tool calls: the calls and what they gave so far, sent after the turns (set by streamChat). */
+  toolTurns?: Record<string, unknown>[];
+  /** Which round of tool calls this is, 0 the first (set by streamChat). */
+  round?: number;
+}
+
+/**
+ * Tools for one answer: their definitions (OpenAI's form, which llama-server takes) and running one by name with the
+ * arguments the model wrote. `rounds`: how many rounds of calls before the answer is asked for with the tools off.
+ */
+export interface ToolBox {
+  defs: unknown[];
+  /** `round`: which round of calls this is, 0 the first. */
+  run: (name: string, args: string, signal: AbortSignal, round: number) => Promise<string>;
+  /** Told as each call starts, with its name and the arguments as the model wrote them. */
+  onCall?: (name: string, args: string) => void;
+  rounds: number;
 }
 
 /**
@@ -304,12 +327,15 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
   if (signal.aborted) ac.abort();
   // Answer now: set once the stream is open (below).
   let hurry: (() => void) | null = null;
+  // Tools: offered while rounds are left; the last round says none may be called, so the model answers in words.
+  const round = opts.round ?? 0;
+  const tools = opts.tools ? { tools: opts.tools.defs, tool_choice: round >= opts.tools.rounds ? 'none' : 'auto' } : {};
   try {
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
       // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word.
-      body: JSON.stringify({ messages: turnsFor(turns, style), stream: true, max_tokens: maxTokens, ...style.sampling, ...(opts.onReading ? { return_progress: true } : {}) }),
+      body: JSON.stringify({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, ...(opts.onReading ? { return_progress: true } : {}) }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {
@@ -346,6 +372,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     let tokens = 0;
     let perSecond = 0;
     let read = 0;
+  let readTokens = 0;
     let cut = false;
     let timings: Parameters<typeof usedFromTimings>[0] = null;
     // Each streamed piece is one token from llama.cpp: counted with the clock, for the speed when its own timings never
@@ -353,6 +380,8 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     let pieces = 0;
     let firstAt = 0;
     let lastAt = 0;
+    // Tool calls, as they stream in: each by its index, its name once, its arguments in pieces.
+    const calls: { id: string; name: string; args: string }[] = [];
     let buffer = '';
     const decoder = new TextDecoder();
     try {
@@ -365,7 +394,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
           if (!line.startsWith('data:')) continue;
           const data = line.slice(5).trim();
           if (data === '[DONE]') continue;
-          let msg: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string | null }>; timings?: { predicted_n?: number; predicted_per_second?: number; prompt_n?: number; prompt_per_second?: number; prompt_ms?: number; predicted_ms?: number } };
+          let msg: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string | null }>; timings?: { predicted_n?: number; predicted_per_second?: number; prompt_n?: number; prompt_per_second?: number; prompt_ms?: number; predicted_ms?: number } };
           try {
             msg = JSON.parse(data);
           } catch {
@@ -377,7 +406,14 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
             if (r) opts.onReading(r);
           }
           const thinking = msg.choices?.[0]?.delta?.reasoning_content;
-          if (thinking || msg.choices?.[0]?.delta?.content) {
+          for (const c of msg.choices?.[0]?.delta?.tool_calls ?? []) {
+            const k = Number.isInteger(c.index) && c.index! >= 0 && c.index! < 16 ? c.index! : calls.length;
+            calls[k] ??= { id: '', name: '', args: '' };
+            if (c.id) calls[k].id = c.id;
+            if (c.function?.name && !calls[k].name) calls[k].name = c.function.name;
+            if (c.function?.arguments) calls[k].args += c.function.arguments;
+          }
+          if (thinking || msg.choices?.[0]?.delta?.content || msg.choices?.[0]?.delta?.tool_calls?.length) {
             pieces++;
             lastAt = Date.now();
             firstAt ||= lastAt;
@@ -409,6 +445,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
             const { prompt_n: n, prompt_per_second: ps } = msg.timings;
             if (n && ps && msg.choices?.[0]?.finish_reason) readings.seen?.(model, n, ps);
             if (ps) read = ps;
+            if (n) readTokens = n;
           }
         }
       }
@@ -430,11 +467,35 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     // anyway, so it is asked only when he pressed Answer now), with the working so far, which is kept with the answer.
     // (Set inside the stream's callbacks, which the type checker does not follow.)
     const why = stopped as ThoughtStop | null;
+    // The model asked for tools: each one is run, and it is asked again with what they gave (the answer so far is
+    // written afresh), until it answers in words or the rounds are used up.
+    const asked = calls.filter(c => c?.name);
+    if (asked.length && opts.tools && round < opts.tools.rounds && !why && !signal.aborted) {
+      // The words before the calls ("I will look that up") are not the answer: the next round writes it.
+      onText('');
+      const ids = asked.map((c, i) => c.id || `call_${round}_${i}`);
+      const said: Record<string, unknown>[] = [{ role: 'assistant', content: visibleText(raw), tool_calls: asked.map((c, i) => ({ id: ids[i], type: 'function', function: { name: c.name, arguments: c.args || '{}' } })) }];
+      for (const [i, c] of asked.entries()) {
+        opts.tools.onCall?.(c.name, c.args);
+        let out: string;
+        try {
+          out = await opts.tools.run(c.name, c.args, signal, round);
+        } catch (e) {
+          if (signal.aborted) throw e;
+          out = `The tool did not work: ${(e as Error).message}`;
+        }
+        said.push({ role: 'tool', tool_call_id: ids[i], content: out });
+      }
+      const next = await streamChat(base, model, turns, onText, signal, maxTokens, { ...opts, toolTurns: [...(opts.toolTurns ?? []), ...said], round: round + 1 });
+      return { ...next, thought: [thought, next.thought].filter(Boolean).join('\n\n'), thoughtSeconds: thoughtSeconds + next.thoughtSeconds };
+    }
     if (why && !signal.aborted && !opts.final && (thinksOf(model) === 'switch' || why === 'hurry')) {
-      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - THINK_ROOM), { plain: opts.plain, final: true });
+      // What the tools gave goes with it (Answer now in a later round must not lose the pages read), calls off.
+      const web = opts.tools && opts.toolTurns?.length ? { tools: opts.tools, toolTurns: opts.toolTurns, round: opts.tools.rounds } : {};
+      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - THINK_ROOM), { plain: opts.plain, final: true, ...web });
       return { ...again, thought, thoughtSeconds, thoughtStopped: why };
     }
-    return { text: why ? '' : visibleText(raw), tokens, perSecond, read, cut: cut && !why, thought, thoughtSeconds, ...(why ? { thoughtStopped: why } : {}) };
+    return { text: why ? '' : visibleText(raw), tokens, perSecond, read, readTokens, cut: cut && !why, thought, thoughtSeconds, ...(why ? { thoughtStopped: why } : {}) };
   } finally {
     signal.removeEventListener('abort', stop);
     if (hurry) opts.hurry?.removeEventListener('abort', hurry);

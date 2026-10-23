@@ -40,3 +40,50 @@ test('S5: a new PIN hash is made at a higher scrypt cost, kept in the file; an o
   // A cost that is not a sane power of two is not used (a damaged or doctored file).
   assert.equal(await pinMatches('2468', { ...old, cost: 3 }), false);
 });
+
+test('A1: a lock is a PIN or a password; a password is any length of 1 or more and keeps its spaces', async () => {
+  const { cleanSecret, cleanKind } = await import('../src/lock.ts');
+  assert.equal(cleanKind('password'), 'password');
+  assert.equal(cleanKind('pin'), 'pin');
+  assert.equal(cleanKind(undefined), 'pin', 'a file from before A1 (no kind) is a PIN');
+  assert.equal(cleanKind('other'), 'pin');
+  // A PIN keeps its rules: 4 to 12 digits, 4 allowed.
+  assert.equal(cleanSecret('pin', ' 12 34 '), '1234');
+  assert.equal(cleanSecret('pin', '123'), null);
+  assert.equal(cleanSecret('pin', 'abcd'), null);
+  // A password: nothing refused but empty (or too long to be one).
+  assert.equal(cleanSecret('password', 'a'), 'a');
+  assert.equal(cleanSecret('password', 'my dog Rex'), 'my dog Rex');
+  assert.equal(cleanSecret('password', '1234'), '1234');
+  assert.equal(cleanSecret('password', ''), null);
+  assert.equal(cleanSecret('password', undefined), null);
+  assert.equal(cleanSecret('password', 'x'.repeat(2000)), null);
+});
+
+test('A1: the strength line says weak, OK or strong, and refuses nothing', async () => {
+  const { strength } = await import('../src/lock.ts');
+  for (const w of ['a', '1234', 'password', 'aaaaaaaaaaaa', 'qwerty']) assert.equal(strength(w), 'weak', w);
+  for (const w of ['Rex2019dog', 'blue-kettle7']) assert.equal(strength(w), 'OK', w);
+  for (const w of ['maple river cloud stone', 'T7#qL!m2v@Rz9']) assert.equal(strength(w), 'strong', w);
+});
+
+test('A1: Generate gives plain words, picked at random from a long list', async () => {
+  const { generateWords, WORDS } = await import('../src/lock.ts');
+  assert.ok(new Set(WORDS).size >= 1000, `${new Set(WORDS).size} words`);
+  assert.equal(new Set(WORDS).size, WORDS.length, 'no word twice in the list');
+  for (const w of WORDS) assert.match(w, /^[a-z]{3,8}$/, w);
+  const four = generateWords(4);
+  assert.equal(four.split(' ').length, 4);
+  for (const w of four.split(' ')) assert.ok(WORDS.includes(w), w);
+  assert.equal(generateWords(5).split(' ').length, 5);
+  assert.notEqual(generateWords(4), generateWords(4));
+});
+
+test('A1: hashSecret and secretMatches are the PIN helpers under their new names', async () => {
+  const { hashSecret, secretMatches } = await import('../src/lock.ts');
+  assert.equal(hashSecret, hashPin);
+  assert.equal(secretMatches, pinMatches);
+  const f = await hashSecret('long pass phrase');
+  assert.equal(await secretMatches('long pass phrase', f), true);
+  assert.equal(await secretMatches('long pass phrasE', f), false);
+});

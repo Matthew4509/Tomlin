@@ -22,8 +22,14 @@ export interface RunnerHello {
   driver: string | null;
   /** Why the CUDA runner cannot help there ('' when it can). */
   why: string;
-  /** Its CUDA chat runner. */
+  /** Its CUDA chat runner (the CUDA 12.4 build). */
   cuda: RunnerState;
+  /**
+   * Each CUDA build of the chat runner it pins, by id (llama-cuda, llama-cuda13): how it is there and why it cannot
+   * take it ('' when it can); `best` is the one that suits its card. Unset: an older TOMLIN that knows one build only.
+   */
+  pins?: Record<string, { state: RunnerState; why: string }>;
+  best?: string;
   /** The last word about it (ready, or why it failed). */
   said: string;
   /** The last chat model start there: on which device, how long it took, and the runner's own lines about the card. */
@@ -38,6 +44,20 @@ export function startFact(line: string): boolean {
   return /ggml_cuda_init:|^\s*Device \d+:|ggml_vulkan: (Found|\d+ =)|offloaded \d+\/\d+ layers|graph splits|no usable GPU|using device/i.test(line);
 }
 
+/**
+ * Why a card runner's start counts as failed although it answered ('' when it is fine): it put the layers somewhere
+ * (its "offloaded N/M layers" line, which it writes on the CPU too) but never said it used a card of its kind ("using
+ * device CUDA0"), so the model went on the CPU. A CUDA build on a PC with no NVIDIA driver, or with no code for the card,
+ * lists no device and carries on without one. With no such lines at all (an older runner, or a quieter start) nothing
+ * is known, and nothing is held against it.
+ */
+export function noCardStart(device: Device, facts: string[]): string {
+  if (device === 'cpu' || !facts.some(l => /offloaded \d+\/\d+ layers/i.test(l))) return '';
+  const kind = device === 'cuda' ? 'CUDA' : 'Vulkan';
+  if (facts.some(l => new RegExp(`using device ${kind}\\d`, 'i').test(l))) return '';
+  return `the ${kind} runner found no card it can use on this PC and loaded the model on the CPU`;
+}
+
 /** A runner part of a hello as the host keeps it: each field checked, the words cut short; null from an older TOMLIN. */
 export function cleanRunner(raw: unknown): RunnerHello | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -49,6 +69,7 @@ export function cleanRunner(raw: unknown): RunnerHello | null {
     driver: typeof o.driver === 'string' && /^\d+(\.\d+)+$/.test(o.driver) ? o.driver : null,
     why: text(o.why, 300),
     cuda: STATES.includes(o.cuda as RunnerState) ? (o.cuda as RunnerState) : 'none',
+    ...cleanPins(o.pins, o.best),
     said: text(o.said, 300),
     last: l
       ? {
@@ -58,6 +79,21 @@ export function cleanRunner(raw: unknown): RunnerHello | null {
       }
       : null,
   };
+}
+
+/** A CUDA build's id as a hello may name it. */
+const PIN_ID = /^llama-cuda\d{0,2}$/;
+
+/** A hello's builds, each field checked (at most 4, unknown ids dropped); nothing when it named none. */
+function cleanPins(raw: unknown, best: unknown): Pick<RunnerHello, 'pins' | 'best'> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const pins: Record<string, { state: RunnerState; why: string }> = {};
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>).slice(0, 4)) {
+    if (!PIN_ID.test(id) || !v || typeof v !== 'object') continue;
+    const o = v as Record<string, unknown>;
+    pins[id] = { state: STATES.includes(o.state as RunnerState) ? (o.state as RunnerState) : 'none', why: typeof o.why === 'string' ? o.why.slice(0, 300) : '' };
+  }
+  return { pins, ...(typeof best === 'string' && pins[best] ? { best } : {}) };
 }
 
 /** A linked PC as far as sending it a runner goes. */
@@ -70,22 +106,30 @@ export interface RunnerPc {
   runner: RunnerHello | null;
 }
 
-/** Why the CUDA runner cannot be sent to a linked PC now ('' when it can). */
-export function sendRunnerWhy(pc: RunnerPc): string {
+/** How build `id` is on a linked PC, from its hello: an older TOMLIN only says how its CUDA 12.4 build is. */
+export function pinThere(h: RunnerHello, id: string): { state: RunnerState; why: string } | null {
+  if (h.pins) return h.pins[id] ?? null;
+  return id === 'llama-cuda' ? { state: h.cuda, why: h.why } : null;
+}
+
+/** Why CUDA build `id` cannot be sent to a linked PC now ('' when it can). */
+export function sendRunnerWhy(pc: RunnerPc, id = 'llama-cuda'): string {
   if (!pc.ok) return `"${pc.name}" is off or not answering now.`;
   if (pc.away) return `"${pc.name}" is being used by its owner for now.`;
-  if (!pc.can.includes('runner') || !pc.runner) return `"${pc.name}" runs an older TOMLIN that cannot take a runner: update it first (Network: connect PCs, Update).`;
+  if (!pc.can.includes('runner') || !pc.runner) return `"${pc.name}" runs an older TOMLIN that cannot take a runner: update it first (Network, Update).`;
   if (pc.backupsOnly) return `"${pc.name}" is set to Backups only: no runner is sent to it (untick Backups only on its card to use it for models).`;
-  if (pc.runner.why) return pc.runner.why;
-  if (pc.runner.cuda === 'installed') return `"${pc.name}" already has it.`;
+  const there = pinThere(pc.runner, id);
+  if (!there) return `"${pc.name}" runs an older TOMLIN that does not know this runner: update it first (Network, Update).`;
+  if (there.why) return there.why;
+  if (there.state === 'installed') return `"${pc.name}" already has it.`;
   return '';
 }
 
 export interface RunnerNodeDeps {
   runtimes: Runtimes;
   pcName: () => string;
-  /** Why this PC cannot use a runner for `device` ('' when it can): src/runtimes.ts runnerWhy with its own cards. */
-  why: (device: Device) => string;
+  /** Why this PC cannot use build `id` ('' when it can): src/runtimes.ts pinWhy with its own cards. */
+  why: (id: string) => string;
   freeBytes?: (dir: string) => Promise<number>;
   /** True while a model runs on that device here (its runner cannot be taken away then). */
   inUse?: (device: Device) => boolean;
@@ -111,8 +155,7 @@ export function runnerSide(d: RunnerNodeDeps) {
   function state(id: string): { state: RunnerState; said: string } {
     const job = jobs.get(id);
     if (job && job.state !== 'installed') return { ...job };
-    const pin = d.runtimes.pins[id];
-    if (pin && d.runtimes.installed(pin.engine, pin.device)) return { state: 'installed', said: job?.said ?? '' };
+    if (d.runtimes.pins[id] && d.runtimes.installedPin(id)) return { state: 'installed', said: job?.said ?? '' };
     return { state: 'none', said: '' };
   }
 
@@ -122,12 +165,12 @@ export function runnerSide(d: RunnerNodeDeps) {
     const pin = d.runtimes.pins[id];
     if (!pin) return `"${d.pcName()}" does not know the runner ${id || '(none named)'}: update TOMLIN there first.`;
     if (pin.device !== 'cuda') return 'Only the NVIDIA (CUDA) runners are sent between PCs; the others come with TOMLIN.';
-    const why = d.why(pin.device);
+    const why = d.why(id);
     if (why) return why;
     const sent = (Array.isArray(b.parts) ? b.parts : []).slice(0, 8).map(p => (p && typeof p === 'object' ? (p as Record<string, unknown>) : {}));
     const same = sent.length === pin.parts.length && pin.parts.every((p, k) => sent[k].sha256 === p.sha256 && int(sent[k].bytes) === p.bytes);
     if (!same) return `"${d.pcName()}" pins another build of that runner: update TOMLIN on both PCs so they are the same version.`;
-    return { id, pin, engine: pin.engine, device: pin.device, files: pin.parts.map((p, k) => ({ path: d.runtimes.zipOf(pin.engine, pin.device, k), bytes: p.bytes, sha256: p.sha256 })) };
+    return { id, pin, engine: pin.engine, device: pin.device, files: pin.parts.map((p, k) => ({ path: d.runtimes.zipOfPin(id, k), bytes: p.bytes, sha256: p.sha256 })) };
   }
 
   const allWhole = async (files: { path: string; bytes: number }[]) => (await Promise.all(files.map(f => sizeOf(f.path)))).every((n, k) => n === files[k].bytes);
@@ -144,7 +187,7 @@ export function runnerSide(d: RunnerNodeDeps) {
         }
       }
       job.state = 'unpacking';
-      await d.runtimes.unpack(a.engine, a.device, a.files.map(f => f.path));
+      await d.runtimes.unpackPin(a.id, a.files.map(f => f.path));
       job.state = 'installed';
       job.said = `${a.pin.name} is ready on "${d.pcName()}": the next model loaded there uses it.`;
       d.onChange?.();
@@ -160,11 +203,12 @@ export function runnerSide(d: RunnerNodeDeps) {
       return { status: 200, json: { ...state(id) } };
     }
     if (p === '/worker/runner-remove') {
-      const pin = d.runtimes.pins[typeof b.id === 'string' ? b.id : ''];
+      const id = typeof b.id === 'string' ? b.id : '';
+      const pin = d.runtimes.pins[id];
       if (!pin || pin.device !== 'cuda') return no(400, 'Only a runner sent here can be taken away from here.');
       if (d.inUse?.(pin.device)) return no(409, `a model runs on it on "${d.pcName()}" now: drop that model there first, then remove the runner.`);
       try {
-        await d.runtimes.remove(pin.engine, pin.device);
+        await d.runtimes.removePin(id);
       } catch (e) {
         return no(409, `It could not be taken away on "${d.pcName()}" (${(e as Error).message.replace(/\.$/, '')}). Drop every model there and try again.`);
       }

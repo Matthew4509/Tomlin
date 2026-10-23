@@ -19,7 +19,7 @@ async function put(file: string, text: string) {
   await mkdir(join(file, '..'), { recursive: true });
   await writeFile(file, text);
 }
-const SETTINGS = { managerName: 'Ann', remotes: [{ id: 'p1', name: 'Laptop', url: 'http://192.168.1.20:8741', token: 't'.repeat(64), key: 'K1' }, { id: 'p2', name: 'Box', url: 'http://192.168.1.30:8741', token: 'u'.repeat(64) }] };
+const SETTINGS = { managerName: 'Ann', webSearch: { provider: 'brave', key: 'BSA-paid-key-1234' }, remotes: [{ id: 'p1', name: 'Laptop', url: 'http://192.168.1.20:8741', token: 't'.repeat(64), key: 'K1' }, { id: 'p2', name: 'Box', url: 'http://192.168.1.30:8741', token: 'u'.repeat(64) }] };
 async function home() {
   const top = mkdtempSync(join(tmpdir(), 'tomlin-elsewhere-'));
   made.push(top);
@@ -45,6 +45,9 @@ test('a restore point for another PC leaves out the link keys, the sharing code 
   const s = JSON.parse(inZip(join(h.backups, away), 'settings.json'));
   assert.equal(s.managerName, 'Ann');
   assert.deepEqual(s.remotes.map((r: Record<string, unknown>) => [r.id, r.token, 'key' in r]), [['p1', '', false], ['p2', '', false]]);
+  // The web search key (a paid Brave key) stays here too; the choice of engine goes.
+  assert.deepEqual(s.webSearch, { provider: 'brave' });
+  assert.ok(!inZip(join(h.backups, away), 'settings.json').includes('BSA-paid-key'));
   // The data itself is not touched.
   assert.equal(JSON.parse(await readFile(join(h.data, 'settings.json'), 'utf8')).remotes[0].token, 't'.repeat(64));
   await new Promise(r => setTimeout(r, 1100));
@@ -58,7 +61,7 @@ test('putting one back keeps this PC\'s own keys, sharing and PIN, and brings ba
   // Later: a chat changed, the PIN changed, a link key changed.
   await put(join(h.data, 'chats', 'c1.json'), '["changed"]');
   await put(join(h.data, 'app-lock.json'), '{"hash":"NEW-PIN"}');
-  await put(join(h.data, 'settings.json'), JSON.stringify({ ...SETTINGS, remotes: [{ ...SETTINGS.remotes[0], token: 'n'.repeat(64), key: 'K2' }] }));
+  await put(join(h.data, 'settings.json'), JSON.stringify({ ...SETTINGS, webSearch: { provider: 'brave', key: 'BSA-new-key-5678' }, remotes: [{ ...SETTINGS.remotes[0], token: 'n'.repeat(64), key: 'K2' }] }));
   const note = await keep.restore(h, away, '2.0.55');
   assert.match(note, /Restored the backup/);
   assert.match(note, /kept on another PC/);
@@ -69,6 +72,8 @@ test('putting one back keeps this PC\'s own keys, sharing and PIN, and brings ba
   // p1 takes this PC's key as it is now; p2 is no longer linked here, so it comes back without one (link it again).
   assert.deepEqual(s.remotes.map((r: Record<string, unknown>) => [r.id, r.token, r.key ?? null]), [['p1', 'n'.repeat(64), 'K2'], ['p2', '', null]]);
   assert.ok(!(await readFile(join(h.data, 'settings.json'), 'utf8')).includes('u'.repeat(64)));
+  // This PC's web search key as it is now.
+  assert.deepEqual(s.webSearch, { provider: 'brave', key: 'BSA-new-key-5678' });
   await assert.rejects(readFile(join(h.data, keep.ELSEWHERE_MARK)));
 });
 

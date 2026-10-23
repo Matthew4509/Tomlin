@@ -31,6 +31,22 @@ const MAX_NOTES = 1600;
 
 export type StepStatus = 'todo' | 'done' | 'skipped';
 
+/**
+ * How far a job's steps are, never calling a skipped step done: `words` is "2 of 5 steps done" (", 1 skipped" after
+ * it when one was), "All 5 steps done", or "All steps finished: 4 done, 1 skipped". `finished`: done and skipped.
+ */
+export function stepCount(steps: { status: StepStatus }[]): { done: number; skipped: number; finished: number; total: number; all: boolean; words: string } {
+  const total = steps.length;
+  const done = steps.filter(s => s.status === 'done').length;
+  const skipped = steps.filter(s => s.status === 'skipped').length;
+  const finished = done + skipped;
+  const all = total > 0 && finished === total;
+  const words = all
+    ? skipped ? `All steps finished: ${done} done, ${skipped} skipped` : `All ${total} step${total === 1 ? '' : 's'} done`
+    : `${done} of ${total} step${total === 1 ? '' : 's'} done${skipped ? `, ${skipped} skipped` : ''}`;
+  return { done, skipped, finished, total, all, words };
+}
+
 export interface Step {
   title: string;
   role: string;
@@ -63,6 +79,8 @@ export interface Job {
   folder?: string;
   /** Who does what on this job; none = every seat on its default. */
   team?: Team;
+  /** Web on for this job: its steps' model may search the web and read pages (src/webtools.ts). */
+  web?: boolean;
 }
 
 /**
@@ -229,6 +247,15 @@ export function parsePlan(text: string): Step[] {
     }
   }
   return steps.slice(0, PLAN_STEPS);
+}
+
+/**
+ * The texts whose web addresses a step with Web on may open: only what the person wrote (the goal, their notes for the
+ * step). Not the job's notes or a step's brief: models write those, so a page read in one step could plant an address
+ * there for the next.
+ */
+export function webSeedOf(job: Job, ownerNotes: string[]): string[] {
+  return [job.goal, ...ownerNotes];
 }
 
 /** Records a finished step in the job's notes, keeping the newest lines when it grows past the limit. */

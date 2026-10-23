@@ -1,4 +1,5 @@
 // One step: sized to its worker, run with checks and retries, saved, and read by the reviewer.
+import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, webWords, type ToolUse } from '../webtools.ts';
 import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import * as jobs from '../jobs.ts';
@@ -9,7 +10,9 @@ import { checkMessage, REFUSAL } from '../filter.ts';
 import { roleOf, levelOf, type StaffMember } from '../staff.ts';
 import * as home from '../home.ts';
 import * as seats from '../seats.ts';
-import type { Send } from './shared.ts';
+import { d, type Send } from './shared.ts';
+import type { AskOpts } from '../engine.ts';
+import * as memory from '../memory.ts';
 import { brainForRef } from './who.ts';
 import { workAs } from '../meter.ts';
 import { lostOf } from './links.ts';
@@ -32,7 +35,7 @@ export async function doStep(job: Job, i: number, send: Send, signal: AbortSigna
   const ids = notes.map(x => x.id);
   const r = await runStep(job, i, send, signal, notes.map(x => x.text), worker => addEvent(job.id, { type: 'step', n: i, title: step.title, role: step.role, worker, notes: ids }), sized.seat);
   if ('error' in r) await addEvent(job.id, { type: 'failed', n: i, role: step.role, error: r.error });
-  else await addEvent(job.id, { type: 'result', n: i, role: step.role, files: r.result.files.map(f => f.path), flags: r.result.problems.length + r.result.warnings.length, worker: r.result.worker, tries: r.result.tries, notes: ids });
+  else await addEvent(job.id, { type: 'result', n: i, role: step.role, files: r.result.files.map(f => f.path), flags: r.result.problems.length + r.result.warnings.length, worker: r.result.worker, tries: r.result.tries, notes: ids, ...(r.result.web?.length ? { web: webWords(r.result.web) } : {}) });
   return r;
 }
 
@@ -89,6 +92,20 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   let user = first;
   let parsed: jobs.Result = { files: [], summary: '', dropped: [] };
   let raw = '';
+  // Web on for this job: the addresses its person gave (the goal, their notes: jobs.webSeedOf) may be opened, in the
+  // room the step's context has left. A model on this PC gets the tools; a linked PC that writes the step runs them itself.
+  const web: ToolUse[] = [];
+  const webAsk = async (): Promise<AskOpts | undefined> => {
+    if (job.web !== true) return undefined;
+    const left = Math.max(0, brain.ctx * memory.CHARS_PER_TOKEN - system.length - user.length - b.answer * memory.CHARS_PER_TOKEN);
+    const total = Math.max(2000, Math.min(40_000, Math.floor(left * 0.6)));
+    const perCall = Math.max(1500, Math.min(10_000, Math.floor(total / 3)));
+    const seed = jobs.webSeedOf(job, ownerNotes);
+    const turn = new WebTurn(seed, { search: (await d.store.settings()).webSearch ?? { provider: 'duckduckgo' }, perCall, total, onStatus: text => send('stage', { text }) });
+    webTurns.push(turn);
+    return { tools: { defs: WEB_TOOLS, run: (n, a, s, r) => turn.run(n, a, s, r), rounds: WEB_ROUNDS, onCall: (n, a) => send('stage', { text: callWords(n, a) }) }, web: { seed, perCall, total } };
+  };
+  const webTurns: WebTurn[] = [];
   let checks: CheckResult[] = [];
   let problems: string[] = [];
   let tries = 0;
@@ -96,7 +113,8 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     tries = attempt + 1;
     if (attempt) send('stage', { text: `Check failed: ${problems[0]} Asking the ${role} to fix it (try ${attempt + 1} of 3).` });
     try {
-      raw = await brain.ask(system, user, b.answer, text => send('text', { text }), signal);
+      raw = await brain.ask(system, user, b.answer, text => send('text', { text }), signal, await webAsk());
+      web.push(...(webTurns.at(-1)?.uses.length ? webTurns.at(-1)!.uses : brain.tools ?? []));
     } catch (e) {
       // The linked PC carries on and keeps the result: running the step again collects it instead of doing it again.
       if (lostOf(e)) return { error: `${(e as Error).message} Press Run step ${i + 1} again once that PC is back: its finished work is collected, not done again.` };
@@ -126,7 +144,7 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     user = `${first}\n\n${jobs.fixMessage(problems, step.files, edit)}`;
   }
   const warnings = jobs.crossCheck(await webFiles(root, parsed.files));
-  return { result: { ...parsed, raw, checks, problems, warnings, base: Object.fromEntries(step.files.map(f => [f, textHash(texts[f] ?? null)])), exists: Object.fromEntries(step.files.map(f => [f, texts[f] != null])), tries, worker: brain.label } };
+  return { result: { ...parsed, raw, checks, problems, warnings, base: Object.fromEntries(step.files.map(f => [f, textHash(texts[f] ?? null)])), exists: Object.fromEntries(step.files.map(f => [f, texts[f] != null])), tries, worker: brain.label, ...(web.length ? { web } : {}) } };
 }
 
 /** A file's text as a short fingerprint (null: no file), kept with a step's result to see a change made after it ran. */

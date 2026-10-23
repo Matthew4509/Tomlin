@@ -7,11 +7,11 @@ import { staffSystem } from '../staff.ts';
 import { createJobs } from '../jobrun.ts';
 import * as keep from '../keep.ts';
 import * as carry from '../carry.ts';
-import { runnerWhy } from '../runtimes.ts';
+import { pinWhy } from '../runtimes.ts';
 import { BUILD, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
 import { scope } from '../meter.ts';
-import { appLock, appLockOn, appPinCheck } from './locks.ts';
-import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
+import { appLock, appLockOn, appPinCheck, recoveryHashes, sameAsLock, whenCodesChange } from './locks.ts';
+import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcProgram, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
 import { answeringBusy, stepAnswers, stopOn } from './answering.ts';
 import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
 import { tellJob } from './notices.ts';
@@ -98,10 +98,14 @@ export function startJobs(): void {
     },
     onNodeAway: name => void notifier.tell('stuck', `${name}: I need to log off for now. Its work goes to other PCs.`, 'nodes:').catch(() => undefined),
     onNodeAsk: (name, hours) => void notifier.tell('stuck', `${name}: ${askText(hours)}. Answer it on Home.`, 'nodes:').catch(() => undefined),
+    onClaim: (name, pc) => void notifier.tell('question', `${name} wants their backups on a new PC (${pc}). Allow or Don't allow it on the Network page.`, 'nodes:').catch(() => undefined),
+    sameAsLock,
+    recoveryHashes,
     autostart: startupOf,
     fetch: fetchHere,
     tune: tuneDoor,
     tuneBusy: finderBusy,
+    rpcProgram,
     carry: {
       // A chat model's files: its first part and the parts beside it. Ollama keeps its own (named by Ollama): not sent.
       chatFiles: id => {
@@ -154,9 +158,11 @@ export function startJobs(): void {
       runtimes,
       nvidia: () => hardware.gpus.some(g => g.vendor === 'nvidia' && !g.integrated),
       driver: () => hardware.nvidiaDriver ?? null,
-      why: (device, pc) => runnerWhy(device, hardware.gpus, hardware.nvidiaDriver ?? null, pc),
+      why: (id, pc) => pinWhy(runtimes.pins[id], hardware.gpus, hardware.nvidiaDriver ?? null, pc, Object.values(runtimes.pins)),
       // A model running (or loading) on that device holds its runner's files open.
       inUse: device => [...runners, images.pane].some(p => p.view.device === device && (p.view.state === 'connected' || p.view.state === 'loading')),
     },
   });
+  // A3: a new set of recovery codes, or one used, goes on (as hashes) to the PCs that keep this PC's backup name.
+  whenCodesChange(() => void jobRoutes.resendCodes().catch(() => undefined));
 }

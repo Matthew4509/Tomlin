@@ -73,7 +73,7 @@ test('saving the last step says the job is done; a role with nobody hired is nam
   const lines = roomLines([{ at, type: 'saved', n: 0, files: ['app.js'], auto: true, left: 0 }, { at, type: 'review', n: 0, ok: false, problems: 2, notes: [] }], j, []);
   assert.deepEqual(lines.map(l => l.text), [
     'Saved step 1: every check passed. (app.js)',
-    'All 1 steps are done. Please review the result: run the tests or ask for the end-of-job report.',
+    'All 1 step is done. Please review the result: run the tests or ask for the end-of-job report.',
     'Read step 1: found 2 problems. See the step in Jobs.',
   ]);
   assert.equal(lines[2].from, 'The reviewer');

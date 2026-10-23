@@ -1,7 +1,7 @@
 // Copies between linked PCs (2.0.32). A model one PC shares can be copied to another, so it is not downloaded from
 // Hugging Face again (delete it here to save room, copy it back from a node later); a host can send one of its models
 // to a node (installed there from here); and a host can keep a restore point (a backup of its data) on a node. The
-// owner of each PC ticks what linked PCs may do there (Network: connect PCs, "Sharing permissions"): nothing until
+// owner of each PC ticks what linked PCs may do there (Network, "Sharing permissions"): nothing until
 // ticked; every model on a node is seen by linked PCs, and copied only with "Sharing of models" ticked.
 // Files cross the encrypted link (src/link.ts) in pieces of 16 MB, each one a request of its own, sealed with the
 // link's keys and tied to that request: a piece changed on the way, sent twice or out of place is refused, and a copy
@@ -25,18 +25,20 @@ export interface Allow {
   update: boolean;
   /** "Allow host to test and change model run settings" (2.0.56): a linked PC may set a model's run settings here (src/runset.ts). */
   tune: boolean;
+  /** "Lend card memory to linked PCs (Max mode)" (2.0.58): a linked PC's chat runner may use this PC's card while nobody is using it (src/maxlend.ts). */
+  lend: boolean;
 }
 
-export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false };
+export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false };
 
 /** The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read. */
 export function cleanAllow(raw: unknown): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: o.lend === true };
 }
 
 /** "Allow all" is ticked when every one is. */
-export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune;
+export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune && a.lend;
 
 // ---- Sizes ----
 
@@ -384,7 +386,7 @@ export function nodeSide(d: NodeDeps) {
 
   /** A shared model's files, when linked PCs may copy it. */
   function shared(b: Record<string, unknown>): FileRef[] | string {
-    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" under Network: connect PCs).`;
+    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" under Network).`;
     const id = typeof b.model === 'string' ? b.model : '';
     if (!d.shared().includes(id)) return `that model is not on "${d.pcName()}" any more.`;
     const files = b.kind === 'image' ? d.pictureFiles(id) : d.chatFiles(id);
@@ -480,7 +482,7 @@ export function nodeSide(d: NodeDeps) {
       case '/worker/backup-list':
         return { status: 200, json: { backups: await listKept(keptFolder(d.keptRoot, who.key)), allowed: d.allow().backup } };
       case '/worker/backup-put': {
-        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" under Network: connect PCs).`);
+        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" under Network).`);
         const name = safeBackupName(b.name);
         const bytes = int(b.bytes);
         const from = int(b.from);
@@ -620,7 +622,7 @@ export function nodeSide(d: NodeDeps) {
 /** Ids asked about in one go, and files in one backup. */
 export const MAX_IDS = 2000;
 export const MAX_FILES = 100_000;
-const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network: connect PCs).`;
+const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network).`;
 
 async function exists(file: string): Promise<boolean> {
   try {

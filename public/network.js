@@ -1,4 +1,4 @@
-// "My local LLMs" (src/carry.ts): the models the linked PCs share with others, copied here over the
+// "Models on my other PCs" (src/carry.ts): the models the linked PCs share with others, copied here over the
 // home network; an update going to a linked PC; restore points kept on them. The copies run on the
 // server, so closing this window does not stop them; while it is open it reads how they go once a second.
 'use strict';
@@ -77,7 +77,7 @@ function drawNet(v) {
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: r.name }), el('br'), el('span', { class: 'hint', text: about }), why ? el('br') : null, why ? el('span', { class: 'hint', text: why }) : null),
       action);
-  }) : [el('p', { class: 'hint', text: v.pcs.length ? 'No shared models yet. Each node has to select "yes" to sharing. It will then display here.' : 'No PCs are linked to this one yet: link one above, under Other PCs.' })]));
+  }) : [el('p', { class: 'hint', text: v.pcs.length ? 'No shared models yet. Each node has to select "yes" to sharing. It will then display here.' : 'No PCs are linked to this one yet: link one under Network.' })]));
 
   drawKept(v.pcs);
 
@@ -106,6 +106,8 @@ function drawNet(v) {
         el('span', { class: 'net-name' }, el('strong', { text: p.name }), p.backup ? el('br') : null, p.backup ? el('span', { class: 'hint', text: `${netUp(p.backup)}.` }) : null),
         p.backup ? null : el('button', { class: 'btn', type: 'button', text: 'Back up to it now', disabled: busyPc(p.id), onclick: e => { e.target.disabled = true; netDo('/api/network/backup', { pc: p.id }); } }),
         show),
+      // A3 + A4 (owner.js): the backup name and PIN there; on a new PC, Get my backups.
+      app.ownerRows(p, b => netDo('/api/network/bring', { pc: p.id, name: b.name, bytes: b.bytes })),
       el('div', { class: 'net-row' },
         el('span', { class: 'net-name hint', text: projLine }),
         p.projects ? null : el('button', { class: 'btn', type: 'button', text: 'Back up projects now', disabled: busyPc(p.id), onclick: e => { e.target.disabled = true; netDo('/api/network/projects', { pc: p.id }); } }),

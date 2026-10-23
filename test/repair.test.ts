@@ -82,7 +82,7 @@ test('an install left on 2.0.34 while a folder copy ran 2.0.44: the copy goes in
   assert.match(said, /Build TOMLIN.exe again/);
   assert.match(said, /Point current\.txt at the new copy/);
   assert.match(said, /Add TOMLIN to the Start menu/);
-  assert.match(said, /Make "Start with Windows" start TOMLIN.exe \(it started .*Start Shelby\.cmd\)/);
+  assert.match(said, /Make "Start TOMLIN when this PC starts" start TOMLIN.exe \(it started .*Start Shelby\.cmd\)/);
   assert.match(said, /Show 2\.0\.44 in Settings > Apps \(it says 2\.0\.34\)/);
   assert.deepEqual(plan.left, []);
 

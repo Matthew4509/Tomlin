@@ -4,6 +4,7 @@
 // The plain parts live in jobs.ts, checks.ts and share.ts, which have tests; this file joins them to the server.
 // Its parts are in src/jobrun/ by area; createJobs gives them the server's parts and starts them.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ToolUse } from './webtools.ts';
 import * as jobs from './jobs.ts';
 import type { Step } from './jobs.ts';
 import type { CheckResult } from './checks.ts';
@@ -24,13 +25,13 @@ import type { RunOptions, Settings, Store } from './store.ts';
 import type { RunnerHello } from './runnerpush.ts';
 import type { Device, Runtimes } from './runtimes.ts';
 import { d, useDeps } from './jobrun/shared.ts';
-import { canKeep, canThink, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
+import { canKeep, canThink, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, copyFrom, fetchOn, keptOn, network, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
+import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
-import { applyShare, askHost, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
+import { applyShare, askHost, claimsWaiting, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
 import { goAway } from './jobrun/giveway.ts';
 
@@ -129,10 +130,18 @@ export interface JobDeps {
   /** The speed finder a linked PC asks for (/worker/tune-*; src/server/finder.ts tuneDoor), and what it says while one runs here. */
   tune?: (action: string, b: Record<string, unknown>, by: string) => Promise<{ status: number; json: Record<string, unknown> }>;
   tuneBusy?: () => string;
+  /** Max mode (src/maxlend.ts): the RPC server beside this PC's best chat runner, what it lends, its threads; null with none. */
+  rpcProgram?: () => import('./maxlend.ts').RpcProgram | null;
   /** Told when a linked PC says "I need to log off for now" (its name). */
   onNodeAway?: (name: string) => void;
   /** Told when someone at a linked PC sends "I need to use the pc, please log out for N hours" (its name, the hours). */
   onNodeAsk?: (name: string, hours: number) => void;
+  /** A4: a new PC asks for a linked PC's backups kept here (the backup name, the new PC's name): the owner is told. */
+  onClaim?: (name: string, pc: string) => void;
+  /** A3: the app lock's kind when `pin` is also what opens TOMLIN here (the "same as your screen PIN" nudge), else null. */
+  sameAsLock?: (pin: string) => Promise<'pin' | 'password' | null | { wait: number }>;
+  /** A3: this PC's recovery codes as their hashes (src/recovery.ts), or null when it has none. */
+  recoveryHashes?: () => import('./recovery.ts').CodeHash[] | null;
   /** "Start when this PC starts" (src/autostart.ts). */
   autostart: { on: () => Promise<boolean>; set: (on: boolean) => Promise<void> };
   /** Copies between linked PCs (src/carry.ts): this PC's model files, where models and restore points go. */
@@ -150,8 +159,8 @@ export interface RunnerDeps {
   nvidia: () => boolean;
   /** Its NVIDIA driver's version, when nvidia-smi gave one. */
   driver: () => string | null;
-  /** Why this PC (named `pc` in the words) cannot use a runner for `device` ('' when it can). */
-  why: (device: Device, pc: string) => string;
+  /** Why this PC (named `pc` in the words) cannot use the runner build `id` ('' when it can). */
+  why: (id: string, pc: string) => string;
   /** True while a model runs (or loads) on that device here. */
   inUse: (device: Device) => boolean;
 }
@@ -221,7 +230,7 @@ export interface Hello {
 export interface Brain {
   label: string;
   ctx: number;
-  ask: (system: string, user: string, maxTokens: number, onText: (t: string) => void, signal: AbortSignal) => Promise<string>;
+  ask: (system: string, user: string, maxTokens: number, onText: (t: string) => void, signal: AbortSignal, opts?: AskOpts) => Promise<string>;
   /**
    * A whole conversation (system line first). `plain`: a Default hire's, asked with the model's own settings (engine.ts
    * plainStyle). `think`: Think was chosen; the working so far goes to `onThought`.
@@ -233,9 +242,11 @@ export interface Brain {
    */
   thought?: { text: string; seconds: number; stopped?: ThoughtStop } | null;
   /** How fast the last answer was written and its prompt read (null when the model did not say, or a linked PC is older). */
-  last?: { write: number; tokens: number; read?: number } | null;
+  last?: { write: number; tokens: number; read?: number; readTokens?: number } | null;
   /** The last answer stopped at its length limit, so Continue can carry it on (a linked PC says so from 2.0.43). */
   cut?: boolean;
+  /** What the last answer searched for and read on the web there (Web on, a linked PC from 2.0.58); null for none. */
+  tools?: ToolUse[] | null;
 }
 
 /** The brain that answers for a hire, and where it is. */
@@ -268,6 +279,8 @@ export interface StepResult extends jobs.Result {
   tries: number;
   worker: string;
   review?: { ok: boolean | null; problems: string[]; text: string };
+  /** What the step's model searched for and read on the web (Web on for the job). */
+  web?: ToolUse[];
 }
 
 export function createJobs(deps: JobDeps) {
@@ -275,7 +288,7 @@ export function createJobs(deps: JobDeps) {
   startNode();
   startLinks();
   startProjectBackups();
-  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on };
+  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
 }
 
 // ---- Routes ----
@@ -293,6 +306,8 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
   if (p === '/api/network/transfers') return d.json(res, 200, { transfers: transfers.view() }), true;
   if (p === '/api/network/backups') return reply(res, await keptOn(url.searchParams.get('pc'))), true;
   if (p === '/api/network/projects') return reply(res, await projectsOn(url.searchParams.get('pc'))), true;
+  if (p === '/api/network/owner') return reply(res, await ownerOn(url.searchParams.get('pc'))), true;
+  if (p === '/api/network/claim') return reply(res, await claimStateOn(url.searchParams.get('pc'))), true;
   if (p === '/api/share/firewall') {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;
@@ -322,6 +337,8 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/fetch': reply(await fetchOn(b)); return true;
     case '/api/network/backup': reply(await backupTo(b)); return true;
     case '/api/network/bring': reply(await bringBack(b)); return true;
+    case '/api/network/owner': reply(await ownerSetOn(b)); return true;
+    case '/api/network/claim': reply(await claimOn(b)); return true;
     case '/api/network/update': reply(await updatePc(b)); return true;
     case '/api/network/runner': reply(await runnerTo(b)); return true;
     case '/api/network/runner-remove': reply(await runnerOff(b)); return true;

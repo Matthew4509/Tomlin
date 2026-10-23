@@ -2,12 +2,12 @@
 // window), in the icon's menu by the clock, or run as `node tools/install.ts repair`; the steps are the same everywhere.
 // What goes wrong on a PC, and what a pushed update cannot fix by itself (it only adds a new copy beside the one that
 // is RUNNING):
-//  - a copy started from an unzipped folder (Start TOMLIN.cmd, or a Start with Windows entry made from it) runs and is
+//  - a copy started from an unzipped folder (Start TOMLIN.cmd, or a Start TOMLIN when this PC starts entry made from it) runs and is
 //    updated, while the install keeps its old copy: the program (TOMLIN.exe) then starts that old copy, finds the
 //    port taken and stops ("fails to load"). Repair copies the running copy into the install folder and points
 //    everything at the program;
 //  - current.txt naming a copy that is gone or damaged, the program or its icon missing or built from an older
-//    tools/tray.cs, shortcuts and Start with Windows pointing somewhere else, the Settings > Apps entry on an old version.
+//    tools/tray.cs, shortcuts and Start TOMLIN when this PC starts pointing somewhere else, the Settings > Apps entry on an old version.
 // It only reads and writes the install folder, the shortcuts, the Startup file and the Apps entry: never the home folder
 // (chats, staff, pictures, models). Plain steps with the Windows parts passed in, tested in test/repair.test.ts.
 import { execFile } from 'node:child_process';
@@ -79,7 +79,7 @@ async function shortcutTarget(d: RepairDeps, lnk: string): Promise<string> {
   return (await d.ps(inst.shortcutTargetScript(lnk)).catch(() => '')).trim();
 }
 
-/** The program a Start with Windows file starts, in words. */
+/** The program a Start TOMLIN when this PC starts file starts, in words. */
 function startsWhat(text: string): string {
   const m = /"([^"]+\.(?:exe|cmd))"/i.exec(text);
   return m ? m[1] : 'something else';
@@ -223,16 +223,16 @@ export async function planRepair(o: { here: string; version: string; env?: NodeJ
   }
   for (const l of oldOurs) steps.push({ say: `Remove the old shortcut ${l}`, run: () => rm(l, { force: true }) });
 
-  // Start with Windows, when it is on: the program, not a copy's Start TOMLIN.cmd (which never takes updates). A file
+  // Start TOMLIN when this PC starts, when it is on: the program, not a copy's Start TOMLIN.cmd (which never takes updates). A file
   // under the earlier name (Smart Manager.cmd) is put under TOMLIN.cmd.
   const sdir = startupDir(env);
   const sfile = sdir ? startupFileIn(sdir) : '';
   const stext = sfile ? await readFile(sfile, 'utf8').catch(() => '') : '';
   const want = inst.startupScriptFor(exe);
   if (stext && stext !== want) {
-    steps.push({ say: `Make "Start with Windows" start ${exeName} (it started ${startsWhat(stext)})`, run: () => writeStartup(sdir!, want) });
+    steps.push({ say: `Make "Start TOMLIN when this PC starts" start ${exeName} (it started ${startsWhat(stext)})`, run: () => writeStartup(sdir!, want) });
   } else if (stext && basename(sfile) !== STARTUP_FILE) {
-    steps.push({ say: `Name the "Start with Windows" file ${STARTUP_FILE} (it was ${basename(sfile)})`, run: () => writeStartup(sdir!, want) });
+    steps.push({ say: `Name the "Start TOMLIN when this PC starts" file ${STARTUP_FILE} (it was ${basename(sfile)})`, run: () => writeStartup(sdir!, want) });
   }
 
   // The entry in Settings > Apps, on the version that runs.

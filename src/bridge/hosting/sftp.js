@@ -30,12 +30,16 @@ function privateTemp(text) {
   fs.writeFileSync(file, text, { mode: 0o600 });
   return { dir, file };
 }
-// OpenSSH on Windows refuses a key file other accounts could read: this account only.
+// OpenSSH on Windows refuses a key file other accounts could read: this account only. A lock-down that fails stops the
+// connection here, in plain words, rather than handing on a key file that might be readable.
 function lockDown(file) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     if (process.platform !== 'win32') return resolve();
     const user = (process.env.USERDOMAIN ? process.env.USERDOMAIN + '\\' : '') + os.userInfo().username;
-    execFile(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [file, '/inheritance:r', '/grant:r', user + ':F'], { windowsHide: true }, () => resolve());
+    execFile(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [file, '/inheritance:r', '/grant:r', user + ':F'], { windowsHide: true }, err => {
+      if (err) return reject(new SftpError('SFTP: the key file could not be locked to your Windows account (icacls ' + (err.code || err.message) + '), so it was not used. Try again; if it keeps happening, restart the PC.'));
+      resolve();
+    });
   });
 }
 
@@ -74,7 +78,13 @@ function client(c) {
     const k = privateTemp(c.privateKey);
     const batch = path.join(k.dir, 'cmds');
     fs.writeFileSync(batch, cmds.join('\n') + '\n');
-    await lockDown(k.file);
+    // The key file goes with the folder it is in, whatever happens next (the lock-down failing too).
+    try {
+      await lockDown(k.file);
+    } catch (e) {
+      try { fs.rmSync(k.dir, { recursive: true, force: true }); } catch {}
+      throw e;
+    }
     fs.mkdirSync(path.dirname(KNOWN()), { recursive: true });
     try {
       return await new Promise((resolve, reject) => {

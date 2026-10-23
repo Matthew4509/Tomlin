@@ -173,7 +173,7 @@ async function loadJobs() {
   const item = j => {
     const name = j.name || j.goal;
     const b = el('button', { class: `file-item${jobUi.job?.id === j.id ? ' current' : ''}`, type: 'button', title: `Last changed ${new Date(j.updated).toLocaleString()}` },
-      el('span', { text: name.length > 90 ? `${name.slice(0, 90)}…` : name }), el('span', { class: 'hint', text: `${j.done} of ${j.steps} steps${j.folder ? ` · folder ${j.folder}` : ''}` }));
+      el('span', { text: name.length > 90 ? `${name.slice(0, 90)}…` : name }), el('span', { class: 'hint', text: `${j.done} of ${j.steps} steps done${j.skipped ? `, ${j.skipped} skipped` : ''}${j.folder ? ` · folder ${j.folder}` : ''}` }));
     b.addEventListener('click', () => openJob(j.id));
     return b;
   };
@@ -326,7 +326,7 @@ function drawTeam(view) {
   const staff = jobUi.setup?.staff ?? [];
   const team = view.team;
   staffPick($('#job-pm'), 'job-pm', team.pm, staff, { value: '', label: 'Default', title: 'The strongest worker available' }, v => saveTeam({ pm: v }));
-  $('#job-pm-line').textContent = `Plans it: ${view.doers?.pm ?? ''}${staff.length ? '' : ' Hire staff (Settings, Set up, Staff) to pick who leads it.'}`;
+  $('#job-pm-line').textContent = `Plans it: ${view.doers?.pm ?? ''}${staff.length ? '' : ' Hire staff (Set up, Staff: hire and edit) to pick who leads it.'}`;
   const rows = ROLE_SEATS.map(([seat, label]) => {
     const now = team[seat];
     const assigned = now !== 'default' && now !== 'none';
@@ -355,6 +355,7 @@ function drawTeam(view) {
   $('#job-roles').replaceChildren(...rows);
   const expect = $('#job-expect');
   if (document.activeElement !== expect) expect.value = team.expect ?? '';
+  $('#job-web').checked = view.job?.web === true;
   // Nobody audits: no reviewer, no end-of-job report, and no expectations to give.
   const audits = team.audit !== 'none';
   $('#job-expect-row').hidden = !audits;
@@ -364,6 +365,18 @@ function drawTeam(view) {
   if (!audits) $('#job-review-each').checked = false;
 }
 $('#job-expect').addEventListener('change', () => saveTeam({ expect: $('#job-expect').value }));
+$('#job-web').addEventListener('change', async e => {
+  const job = jobUi.job;
+  if (!job) return;
+  const said = $('#job-team-said');
+  try {
+    showJob(await api('/api/jobs/change', { id: job.id, action: 'web', on: e.target.checked }));
+    said.textContent = e.target.checked ? 'Web is on for this job: its steps may search the web and read pages.' : 'Web is off for this job.';
+  } catch (err) {
+    e.target.checked = !e.target.checked;
+    jobFault(err.message, err.data);
+  }
+});
 
 // ---- The steps ----
 
@@ -569,7 +582,7 @@ function pictureStepButton(step, n) {
   const people = typeof chatUi === 'undefined' ? [] : chatUi.people.filter(p => p.kind === 'image');
   const artist = people.find(p => (step.role === 'designer' ? /designer/i : /artist/i).test(p.role)) ?? people[0];
   const note = $('#job-note');
-  if (!artist) return note.append(' Nobody draws yet: hire an artist under Settings, Set up, Staff.');
+  if (!artist) return note.append(' Nobody draws yet: hire an artist under Set up, Staff: hire and edit.');
   note.append(' ', el('button', { class: 'btn', type: 'button', text: `Draw it in ${artist.name}'s chat`, onclick: async () => {
     try {
       $('#jobs').close();
@@ -577,7 +590,7 @@ function pictureStepButton(step, n) {
       $('#img-prompt').value = step.brief;
       $('#img-prompt').dispatchEvent(new Event('input'));
       $('#img-prompt').focus();
-      app.imageNote?.(`Step ${n + 1} of the job, "${step.title}": its brief is in the box. Press Draw (connect the picture model first if it is not loaded). When it is drawn, open Jobs and press Mark done on step ${n + 1}.`);
+      app.imageNote?.(`Step ${n + 1} of the job, "${step.title}": its brief is in the box. Press Draw (it asks to load the picture model first if none is loaded). When it is drawn, open Jobs and press Mark done on step ${n + 1}.`);
     } catch (e) {
       jobFault(e.message, e.data);
     }
@@ -926,7 +939,7 @@ app.planJob = async goal => {
   $('#job-goal').value = goal;
   $('#job-new-form').requestSubmit();
 };
-// Linking other PCs lives in Network: connect PCs (home.js opens it).
+// Linking other PCs lives in Network (home.js opens it).
 $('#job-pcs-link').addEventListener('click', () => {
   $('#jobs').close();
   app.openPcs();

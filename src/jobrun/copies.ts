@@ -10,6 +10,8 @@ import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
 import * as pb from '../projectbackup.ts';
 import { broughtBackWhy, recordSent } from '../keep.ts';
+import { cleanPin, hashSecret } from '../lock.ts';
+import { cleanBackupName, NUDGE_CHECKS } from '../owner.ts';
 import type { Remote } from '../store.ts';
 import { d, sleep } from './shared.ts';
 import { hello, onHomeNetwork, remoteStatus } from './links.ts';
@@ -20,7 +22,7 @@ import type { Hello } from '../jobrun.ts';
 /** How this PC talks to a linked PC for copies: sealed requests, a piece of a file each way as sealed bytes. */
 function wireFor(r: Remote): carry.Wire {
   const keys = link.keysOf(r.key);
-  if (!keys) throw new Error(`"${r.name}" was linked before links were encrypted. Link it again: Other PCs, Find PCs on my network, then its setup code.`);
+  if (!keys) throw new Error(`"${r.name}" was linked before links were encrypted. Link it again: Network, Find PCs on my network, then its setup code.`);
   const said = async (res: Response, id: string): Promise<Record<string, unknown>> => {
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     const v = (typeof data.box === 'string' ? link.openAnswer(keys, id, 0, data.box) : data) as Record<string, unknown>;
@@ -97,14 +99,14 @@ function roomOn(pc: carry.NetPc, bytes: number): string {
   return pc.disk ? carry.roomWhy(bytes, pc.disk.free, `"${pc.name}"`) ?? '' : '';
 }
 
-/** "My local LLMs": every model the linked PCs share, and what this PC can send them. */
+/** "Models on my other PCs": every model the linked PCs share, and what this PC can send them. */
 export async function network() {
   const pcs = await netPcs();
   const pictures = d.pictureModels();
   const chats = d.chatList();
   return {
     rows: carry.networkList(pcs, { chatFiles: chats.map(m => m.id), pictures: pictures.filter(m => m.installed).map(m => m.id) }),
-    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }) }))),
+    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(d.runner.runtimes.idsOf('llama', 'cuda').map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
     mine: [
       ...chats.filter(m => !m.id.startsWith('ollama:')).map(m => ({ kind: 'chat' as const, id: m.id, name: m.name, bytes: m.bytes })),
       ...pictures.filter(m => m.installed).map(m => ({ kind: 'image' as const, id: m.id, name: m.name.replace(/\s*\(.*\)$/, ''), bytes: m.bytes ?? 0 })),
@@ -173,12 +175,12 @@ export async function sendTo(b: Record<string, unknown>) {
 
 /**
  * Download to a linked PC (Download, To that PC, on the Models page): that PC downloads the model itself, from the
- * internet, into its own models folder; nothing passes through this PC. Followed here as a transfer (My local LLMs
+ * internet, into its own models folder; nothing passes through this PC. Followed here as a transfer (Models on my other PCs
  * shows it, with Stop), asking that PC how far it is every 2 seconds.
  */
 export async function fetchOn(b: Record<string, unknown>) {
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
-  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   const pc = (await netPcs()).find(x => x.id === r.id)!;
   const why = carry.fetchWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
@@ -215,20 +217,20 @@ export async function runnerTo(b: Record<string, unknown>) {
   const pin = d.runner.runtimes.pins[id];
   if (!pin || pin.device !== 'cuda' || pin.engine !== 'llama') return { status: 400, body: { error: 'Only the NVIDIA (CUDA) chat runner can be sent to a linked PC; the others come with TOMLIN.' } };
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
-  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   const pc = (await netPcs()).find(x => x.id === r.id)!;
-  const why = runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null });
+  const why = runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id);
   if (why) return { status: 409, body: { error: why } };
   const w = wireFor(r);
   const rt = d.runner.runtimes;
   const total = pin.parts.reduce((n, p) => n + p.bytes, 0);
   const t = transfers.start({ kind: 'runner', what: pin.name, pc: r.id, pcName: r.name }, async (progress, signal) => {
-    if (!rt.zipsHere(pin.engine, pin.device)) {
+    if (!rt.zipsHerePin(id)) {
       progress({ stage: 'get', done: 0, bytes: total });
-      await rt.fetchZips(pin.engine, pin.device, p => progress({ done: p.got, bytes: p.bytes }), signal);
+      await rt.fetchZipsPin(id, p => progress({ done: p.got, bytes: p.bytes }), signal);
     }
     progress({ stage: 'send', done: 0, bytes: total });
-    const files = pin.parts.map((p, k) => ({ path: rt.zipOf(pin.engine, pin.device, k), bytes: p.bytes, sha256: p.sha256 }));
+    const files = pin.parts.map((p, k) => ({ path: rt.zipOfPin(id, k), bytes: p.bytes, sha256: p.sha256 }));
     const sent = await runnerpush.pushRunner(w, { id, files, progress, signal });
     if (sent === 'had') return `"${r.name}" has ${pin.name} already.`;
     return `${pin.name} is on "${r.name}" now, checked and unpacked: the next model loaded there uses it. Its files stay on this PC (${GBs(total)}) for another PC; Remove takes them away.`;
@@ -242,7 +244,7 @@ export async function runnerOff(b: Record<string, unknown>) {
   const pin = d.runner.runtimes.pins[id];
   if (!pin || pin.device !== 'cuda' || pin.engine !== 'llama') return { status: 400, body: { error: 'Only the NVIDIA (CUDA) chat runner can be taken away from a linked PC.' } };
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
-  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   try {
     await wireFor(r).ask('/worker/runner-remove', { id });
   } catch (e) {
@@ -258,7 +260,7 @@ export async function runnerOff(b: Record<string, unknown>) {
  */
 export async function runSetOn(b: Record<string, unknown>) {
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
-  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   const pc = (await netPcs()).find(x => x.id === r.id)!;
   const why = runset.tuneWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
@@ -274,17 +276,18 @@ export async function runSetOn(b: Record<string, unknown>) {
 
 /**
  * The speed finder on a linked PC (its own tries, on its own models, run there): preview, start, state, stop, apply or
- * undo, passed on with only the model id, the size, the context sizes ticked and a row id from that PC's own last test.
+ * undo, passed on with only the model id, the size, the context sizes ticked and a row id from that PC's own last test;
+ * and the smaller file that PC offered (smaller: its repo, file name and size, with his yes), which that PC downloads itself.
  */
 export async function tuneOn(b: Record<string, unknown>) {
   const action = String(b.action ?? '');
-  if (!['preview', 'start', 'state', 'stop', 'apply', 'undo'].includes(action)) return { status: 400, body: { error: 'No such speed test step.' } };
+  if (!['preview', 'start', 'state', 'stop', 'apply', 'undo', 'smaller'].includes(action)) return { status: 400, body: { error: 'No such speed test step.' } };
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
-  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network: connect PCs to link it again.' } };
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   const pc = (await netPcs()).find(x => x.id === r.id)!;
   const why = runset.tuneWhy(pc);
   if (why && action !== 'state' && action !== 'stop') return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
-  const ask = { model: String(b.model ?? ''), size: b.size === 'full' ? 'full' : 'quick', contexts: Array.isArray(b.contexts) ? b.contexts.map(Number).filter(Number.isFinite).slice(0, 6) : [], row: String(b.row ?? '') };
+  const ask = { model: String(b.model ?? ''), size: b.size === 'full' ? 'full' : 'quick', contexts: Array.isArray(b.contexts) ? b.contexts.map(Number).filter(Number.isFinite).slice(0, 6) : [], row: String(b.row ?? ''), ...(action === 'smaller' ? { yes: b.yes === true, repo: String(b.repo ?? ''), name: String(b.name ?? ''), bytes: Number(b.bytes) || 0 } : {}) };
   try {
     return { status: 200, body: { ...(await wireFor(r).ask(`/worker/tune-${action}`, ask)), pc: r.id, pcName: r.name } };
   } catch (e) {
@@ -419,6 +422,88 @@ export async function bringBack(b: Record<string, unknown>) {
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
 }
 
+// ---- A3 + A4 (src/owner.ts): this PC's backup name and PIN on a linked PC, and getting backups back on a new PC ----
+
+/** The backup name sent to each linked PC, by its id (data/backup-owner.json): shown on its row, and where codes go. */
+const OWNER_SENT = 'backup-owner.json';
+const ownersSent = () => d.store.readJson<Record<string, { name: string; at: string }>>(OWNER_SENT, {});
+/** A linked PC's fault as this PC's answer: its own words and status when it said why (a name taken, a wrong PIN). */
+const passOn = (e: unknown) => {
+  const { status, said } = e as { status?: number; said?: string };
+  return status && said && [400, 403, 404, 409, 429].includes(status) ? { status, body: { error: `${said.charAt(0).toUpperCase()}${said.slice(1)}` } } : { status: 502, body: { error: (e as Error).message } };
+};
+
+/** The backup name this PC sent to a linked PC, or null. */
+export async function ownerOn(pcId: string | null) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === pcId);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  return { status: 200, body: (await ownersSent())[r.id] ?? null };
+}
+
+/**
+ * A3: the backup name (2-40 characters) and backup PIN (4-12 digits, typed twice) for a linked PC that keeps this PC's
+ * backups. The PIN is hashed here; the recovery codes go as their hashes. A PIN that is also the screen lock's gets the
+ * nudge first and is sent only with `anyway` ("Keep it anyway"); nothing is refused.
+ */
+export async function ownerSetOn(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  const name = cleanBackupName(b.name);
+  if (!name) return { status: 400, body: { error: 'Use 2 to 40 characters for the backup name.' } };
+  const pin = cleanPin(b.pin);
+  if (!pin) return { status: 400, body: { error: 'Use 4 to 12 digits for the backup PIN (numbers only).' } };
+  if (cleanPin(b.pin2) !== pin) return { status: 400, body: { error: 'The two backup PINs are not the same. Type it in both boxes.' } };
+  const same = b.anyway === true ? null : await d.sameAsLock?.(pin);
+  if (same && typeof same === 'object') return { status: 429, body: { error: `The backup PIN was set ${NUDGE_CHECKS} times in a few minutes, and each time it is checked against your screen PIN. Wait ${same.wait} minute${same.wait > 1 ? 's' : ''}, then set it again.` } };
+  if (same) return { status: 200, body: { same: true, said: `This is the same as your screen ${same === 'password' ? 'password' : 'PIN'}. Anyone with access to the backup PC's disk could work it out. A different one is safer.` } };
+  try {
+    await wireFor(r).ask('/worker/owner-set', { name, pin: await hashSecret(pin), codes: d.recoveryHashes?.() ?? [] });
+  } catch (e) {
+    return passOn(e);
+  }
+  const sent = await ownersSent();
+  await d.store.writeJson(OWNER_SENT, { ...sent, [r.id]: { name, at: new Date().toISOString() } });
+  return { status: 200, body: { ok: true, name, said: `Your backup name on "${r.name}" is "${name}". On a new PC, link it to "${r.name}", then use Get my backups with this name and your backup PIN (or a recovery code).` } };
+}
+
+/** A new set of recovery codes, or one used: sent (as hashes) to each linked PC that keeps this PC's backup name. */
+export async function resendCodes(): Promise<void> {
+  const codes = d.recoveryHashes?.() ?? [];
+  const remotes = (await d.store.settings()).remotes;
+  for (const id of Object.keys(await ownersSent())) {
+    const r = remotes.find(x => x.id === id);
+    if (r) await wireFor(r).ask('/worker/owner-set', { codesOnly: true, codes }).catch(e => console.log(`The recovery codes could not be sent to "${r.name}" now (${(e as Error).message}); they go with the next change.`));
+  }
+}
+
+/** A4: asks a linked PC for the backups kept there under a backup name, with the backup PIN or a recovery code. */
+export async function claimOn(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  const name = cleanBackupName(b.name);
+  if (!name) return { status: 400, body: { error: 'Type your backup name (2 to 40 characters).' } };
+  const code = typeof b.code === 'string' && b.code.trim() ? b.code.trim() : null;
+  const pin = code ? null : cleanPin(b.pin);
+  if (!code && !pin) return { status: 400, body: { error: 'Type your backup PIN (4 to 12 digits), or one of your recovery codes.' } };
+  try {
+    return { status: 200, body: await wireFor(r).ask('/worker/claim', code ? { name, code } : { name, pin }) };
+  } catch (e) {
+    return passOn(e);
+  }
+}
+
+/** Where this PC's request to a linked PC stands (waiting, allowed, denied, expired), or state null when none was made. */
+export async function claimStateOn(pcId: string | null) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === pcId);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  try {
+    return { status: 200, body: await wireFor(r).ask('/worker/claim-state', {}) };
+  } catch (e) {
+    if ((e as { status?: number }).status === 404) return { status: 200, body: { state: null } };
+    return passOn(e);
+  }
+}
+
 // ---- Project backups to linked PCs (src/gitstore.ts): the workspace, and the Bridge projects ticked "Copy to my
 // nodes" (src/projectbackup.ts, each under "Bridge projects/<name>/"), as one commit in a git repository there ----
 
@@ -541,7 +626,7 @@ async function sendProjects(r: Remote, progress: (p: Partial<Pick<carry.Transfer
   return `Backed up ${files.length} file${files.length === 1 ? '' : 's'} to "${r.name}" (${send.length ? `${bytes >= 2 ** 20 ? GBs(bytes) : `${Math.max(1, Math.round(bytes / 1024))} KB`} sent` : 'nothing new to send'}).${left}`;
 }
 
-/** "Back up projects now" in My local LLMs. */
+/** "Back up projects now" in Models on my other PCs. */
 export async function projectsTo(b: Record<string, unknown>) {
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
   if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
@@ -720,7 +805,7 @@ export async function bridgeBackupNow(only?: string[]): Promise<{ ok: boolean; s
   const can = carry.backupOrder(pcs.filter(pc => !carry.projectsWhy(pc) && !roomOn(pc, bytes) && (!only || only.includes(pc.id))));
   if (only && !only.length) return { ok: false, started: [], ids: [], error: 'No PC is chosen. Tick at least one PC to back up to.' };
   if (!can.length) {
-    return { ok: false, started: [], ids: [], error: only && pcs.length ? 'None of the chosen PCs can take a backup now: read the line under each one.' : pcs.length ? `No linked PC can take a backup now: ${pcs.map(pc => carry.projectsWhy(pc)).join('; ')}.` : 'No PC is linked yet. Link one (TOMLIN, Link another PC), then tick "Enable backups" on it.' };
+    return { ok: false, started: [], ids: [], error: only && pcs.length ? 'None of the chosen PCs can take a backup now: read the line under each one.' : pcs.length ? `No linked PC can take a backup now: ${pcs.map(pc => carry.projectsWhy(pc)).join('; ')}.` : 'No PC is linked yet. Link one (TOMLIN, Network, Connect a PC), then tick "Enable backups" on it.' };
   }
   const started: string[] = [];
   const ids: string[] = [];

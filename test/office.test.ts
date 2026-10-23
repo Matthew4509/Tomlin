@@ -388,3 +388,17 @@ test('the office page loads the banter and keeps its chat setting on this PC', a
   assert.match(js, /officeBanter/);
   assert.match(js, /localStorage/);
 });
+
+test('the vending machine stays free in TOMLIN (the other office apps charge for theirs; this one never does)', () => {
+  const energy = SHOP.find(i => i.id === 'energy');
+  assert.ok(energy);
+  assert.equal(energy!.price, 0);
+});
+
+test('the vending machine with nobody hired has a way out: Hire staff beside Close opens the Hire staff window', async () => {
+  const page = await readFile(new URL('../public/office.js', import.meta.url), 'utf8');
+  const vend = page.slice(page.indexOf('function openVending'), page.indexOf('const boardLine'));
+  assert.match(vend, /const hireBtn = el\('button', \{ type: 'button', class: 'btn primary', text: 'Hire staff', hidden: true, onclick: \(\) => \{\s+vendDlg\.close\(\);\s+full\.close\(\);\s+app\.openHire\?\.\(\);/);
+  assert.match(vend, /if \(!drinkers\(\)\.length\) \{\s+(\/\/[^\n]*\n\s+)?hireBtn\.hidden = false;\s+return show\('NOBODY HERE'/);
+  assert.match(vend, /el\('div', \{ class: 'vend-foot' \}, hireBtn, el\('button', \{ type: 'button', class: 'btn', text: 'Close'/);
+});

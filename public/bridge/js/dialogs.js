@@ -8,8 +8,12 @@ function dialog(title, bodyKids, buttons, size) {
   $('dlg-foot').replaceChildren(...buttons);
   const d = $('dlg');
   if (!d.open) d.showModal();
-  // A text field first; never a tick box (Enter there would submit at once) or a file picker.
-  const f = $('dlg-body').querySelector('input:not([type=checkbox]):not([type=file]), textarea') || $('dlg-foot').querySelector('.accent'); if (f) f.focus();
+  // A text field first; never a tick box (Enter there would submit at once) or a file picker, and never a field that
+  // cannot take focus (a copy block's hidden, read-only text): focus() on it does nothing and leaves the first tick
+  // box focused. Otherwise the main button.
+  const f = [...$('dlg-body').querySelectorAll('input:not([type=checkbox]):not([type=file]), textarea')]
+    .find(x => !x.readOnly && !x.disabled && x.getClientRects().length) || $('dlg-foot').querySelector('.accent');
+  if (f) f.focus();
 }
 function closeDialog() { if ($('dlg').open) $('dlg').close(); }
 const cancelBtn = (label = 'Cancel') => h('button', { class: 'btn', type: 'button', onclick: closeDialog }, label);

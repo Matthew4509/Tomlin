@@ -1,11 +1,12 @@
 // Chat models from Hugging Face: search, sizes, one download at a time; and models in another folder.
 import { statSync } from 'node:fs';
-import { statfs } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile, statfs } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { totalmem } from 'node:os';
 import { cursorPlaces, fetchChecked, hfUrl, lookUpHf, searchHf, usualModel, type HfLookup } from '../download.ts';
 import { isMoe, ordered, pick } from '../hflist.ts';
-import { GB, type Routes, chatModels, hfList, json } from './core.ts';
+import { GB, HOME, type Routes, chatModels, hfList, json } from './core.ts';
+import { writeAtomic } from '../atomic.ts';
 import { cardFit, fitsRoom } from '../calc.ts';
 import { cardMem, chatCards, fit, images, loadShapes } from './panes.ts';
 
@@ -29,7 +30,7 @@ function fitsPc(bytes: number): 'ok' | 'tight' | 'no' {
 
 /** A repo's files, read from Hugging Face once per half hour (a search asks for up to 30 at a time). */
 const hfLooked = new Map<string, { at: number; got: Promise<HfLookup> }>();
-function lookCached(repo: string): Promise<HfLookup> {
+export function lookCached(repo: string): Promise<HfLookup> {
   const hit = hfLooked.get(repo);
   if (hit && Date.now() - hit.at < 30 * 60_000) return hit.got;
   const got = lookUpHf(`https://huggingface.co/${repo}`);
@@ -60,6 +61,23 @@ async function inTurns<T, R>(items: T[], n: number, f: (x: T) => Promise<R>): Pr
   return out;
 }
 
+// ---- Where each downloaded chat model came from (data/model-sources.json), so the speed finder can find the same
+// model's other files on Hugging Face (src/server/smaller.ts). Written when a download is whole. ----
+
+export interface ModelSource { repo: string; rev: string; bytes: number; at: string }
+const SOURCES = join(HOME.data, 'model-sources.json');
+export async function modelSources(): Promise<Record<string, ModelSource>> {
+  try {
+    const j = JSON.parse(await readFile(SOURCES, 'utf8'));
+    return j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+  } catch {
+    return {};
+  }
+}
+async function keepSource(name: string, s: ModelSource): Promise<void> {
+  await writeAtomic(SOURCES, JSON.stringify({ ...(await modelSources()), [name]: s }, null, 2));
+}
+
 function startHf(repo: string, rev: string, m: { name: string; bytes: number; files: { path: string; bytes: number; sha256: string }[] }): void {
   const job = { repo, name: m.name, state: 'downloading' as const, got: 0, bytes: m.bytes, error: '', ac: new AbortController() };
   hfJob = job;
@@ -72,6 +90,7 @@ function startHf(repo: string, rev: string, m: { name: string; bytes: number; fi
         job.got = before;
       }
       (job as { state: string }).state = 'done';
+      await keepSource(m.name, { repo, rev, bytes: m.bytes, at: new Date().toISOString() }).catch(e => console.error(`Where ${m.name} came from was not written down: ${(e as Error).message}`));
       chatModels.forget();
       void loadShapes().catch(() => undefined);
     } catch (error) {
@@ -85,7 +104,7 @@ function startHf(repo: string, rev: string, m: { name: string; bytes: number; fi
  * Starts one chat model's download (Download on the Models page, or a linked main PC's Download to this PC): refused
  * while another runs, and when the drive has not got room for it.
  */
-async function getHf(repo: string, rev: string, name: string): Promise<{ status: number; json: unknown }> {
+export async function getHf(repo: string, rev: string, name: string): Promise<{ status: number; json: unknown }> {
   if (hfJob?.state === 'downloading') return { status: 409, json: { error: `${hfJob.name} is still downloading. Wait for it, or stop it.` } };
   // Taken before the look-up (a second or two): a second Get pressed meanwhile is told to wait, never started beside it.
   if (hfStarting) return { status: 409, json: { error: 'A download is starting. Wait a moment, then try again.' } };
@@ -206,7 +225,7 @@ export const hfPost: Routes = {
     const sizeOk = (m: { bytes: number; card: string | null; fits: string }) => inGB(m.bytes) && (!card || m.card === 'ok') && fitsOn(m);
     const q = String(b.q ?? '');
     const terms = [...new Set((Array.isArray(b.terms) ? b.terms : []).map(String))].filter(t => t === 'abliterated' || t === 'uncensored');
-    // MoE's ticked: mixtures of experts only (by name). Order: Size or A to Z on the page (most downloaded when not set).
+    // Mixture-of-experts ticked: mixtures of experts only (by name). Order: Size or A to Z on the page (most downloaded when not set).
     const moe = b.moe === true;
     const order = ['size-asc', 'size-desc', 'name-asc', 'name-desc'].includes(String(b.order)) ? String(b.order) : '';
     const list = await hfList.get();

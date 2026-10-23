@@ -43,19 +43,29 @@ function afterPlanned(r, title, before) {
 }
 
 function askBringIn(k) {
-  let pick = k.offer[0].dir;
+  // The safe choice leads: Decide later is the highlighted button, and with several older copies none is ticked (one
+  // copy is the only choice there is, so it is ticked; Import still has to be pressed).
+  let pick = k.offer.length === 1 ? k.offer[0].dir : '';
   const fault = el('div', { class: 'fault', role: 'alert', hidden: true });
-  const rows = k.offer.map((s, i) => {
+  const rows = k.offer.map(s => {
     const radio = el('input', { type: 'radio', name: 'keep-from', value: s.dir });
-    radio.checked = i === 0;
-    radio.addEventListener('change', () => (pick = s.dir));
+    radio.checked = s.dir === pick;
+    radio.addEventListener('change', () => {
+      pick = s.dir;
+      fault.hidden = true;
+    });
     const what = [`${s.chats} chat${s.chats === 1 ? '' : 's'}`, `last used ${keepWhen(s.at)}`, s.modelBytes ? `${keepMb(s.modelBytes)} of models to move` : 'no models to move'].join(' · ');
     return el('label', { class: 'check keep-src' }, radio, el('span', {},
       el('strong', { text: s.here ? `This folder (TOMLIN ${s.version})` : `TOMLIN ${s.version}` }),
       el('span', { class: 'hint keep-path', text: ` ${s.dir}` }),
       el('br'), el('span', { class: 'hint', text: what })));
   });
-  const go = el('button', { class: 'btn primary', type: 'button', text: 'Import', onclick: async () => {
+  const go = el('button', { class: 'btn', type: 'button', text: 'Import', 'aria-describedby': 'keep-moves', onclick: async () => {
+    if (!pick) {
+      fault.textContent = 'Tick the copy to import from first (the list above), then press Import.';
+      fault.hidden = false;
+      return;
+    }
     go.disabled = true;
     keepDlg.oncancel = null;
     try {
@@ -76,6 +86,7 @@ function askBringIn(k) {
       fault.hidden = false;
     }
   } });
+  const wait = el('button', { class: 'btn primary', type: 'button', text: 'Decide later', onclick: () => later() });
   keepDlg.replaceChildren(el('div', { class: 'help-body' },
     el('h2', { id: 'keep-title', text: 'Import your chats?' }),
     el('p', { text: `TOMLIN now keeps your chats, staff, pictures and models in one folder outside the app: ${k.home}. Updates find it on their own. It is empty, and ${k.offer.length === 1 ? 'an older copy has' : 'older copies have'} data:` }),
@@ -83,7 +94,9 @@ function askBringIn(k) {
     el('p', { class: 'hint', text: 'Chats, staff, pictures, memory, settings and PC links are copied (the old folder keeps its own). Models and the parts that run them on a graphics card are moved, so nothing downloads again. TOMLIN starts again to do it.' }),
     el('p', { class: 'hint', text: 'Start empty is for good: this question is not asked again. Not sure yet? Decide later asks again the next time TOMLIN starts.' }),
     fault,
-    el('div', { class: 'team-actions' }, go, empty, el('button', { class: 'btn quiet', type: 'button', text: 'Decide later', onclick: () => later() }))));
+    el('div', { class: 'team-actions keep-actions' }, wait,
+      el('span', { class: 'keep-go' }, go, el('span', { id: 'keep-moves', class: 'hint', text: 'moves the model files' })),
+      empty)));
   // Decide later, or Escape: the question comes back the next time TOMLIN starts, not at the next page load.
   const later = () => {
     keepDlg.oncancel = null;
@@ -95,6 +108,7 @@ function askBringIn(k) {
     later();
   };
   keepDlg.showModal();
+  wait.focus();
 }
 
 async function keepStart() {
@@ -153,7 +167,12 @@ app.keepBox = () => {
             note.textContent = err.message;
           }
         } })),
-      el('p', { class: 'hint', text: 'Backups (the last 5 are kept; models are not in them). To keep one on a linked PC too: Network: connect PCs, My local LLMs.' }),
+      el('p', { class: 'hint', text: 'Backups (the last 5 are kept; models are not in them). To keep one on a linked PC too: Network, Models on my other PCs.' }),
+      // A4: a new PC links to the PC that kept the backups, then asks for them there by backup name and PIN.
+      el('div', { class: 'team-actions' }, el('button', { class: 'btn quiet', type: 'button', text: 'Get my backups from a linked PC', title: 'On a new PC: link it to the PC that kept your backups first (Network), then use Get my backups under its name', onclick: () => {
+        document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();
+        app.openNet?.();
+      } })),
       list,
       ask,
       note);

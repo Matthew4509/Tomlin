@@ -3,9 +3,15 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { RUNNER_FILE_HELP, RUNNER_FILE_LINE, VCRT_HELP, vcrtFault } from './vcrt.ts';
+import { idsFor } from './devices.ts';
 
 /** llama-server could not read the chat template inside the model file. */
 export const TEMPLATE_FAULT = /FilterExpression|chat template is not supported|failed to apply template|Unable to generate parser|unknown test|unknown filter/i;
+
+/** The runner's last lines say a PC lending its card (Max mode's RPC) went away. */
+export const maxFault = (tail: string) => /\brpc\b|ggml_backend_rpc|failed to connect to/i.test(tail);
+/** A loaded model stopped because a PC lending its card for it took it back. */
+export const MAX_STOPPED = 'The model stopped: a PC lending its card for Max mode took it back (someone started using that PC, or it left the network). Press Connect to load it again on the PCs that lend now.';
 
 /** Why a model would not load, in plain words (what went wrong, why, what to do), from llama-server's last lines. */
 export function whyItFailed(tail: string): string {
@@ -20,6 +26,10 @@ export function whyItFailed(tail: string): string {
   }
   if (/invalid magic|failed to read|unexpectedly reached end of file|corrupt|not within the file bounds/.test(t)) {
     return 'This model did not load: the file is incomplete or damaged (often a download that stopped part-way). Download it again, or pick another model.';
+  }
+  if (maxFault(tail)) return 'This model did not load: a PC lending its card for Max mode stopped answering while it loaded (someone started using it, or it left the network). Load it again: it then uses the PCs that lend now.';
+  if (/doesn't contain mtp layers|failed to create mtp context/.test(t)) {
+    return 'This model did not load: it was set to use its built-in guesser (MTP), but this file has none. Set Guessing model to None (or a smaller model) in its gear, beside Connect, then load it again.';
   }
   if (/failed to allocate|unable to allocate|out of memory|not enough memory|bad_alloc/.test(t)) {
     return 'This model did not load: this PC ran out of free memory (RAM) for it. Close other programs (LM Studio too, if it has a model open; or drop the picture model with Drop in the top bar), or pick a smaller model.';
@@ -115,9 +125,24 @@ export interface ChatRun {
   fitMargin?: number;
   fa?: 'on' | 'off';
   threads?: number;
-  spec?: 'ngram';
+  spec?: 'ngram' | 'mtp';
   draftOn?: 'ram';
   draftCache?: 'q8_0';
+  draftMax?: number;
+  /**
+   * A mixture-of-experts model (read from its header). On a graphics card it reads prompts in chunks of 2048 tokens,
+   * not llama.cpp's 512: with the experts in RAM, each chunk carries the experts to the card once, so bigger chunks read
+   * a long prompt several times faster.
+   */
+  moe?: boolean;
+  /**
+   * Max mode: linked PCs' cards (or RAM) as more devices, each an address on 127.0.0.1 that is a sealed stream to that
+   * PC (src/jobrun/maxhost.ts). llama.cpp's own fit then places the layers over them and this PC.
+   */
+  rpc?: string[];
+  /** The cards it runs on and its guessing model's card (src/devices.ts names; unset: every card, as llama.cpp picks). */
+  cards?: string[];
+  draftCard?: string[];
 }
 
 /** How llama-server is started for chat on `device`. `plainTemplates`: llama.cpp's own chat formats, for a model
@@ -126,8 +151,11 @@ export interface ChatRun {
  * answers only requests that carry it (src/runnerkeys.ts), and its slots page (what each slot is working on) is off. */
 export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' | 'cuda', threads: number, plainTemplates = false, run: ChatRun = { ctx: 8192, cache: 'f16', place: 'auto' }, card = false, key = ''): string[] {
   // Auto on a card: no layer count, so llama.cpp fits it; otherwise every layer goes to the chip (none on the CPU).
-  const fits = device !== 'cpu' && run.place === 'auto' && card;
-  const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx), '--no-webui', ...(fits ? [] : ['-ngl', device === 'cpu' ? '0' : '999'])];
+  // With Max mode, its fit places the layers on every device, the lent ones too (the CPU runner included).
+  const fits = (device !== 'cpu' && run.place === 'auto' && card) || !!run.rpc?.length;
+  // Log level 4: only then does the runner write which devices it found and used ("using device CUDA0", "offloaded
+  // N/M layers"), which tell a card start from one that quietly went to the CPU. No chat text is written at that level.
+  const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx), '--no-webui', '-lv', '4', ...(fits ? [] : ['-ngl', device === 'cpu' ? '0' : '999'])];
   // llama.cpp's own fit keeps 1024 MB free on each card unless told a smaller margin.
   if (fits && run.fitMargin) args.push('-fitt', String(run.fitMargin));
   if (run.cache !== 'f16') args.push('-fa', 'on', '-ctk', run.cache, '-ctv', run.cache);
@@ -135,13 +163,22 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   if (run.place === 'ram' && device !== 'cpu') args.push('--cpu-moe');
   if (run.place === 'layers' && run.moeCpu && device !== 'cpu') args.push('--n-cpu-moe', String(run.moeCpu));
   const t = run.threads && run.threads > 0 ? run.threads : threads;
+  if (run.moe && device !== 'cpu') args.push('-ub', '2048');
   if (t > 0) args.push('-t', String(t));
   if (plainTemplates) args.push('--no-jinja');
   if (key) args.push('--api-key', key, '--no-slots');
+  if (run.rpc?.length) args.push('--rpc', run.rpc.join(','));
+  // Card choice: only these cards (with Max mode's lent ones, RPC0, RPC1… in --rpc order, which must be named too).
+  const mine = idsFor(device, run.cards);
+  if (mine.length) args.push('-dev', [...mine, ...(run.rpc ?? []).map((_, i) => `RPC${i}`)].join(','));
   if (run.draft) {
     args.push('--spec-type', 'draft-simple', '-md', run.draft, '-ngld', device === 'cpu' || run.draftOn === 'ram' ? '0' : '999');
+    const its = run.draftOn === 'ram' ? [] : idsFor(device, run.draftCard);
+    if (its.length) args.push('-devd', its[0]);
     if (run.cache !== 'f16') args.push('-ctkd', run.cache, '-ctvd', run.cache);
     else if (run.draftCache) args.push('-ctkd', run.draftCache, '-ctvd', run.draftCache);
   } else if (run.spec === 'ngram') args.push('--spec-type', 'ngram-mod');
+  else if (run.spec === 'mtp') args.push('--spec-type', 'draft-mtp');
+  if ((run.draft || run.spec === 'mtp') && run.draftMax) args.push('--spec-draft-n-max', String(run.draftMax));
   return args;
 }

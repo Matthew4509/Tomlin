@@ -230,7 +230,8 @@ export function buildChat(x: ChatInput): ChatContext {
   const history = x.history.filter(l => !l.refused && !l.failed && l.content.trim());
   const fixed = room - left;
   const sumRoom = Math.min(Math.floor(room / 6), 1500);
-  const start = keptFrom(history.map(l => l.content.length + 8), left - sumRoom);
+  // On one of his messages: a chat template may refuse an answer straight after the system message (measured).
+  const start = userFrom(history, keptFrom(history.map(l => l.content.length + 8), left - sumRoom));
   const recent = history.slice(start);
   const older = history.slice(0, start);
   if (older.length) {
@@ -281,6 +282,15 @@ export function keptFrom(sizes: number[], room: number): number {
 }
 
 const sumTo = (sizes: number[], i: number) => sizes.slice(0, i).reduce((t, s) => t + s, 0);
+
+/**
+ * The first of his messages at or after `i` (past the last line when there is none): where the messages sent word for
+ * word may start. Some chat templates (Ministral's, measured) refuse an answer straight after the system message.
+ */
+export function userFrom(history: ChatLine[], i: number): number {
+  while (i < history.length && history[i].role !== 'user') i++;
+  return i;
+}
 
 // ---- Job steps: the packet a worker gets ----
 

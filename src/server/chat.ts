@@ -12,10 +12,11 @@ import type { ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { cleanFrom, cleanWritten, markSent, promptFor } from '../sendto.ts';
-import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chats, json, notebooks, staff, staffId, store } from './core.ts';
+import { cleanFoldWait, findInChat, FOLD_WAIT_MAX, isBigRead, LOG_KINDS, recallLine, sentLines, startIn, type LogKind } from '../layers.ts';
+import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, staff, staffId, store } from './core.ts';
 import { chat, lastUsed, main, runOn, runnerUsed } from './panes.ts';
-import { answeringBusy, askOnce, chatAnswering, chatContext, endAnswer, lastContext, notebooksOf, reserve, setPhase, startAnswer, stopChats, takeChat, takeTurn, workOn } from './answering.ts';
-import { artistPointer, chatPeople, chatPersonHere, chatToSend, openChat, sendTarget, type SendTarget } from './people.ts';
+import { answeringBusy, askOnce, chatAnswering, chatContext, endAnswer, lastContext, layerAsk, notebooksOf, reserve, setPhase, startAnswer, stopChats, takeChat, takeTurn, workOn } from './answering.ts';
+import { artistPointer, chatPeople, chatPersonHere, chatToSend, openChat, previewsTake, sendTarget, type SendTarget } from './people.ts';
 import { namedChat } from '../chats.ts';
 import { jobRoutes } from './jobs.ts';
 import { newRid, owedLine, type Owed } from '../outbox.ts';
@@ -23,10 +24,13 @@ import { addOwed, dropOwed, notLive } from './owed.ts';
 import { keepFirstAnswer, saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
+import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, type ToolUse } from '../webtools.ts';
+import { runnerHeaders } from '../runnerkeys.ts';
+import type { Pane } from '../pane.ts';
 import * as Q from '../queue.ts';
 
 /** A new message, answered in the chat it names (`to`): never in whichever chat another window opened last. */
-async function chatMessage(res: ServerResponse, message: string, to: SendTarget, from = '', agree = false, think = false, now = false): Promise<void> {
+async function chatMessage(res: ServerResponse, message: string, to: SendTarget, from = '', agree = false, think = false, now = false, web = false): Promise<void> {
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', ...SECURITY_HEADERS });
   const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   const { who } = to;
@@ -93,6 +97,8 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
   const openId = openChat0.id;
   // The chat it went into (a new one is made just above): the page reads it back by this id.
   send('chat', { chat: openId });
+  // The first message today in a chat of a project: a fresh picture of its running site, in the background.
+  void previewsTake(openChat0.project);
   const file = chats.file(openId);
   // The hire's PC is busy with the queue (src/server/queue.ts): asked first, "busy: add to the queue" (or send now anyway).
   const queued = member && !now && !memory.rememberCommand(message) ? queueOn(brains.refsOf(member)) : null;
@@ -100,8 +106,9 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
     send('queue', { text: `${member!.name.split(/\s+/)[0]}'s PC (${queued.pc}) is busy with the queue: "${queued.title.slice(0, 80)}". Add this message to the queue? It is answered in this chat when that PC is free.`, chat: openId });
     return void res.end();
   }
-  // Quick or Think, as chosen in this chat's box: kept on the chat, so it is chosen again when the chat opens.
+  // Quick or Think, as chosen in this chat's box: kept on the chat, so it is chosen again when the chat opens. Web too.
   if (!!openChat0.think !== think) await chats.mark(openId, { think });
+  if (!!openChat0.web !== web) await chats.mark(openId, { web });
   const books = notebooksOf(who);
   // "remember: ..." is written to the notebook by code, at once; no model is asked.
   const cmd = memory.rememberCommand(message);
@@ -117,7 +124,7 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
     send('done', { text: reply, perSecond: 0, ran: 'written by the app, no model', note: '', saved: !('error' in r) });
     return void res.end();
   }
-  return answerTurn(res, send, { who, member, own, file, openId, mode: 'message', message, from, think });
+  return answerTurn(res, send, { who, member, own, file, openId, mode: 'message', message, from, think, web });
 }
 
 /**
@@ -220,7 +227,7 @@ async function answerTurn(res: ServerResponse, send: (event: string, data: unkno
 }
 
 /** `think`: Think was chosen for this message (the model works it out first, when it can). */
-type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; queued?: string; think?: boolean };
+type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; queued?: string; think?: boolean; web?: boolean };
 
 /**
  * An answer being written in a chat, kept going for whoever follows it: the page that asked, and a page that opens the
@@ -330,8 +337,15 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const asked = `${message} ${[...history].reverse().find(l => l.role === 'user')?.content ?? ''}`;
   const docsRoom = memory.docRoom(memory.chatRoom(ctx, ANSWER_CEILING)) - 600;
   const found = docs.length ? findParts(docs, pagesAskedFirst(message, asked), docsRoom) : [];
-  // The context is rebuilt for this turn, sized to the model that answers (src/memory.ts), and thrown away after.
-  const build = (squeeze?: number) => chatContext(who, member, history, mode === 'message' ? message : mode === 'handoff' ? HANDOFF_ASK : '', ctx, info?.opening, found.length ? docSection(found) : undefined, wholeSection(docs, docsRoom) ?? undefined, squeeze);
+  // The context is rebuilt for this turn, sized to the model that answers (src/memory.ts), and thrown away after. A
+  // chat of 16K or more is built in layers (src/layers.ts) from the read speed of the model that answers and its fold wait.
+  const away = !!target && !target.here;
+  const layers = await layerAsk(info, away ? target!.ref : runner.view.model ?? '', away);
+  const build = (squeeze?: number) => chatContext(who, member, history, mode === 'message' ? message : mode === 'handoff' ? HANDOFF_ASK : '', ctx, info?.opening, found.length ? docSection(found) : undefined, wholeSection(docs, docsRoom) ?? undefined, squeeze, layers);
+  /** A fold (or the first layered turn) changed what sits above the latest messages: kept for the turns after it. */
+  const keepSent = async () => {
+    if ('layered' in built && built.folded) await chatLogs.setSent(openId, built.sent);
+  };
   let built = await build();
   const sources = built.docsWhole ? `${docs.map(d => d.name).join('; ')} (whole)` : found.length ? sourcesLine(found) : '';
   // A message bigger than this model's context can read with an answer: said plainly, never sent to be cut or refused.
@@ -341,6 +355,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     return void res.end();
   }
   lastContext.set(openId, { ctx: built.ctx, at: Date.now(), model: ran });
+  await keepSent();
   let turns = built.turns;
   // Continue: the cut answer is the last turn, so the model goes on from inside it.
   const before = mode === 'continue' ? history.at(-1)?.content ?? '' : '';
@@ -354,6 +369,12 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const thinks = thinksOf(answering);
   const olderPc = !!target && !target.here && !jobRoutes.canThink(target.ref);
   const thinkNow = !!t.think && mode === 'message' && thinks !== 'never' && !olderPc;
+  // Web (the chat's switch): the model may search the web and read pages while it answers, when it runs here and its
+  // chat format has tools. Addresses the person gave (messages, the documents' parts read now) may be opened.
+  const webAsked = mode === 'message' && (t.web ?? info?.web ?? false);
+  const webAway = webAsked && !!target && !target.here;
+  const webWhy = !webAsked ? '' : webAway ? (jobRoutes.canWeb(target!.ref) ? '' : `Web is on, but "${target!.pc}" runs an older TOMLIN without the web tools, so it answered from what it knows. Update it there (Network, Update).`) : await toolsWhy(runner);
+  const webSeed = [message, ...history.filter(l => l.role === 'user').map(l => l.content), ...found.map(f => f.part.text)];
   const thinkNote = t.think && mode === 'message' && !thinkNow
     ? olderPc ? `"${target!.pc}" runs an older TOMLIN that cannot think first, so this was answered straight away.` : `${target?.model || runner.view.modelName || 'This model'} cannot think first, so it answered straight away (Qwen 3 and 3.5 can).`
     : '';
@@ -386,6 +407,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   };
   let perSecond = 0;
   let cut = false;
+  // This answer's web tools (Web on), set by the ask that wrote it; or what a linked PC used for it.
+  let web: WebTurn | null = null;
+  let awayTools: ToolUse[] = [];
   // A new message to a linked PC that keeps answers: owed from now until it is in this chat, so a lost connection (or
   // this PC stopping) does not lose it; the node finishes it and it is collected (src/server/owed.ts).
   let owe: Owed | null = null;
@@ -430,8 +454,11 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         owe = { rid: newRid(), pc: at.pc, name: target.pc, chatId: openId, ran, at: new Date().toISOString() };
         await addOwed(owe);
       }
+      // Web on: that PC runs the web tools itself, with the addresses given here and the room in the context.
+      const webThere = webAway && !webWhy ? { seed: webSeed, perCall: Math.max(1500, Math.min(12_000, Math.floor(Math.max(2000, (built.room - built.used) * 0.7) / 3))), total: Math.max(2000, Math.min(60_000, Math.floor((built.room - built.used) * 0.7))) } : undefined;
       try {
-        shown = fresh(await target.brain.chat(turns, answerTokens, text => show((shown = fresh(text))), inner.signal, { ...askOpts, ...(owe ? { rid: owe.rid } : {}) }));
+        shown = fresh(await target.brain.chat(turns, answerTokens, text => show((shown = fresh(text))), inner.signal, { ...askOpts, ...(owe ? { rid: owe.rid } : {}), ...(webThere ? { web: webThere } : {}) }));
+        if (target.brain.tools?.length) awayTools = target.brain.tools;
         thought = target.brain.thought ?? null;
         // Stopped at its length limit (a linked PC says so from 2.0.43): Continue is offered, as for a model here.
         cut = target.brain.cut === true;
@@ -453,15 +480,32 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       perSecond = target.brain.last?.write ?? 0;
     } else {
       if (runner.view.state !== 'connected' || !runner.worker.base) throw new Error('the chat model was disconnected');
-      const ask = () => streamChat(runner.worker.base!, runner.view.model ?? '', turns, text => {
-        const loop = repeatCut(text);
-        shown = fresh(loop ?? text);
-        show(shown);
-        if (loop !== null) {
-          looped = true;
-          ac.abort();
-        }
-      }, ac.signal, answerTokens, askOpts);
+      // The web's room: what the context has left after the chat, shared by this answer's results.
+      const left = Math.max(0, built.room - built.used);
+      const webTotal = Math.max(2000, Math.min(60_000, Math.floor(left * 0.7)));
+      const webPerCall = Math.max(1500, Math.min(12_000, Math.floor(webTotal / 3)));
+      const search = (await store.settings()).webSearch ?? { provider: 'duckduckgo' as const };
+      const ask = () => {
+        // Asked again (a smaller context, or no prefill): the web is used afresh, and only that ask's use is kept.
+        // What it is doing, in the answer's place until the answer comes (a text held back is not sent after it).
+        const say = (text: string) => {
+          holdNoMore();
+          latest = before;
+          send('status', { text });
+        };
+        const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: webPerCall, total: webTotal, onStatus: say }) : null;
+        web = turnWeb;
+        const tools = turnWeb ? { defs: WEB_TOOLS, run: (n: string, a: string, sig: AbortSignal, round: number) => turnWeb.run(n, a, sig, round), rounds: WEB_ROUNDS, onCall: (n: string, a: string) => say(callWords(n, a)) } : undefined;
+        return streamChat(runner.worker.base!, runner.view.model ?? '', turns, text => {
+          const loop = repeatCut(text);
+          shown = fresh(loop ?? text);
+          show(shown);
+          if (loop !== null) {
+            looped = true;
+            ac.abort();
+          }
+        }, ac.signal, answerTokens, { ...askOpts, ...(tools ? { tools } : {}) });
+      };
       let r;
       try {
         r = await ask();
@@ -470,6 +514,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
           // The chat's words came to more word-pieces than the guess of 3 characters each (JSON, lock files, another
           // alphabet): built again once, smaller by what llama.cpp counted, and asked again.
           built = await build((0.95 * (built.used / memory.CHARS_PER_TOKEN)) / error.tokens);
+          await keepSent();
           turns = built.turns;
           try {
             r = await ask();
@@ -520,10 +565,15 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     // Came in whole, stopped, or failed there: nothing is owed any more.
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
-  const note = [looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : ''].filter(Boolean).join(' ');
+  const note = [looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, webWhy, thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : ''].filter(Boolean).join(' ');
+  const tools = (web as WebTurn | null)?.uses ?? awayTools;
+  // How full, whether it was layered (no "getting large" bar then), and a linked PC's read speed for the next turn
+  // (from a big read only: a small one carries start-up time, src/layers.ts BIG_READ_TOKENS).
+  const last = away ? target!.brain.last : null;
+  const facts = () => ({ fill: built.fill + Math.round((shown.length / built.room) * 100), layered: 'layered' in built, ...(last && (last.read ?? 0) > 0 && isBigRead(last.readTokens) ? { readSpeed: last.read } : {}) });
   if (mode === 'continue') {
     if (mark !== store.chatMark(file)) return gone();
-    const marked = await chats.mark(openId, { fill: built.fill + Math.round((shown.length / built.room) * 100) });
+    const marked = await chats.mark(openId, facts());
     await keepContinued(file, before, shown, ran, send, note, cut, perSecond, largeOf(marked), mark);
     return void res.end();
   }
@@ -535,6 +585,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     }
     const next = await chats.carryOn(info!, text);
     await docStore.copy(openId, next.id);
+    await chatLogs.copy(openId, next.id);
     await chats.mark(openId, { askedLarge: 100 });
     await store.saveSettings({ chatId: next.id });
     send('done', { text, perSecond, ran, handoff: next.id, note });
@@ -554,17 +605,36 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // A "REMEMBER: ..." line is only a suggestion: it comes off the answer and he decides (Save / No).
   const sug = memory.takeSuggestion(shown);
   shown = sug.answer;
-  const line: ChatLine = { role: 'assistant', content: shown, at: new Date().toISOString(), perSecond, ran, ...(cut ? { cut } : {}), ...(ac.signal.aborted && !looped ? { stopped: true } : {}), ...(sources ? { sources } : {}), ...(thought ? { thought } : {}) };
+  const line: ChatLine = { role: 'assistant', content: shown, at: new Date().toISOString(), perSecond, ran, ...(cut ? { cut } : {}), ...(ac.signal.aborted && !looped ? { stopped: true } : {}), ...(sources ? { sources } : {}), ...(thought ? { thought } : {}), ...(tools.length ? { tools } : {}) };
   // A stand-in for this answer (owed, src/server/owed.ts) never stays beside the answer itself.
   const rid = owe?.rid;
   if (shown.trim() && !(await store.changeChat(file, lines => [...lines.filter(l => !rid || l.waiting?.rid !== rid), line], mark))) return gone();
-  // How full the chat is now (with this answer): the page offers a handoff from 75%.
-  const marked = await chats.mark(openId, { fill: built.fill + Math.round((shown.length / built.room) * 100) });
+  // How full the chat is now (with this answer): the page offers a handoff from 75% (not in a layered chat).
+  const marked = await chats.mark(openId, facts());
   // Lets go! on Home: the first answer is also kept as a file in the project (a stopped one is not).
   const kept = mode === 'message' && marked?.saveAnswer && !(ac.signal.aborted && !looped) ? await keepFirstAnswer(marked, message, shown) : '';
   const said = [note, kept ? `Also saved as ${kept.replace(/\//g, '\\')} in the workspace folder${cut ? ' (as far as it got: the rest, after Continue, is in this chat only)' : ''}.` : ''].filter(Boolean).join(' ');
-  send('done', { text: shown, perSecond, ran, cut, sources, thought, large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said });
+  send('done', { text: shown, perSecond, ran, cut, sources, thought, ...(tools.length ? { tools } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said });
   res.end();
+}
+
+/** Whether a model here can call tools: its chat format says so (llama-server /props), asked once per runner start. */
+const toolsSaid = new Map<string, boolean>();
+async function toolsWhy(runner: Pane): Promise<string> {
+  const base = runner.worker.base;
+  const name = runner.view.modelName || 'This model';
+  if (!base) return '';
+  const key = `${base}|${runner.view.pid ?? ''}`;
+  if (!toolsSaid.has(key)) {
+    try {
+      const r = await fetch(`${base}/props`, { headers: runnerHeaders(base) });
+      const p = r.ok ? ((await r.json()) as { chat_template_caps?: { supports_tools?: boolean } }) : null;
+      toolsSaid.set(key, p?.chat_template_caps?.supports_tools === true);
+    } catch {
+      return '';
+    }
+  }
+  return toolsSaid.get(key) ? '' : `Web is on, but ${name} cannot call tools (its chat format has none), so it answered from what it knows. Models such as Qwen 3 and 3.5 can.`;
 }
 
 /** A page named in this message counts; one named only in the message before does not pull that page in again. */
@@ -630,9 +700,12 @@ export async function addDoc(req: IncomingMessage, res: ServerResponse): Promise
   return json(res, 200, { chat: open.id, docs: await docStore.list(open.id), said: `${name} is in this chat: ${doc.kind === 'pdf' ? `${doc.pages} page${doc.pages === 1 ? '' : 's'}` : `${doc.pages.toLocaleString('en-GB')} lines`}, ${doc.chars.toLocaleString('en-GB')} characters.${empty ? ` ${empty} page${empty === 1 ? ' has' : 's have'} no text (pictures only) and cannot be read.` : ''} Ask about it; each answer is given the parts that match your words, and says which pages.` });
 }
 
-/** The "getting large" bar's facts for a chat, when it should show: fill past 75% (or 90% after one Ignore). */
+/**
+ * The "getting large" bar's facts for a chat, when it should show: fill past 75% (or 90% after one Ignore). Never for a
+ * layered chat: its oldest messages move out at each fold and the log keeps what matters, so it never has to end.
+ */
 function largeOf(c: ChatInfo | null): { fill: number } | null {
-  if (!c?.fill) return null;
+  if (!c?.fill || c.layered) return null;
   const asked = c.askedLarge ?? 0;
   return (c.fill >= 75 && asked < 75) || (c.fill >= 90 && asked < 90) ? { fill: c.fill } : null;
 }
@@ -703,7 +776,30 @@ export const chatGet: Routes = {
     const open = id === null ? await openChat() : await chats.get(id);
     return json(res, 200, { lines: open ? await chats.lines(open.id) : [], chat: open ? { ...open, here: chatPersonHere(open.who), large: largeOf(open), docs: await docStore.list(open.id), live: liveAnswers.has(open.id), saveTo: await saveToOf(open) } : null });
   },
+  '/api/chat/log': async ({ res, url }) => {
+    // ?chat=<id>: that chat's log (src/layers.ts), each line as he can see, change or delete it in Memory.
+    const c = await logChat(url.searchParams.get('chat'));
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    return json(res, 200, { lines: (await chatLogs.read(c.id)).lines, kinds: LOG_KINDS });
+  },
+  '/api/chat/find': async ({ res, url }) => {
+    // ?chat=<id>&q=<words>: the older messages, no longer sent word for word, that match the words (Find in this chat).
+    const c = await logChat(url.searchParams.get('chat'));
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    const history = sentLines(await chats.lines(c.id));
+    const { sent } = await chatLogs.read(c.id);
+    const older = sent ? Math.max(0, startIn(history, sent)) : 0;
+    return json(res, 200, { found: findInChat(history, String(url.searchParams.get('q') ?? '').slice(0, 300), older), older });
+  },
 };
+
+/** The chat a log, Find or layers action names: one with TOMLIN or a hire on this PC (a linked PC's hire keeps its own). */
+async function logChat(id: unknown): Promise<ChatInfo | { error: string; status: number }> {
+  const c = await chats.get(id);
+  if (!c) return { error: 'That chat is not there any more. It may have been deleted in another window.', status: 404 };
+  if (nodestaff.parseNodeWho(c.who)) return { error: 'This chat keeps its own memory, on the PC its hire lives on: it has no chat log here.', status: 400 };
+  return c;
+}
 
 /** The chat a chat action names ({chatId}), found; with the reason (and its status) when it cannot be used. */
 async function namedTarget(b: Record<string, unknown>, newAllowed = false): Promise<SendTarget | { error: string; status: number }> {
@@ -758,7 +854,7 @@ export const chatPost: Routes = {
     // {chatId}: the chat it goes into; {chatId: '', who}: a new chat with that person, made by this message.
     const at = await namedTarget(b, true);
     if ('error' in at) return json(res, at.status, { error: at.error });
-    return chatMessage(res, message, at, cleanFrom(b.from), b.agree === true, b.think === true, b.now === true);
+    return chatMessage(res, message, at, cleanFrom(b.from), b.agree === true, b.think === true, b.now === true, b.web === true);
   },
   '/api/chat/continue': moreOrHandoff,
   '/api/chat/handoff': moreOrHandoff,
@@ -778,6 +874,51 @@ export const chatPost: Routes = {
     await chats.mark(open.id, { askedLarge: (open.fill ?? 0) >= 90 ? 90 : 75 });
     return json(res, 200, { ok: true });
   },
+  '/api/chat/log': async ({ res, b }) => {
+    // {chatId, action: add | edit | delete}: his chat log. A model never calls this: a line goes in on his press only.
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    const r = b.action === 'delete'
+      ? (await chatLogs.remove(c.id, b.id)) ? { ok: true } : { error: 'That line is not there any more. It may have been deleted in another window.' }
+      : b.action === 'edit'
+        ? await chatLogs.edit(c.id, b.id, { text: b.text, kind: b.kind, ...(typeof b.done === 'boolean' ? { done: b.done } : {}) })
+        : await chatLogs.add(c.id, b.kind as LogKind, b.text);
+    if ('error' in r) return json(res, 400, r);
+    return json(res, 200, { line: r, lines: (await chatLogs.read(c.id)).lines });
+  },
+  '/api/chat/fold': async ({ res, b }) => {
+    // {chatId}: "Send them now": the next answer takes the log and the notebooks as they are (one fold's reading).
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    await chatLogs.stale(c.id);
+    return json(res, 200, { ok: true });
+  },
+  '/api/chat/layers': async ({ res, b }) => {
+    // {chatId, on}: that chat's "Short, mid and long memory" tick.
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    await chats.mark(c.id, { layersOff: b.on !== true });
+    return json(res, 200, { on: b.on === true });
+  },
+  '/api/chat/recall': async ({ res, b }) => {
+    // {chatId, at, role}: an older message brought back into the chat (Find in this chat), as a line of his.
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    if (chatAnswering(c.id)) return json(res, 409, { error: 'This chat is still being answered. Wait for it, or press Stop, then bring the message back.' });
+    const l = (await chats.lines(c.id)).find(x => x.at === b.at && x.role === b.role && x.content.trim());
+    if (!l) return json(res, 404, { error: 'That message is not in this chat any more. Search again.' });
+    const line = recallLine(l, notebooksOf(c.who).name);
+    if (!(await store.changeChat(chats.file(c.id), lines => [...lines, line]))) return json(res, 500, { error: 'The message could not be added to the chat. Try again.' });
+    return json(res, 200, { line });
+  },
+  '/api/chat/foldwait': async ({ res, b }) => {
+    // {model, minutes}: how long a fold may spend reading with that chat model (Model settings). Used from the next answer.
+    const minutes = Number(b.minutes);
+    if (cleanFoldWait(minutes) !== minutes) return json(res, 400, { error: `The fold wait is a whole number of minutes, from 1 to ${FOLD_WAIT_MAX}.` });
+    if (typeof b.model !== 'string' || !b.model || b.model.length > 300) return json(res, 400, { error: 'Pick the chat model first: the fold wait is kept for each model.' });
+    await store.saveSettings({ foldWait: { [b.model]: minutes } });
+    return json(res, 200, { minutes });
+  },
   '/api/chat/answer-now': async ({ res, b }) => {
     // {chatId}: Answer now, pressed while that chat's answer is still being worked out.
     const live = liveAnswers.get(String(b.chatId ?? ''));
@@ -789,6 +930,12 @@ export const chatPost: Routes = {
     // {chatId, on}: Quick or Think chosen in a chat's box, kept on that chat (a chat not made yet keeps it at its first message).
     const c = await chats.get(b.chatId);
     if (c) await chats.mark(c.id, { think: b.on === true });
+    return json(res, 200, { ok: true });
+  },
+  '/api/chat/web': async ({ res, b }) => {
+    // {chatId, on}: Web switched on or off in a chat's box, kept on that chat (a chat not made yet keeps it at its first message).
+    const c = await chats.get(b.chatId);
+    if (c) await chats.mark(c.id, { web: b.on === true });
     return json(res, 200, { ok: true });
   },
   '/api/chat/follow': async ({ res, b }) => {
@@ -817,6 +964,9 @@ export const chatPost: Routes = {
       store.chatEmptied(chats.file(open.id));
       await store.saveChat([], chats.file(open.id));
       await chats.mark(open.id, { fill: 0, askedLarge: 0 });
+      // The chat log stays, as its documents do (he empties messages, not what was decided); the next turn starts a
+      // fresh record of what is sent.
+      await chatLogs.setSent(open.id, null);
     }
     return json(res, 200, { ok: true });
   },

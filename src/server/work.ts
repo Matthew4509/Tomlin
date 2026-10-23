@@ -275,7 +275,8 @@ async function projectCreate(b: Record<string, unknown>): Promise<{ status: numb
   if (go && !hire) return { status: 409, body: { error: 'Nobody can take the prompt now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
   const place = await projectPlace(b);
   if ('error' in place) return { status: 400, body: place };
-  const q = project.cleanQuick(b, place.folder);
+  // {fromChat: true}: "+ New project…" in a chat's project list, a name alone (never with Lets go!, which sends a prompt).
+  const q = project.cleanQuick(b, place.folder, b.fromChat === true && !go);
   if ('error' in q) return { status: 400, body: q };
   const verdict = checkMessage([q.name, q.about, q.prompt].join('\n'), { recent: [] });
   if (!verdict.ok) return { status: 400, body: { error: REFUSAL[verdict.reason] } };

@@ -7,7 +7,7 @@
 //                         beside it and TOMLIN.exe moves current.txt on)
 //     tomlin-2.0.44\      the app, with its own Node.js in runtime\node
 // The home folder (chats, staff, pictures, models, backups) stays where it always was, so installing, updating and
-// uninstalling never touch it unless asked. Shortcuts (Start menu, desktop, Start with Windows) and the entry in
+// uninstalling never touch it unless asked. Shortcuts (Start menu, desktop, Start TOMLIN when this PC starts) and the entry in
 // Settings > Apps all point at TOMLIN.exe, which never moves, so they keep working after every update.
 // An install made before the TOMLIN name (Programs\Smart Manager, Smart Manager.exe) keeps its names: see FORMER.
 // Tested in test/installer.test.ts.
@@ -18,7 +18,7 @@ import { basename, join } from 'node:path';
 export const EXE = 'TOMLIN.exe';
 /**
  * The names an install made before the TOMLIN name has (in Programs\Smart Manager). It keeps them all, through updates
- * and repairs: its shortcuts, Start with Windows and the entry in Settings > Apps point at them, so nothing is moved
+ * and repairs: its shortcuts, Start TOMLIN when this PC starts and the entry in Settings > Apps point at them, so nothing is moved
  * under it. A new install gets the TOMLIN names.
  */
 export const FORMER = { folder: 'Smart Manager', exe: 'Smart Manager.exe', key: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SmartManager' };
@@ -117,7 +117,7 @@ export function currentCopy(root: string): { name: string; dir: string; version:
 /**
  * The program of this user's install (TOMLIN.exe, or Smart Manager.exe in an older one), when there is one whose copy
  * is whole and not older than `version`: then
- * "Start with Windows" and the desktop shortcut start it, even when asked from an unzipped copy (else a copy started
+ * "Start TOMLIN when this PC starts" and the desktop shortcut start it, even when asked from an unzipped copy (else a copy started
  * from a folder would point them at itself, and the install would never run again).
  */
 export function installExe(version: string | null, env: NodeJS.ProcessEnv = process.env): string | null {
@@ -249,11 +249,11 @@ export function copiesToRemove(names: string[], current: string): string[] {
   return copies.slice(KEEP_COPIES - 1);
 }
 
-/** The Start with Windows file's text when TOMLIN is installed: the program, with no window at the start. */
+/** The Start TOMLIN when this PC starts file's text when TOMLIN is installed: the program, with no window at the start. */
 export function startupScriptFor(exe: string): string {
   return [
     '@echo off',
-    'rem Made by TOMLIN (Network: connect PCs: "Start TOMLIN when this PC starts"). Untick it there to remove this file.',
+    'rem Made by TOMLIN (Network: "Start TOMLIN when this PC starts"). Untick it there to remove this file.',
     `start "" "${exe.replace(/%/g, '%%')}" --quiet`,
     '',
   ].join('\r\n');

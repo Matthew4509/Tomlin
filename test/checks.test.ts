@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cssBalance, isModule, runTests, syntaxCheck, tidyError, tidyTestOutput } from '../src/checks.ts';
+import { cssBalance, isModule, runTests, syntaxCheck, testEnv, tidyError, tidyTestOutput } from '../src/checks.ts';
 
 test('syntax checks catch broken TypeScript and module JavaScript (which node --check alone passes)', async () => {
   const r = await syntaxCheck([
@@ -62,4 +62,27 @@ test('tests run in the folder from the fixed list only, and report a failure wit
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('Run tests gets only what the test tools need: no keys, tokens, passwords or TOMLIN settings reach the code a model wrote', () => {
+  const env = testEnv({
+    Path: 'C:\\Windows', SystemRoot: 'C:\\Windows', TEMP: 'C:\\T', USERPROFILE: 'C:\\Users\\x', APPDATA: 'C:\\A', PYTHONPATH: 'C:\\py', npm_config_cache: 'C:\\npm', LANG: 'en_AU.UTF-8',
+    OPENAI_API_KEY: 'sk-1', GITHUB_TOKEN: 'ghp', TOMLIN_RELEASE_KEY: 'C:\\key.pem', AWS_SECRET_ACCESS_KEY: 'x', npm_config__authToken: 'npm_1', PIP_INDEX_PASSWORD: 'p', CPANEL_PASSWORD: 'p', SOME_APP_SETTING: 'x', NODE_OPTIONS: '--inspect',
+  });
+  assert.deepEqual(Object.keys(env).sort(), ['APPDATA', 'LANG', 'PYTHONPATH', 'Path', 'SystemRoot', 'TEMP', 'USERPROFILE', 'npm_config_cache']);
+});
+
+test('a script with top-level await and no import passes, as Node runs it (tools/max-speed.ts was failed); a broken one still fails', async () => {
+  const r = await syntaxCheck([
+    { path: 'tools/speed.ts', text: 'const port: number = Number(process.argv[2]) || 8740;\nconst s = (await (await fetch(`http://127.0.0.1:${port}/`)).json()) as { a?: number };\nconsole.log(s.a);\n' },
+    { path: 'tools/plain.js', text: 'const r = await fetch("http://127.0.0.1:1/");\nconsole.log(r.status);\n' },
+    { path: 'tools/broken.ts', text: 'const a: number = await f(;\n' },
+    { path: 'web/app.js', text: 'function f( {\n' },
+  ]);
+  const by = Object.fromEntries(r.map(x => [x.path, x]));
+  assert.equal(by['tools/speed.ts'].ok, true, by['tools/speed.ts'].message);
+  assert.equal(by['tools/plain.js'].ok, true, by['tools/plain.js'].message);
+  assert.equal(by['tools/broken.ts'].ok, false);
+  assert.equal(by['web/app.js'].ok, false);
+  assert.doesNotMatch(by['web/app.js'].message, /sm-check-|\.cjs|\.mjs/);
 });

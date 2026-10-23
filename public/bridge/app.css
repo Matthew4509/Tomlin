@@ -45,7 +45,7 @@ nav{grid-row:1;background:var(--pane);display:flex;flex-direction:column;padding
 .brand:hover{background:var(--hover)} .brand:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .brand svg{width:22px;height:22px;flex:none}
 .brand small{display:block;font-weight:400;color:var(--muted);font-size:12px;line-height:16px}
-.nav-item{display:flex;align-items:center;gap:14px;height:40px;padding:0 12px;border:0;background:none;border-radius:4px;cursor:pointer;text-align:left;position:relative;width:100%}
+.nav-item{display:flex;flex:none;align-items:center;gap:14px;height:40px;padding:0 12px;border:0;background:none;border-radius:4px;cursor:pointer;text-align:left;position:relative;width:100%}
 .nav-item:hover{background:var(--hover)}
 .nav-item[aria-current="page"]{background:var(--hover);font-weight:600}
 .nav-item[aria-current="page"]::before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:2px;background:var(--accent)}
@@ -67,7 +67,7 @@ h2{font-size:20px;line-height:28px;font-weight:600;margin:28px 0 8px}
 .cmdbar .grow{flex:1}
 .search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;background:var(--card);border:1px solid var(--line2);border-bottom-color:var(--muted);border-radius:4px;min-width:220px}
 .search:focus-within{border-bottom:2px solid var(--accent)}
-.search input{border:0;outline:0;background:none;flex:1;min-width:0}
+.search input{border:0;outline:0;background:none;flex:1;min-width:0;align-self:stretch}
 select.sel{height:32px;border:1px solid var(--line2);border-radius:4px;background:var(--card);padding:0 8px}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 12px;border:1px solid var(--line2);border-bottom-color:rgba(0,0,0,.18);background:var(--card);border-radius:4px;cursor:pointer;white-space:nowrap}
@@ -81,23 +81,24 @@ select.sel{height:32px;border:1px solid var(--line2);border-radius:4px;backgroun
 .list{display:flex;flex-direction:column;gap:4px}
 .row{display:grid;grid-template-columns:minmax(0,1fr) 92px 78px 158px 346px;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 12px 10px 16px;min-height:64px}
 .row:hover{background:var(--card2)}
-.row .title{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}
-.row .title span.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .title{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-weight:600;min-width:0}
+/* The name first and whole: the marks after it (audit, live, git) go to a second line before it is ever cut. */
+.row .title span.nm{flex:0 1 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .desc{color:var(--muted);font-size:13px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .num{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
 .row .num b{color:var(--ink);font-weight:600;display:block;font-size:14px}
 .row .acts{display:flex;gap:6px;align-items:center;justify-content:flex-end}
 .list-head{display:grid;grid-template-columns:minmax(0,1fr) 92px 78px 158px 346px;gap:12px;padding:0 13px 4px 17px;color:var(--muted);font-size:12px}
 
-.badge{display:inline-flex;align-items:center;gap:6px;height:22px;border-radius:11px;padding:0 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;border-radius:12px;padding:0 9px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-run{background:var(--ok-soft);color:var(--ok)} .b-busy{background:var(--warn-soft);color:var(--warn)} .b-off{background:var(--off-soft);color:var(--off)}
 button.badge.b-link{border:0;font-family:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px} button.badge.b-link:hover{text-decoration-style:solid} button.badge.b-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .b-new{background:var(--accent-soft);color:var(--accent)}
 .b-bad{background:var(--bad-soft);color:var(--bad)} .b-ok{background:var(--ok-soft);color:var(--ok)}
-.audit-link{border:0;background:none;padding:0;cursor:pointer;font-size:12px;text-align:left}
+.audit-link{border:0;background:none;padding:0;min-height:24px;cursor:pointer;font-size:12px;text-align:left}
 .a-bad{color:var(--bad)} .a-warn{color:var(--warn)} .a-ok{color:var(--ok)} .a-low{color:var(--muted)}
 /* Hosted live: a light with a shape as well as a colour (● up, ▲ unsure, ✕ down, ○ not checked yet) */
-.live{border:0;background:none;padding:0 2px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;font-family:inherit}
+.live{border:0;background:none;padding:0 2px;min-height:24px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;font-family:inherit}
 .live:hover{text-decoration:underline}
 .git-fact{display:flex;gap:12px;padding:4px 0;border-top:1px solid var(--line)}
 .git-fact .muted{flex:0 0 180px;color:var(--muted)}
@@ -191,7 +192,7 @@ button.ring:hover .ring-k{color:var(--ink);text-decoration:underline}
 .pc-fact span{color:var(--muted);white-space:nowrap}
 .pc-fact b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pc-count{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin-top:4px}
-.linkbtn{border:0;background:none;padding:2px 4px;margin-right:-4px;border-radius:4px;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600}
+.linkbtn{border:0;background:none;padding:2px 4px;min-height:24px;margin-right:-4px;border-radius:4px;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600}
 .linkbtn:hover{background:var(--hover)} .linkbtn:disabled{color:var(--muted);cursor:default;background:none}
 
 /* status bar */
@@ -256,7 +257,7 @@ dialog.wide{width:min(820px,calc(100vw - 32px))}
 .testbar{display:flex;gap:10px;align-items:flex-start;background:var(--warn-soft);color:var(--ink);border:1px solid var(--warn);border-radius:6px;padding:10px 14px;margin:-8px 0 16px}
 .testbar .ic{color:var(--warn);margin-top:2px}
 .testbar[hidden]{display:none}
-.infobar button{border:0;background:none;cursor:pointer;color:var(--muted);padding:2px}
+.infobar button{border:0;background:none;cursor:pointer;color:var(--muted);padding:2px;min-width:24px;min-height:24px}
 
 /* Orbital extras: a deep-space backdrop, glowing edges and a lit accent. Only colour and light; no layout changes. */
 [data-theme="orbital"] body{background:
@@ -321,7 +322,17 @@ dialog.wide{width:min(820px,calc(100vw - 32px))}
   radial-gradient(1px 1px at 79% 12%,rgba(255,255,255,.55),transparent 60%),radial-gradient(1px 1px at 91% 40%,rgba(255,255,255,.5),transparent 60%),
   radial-gradient(1px 1px at 97% 76%,rgba(255,255,255,.35),transparent 60%),
   linear-gradient(180deg,#01050e 0%,#041126 62%,#0a2552 100%)}
-/* no .orbit.empty height: the space keeps one size with 0 or more sites, so the page below never jumps */
+/* Hidden while nothing runs. Off the Projects page it folds to a thin strip (the count and a way back), so Audits,
+   Folders and the rest keep their room; the satellites wait on Projects. */
+.orbit[hidden]{display:none}
+.orbit.fold{height:34px;cursor:pointer}
+.orbit.fold .sky,.orbit.fold .station{display:none}
+.orbit.fold .earth{top:calc(100% - 6px)}
+.orbit.fold .hint{top:9px;right:150px;text-align:left}
+.orbit-go{display:none}
+.orbit.fold .orbit-go{display:inline-flex;align-items:center;position:absolute;right:16px;top:5px;height:24px;padding:0 10px;border:1px solid rgba(90,180,255,.6);border-radius:12px;
+  background:#0b2140;color:#bfe3ff;font-size:12px;cursor:pointer}
+.orbit-go:hover,.orbit-go:focus-visible{border-color:#bfe3ff;outline:0}
 :root:not([data-theme="orbital"]) .orbit{display:none}
 .orbit .earth{position:absolute;left:-30%;right:-30%;top:calc(100% - 48px);height:1400px;border-radius:50%;pointer-events:none;
   background:radial-gradient(ellipse 60% 18% at 50% 0%,#4f9dff 0%,#1f5cc0 30%,#0c3170 62%,#061a3e 100%);
@@ -332,8 +343,6 @@ dialog.wide{width:min(820px,calc(100vw - 32px))}
 @keyframes clouds{to{background-position:840px 0}}
 .orbit .station{position:absolute;left:50%;bottom:36px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#d6f2ff;box-shadow:0 0 10px 3px rgba(80,190,255,.9);pointer-events:none}
 .orbit .hint{position:absolute;left:16px;right:16px;top:8px;text-align:center;font-size:12px;line-height:16px;color:rgba(200,225,255,.72);pointer-events:none}
-.orbit .empty-note{position:absolute;left:0;right:0;top:0;bottom:44px;display:flex;align-items:center;justify-content:center;font-size:13px;color:rgba(200,225,255,.75);pointer-events:none}
-.orbit .empty-note[hidden]{display:none}
 .orbit .sky{position:absolute;left:16px;right:16px;top:26px;bottom:50px;display:flex;align-items:center;justify-content:safe center;gap:26px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .sat{position:relative;flex:none}
 .sat .float{display:flex;align-items:center;animation:bob var(--dur,6s) ease-in-out var(--delay,0s) infinite}
@@ -364,7 +373,7 @@ dialog.wide{width:min(820px,calc(100vw - 32px))}
 .sat.other .sat-body:hover,.sat.other .sat-body:focus-visible{border-color:#ff7d5c;box-shadow:0 0 0 1px #ff7d5c,0 0 22px rgba(255,125,92,.5)}
 .sat.other .av{background:radial-gradient(circle at 35% 30%,#ffd08a,#b86a10)}
 .sat.other .wing{background:repeating-linear-gradient(90deg,#6b4a1a 0 5px,#3a2810 5px 6px),#6b4a1a;border-color:rgba(255,182,72,.45)}
-.sat-open{position:absolute;top:-9px;right:30px;z-index:2;width:22px;height:22px;border-radius:50%;border:1px solid rgba(90,180,255,.7);background:#0b2140;color:#bfe3ff;cursor:pointer;
+.sat-open{position:absolute;top:-9px;right:30px;z-index:2;width:24px;height:24px;border-radius:50%;border:1px solid rgba(90,180,255,.7);background:#0b2140;color:#bfe3ff;cursor:pointer;
   display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s}
 .sat-open .ic{font-size:12px;width:12px}
 .sat:hover .sat-open,.sat:focus-within .sat-open{opacity:1}

@@ -107,7 +107,7 @@ test('Hugging Face list: the copy shipped with TOMLIN is read until this PC has 
   }
 });
 
-test("MoE's: a mixture of experts is known by its name, and ticking it keeps only those", () => {
+test("Mixture-of-experts: a mixture of experts is known by its name, and ticking it keeps only those", () => {
   for (const n of ['unsloth/Qwen3-30B-A3B-GGUF', 'TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF', 'allenai/OLMoE-1B-7B-0924', 'bartowski/Phi-3.5-MoE-instruct-GGUF', 'unsloth/gpt-oss-20b-GGUF', 'ibm/granite-3.0-3b-a800m-instruct', 'LiquidAI/LFM2-8B-A1B-GGUF']) assert.ok(isMoe(n), n);
   for (const n of ['unsloth/Qwen3.5-9B-GGUF', 'unsloth/gemma-3n-E4B-it-GGUF', 'TheBloke/Llama-2-7B-AWQ', 'some/amoeba-7b']) assert.ok(!isMoe(n), n);
   const list: ListedModel[] = [['a/Qwen3-30B-A3B-GGUF', 50, 0, 30e9], ['b/Qwen3.5-9B-GGUF', 90, 0, 9e9], ['c/gpt-oss-20b-GGUF', 70, 0, 20e9]];

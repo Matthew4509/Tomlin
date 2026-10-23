@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -164,12 +164,56 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     assert.equal(kitchen.id, chatE, 'the empty chat on this window\'s screen takes the name');
     assert.equal(kitchen.title, 'Kitchen plans');
 
-    // Pinning a chat (the left panel keeps it under Projects): kept by the server until unpinned; a gone chat says so.
+    // Pinning a chat (the left panel keeps it at the top of Recent chats): kept by the server until unpinned; a gone chat says so.
     const pinned = async (on: boolean) => ((await (await post('/api/chats/pin', { id: garden.id, on })).json()) as { chats: { id: string; pinned?: boolean }[] }).chats.find(c => c.id === garden.id)?.pinned;
     assert.equal(await pinned(true), true);
     assert.equal(((await (await fetch(`${base}/api/chats`)).json()) as { chats: { id: string; pinned?: boolean }[] }).chats.find(c => c.id === garden.id)?.pinned, true);
     assert.equal(await pinned(false), false);
     assert.equal((await post('/api/chats/pin', { id: 'gone-chat', on: true })).status, 404);
+
+    // "+ New project…" in a chat: a name alone makes a project; the chat goes in; Recent chats lists the project as one
+    // entry with the chat under it; the project can be pinned to the top. Home's create without a prompt is still refused.
+    assert.equal((await post('/api/projects/create', { name: 'Made-up shop' })).status, 400);
+    const proj = await post('/api/projects/create', { name: 'Made-up shop', fromChat: true });
+    assert.equal(proj.status, 200, await proj.clone().text());
+    const projId = ((await proj.json()) as { id: string }).id;
+    const inProj = await post('/api/chats/project', { id: kitchen.id, project: projId });
+    assert.equal(inProj.status, 200, await inProj.clone().text());
+    type Recent = { kind: string; id?: string; project?: string; chats?: string[]; pinned: boolean }[];
+    const recentNow = async () => ((await (await fetch(`${base}/api/chats`)).json()) as { recent: Recent }).recent;
+    const entry = (await recentNow()).find(e => e.kind === 'project' && e.project === projId);
+    assert.deepEqual(entry?.chats, [kitchen.id]);
+    assert.ok(!(await recentNow()).some(e => e.kind === 'chat' && e.id === kitchen.id), 'not also on its own');
+    assert.equal((await post('/api/chats/pin-project', { project: 'no-such-project', on: true })).status, 404);
+    assert.equal((await post('/api/chats/pin-project', { project: projId, on: true })).status, 200);
+    assert.deepEqual((await recentNow())[0], { ...entry, pinned: true }, 'a pinned project is on top');
+
+    // A chat's log (src/layers.ts): his lines only, added, ticked Done, deleted; the layers tick; "Send them now"; Find
+    // with nothing moved out yet; the fold wait kept per model, refused out of range; the log goes with a deleted chat.
+    const logOf = async (body: Record<string, unknown>) => {
+      const r = await post('/api/chat/log', { chatId: chatA, ...body });
+      return { status: r.status, body: (await r.json()) as { line?: { id: string; done?: string }; lines?: { text: string }[]; error?: string } };
+    };
+    assert.equal((await post('/api/chat/log', { chatId: 'gone-chat', kind: 'decision', text: 'x' })).status, 404);
+    assert.equal((await logOf({ kind: 'nonsense', text: 'x' })).status, 400);
+    const todo = await logOf({ kind: 'todo', text: 'Ring the made-up buyer' });
+    assert.equal(todo.status, 200, JSON.stringify(todo.body));
+    const ticked = await logOf({ action: 'edit', id: todo.body.line!.id, done: true });
+    assert.ok(ticked.body.line?.done, JSON.stringify(ticked.body));
+    assert.deepEqual(((await (await fetch(`${base}/api/chat/log?chat=${chatA}`)).json()) as { lines: { text: string }[] }).lines.map(l => l.text), ['Ring the made-up buyer']);
+    assert.equal((await post('/api/chat/layers', { chatId: chatA, on: false })).status, 200);
+    assert.equal(((await (await fetch(`${base}/api/chat?id=${chatA}`)).json()) as { chat: { layersOff?: boolean } }).chat.layersOff, true);
+    assert.equal((await post('/api/chat/layers', { chatId: chatA, on: true })).status, 200);
+    assert.equal((await post('/api/chat/fold', { chatId: chatA })).status, 200);
+    const found = (await (await fetch(`${base}/api/chat/find?chat=${chatA}&q=teal`)).json()) as { found: unknown[]; older: number };
+    assert.deepEqual(found, { found: [], older: 0 }, 'nothing has left the word-for-word part yet');
+    assert.equal((await post('/api/chat/recall', { chatId: chatA, at: 'never', role: 'user' })).status, 404);
+    assert.equal((await post('/api/chat/foldwait', { model: 'made-up.gguf', minutes: 20 })).status, 400);
+    assert.equal((await post('/api/chat/foldwait', { model: 'made-up.gguf', minutes: 8 })).status, 200);
+    assert.equal((await logOf({ action: 'delete', id: todo.body.line!.id })).status, 200);
+    await logOf({ kind: 'fact', text: 'A made-up fact' });
+    assert.equal((await post('/api/chats/delete', { id: chatA, pictures: 'keep' })).status, 200);
+    assert.equal(existsSync(join(home, 'data', 'chats', `${chatA}-log.json`)), false, 'the log went with the chat');
 
     // The second look is dropped for now: /alt/ goes to the app.
     const alt = await fetch(`${base}/alt/`, { redirect: 'manual' });

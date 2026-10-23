@@ -40,18 +40,26 @@ test('a model that will not load is explained in plain words, by what the runner
 
 test('the runner is started with the model\'s own context, cache and expert placement', () => {
   const base = chatArgs('m.gguf', 9000, 'cpu', 0);
-  assert.deepEqual(base, ['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9000', '-c', '8192', '--no-webui', '-ngl', '0']);
+  assert.deepEqual(base, ['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9000', '-c', '8192', '--no-webui', '-lv', '4', '-ngl', '0']);
   const big = chatArgs('m.gguf', 9000, 'cuda', 4, false, { ctx: 32768, cache: 'q8_0', place: 'ram' }, true);
-  assert.deepEqual(big.slice(6), ['-c', '32768', '--no-webui', '-ngl', '999', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cpu-moe', '-t', '4']);
+  assert.deepEqual(big.slice(6), ['-c', '32768', '--no-webui', '-lv', '4', '-ngl', '999', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cpu-moe', '-t', '4']);
   // Experts in RAM means nothing on the CPU (everything is in RAM already).
   assert.ok(!chatArgs('m.gguf', 9000, 'cpu', 0, true, { ctx: 4096, cache: 'f16', place: 'ram' }).includes('--cpu-moe'));
   // Auto on a card of its own: no layer count, so llama.cpp's fit fills the card(s) and puts the rest in RAM.
   const auto = chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, true);
   assert.ok(!auto.includes('-ngl') && !auto.includes('--cpu-moe'));
   // Auto on a chip built into the processor (shared RAM): every layer on it, as before.
-  assert.deepEqual(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, false).slice(9), ['-ngl', '999']);
+  assert.deepEqual(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, false).slice(11), ['-ngl', '999']);
   // All on the card: every layer, even with a card of its own.
-  assert.deepEqual(chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'card' }, true).slice(9), ['-ngl', '999']);
+  assert.deepEqual(chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'card' }, true).slice(11), ['-ngl', '999']);
+});
+
+test('every chat start logs at level 4, the only level at which the runner says which devices it used', () => {
+  for (const device of ['cpu', 'vulkan', 'cuda'] as const) {
+    const a = chatArgs('m.gguf', 9000, device, 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, device !== 'cpu');
+    assert.equal(a.filter(x => x === '-lv').length, 1);
+    assert.equal(a[a.indexOf('-lv') + 1], '4');
+  }
 });
 
 test('a guessing model (speculative drafts): started beside the big one, on the card with it, or in RAM on the CPU', () => {
@@ -70,7 +78,7 @@ test('a guessing model (speculative drafts): started beside the big one, on the 
 
 test('the speed setups: each new run setting gives its own flags, and old settings give exactly today\'s', () => {
   const base = { ctx: 8192, cache: 'f16' as const, place: 'auto' as const };
-  const tail = (a: string[]) => a.slice(a.indexOf('--no-webui') + 1);
+  const tail = (a: string[]) => a.slice(a.indexOf('-lv') + 2);
   // Old settings: nothing new.
   assert.deepEqual(tail(chatArgs('m.gguf', 9000, 'vulkan', 4, false, base, true)), ['-t', '4']);
   // A smaller card margin for llama.cpp's own fit: only where it fits (Auto on a card of its own).
@@ -104,4 +112,15 @@ test('a chat template the runner cannot read is recognised, so the runner tries 
   assert.ok(TEMPLATE_FAULT.test("Error: selectattr: unknown test 'tool_calls'"));
   assert.ok(!TEMPLATE_FAULT.test('llama_model_load: error loading model: tensor data is not within the file bounds'));
   assert.match(whyItFailed(nemo), /chat format/);
+});
+
+test('a mixture-of-experts model on a graphics card reads prompts in bigger chunks; a dense model or the CPU keeps the default', () => {
+  const run = { ctx: 8192, cache: 'f16' as const, place: 'auto' as const };
+  const moe = chatArgs('a3b.gguf', 9000, 'vulkan', 0, false, { ...run, moe: true }, true);
+  assert.deepEqual(moe.slice(moe.indexOf('-ub'), moe.indexOf('-ub') + 2), ['-ub', '2048']);
+  // Experts in RAM: the case it helps most.
+  assert.ok(chatArgs('a3b.gguf', 9000, 'cuda', 0, false, { ...run, place: 'ram', moe: true }, true).includes('-ub'));
+  // Dense, or on the CPU: llama.cpp's own default.
+  assert.ok(!chatArgs('dense.gguf', 9000, 'vulkan', 0, false, run, true).includes('-ub'));
+  assert.ok(!chatArgs('a3b.gguf', 9000, 'cpu', 0, false, { ...run, moe: true }).includes('-ub'));
 });

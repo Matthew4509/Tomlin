@@ -309,5 +309,20 @@
     return out;
   }
 
-  window.officeBanter = { CHARACTERS, characterOf, plan, dayKind, payday, eventLine, banterKind, changes, LINES, REPLIES, EXCHANGES, COMEBACKS, AT_EASE, KINDS: Object.keys(LINES) };
+  /** General chit-chat: at most one line this often across the whole office, so the work lines stand out. */
+  const CHIT_GAP_MS = 90_000;
+  /**
+   * Whether `m` ({ id, text, kind }) should be left out: chit-chat said by anyone in the last 10 minutes (or waiting to
+   * be said), or a work line that only repeats the same person's last line. `said` holds { id, text, kind, at? }
+   * (at: when posted; none = still waiting).
+   */
+  function saidLately(said, m, now = Date.now()) {
+    if (m.kind === 'work') {
+      const last = [...said].reverse().find((t) => t.id === m.id);
+      return last?.text === m.text;
+    }
+    return said.some((t) => t.text === m.text && (!t.at || now - t.at < 600_000));
+  }
+
+  window.officeBanter = { CHIT_GAP_MS, saidLately, CHARACTERS, characterOf, plan, dayKind, payday, eventLine, banterKind, changes, LINES, REPLIES, EXCHANGES, COMEBACKS, AT_EASE, KINDS: Object.keys(LINES) };
 })();

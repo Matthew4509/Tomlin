@@ -77,8 +77,8 @@ function workingCards() {
       el('div', { class: 'home-item-text' },
         el('strong', { text: w.text }),
         w.stage ? el('span', { class: 'hint', text: w.stage }) : null,
-        w.total ? bar(w.done / w.total, `${w.done} of ${w.total} steps done`) : null,
-        el('span', { class: 'hint', text: `${w.total ? `${w.done} of ${w.total} steps done · ` : ''}${secsText(w.seconds)} on this` }),
+        w.total ? bar((w.done + (w.skipped ?? 0)) / w.total, `${w.done} of ${w.total} steps done${w.skipped ? `, ${w.skipped} skipped` : ''}`) : null,
+        el('span', { class: 'hint', text: `${w.total ? `${w.done} of ${w.total} steps done${w.skipped ? `, ${w.skipped} skipped` : ''} · ` : ''}${secsText(w.seconds)} on this` }),
         el('span', { class: 'hint home-goal', text: `Job: ${w.goal}` })),
       open));
   }
@@ -148,8 +148,8 @@ function setupCards() {
     el('div', { class: 'setup-grid' },
       card(u.chatModels > 0, 'Add a chat model', u.chatModels ? `${u.chatModels} chat model${u.chatModels > 1 ? 's' : ''} found.` : 'TOMLIN needs at least one chat model on this PC. Models shows which ones fit.', 'Models', () => app.openModels()),
       card(u.staff > 0, 'Hire your first staff member', u.staff ? `${u.staff} on the team.` : 'Give a person a name, a role (coder, writer, artist…) and a level. They appear in the list on the left.', u.staff ? 'Manage staff' : 'Hire staff', () => (u.staff ? $('#team-open').click() : app.openHire())),
-      card(u.pcs > 0, 'Link another PC (optional)', [u.pcs ? `${u.pcs} PC${u.pcs > 1 ? 's' : ''} linked.` : '', u.pcsBroken?.length ? `${u.pcsBroken.map(n => `"${n}"`).join(', ')} need${u.pcsBroken.length > 1 ? '' : 's'} linking again: its old link no longer works.` : '', !u.pcs && !u.pcsBroken?.length ? 'Use a stronger PC on your home network for some of the work.' : ''].filter(Boolean).join(' '), 'Other PCs', () => app.openPcs()),
-      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Network: connect PCs', () => openNodes())));
+      card(u.pcs > 0, 'Connect a PC (optional)', [u.pcs ? `${u.pcs} PC${u.pcs > 1 ? 's' : ''} linked.` : '', u.pcsBroken?.length ? `${u.pcsBroken.map(n => `"${n}"`).join(', ')} need${u.pcsBroken.length > 1 ? '' : 's'} linking again: its old link no longer works.` : '', !u.pcs && !u.pcsBroken?.length ? 'Use a stronger PC on your home network for some of the work.' : ''].filter(Boolean).join(' '), 'Other PCs', () => app.openPcs()),
+      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Network', () => openNodes())));
 }
 
 // The Home title greets by the time of day, with the date under it.

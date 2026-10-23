@@ -394,6 +394,10 @@ async function changeNow(b: Record<string, unknown>): Promise<{ status: number; 
   } else if (b.action === 'team') {
     // The job's Overview: the project manager, the three roles and the final audit's expectations.
     job.team = jobs.cleanTeam(b.team ?? {}, chatHires().map(m => m.id), teamOf(job));
+  } else if (b.action === 'web') {
+    // The job's Overview: Web on or off for its steps.
+    if (b.on === true) job.web = true;
+    else delete job.web;
   } else if (b.action === 'addfix') {
     if (!job.tests || job.tests.ok) return { status: 409, body: { error: 'There is no failed test run to fix.' } };
     if (job.steps.length >= jobs.MAX_STEPS) return { status: 409, body: { error: `A job has at most ${jobs.MAX_STEPS} steps. Remove a finished one's plan entry by starting a new job for the fix.` } };

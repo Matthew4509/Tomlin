@@ -5,6 +5,7 @@
 // trick wrote the same words (sameWords) and how long a test takes (estimateMinutes). The run itself is in
 // src/server/finder.ts.
 import { guessersFor, type Listed } from './runset.ts';
+import type { RunnerName } from './runtimes.ts';
 import type { RunOptions } from './store.ts';
 
 const GB = 2 ** 30;
@@ -12,14 +13,22 @@ const MB = 2 ** 20;
 
 /** What the finder needs to know about the PC it runs on. */
 export interface PcFacts {
-  /** Graphics cards chat can use here, with memory of their own (none: the CPU only). Bytes. */
-  cards: { name: string; total: number; free: number }[];
+  /**
+   * Graphics cards chat can use here, with memory of their own (none: the CPU only), biggest first. Bytes. `ids`: each
+   * runner's name for it (src/devices.ts), for card choice; none known: no card rows.
+   */
+  cards: { name: string; total: number; free: number; ids?: string[] }[];
   /** Physical cores. */
   cores: number;
   /** The PC's chat threads now (0: llama.cpp's own choice). */
   threads: number;
   /** The chat models on this PC. */
   models: Listed[];
+  /**
+   * The card runners installed here for chat, in the order Auto tries them (CUDA needs an NVIDIA card; CUDA 12 and
+   * CUDA 13 are two builds); none known: not tried.
+   */
+  runners?: RunnerName[];
 }
 
 /** What it needs to know about the model (sizes from its file, src/gguf.ts). */
@@ -34,6 +43,8 @@ export interface ModelFacts extends Listed {
   ctxBytes: number;
   /** The smallest model of the same family on this PC, with its own cache at this context; null: none here. */
   guesser: (Listed & { ctxBytes: number }) | null;
+  /** Its file has its own built-in guesser (an MTP head, src/gguf.ts). */
+  mtp?: boolean;
 }
 
 /** Row a: the setup saved now, and what its start said. */
@@ -92,8 +103,20 @@ export function draftLayers(m: ModelFacts): number {
 const q8Run = ({ fa, ...r }: RunOptions): RunOptions => ({ ...r, cache: 'q8_0', ...(fa === 'on' ? { fa } : {}) });
 const biggest = (pc: PcFacts) => [...pc.cards].sort((a, b) => b.total - a.total)[0] ?? null;
 
+/**
+ * The cards for planning again once the model is loaded: every card, with its runner names (the card rows need them),
+ * and the biggest card's room as read now. No card read now: none, as before.
+ */
+export function cardsNow(cards: PcFacts['cards'], now: { name: string; total: number; free: number } | null): PcFacts['cards'] {
+  if (!now) return [];
+  const big = biggest({ cards } as PcFacts);
+  return big ? cards.map(c => (c === big ? { ...c, free: now.free } : c)) : [now];
+}
+
+const RUNNER_NAME: Record<RunnerName, string> = { cuda: 'CUDA 12', cuda13: 'CUDA 13', vulkan: 'Vulkan' };
+
 /** A setup in plain words. */
-export function describeRun(run: RunOptions, names: (id: string) => string = id => id): string {
+export function describeRun(run: RunOptions, names: (id: string) => string = id => id, cardNames: (ids: string[]) => string = ids => ids.join(' + ')): string {
   const where = run.place === 'card' ? 'every layer on the card' : run.place === 'ram' ? 'every expert in RAM' : run.place === 'layers' ? `the experts of ${run.moeCpu} layers in RAM` : 'Auto';
   return [
     where,
@@ -101,7 +124,11 @@ export function describeRun(run: RunOptions, names: (id: string) => string = id 
     `cache ${run.cache}`,
     run.fa ? `flash attention ${run.fa}` : '',
     run.threads ? `${run.threads} threads` : '',
-    run.draft ? `guessing model ${names(run.draft)}${run.draftOn === 'ram' ? ' in RAM' : ''}` : run.spec === 'ngram' ? 'copy-ahead' : '',
+    run.draft ? `guessing model ${names(run.draft)}${run.draftOn === 'ram' ? ' in RAM' : ''}` : run.spec === 'ngram' ? 'copy-ahead' : run.spec === 'mtp' ? 'built-in guesser (MTP)' : '',
+    run.draftMax ? `guesses of up to ${run.draftMax} words` : '',
+    run.runner ? `${RUNNER_NAME[run.runner]} runner` : '',
+    run.cards?.length ? `only on the ${cardNames(run.cards)}` : '',
+    run.draft && run.draftCard?.length ? `guessing model on the ${cardNames(run.draftCard)}` : '',
   ].filter(Boolean).join(', ');
 }
 
@@ -180,10 +207,47 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
     fa(false, 'off');
   }
 
+  // The model's own built-in guesser (an MTP head): no second model and no card room of its own, so it is the likeliest
+  // gain of the guessing tricks, tried first among them. A file without one says so (the runner would refuse it).
+  const { draft: _d, draftOn: _o, draftCache: _c, draftCard: _k, spec: _s, draftMax: _m, ...plain } = r;
+  if (m.mtp && r.spec !== 'mtp') {
+    cand.unshift({ id: 'mtp', name: 'Built-in guesser (MTP)', why: 'This file carries its own guesser: it guesses the next few words from inside the model, which checks them. The answer is its own; no second model.', run: { ...plain, spec: 'mtp' }, quick: true });
+  } else if (!m.mtp) left.push({ name: 'Built-in guesser (MTP)', why: 'this file has none: an MTP version of the same model may have one' });
+
+  // Longer guesses: up to 8 words a time (llama.cpp's own is 3). A model that is often right ahead (code, a dense model
+  // wholly on its card) can gain; one that is often wrong loses. With the guess in use now, or the likeliest one. Full only.
+  const guessing = r.draft || r.spec === 'mtp' ? r : m.mtp ? { ...plain, spec: 'mtp' as const } : guesser ? draftRun({}) : null;
+  if (guessing && !r.draftMax) add(false, { id: 'draft-long', name: 'Longer guesses (up to 8 words at a time)', why: 'Each guess runs further ahead: more words a pass when the guesses are right, more thrown away when they are not. Measured, not guessed.', run: { ...guessing, draftMax: 8 } });
+
+  // Two cards or more (card choice, src/devices.ts): llama.cpp's Auto splits a model over every card, and a split model
+  // waits for the slower card at every word. Tried first after the runner: the biggest card alone (or every card again,
+  // when the model is held to some), and the guessing model on the second card, leaving the biggest to the model.
+  const idsOf = (c: PcFacts['cards'][number] | undefined) => c?.ids ?? [];
+  const second = [...pc.cards].sort((x, y) => y.total - x.total)[1];
+  if (card && second && idsOf(card).length) {
+    if (!r.cards?.length) cand.unshift({ id: 'cards-one', name: `Only the ${card.name}`, why: `This PC has ${pc.cards.length} cards: a model split over them waits for the slower one at every word. This keeps it on the biggest (what does not fit goes to RAM).`, run: { ...r, cards: idsOf(card) }, quick: true });
+    else {
+      const { cards: _held, ...every } = r;
+      cand.unshift({ id: 'cards-all', name: 'Every card (Auto)', why: 'This model is held to some of the cards: spread over all of them, more of it may fit on a card.', run: every, quick: true });
+    }
+    // Placed straight after it (Full): with a second card, this is the guessing model's likeliest home.
+    if (guesser && idsOf(second).length) cand.splice(1, 0, { quick: false, id: 'draft-second', name: `Guessing model ${guesser.name} on the ${second.name}`, why: 'The second card holds the guessing model, so the biggest card keeps all its room for this model.', run: draftRun({ cards: idsOf(card), draftCard: idsOf(second), draftOn: undefined }) });
+  }
+
+  // More than one card runner here (CUDA 12, CUDA 13 and Vulkan for an NVIDIA card): each other one, tried first, as
+  // the runner can change both speeds either way (measured 21 Oct, GTX 1060, Qwen3.5 4B: Vulkan wrote 34 tok/s against
+  // 30, CUDA read 54 against 40). The one in use is the model's own, else the first Auto tries.
+  const inUse = r.runner && pc.runners?.includes(r.runner) ? r.runner : pc.runners?.[0];
+  if (card && inUse && pc.runners && pc.runners.length > 1) {
+    const others = pc.runners.filter(x => x !== inUse);
+    cand.unshift(...others.map(other => ({ id: `runner-${other}`, name: `${RUNNER_NAME[other]} runner (instead of ${RUNNER_NAME[inUse]})`, why: other === 'vulkan' || inUse === 'vulkan' ? 'This PC has more than one runner for its card: a model can write faster on one and read faster on the other.' : 'Two CUDA builds can run this card: the newer one may have code made for it, the older one is the one measured before.', run: { ...r, runner: other }, quick: true })));
+  }
+
   const limit = size === 'quick' ? 3 : 7;
   const picked = (size === 'quick' ? cand.filter(c => c.quick) : cand).slice(0, limit);
   for (const c of cand) if (!picked.includes(c)) left.push({ name: c.name, why: size === 'quick' && !c.quick ? 'tried in Full only' : size === 'quick' ? 'Quick tries the 3 most likely: tried in Full' : 'no room in Full (8 rows at most)' });
-  const a: Setup = { id: 'a', name: `Now: ${describeRun(r)}`, why: 'The setup in use now: the yardstick.', run: r };
+  const cardNames = (ids: string[]) => pc.cards.filter(c => c.ids?.some(id => ids.includes(id))).map(c => c.name).join(' + ') || 'chosen cards';
+  const a: Setup = { id: 'a', name: `Now: ${describeRun(r, undefined, cardNames)}`, why: 'The setup in use now: the yardstick.', run: r };
   const rows: Setup[] = [a, ...picked.map(({ quick: _q, ...s }) => s)];
   for (const n of [...new Set(contexts)]) {
     if (n !== r.ctx) rows.push({ id: `ctx-${n}`, name: `Context ${n.toLocaleString('en')} tokens`, why: 'You ticked this size to test.', run: { ...r, ctx: n } });
@@ -266,8 +330,8 @@ export function sameWords(a: string, b: string): boolean {
 
 // ---- How long ----
 
-/** The prompts' sizes (src/server/finder.ts): warm-up, the write prompt run twice, the read prompt and its copy. */
-export const TOKENS = { warm: 32, write: 220, read: 800, copy: 150 };
+/** The prompts' sizes (src/finderrun.ts): warm-up, the write prompt run twice, the read prompt and its copy, the code prompt. */
+export const TOKENS = { warm: 32, write: 220, read: 800, copy: 150, code: 220 };
 
 /**
  * Minutes a test of `rows` rows takes, from this PC's own figures for the model (load seconds, writing and reading
@@ -278,6 +342,6 @@ export function estimateMinutes(rows: number, f: { loadSeconds: number; write: n
   const load = f.loadSeconds || disk + 4;
   const write = f.write || 10;
   const read = f.read || 50;
-  const perRow = load + (TOKENS.warm + 2 * TOKENS.write + TOKENS.copy) / write + TOKENS.read / read + 10;
+  const perRow = load + (TOKENS.warm + 2 * TOKENS.write + TOKENS.copy + TOKENS.code) / write + TOKENS.read / read + 10;
   return Math.max(1, Math.ceil((rows * perRow + disk) / 60));
 }

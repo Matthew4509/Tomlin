@@ -46,7 +46,7 @@ export function localBrain(label: string, runner?: Pane): Brain {
         got = await ask([...turns, { role: 'user', content: CONTINUE_ASK }]);
       }
       brain.cut = got.cut && !repeated;
-      if (got.perSecond > 0) brain.last = { write: got.perSecond, tokens: got.tokens, ...(got.read > 0 ? { read: got.read } : {}) };
+      if (got.perSecond > 0) brain.last = { write: got.perSecond, tokens: got.tokens, ...(got.read > 0 ? { read: got.read } : {}), ...(got.readTokens ? { readTokens: got.readTokens } : {}) };
       if (got.thought) brain.thought = { text: got.thought, seconds: got.thoughtSeconds, ...(got.thoughtStopped ? { stopped: got.thoughtStopped } : {}) };
     } catch (error) {
       if (signal.aborted) throw new Error('Stopped.');
@@ -66,7 +66,7 @@ export function localBrain(label: string, runner?: Pane): Brain {
     label,
     ctx: runner ? d.runOn(runner).ctx : d.runNow().ctx,
     chat,
-    ask: (system, user, maxTokens, onText, signal) => chat([{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, onText, signal),
+    ask: (system, user, maxTokens, onText, signal, opts) => chat([{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, onText, signal, opts),
     last: null,
   };
   return brain;
@@ -126,7 +126,7 @@ export async function brainForRef(want: string, forWhat: string, change: string,
     try {
       h = await hello(r);
     } catch (e) {
-      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Enable this PC as a node" ticked (Network: connect PCs), or choose another model for ${forWhat}.`);
+      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Enable this PC as a node" ticked (Network), or choose another model for ${forWhat}.`);
     }
     if (b.model) {
       const why = sharedWhy(r, h, b.model);

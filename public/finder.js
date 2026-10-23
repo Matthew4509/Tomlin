@@ -65,12 +65,55 @@ async function finderPreview() {
     el('div', { class: 'finder-sizes', role: 'radiogroup', 'aria-label': 'How long' }, sizeRow('quick', 'Quick'), sizeRow('full', 'Full')),
     el('h3', { text: 'It will try' }),
     el('ol', { class: 'finder-plan' }, ...p.rows.map(r => el('li', {}, el('strong', { text: r.name }), r.tight ? ' (leaves little on the card)' : '', el('span', { class: 'hint', text: ` ${r.why}` })))),
+    p.smaller ? finderSmaller(p.smaller) : null,
     p.left.length ? el('details', {}, el('summary', { text: `Not tried (${p.left.length})` }), el('ul', { class: 'finder-plan' }, ...p.left.map(l => el('li', {}, el('strong', { text: l.name }), el('span', { class: 'hint', text: `: ${l.why}` }))))) : null,
     p.card ? el('p', { class: 'hint', text: 'The list may change a little once the model is loaded as it is now (what it really holds on the card is read first).' }) : null,
     p.contexts.length ? ctxs : null,
     p.last ? el('p', { class: 'hint' }, `Last test: ${new Date(p.last.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. `, el('button', { class: 'link', type: 'button', text: 'Show its results', onclick: () => finderResults(p.last.run, p.undo) })) : null,
     el('p', { class: 'hint fault-line', id: 'finder-say', role: 'status' }),
     el('div', { class: 'team-actions' }, start, el('button', { class: 'btn', type: 'button', text: finder.t.ask ? 'Skip' : 'Close', onclick: () => finderBox().close() })));
+}
+
+/**
+ * Same model, smaller file, fits the card (src/server/smaller.ts): offered beside the tries, never run by the test. Its
+ * Download button says the size; nothing is downloaded before it is pressed, and the file in use is kept.
+ */
+function finderSmaller(x) {
+  const box = el('section', { class: 'finder-smaller', 'aria-labelledby': 'finder-smaller-title' });
+  const say = el('p', { class: 'hint', role: 'status' });
+  const about = [
+    el('h3', { id: 'finder-smaller-title', text: x.name }),
+    el('p', { text: `${x.file}: ${x.bits} bits a weight instead of ${x.bitsNow}, so it sits wholly on the card with ${x.leftGb} GB left free.` }),
+    el('p', { class: 'hint', text: `About ${fNum(x.expect)} tokens a second writing by the sums (${fNum(x.now)} now). Fewer bits can make answers a little weaker: test it before your staff use it.` }),
+  ];
+  const testIt = () => app.openFinder(finder.t.pc === 'here' ? x.have : `remote:${finder.t.pc}:${x.have}`, { name: x.file, pcName: finder.t.pcName });
+  const offer = () => box.replaceChildren(...about, x.have
+    ? el('div', { class: 'team-actions' }, el('p', { class: 'hint', text: `It is on ${fWhere()} already.` }), el('button', { class: 'btn', type: 'button', text: 'Find the fastest setup for it', onclick: testIt }))
+    : el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: `Download… (${fGB(x.bytes)})`, onclick: confirm })), say);
+  function confirm() {
+    const go = el('button', { class: 'btn primary', type: 'button', text: `Download (${fGB(x.bytes)})`, onclick: async () => {
+      go.disabled = true;
+      try {
+        say.textContent = (await finderAsk('smaller', { yes: true, repo: x.repo, rev: x.rev, name: x.file, bytes: x.bytes, size: finder.size })).said;
+        go.remove();
+      } catch (e) {
+        say.textContent = e.message;
+        go.disabled = false;
+      }
+    } });
+    box.replaceChildren(...about,
+      el('ul', { class: 'finder-info' },
+        el('li', {}, el('span', { class: 'hint', text: 'File: ' }), x.file),
+        el('li', {}, el('span', { class: 'hint', text: 'From: ' }), `${x.repo} on Hugging Face${x.licence ? ` (licence: ${x.licence})` : ''}`),
+        el('li', {}, el('span', { class: 'hint', text: 'Download size: ' }), fGB(x.bytes)),
+        el('li', {}, el('span', { class: 'hint', text: 'Downloads to: ' }), fWhere()),
+        el('li', {}, 'The file you use now is kept, and no hire changes. Once it is here, test it with Find the fastest setup, then give it to a hire in Edit staff if you like it.')),
+      el('div', { class: 'team-actions' }, go, el('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: offer })),
+      say);
+    go.focus();
+  }
+  offer();
+  return box;
 }
 
 async function finderStart(btn) {
@@ -130,6 +173,7 @@ function finderInfo(r, run) {
     line('Writing', r.write ? `${fNum(r.write)} tokens a second (the middle of ${r.state === 'done' ? 'two or three runs' : 'its runs'})` : null),
     line('Reading', r.read ? `${fNum(r.read)} tokens a second` : null),
     line('Copying (the second prompt\'s answer)', r.copy ? `${fNum(r.copy)} tokens a second` : null),
+    line('Writing code (the third prompt)', r.code ? `${fNum(r.code)} tokens a second` : null),
     line('First word after', r.firstWord ? `${r.firstWord} s` : null),
     line('Loaded in', r.loadSeconds ? `${r.loadSeconds} s${r.slowLoad ? ' (read from disk: its figure may be low)' : ''}` : null),
     line('On the card', r.cardBytes ? fGB(r.cardBytes) : null),
@@ -178,7 +222,7 @@ function finderResults(run, undo) {
       const more = el('details', { class: 'finder-more' }, el('summary', { text: 'more info' }), finderInfo(r, run));
       return el('div', { class: `finder-result${run.best === r.id ? ' is-best' : ''}` },
         el('label', { class: 'check' }, radio, ' ', el('strong', { text: r.name })),
-        el('span', { class: 'finder-fig', text: r.state === 'done' ? `${fNum(r.write)} tok/s writing${r.copy && (r.run.spec || r.run.draft) ? ` · ${fNum(r.copy)} copying` : ''}` : r.state === 'failed' ? `failed: ${r.why}` : r.why }),
+        el('span', { class: 'finder-fig', text: r.state === 'done' ? `${fNum(r.write)} tok/s writing${r.code ? ` · ${fNum(r.code)} on code` : ''}${r.copy && (r.run.spec || r.run.draft) ? ` · ${fNum(r.copy)} copying` : ''}` : r.state === 'failed' ? `failed: ${r.why}` : r.why }),
         mark ? el('span', { class: 'finder-tag', text: mark }) : null,
         more);
     })),
@@ -211,18 +255,18 @@ app.openFinder = (ref, o = {}) => new Promise(done => {
 app.finderButton = (ref, o = {}) => (finderTarget(ref) ? el('button', { class: o.link ? 'link' : 'btn', type: 'button', text: 'Find the fastest setup', title: 'Starts this model a few different ways, times each, and recommends the fastest (about 5 to 25 minutes; nothing changes until you choose)', onclick: () => app.openFinder(ref, o) }) : null);
 
 /**
- * After a hire on a chat model that has never been through the test: asks whether to run it now (Skip keeps the
- * settings it has). Says nothing when that PC cannot run it (an older TOMLIN, or its owner has not ticked it).
+ * After a hire on a chat model: the Quick test's minutes when it has never been through the test, for the "X is hired"
+ * window (team.js) to offer it; null when it was tested, is being tested, or that PC cannot run it (an older TOMLIN, or
+ * its owner has not ticked it). Nothing runs from here.
  */
-app.offerFinder = async (ref, name) => {
+app.finderOffer = async ref => {
   const t = finderTarget(ref);
-  if (!t) return;
-  finder.t = { ...t, name, pcName: '', ask: true };
+  if (!t) return null;
+  finder.t = { ...t, name: '', pcName: '', ask: true };
   try {
     const p = await finderAsk('preview', { size: 'quick' });
-    if (p.last || p.found || p.running) return;
+    return p.last || p.found || p.running ? null : { minutes: p.minutes?.quick ?? null };
   } catch {
-    return;
+    return null;
   }
-  await app.openFinder(ref, { name, ask: true });
 };

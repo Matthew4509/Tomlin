@@ -24,7 +24,7 @@ test('Worker PC, Qwen3.5 4B wholly on the card: a guessing model, flash attentio
   assert.deepEqual(ids(quick), ['a', 'draft-card', 'fa-on', 'ngram']);
   assert.deepEqual(quick.rows[0].run, BASE, 'row a is the setup saved now');
   assert.deepEqual(quick.rows[1].run, { ...BASE, draft: Q08.id });
-  assert.deepEqual(ids(sf.setupsFor(worker(), m, now, 'full')), ['a', 'draft-card', 'fa-on', 'ngram', 'fa-off']);
+  assert.deepEqual(ids(sf.setupsFor(worker(), m, now, 'full')), ['a', 'draft-card', 'fa-on', 'ngram', 'fa-off', 'draft-long']);
   // No 0.8B on that PC: said, not tried, never downloaded.
   const none = sf.setupsFor(worker([Q4B, A3B]), { ...m, guesser: null }, now, 'quick');
   assert.deepEqual(ids(none), ['a', 'fa-on', 'ngram']);
@@ -76,7 +76,7 @@ test('a dense model that spills off the card: smaller cache, every layer on the 
   const small: sf.ModelFacts = { ...Q4B, moe: false, layers: 32, expertsPerLayer: 0, rest: Q4B.bytes, ctxBytes: 0.3 * GB, guesser };
   const cpu = { run: BASE, spilled: false, cardBytes: 0 };
   assert.deepEqual(ids(sf.setupsFor(laptop, small, cpu, 'quick')), ['a', 'threads-2', 'threads-1', 'ngram']);
-  assert.deepEqual(ids(sf.setupsFor(laptop, small, cpu, 'full')), ['a', 'threads-2', 'threads-1', 'ngram', 'draft-ram']);
+  assert.deepEqual(ids(sf.setupsFor(laptop, small, cpu, 'full')), ['a', 'threads-2', 'threads-1', 'ngram', 'draft-ram', 'draft-long']);
   // Threads already set to the cores: that row would change nothing.
   assert.ok(!ids(sf.setupsFor({ ...laptop, threads: 2 }, small, cpu, 'full')).includes('threads-2'));
 });
@@ -164,4 +164,23 @@ test('how long a test takes, from the PC\'s own load time and speeds', () => {
   // The 35B-A3B: slower to load, write and read: Quick over 10 minutes.
   assert.ok(sf.estimateMinutes(4, { loadSeconds: 45, write: 12.5, read: 20, bytes: 22 * GB }) >= 10);
   assert.ok(sf.estimateMinutes(4, { loadSeconds: 0, write: 0, read: 0, bytes: 5 * MB }) >= 1, 'no figures yet: still a sensible guess');
+});
+
+test('a PC with both card runners (CUDA and Vulkan): the other runner is tried, first in Quick; one runner or none: never', () => {
+  const m: sf.ModelFacts = { ...Q4B, moe: false, layers: 32, expertsPerLayer: 0, rest: Q4B.bytes, ctxBytes: 0.3 * GB, guesser };
+  const now: sf.NowFacts = { run: BASE, spilled: false, cardBytes: 3.2 * GB };
+  const both = { ...worker(), runners: ['cuda', 'vulkan'] as ('cuda' | 'vulkan')[] };
+  // Unset = Auto, which starts on CUDA when it is there: the try is Vulkan.
+  const quick = sf.setupsFor(both, m, now, 'quick');
+  assert.deepEqual(ids(quick), ['a', 'runner-vulkan', 'draft-card', 'fa-on']);
+  assert.deepEqual(quick.rows[1].run, { ...BASE, runner: 'vulkan' });
+  assert.match(quick.rows[1].name, /Vulkan runner/);
+  // Saved on Vulkan: the try is CUDA.
+  const onVulkan = sf.setupsFor(both, m, { ...now, run: { ...BASE, runner: 'vulkan' } }, 'quick');
+  assert.equal(onVulkan.rows[1].id, 'runner-cuda');
+  assert.deepEqual(onVulkan.rows[1].run, { ...BASE, runner: 'cuda' });
+  // Only one runner installed, or no card: no runner row.
+  assert.ok(!ids(sf.setupsFor({ ...worker(), runners: ['vulkan'] }, m, now, 'full')).some(x => x.startsWith('runner-')));
+  assert.ok(!ids(sf.setupsFor({ ...worker(), cards: [], runners: ['cuda', 'vulkan'] }, m, now, 'full')).some(x => x.startsWith('runner-')));
+  assert.match(sf.describeRun({ ...BASE, runner: 'vulkan' }), /Vulkan runner/);
 });

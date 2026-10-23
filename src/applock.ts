@@ -1,4 +1,4 @@
-// The app lock: an optional PIN for the whole of TOMLIN. Off until a PIN is set (data/app-lock.json, a salted
+// The app lock: an optional PIN or password for the whole of TOMLIN (A1). Off until one is set (data/app-lock.json, a salted
 // scrypt hash, src/lock.ts). While it is locked the SERVER refuses every /api call and the
 // /v1 door, so another tab, browser or program on this PC cannot read the chats either; only the page's own files and
 // the lock's own door answer. Open is a random token in a cookie, one per browser, kept only in this process's memory:
@@ -6,6 +6,7 @@
 // disk are not encrypted, and deleting data/app-lock.json while TOMLIN is closed takes the PIN away.
 // Linked PCs talk to the worker door (src/jobrun/node.ts, its own port and tokens), which this lock does not touch.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import type { LockKind } from './lock.ts';
 
 export const APP_COOKIE = 'sm_app';
 export const APP_LOCK_FILE = 'app-lock.json';
@@ -14,6 +15,8 @@ export const APP_IDLE_CHOICES = [0, 5, 10, 15, 30, 60] as const;
 export const DEFAULT_APP_IDLE = 0;
 
 export interface AppLockFile {
+  /** A PIN (a number pad) or a password (a text box), chosen by the person (A1). A file from before A1 has none: a PIN. */
+  kind?: LockKind;
   salt: string;
   hash: string;
   /** scrypt's N the hash was made with (src/lock.ts PIN_COST); a file from before 2.0.56 has none. */

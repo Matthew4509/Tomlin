@@ -17,7 +17,7 @@ export const RETIRED_NODE_HIRE = 'Linked PCs no longer lend their own staff: a n
 const text = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 // ---- Models a node lets linked PCs use ----
-// Its owner ticks them under Network: connect PCs ("Models other PCs may use"): chat models and picture models. A linked PC
+// Its owner ticks them under Network ("Models other PCs may use"): chat models and picture models. A linked PC
 // then hires its OWN staff on them; the node only loads the model and answers (or draws). Nothing is shared until a
 // model is ticked.
 
@@ -81,6 +81,37 @@ export function modelRefusal(id: string, o: { onPc: (id: string) => string | nul
   if (!name) return { error: `that model is not on "${o.pcName}" any more.` };
   if (o.busy) return { error: `${name} is answering something else on "${o.pcName}" now.`, busy: true };
   return null;
+}
+
+/** A chat model loaded on a node for a linked PC stays this long unused, so a reply minutes later does not reload it. */
+export const CHAT_DROP_MS = 10 * 60_000;
+
+/** The chat models a node loaded for linked PCs: the PCs using each (names, links) and when one last did. */
+export type LoadedFor = Map<string, { by: Set<string>; links: Set<string>; at: number }>;
+
+/** An answer for a linked PC: every chat model loaded for it stays. */
+export function keepAll(loaded: LoadedFor, link: string, now: number): void {
+  for (const v of loaded.values()) if (v.links.has(link)) v.at = now;
+}
+
+/**
+ * A chat open on a linked PC (its meters every few seconds): only the model that chat uses stays, so the other models
+ * loaded for that PC still drop after 10 minutes. No model named: none is kept.
+ */
+export function keepChat(loaded: LoadedFor, link: string, model: string, now: number): void {
+  const v = model ? loaded.get(model) : undefined;
+  if (v?.links.has(link)) v.at = now;
+}
+
+/** After a run for a linked PC: an answer keeps every model loaded for it; a refused or failed run keeps none. */
+export function afterRun(loaded: LoadedFor, link: string, answered: boolean, now: number): void {
+  if (answered) keepAll(loaded, link, now);
+}
+
+/** The model a chat's meters name to a linked PC: the hire's brain when it is one of that PC's models, else ''. */
+export function statsModel(ref: string | null | undefined, pc: string): string {
+  const m = /^remote:([0-9a-f]{8}):(.+)$/.exec(ref ?? '');
+  return m && m[1] === pc ? m[2] : '';
 }
 
 /** Initials for a card or row. */

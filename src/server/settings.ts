@@ -1,5 +1,6 @@
 // This PC's settings, its data and updates (src/keep.ts: the home folder, import, backups), and Connect Claude.
 import type { ServerResponse } from 'node:http';
+import { cleanSearch } from '../webtools.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { log, logFile } from '../log.ts';
@@ -179,10 +180,16 @@ export const settingsPost: Routes = {
     // Everything is checked before anything is saved, so a refused change never leaves half of the others saved.
     const to = 'who' in b ? whoId(b.who) : null;
     const hostModel = 'hostModel' in b ? (typeof b.hostModel === 'string' ? b.hostModel : '') : null;
-    if (hostModel && !chatList().some(m => m.id === hostModel)) return json(res, 400, { error: 'That model is not on this PC any more. Pick another, or get one under Add a model.' });
+    if (hostModel && !chatList().some(m => m.id === hostModel)) return json(res, 400, { error: 'That model is not on this PC any more. Pick another, or get one under Models: add or remove.' });
     // {opened}: the chat that choice opened ('' for none yet), for the window that asked to read by its id.
     const opened = to !== null ? await setWho(to) : null;
     if ('tone' in b) await store.saveSettings({ tone: toneOf(b.tone).id });
+    // Web search ({provider, url, key}): a key not sent is kept (the page never has it); key '' takes it away.
+    if (b.webSearch && typeof b.webSearch === 'object') {
+      const was = (await store.settings()).webSearch;
+      const asked = b.webSearch as Record<string, unknown>;
+      await store.saveSettings({ webSearch: cleanSearch({ ...asked, key: 'key' in asked ? asked.key : was?.key }) });
+    }
     if (hostModel !== null) await store.saveSettings({ hostModel });
     if ('imageAs' in b) {
       const v = String(b.imageAs);

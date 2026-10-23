@@ -11,11 +11,19 @@ function renderConn() {
   $('conn-logo').title = lost ? 'Connection lost' : 'Connected';
 }
 
+// What is running, said the same way in the bar, the Running list and the orbit: sites the Bridge started, and sites
+// another program holds on a project's port.
+function runningSplit() {
+  const mine = rows.filter(r => r.running), other = rows.filter(r => !r.running && r.portInUse);
+  const words = mine.length && other.length ? mine.length + ' started here · ' + other.length + ' other'
+    : other.length ? other.length + ' started by another program' : mine.length + ' running';
+  return { mine, other, n: mine.length + other.length, words };
+}
 function renderStatus() {
-  const run = rows.filter(r => r.running).length;
+  const run = runningSplit();
   renderRunning(); renderLivePanel(); renderOrbit(); renderConn();
   $('st-projects').textContent = rows.length + ' project' + (rows.length === 1 ? '' : 's');
-  $('st-running').textContent = run ? '● ' + run + ' running' : '○ none running';
+  $('st-running').textContent = run.n ? (run.mine.length ? '● ' : '◐ ') + run.words : '○ none running';
   const g = [gitSummary(), nodeSummary()].filter(Boolean).join(' · ');
   $('st-git').textContent = g; $('st-git').hidden = !g;
   $('n-projects').textContent = rows.length || '';
@@ -82,7 +90,7 @@ function renderPC() {
   if (s.temp) rings.push(tempRing(s.temp));
   const counting = tokensCounting(), busy = s.tokensBusy || recounting;
   facts.push(fact('Tokens this month', counting ? 'counting…' : fmtTok(rows.reduce((t, r) => t + r.tokensMonth, 0))),
-    fact('Tokens on disk', counting ? 'counting…' : fmtTok(rows.reduce((t, r) => t + r.tokens, 0)), 'Every token in the Claude Code and Codex transcripts on this PC'),
+    fact('Tokens on disk', counting ? 'counting…' : fmtTok(rows.reduce((t, r) => t + r.tokens, 0)), 'Every token in the Claude Code and Codex transcripts on this PC. They are read here only for their counts: no words are kept, and nothing is sent anywhere.'),
     h('div', { class: 'pc-count', 'aria-live': 'polite' }, h('span', null, busy ? 'Counting now…' : s.tokensAt ? 'Counted ' + fmtWhen(Date.parse(s.tokensAt)) : 'Not counted yet'),
       h('button', { class: 'linkbtn', type: 'button', onclick: recount, disabled: busy, 'aria-busy': busy ? 'true' : null, title: 'Count the tokens again from the transcripts (about half a minute)' }, busy ? 'Counting…' : 'Recount')));
   $('pc-rings').replaceChildren(...rings);

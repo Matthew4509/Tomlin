@@ -1,4 +1,4 @@
-// Pages and navigation. Setup, shortcuts and Start with Windows are TOMLIN's own (its Settings), not here.
+// Pages and navigation. Setup, shortcuts and Start TOMLIN when this PC starts are TOMLIN's own (its Settings), not here.
 'use strict';
 
 // ---- pages ----
@@ -9,6 +9,7 @@ function show(page) {
   page = sub ? base + '/' + sub : base;
   for (const s of document.querySelectorAll('.page')) s.hidden = s.id !== 'page-' + base;
   for (const b of document.querySelectorAll('.nav-item')) b.setAttribute('aria-current', b.dataset.page === base ? 'page' : 'false');
+  $('orbit').classList.toggle('fold', base !== 'projects'); renderOrbit();
   if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page);
   closeMenu();
   if (base === 'folders') loadFolders();

@@ -5,6 +5,7 @@ import { freemem, totalmem } from 'node:os';
 import { Worker, type Asked, type LaunchSpec, type WorkerView } from './worker.ts';
 import type { Device } from './runtimes.ts';
 import { log } from './log.ts';
+import { MAX_STOPPED, maxFault } from './llama.ts';
 
 export interface ConnectRequest {
   model: string;
@@ -19,6 +20,11 @@ export interface ConnectRequest {
   retry?: (device: Device, tail: string) => LaunchSpec | null;
   /** Plain words for why it failed, from the runner's last lines. */
   why: (tail: string) => string;
+  /**
+   * Once a start answers: why it must count as failed all the same ('' when it is fine), from its lines about the
+   * devices (a card runner that put the model on the CPU), so the next device is tried and the reason is said.
+   */
+  started?: (device: Device, facts: string[]) => string;
   /** Said once connected (why Auto chose what it chose). */
   note?: string;
 }
@@ -45,6 +51,11 @@ export class Pane {
       const v = this.worker.view;
       if (v.state === 'connected') {
         this.set({ state: 'failed', error: 'The model stopped on its own (often: the PC ran out of memory). Press Connect to load it again.', detail: this.worker.tail(), pid: null });
+        // Its last lines arrive just after it ends: a PC lending its card for Max mode that took it back is said so.
+        setTimeout(() => {
+          const tail = this.worker.tail();
+          if (this.worker.view.state === 'failed' && maxFault(tail)) this.set({ error: MAX_STOPPED, detail: tail });
+        }, 500);
       }
     };
   }
@@ -93,16 +104,25 @@ export class Pane {
         spec = attempt === 0 ? req.retry?.(device, tail) ?? null : null;
       }
       if (result === 'cancelled' || this.view.state !== 'loading') return this.view;
+      let noCard = '';
       if (result === 'ready') {
         const seconds = Math.round((Date.now() - (this.view.loadStartedAt ?? Date.now())) / 100) / 10;
+        // A moment for the last start lines to arrive before they are read.
         await sleep(300);
-        this.connectedRam = ramUsed();
-        this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: notes.join(' ') || null });
-        return this.view;
+        noCard = req.started?.(device, this.worker.facts) ?? '';
+        if (!noCard) {
+          this.connectedRam = ramUsed();
+          this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: notes.join(' ') || null });
+          return this.view;
+        }
+        tail = noCard;
+        await this.worker.end();
+        if (this.view.state !== 'loading') return this.view;
       }
-      const why = req.why(tail);
+      const why = noCard ? `${noCard[0].toUpperCase()}${noCard.slice(1)}.` : req.why(tail);
       if (i < req.devices.length - 1) {
-        notes.push(`${DEVICE_NAME[device][0].toUpperCase()}${DEVICE_NAME[device].slice(1)} could not run it (${why.replace(/^This model did not load: /, '').replace(/\.$/, '')}), so it runs on ${DEVICE_NAME[req.devices[i + 1]]}.`);
+        const said = noCard || why.replace(/^This model did not load: /, '').replace(/\.$/, '');
+        notes.push(`${DEVICE_NAME[device][0].toUpperCase()}${DEVICE_NAME[device].slice(1)} could not run it (${said}), so it runs on ${DEVICE_NAME[req.devices[i + 1]]}.`);
         continue;
       }
       this.set({ state: 'failed', error: why, detail: tail, stage: null, pid: null, note: notes.join(' ') || null });
