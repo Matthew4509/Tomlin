@@ -156,7 +156,8 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 To update: **Update this install** (This PC: models and updates; Settings, Your data and updates, opens it), with **Check git**
 or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
-data it zips the `data` folder into `backups` (the last 5 are kept; models are not in them). **Settings** (top bar),
+data it zips the `data` folder into `backups` (models are not in them). The newest 5 are kept, and older ones thin out:
+one a day for a week, one a week for a month, one every 3 months for a year. **Settings** (top bar),
 **Your data and updates**, opens the folder, backs up by hand and puts a backup back.
 
 Coming from a version that kept everything inside its own folder (2.0.25 and older): the first start finds that folder
@@ -563,6 +564,9 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.59:** Data backups thin out by age instead of keeping only the last 5: the newest 5, then one a day for a week,
+  one a week for a month and one every 3 months for a year. Two pictures of one prompt kept in a project in the same
+  minute are both handed in (the second named " 2"), never one written over the other.
 - **2.0.58:** Chats of 16k or more send only their latest messages word for word (sized from the read speed and a fold
   wait in Model settings), with a chat log and Find. Draw asks to load the picture model; one window after a hire; a
   linked PC's chat model stays 10 min; MoE models read prompts faster; office chat lines never repeat within 10 min.

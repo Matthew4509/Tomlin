@@ -1,8 +1,8 @@
 // Where work goes in the workspace (src/folders.ts): a chat's Save, a quick chat's files going into a project, a note
 // saved from the right panel, a picture kept in a project's chat, and the work handed in to a project.
-import { existsSync } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { copyFile, mkdir, rename, rmdir } from 'node:fs/promises';
-import { dirname, extname } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import * as folders from '../folders.ts';
 import * as ws from '../workspace.ts';
 import type { ChatInfo } from '../chats.ts';
@@ -96,11 +96,14 @@ export async function handInTo(project: string, prompt: string, file: string | n
     const folder = await projectFolder(project);
     if (folder === null) return { error: 'that project is not in this workspace any more' };
     if (!file) return { error: 'the picture file is not in the gallery' };
-    const rel = folders.picturePath(folder, prompt, extname(output).toLowerCase() || '.png');
-    const dest = await ws.inside(await workspaceDir(), rel, false);
-    if (!dest) return { error: 'its folder is outside the workspace' };
+    const first = folders.picturePath(folder, prompt, extname(output).toLowerCase() || '.png');
+    const at = await ws.inside(await workspaceDir(), first, false);
+    if (!at) return { error: 'its folder is outside the workspace' };
+    // Two pictures of one prompt kept in the same minute have the same name: the second gets " 2", never written over.
+    const rel = folders.freeName(first, r => existsSync(join(dirname(at), r.split('/').pop()!)));
+    const dest = join(dirname(at), rel.split('/').pop()!);
     await mkdir(dirname(dest), { recursive: true });
-    await copyFile(file, dest);
+    await copyFile(file, dest, constants.COPYFILE_EXCL);
     return { path: rel };
   } catch (e) {
     return { error: (e as Error).message };

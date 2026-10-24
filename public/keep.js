@@ -167,7 +167,7 @@ app.keepBox = () => {
             note.textContent = err.message;
           }
         } })),
-      el('p', { class: 'hint', text: 'Backups (the last 5 are kept; models are not in them). To keep one on a linked PC too: Network, Models on my other PCs.' }),
+      el('p', { class: 'hint', text: 'Backups (the newest 5, then one a day for a week, one a week for a month and one every 3 months for a year; models are not in them). To keep one on a linked PC too: Network, Models on my other PCs.' }),
       // A4: a new PC links to the PC that kept the backups, then asks for them there by backup name and PIN.
       el('div', { class: 'team-actions' }, el('button', { class: 'btn quiet', type: 'button', text: 'Get my backups from a linked PC', title: 'On a new PC: link it to the PC that kept your backups first (Network), then use Get my backups under its name', onclick: () => {
         document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();

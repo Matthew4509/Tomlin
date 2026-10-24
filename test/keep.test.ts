@@ -162,7 +162,38 @@ test('newer compares versions number by number', () => {
   assert.equal(keep.newer('2.0.29', '2.0.29'), false);
 });
 
-test('backups keep the last 5; a restore puts the data back and backs up what was there, and Push live records stay', async () => {
+test('older backups thin out by age: the newest 5, then one a day for 7 days, one a week for 4 weeks, one a quarter for a year', () => {
+  // Sunday 25 Oct 2026, noon: a backup at 10:00 every day for over a year, and three more today.
+  const now = new Date(2026, 9, 25, 12, 0, 0);
+  const two = (n: number) => String(n).padStart(2, '0');
+  const nameOf = (d: Date, label: string) => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}${two(d.getMinutes())}00 ${label}.zip`;
+  const all: keep.Backup[] = [];
+  for (let i = 0; i < 400; i++) {
+    const d = new Date(2026, 9, 25 - i, 10, 0, 0);
+    all.push({ name: nameOf(d, 'by hand'), at: d.getTime(), bytes: 1 });
+  }
+  for (const h of [10, 11, 11.5]) {
+    const d = new Date(2026, 9, 25, Math.floor(h), (h % 1) * 60 + 1, 0);
+    all.push({ name: nameOf(d, 'before 2.0.59'), at: d.getTime(), bytes: 1 });
+  }
+  const kept = [...keep.keptByAge(all, now)].map(n => n.slice(0, 15)).sort();
+  assert.deepEqual(kept, [
+    // a quarter each: Q1, Q2 and Q3 2026 (Q4 is this quarter, held by today's)
+    '2026-03-31 1000', '2026-06-30 1000', '2026-09-30 1000',
+    // a week each: the 3 weeks before this one (each week's newest is its Sunday)
+    '2026-10-04 1000', '2026-10-11 1000', '2026-10-18 1000',
+    // a day each: the 6 days before today
+    '2026-10-19 1000', '2026-10-20 1000', '2026-10-21 1000', '2026-10-22 1000', '2026-10-23 1000', '2026-10-24 1000',
+    // the newest 5: all four of today's, and yesterday's (already kept above)
+    '2026-10-25 1000', '2026-10-25 1001', '2026-10-25 1101', '2026-10-25 1131',
+  ]);
+  // A few backups, all recent: none goes.
+  assert.equal(keep.keptByAge(all.slice(0, 3), now).size, 3);
+  // A name without its date is placed by its file time.
+  assert.ok(keep.keptByAge([{ name: 'odd.zip', at: now.getTime(), bytes: 1 }], now).has('odd.zip'));
+});
+
+test('backups made the same day keep the newest 5; a restore puts the data back and backs up what was there, and Push live records stay', async () => {
   const w = await world();
   try {
     await put(join(w.home.data, 'settings.json'), '{"v":"first"}');

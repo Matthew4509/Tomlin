@@ -1,7 +1,7 @@
 // Where work goes in the workspace (src/folders.ts). Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answerPath, chatFolder, firstWords, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
+import { answerPath, chatFolder, firstWords, freeName, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
 import { cleanFiles, cleanProjectFolder, cleanStep, folderStamp } from '../src/jobs.ts';
 import { cleanPath } from '../src/workspace.ts';
 
@@ -102,4 +102,15 @@ test('no model is given the person\'s notes or the quick chats\' folders', () =>
 test('a project cannot take the names of the chats and notes folders', () => {
   for (const bad of ['chats', 'notes', 'Chats', 'notes/x']) assert.equal(cleanProjectFolder(bad), null, bad);
   assert.equal(cleanProjectFolder('my-notes'), 'my-notes');
+});
+
+test('two pictures of one prompt kept in the same minute: the second is named " 2", never written over the first', () => {
+  const first = picturePath('site', 'a reading chair in a sunny room photo', '.png', new Date(2026, 9, 25, 15, 30));
+  const taken = new Set([first]);
+  assert.equal(freeName(first, p => taken.has(p)), first.replace(/\.png$/, ' 2.png'));
+  taken.add(first.replace(/\.png$/, ' 2.png'));
+  assert.equal(freeName(first, p => taken.has(p)), first.replace(/\.png$/, ' 3.png'));
+  assert.equal(freeName('a/b.c/notes', () => false), 'a/b.c/notes');
+  assert.equal(freeName('a/b.c/notes', p => p === 'a/b.c/notes'), 'a/b.c/notes 2', 'a dot in a folder name is not an extension');
+  assert.throws(() => freeName('x.png', () => true), /no free name/);
 });

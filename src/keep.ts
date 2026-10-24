@@ -4,7 +4,8 @@
 // so an update is: unzip the new version anywhere and start it; it finds the same home.
 // The first start of a version whose home is empty offers to import an older copy's data (copied) and models and
 // runners (moved, so nothing is downloaded again). Before a new version first uses the data, data/ is zipped into
-// backups/ (the last 5 are kept). Import and restore run at the NEXT start, before anything opens a file.
+// backups/ (the newest 5 are kept, and older ones thin out by age: keptByAge). Import and restore run at the NEXT
+// start, before anything opens a file.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -22,7 +23,8 @@ const run = promisify(execFile);
 export const DATA_VERSION = 1;
 /** Exit code that Start TOMLIN.cmd reads as "start me again". */
 export const RESTART_CODE = 75;
-const KEEP_BACKUPS = 5;
+/** Kept whatever their age: the newest backups. */
+const KEEP_NEWEST = 5;
 const VERSION_FILE = 'version.json';
 const NEXT_FILE = 'next-start.json';
 
@@ -214,6 +216,43 @@ export async function listBackups(home: Home): Promise<Backup[]> {
   return out.sort((a, b) => b.name.localeCompare(a.name));
 }
 
+/** When a backup was made: the date and time its name starts with ("2026-10-04 101500 ..."), else its file time. */
+function madeAt(b: Backup): Date {
+  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d)(\d\d) /.exec(b.name);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : new Date(b.at);
+}
+
+const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+/** A week is named by its Monday. */
+const weekKey = (d: Date) => dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)));
+const quarterOf = (d: Date) => d.getFullYear() * 4 + Math.floor(d.getMonth() / 3);
+
+/**
+ * Older backups thin out by age, as a web host keeps its own: the newest of each day for the last 7 days, of each week
+ * for the last 4 weeks, and of each quarter (3 months) for the last 4 quarters. Each period is counted back from `now`,
+ * the current one included.
+ */
+const TIERS: { periods: (now: Date) => string[]; key: (d: Date) => string }[] = [
+  { periods: now => [0, 1, 2, 3, 4, 5, 6].map(i => dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))), key: dayKey },
+  { periods: now => [0, 1, 2, 3].map(i => weekKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7 * i))), key: weekKey },
+  { periods: now => [0, 1, 2, 3].map(i => String(quarterOf(now) - i)), key: d => String(quarterOf(d)) },
+];
+
+/** The backups to keep (by name): the newest 5, and the newest of each day, week and quarter TIERS names. */
+export function keptByAge(backups: Backup[], now = new Date()): Set<string> {
+  const newest = [...backups].sort((a, b) => b.name.localeCompare(a.name));
+  const kept = new Set(newest.slice(0, KEEP_NEWEST).map(b => b.name));
+  for (const tier of TIERS) {
+    const open = new Set(tier.periods(now));
+    for (const b of newest) {
+      const k = tier.key(madeAt(b));
+      if (!open.delete(k)) continue;
+      kept.add(b.name);
+    }
+  }
+  return kept;
+}
+
 /** settings.json without the keys to the linked PCs (each keeps its name and address; its token is empty). */
 function withoutKeys(text: string): string {
   const s = JSON.parse(text) as { remotes?: unknown; webSearch?: unknown };
@@ -227,7 +266,7 @@ function withoutKeys(text: string): string {
 }
 
 /**
- * Zips data/ into backups/ ("<date> <label>.zip") and keeps the last 5. Returns the file name. The zip is made in a
+ * Zips data/ into backups/ ("<date> <label>.zip"); the older ones thin out (keptByAge). Returns the file name. The zip is made in a
  * folder of its own and moved in when it is whole, so a backup that failed or was cut off is never listed as one.
  * forOtherPc: a restore point to keep on another PC, without this PC's keys to its linked PCs, sharing code and PIN.
  */
@@ -274,7 +313,8 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
     await rmdir(making).catch(() => undefined);
   }
   const all = await listBackups(home);
-  for (const old of all.slice(KEEP_BACKUPS)) await rm(join(home.backups, old.name), { force: true });
+  const kept = keptByAge(all);
+  for (const old of all) if (!kept.has(old.name)) await rm(join(home.backups, old.name), { force: true });
   return name;
 }
 

@@ -101,6 +101,15 @@ export function picturePath(projectFolder: string, prompt: string, ext: string, 
   return inProject(projectFolder, SPECIALISTS, 'images', `${stamp(now)} ${firstWords(prompt)}${ext}`);
 }
 
+/** `rel` as it is when it is free, else with " 2", " 3" ... before its extension: never a name `taken` says is used. */
+export function freeName(rel: string, taken: (rel: string) => boolean): string {
+  if (!taken(rel)) return rel;
+  const dot = rel.lastIndexOf('.');
+  const [base, ext] = dot > rel.lastIndexOf('/') ? [rel.slice(0, dot), rel.slice(dot)] : [rel, ''];
+  for (let n = 2; n < 1000; n++) if (!taken(`${base} ${n}${ext}`)) return `${base} ${n}${ext}`;
+  throw new Error(`no free name for ${rel.split('/').pop()}`);
+}
+
 /**
  * A quick chat's files going into a project: each one under `from` to the same place under `dest` ('' = the top of the
  * workspace). Going into a specialists folder (`stampWith`, the chat's own date and time) each name starts with it.
