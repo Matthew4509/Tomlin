@@ -39,3 +39,44 @@ test('driver versions are compared as numbers, not as words', () => {
   assert.equal(driverAtLeast('99.1', '551.61'), false);
   assert.equal(driverAtLeast('1000.1', '551.61'), true);
 });
+
+test('a runner\'s program is looked up on disk once, not on every Home poll (1,000 asks made 4,000+ disk calls)', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = fs;
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Runtimes } = await import('../src/runtimes.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'tomlin-rt-'));
+  try {
+    const pins = join(dir, 'runtimes.json');
+    writeFileSync(pins, JSON.stringify({ runtimes: { 'llama-cpu': { engine: 'llama', device: 'cpu', name: 'cpu', licence: '', parts: [{ url: 'https://x/a.zip', bytes: 1, sha256: 'a' }] }, 'llama-vulkan': { engine: 'llama', device: 'vulkan', name: 'vk', licence: '', parts: [{ url: 'https://x/b.zip', bytes: 1, sha256: 'b' }] } } }));
+    mkdirSync(join(dir, 'app', 'llama-cpu'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'llama-cpu', process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'), '');
+    const rt = new Runtimes(join(dir, 'app'), pins, join(dir, 'home'));
+    let calls = 0;
+    const names = ['existsSync', 'readFileSync', 'readdirSync', 'statSync'] as const;
+    const was = Object.fromEntries(names.map(n => [n, fs[n]]));
+    for (const n of names) (fs as unknown as Record<string, unknown>)[n] = (...a: unknown[]) => { calls++; return (was[n] as (...x: unknown[]) => unknown)(...a); };
+    syncBuiltinESMExports();
+    try {
+      for (let i = 0; i < 1000; i++) {
+        rt.installed('llama', 'cpu');
+        rt.installed('llama', 'vulkan');
+      }
+    } finally {
+      for (const n of names) (fs as unknown as Record<string, unknown>)[n] = was[n];
+      syncBuiltinESMExports();
+    }
+    assert.ok(calls <= 40, `${calls} disk calls for 2,000 asks`);
+    assert.equal(rt.installed('llama', 'cpu'), true);
+    assert.equal(rt.installed('llama', 'vulkan'), false);
+    // A runner unpacked or removed here is seen at once (the remembered answer is dropped).
+    await rt.removePin('llama-cpu').catch(() => undefined);
+    rmSync(join(dir, 'app', 'llama-cpu'), { recursive: true, force: true });
+    await rt.removePin('llama-cpu').catch(() => undefined);
+    assert.equal(rt.installed('llama', 'cpu'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -15,7 +15,7 @@ import { shortBuild } from '../update.ts';
 import type { RunOptions } from '../store.ts';
 import { lastStart } from '../worker.ts';
 import { BUILD, HOME, type Routes, chatModels, hardware, json, sampler, speeds, store } from './core.ts';
-import { CONTEXTS, cardRunners, chatCards, cleanRun, connectChat, readCards, runOf, runOn, runnerFor, runners } from './panes.ts';
+import { CONTEXTS, cardRunners, chatCards, cleanRun, connectChat, readCards, runOf, runOn, runnerFor, runners, runnersForCard } from './panes.ts';
 import { answeringBusy, endAnswer, takeChat } from './answering.ts';
 import { SMALLER_NAME, getSmaller, offerView, smallerOffer, type SmallerOffer } from './smaller.ts';
 
@@ -53,7 +53,8 @@ async function factsFor(id: string, run: RunOptions): Promise<{ pc: PcFacts; mod
   const known = card ? await readCards() : [];
   const s = await store.settings();
   return {
-    pc: { cards: card ? [{ ...card, ids: known[0]?.ids ?? [] }, ...known.slice(1).map(c => ({ name: c.label, total: c.total, free: c.total, ids: c.ids }))] : [], cores: hardware.cores, threads: s.chat.threads, models: list, runners: cardRunners() },
+    // Each card with the runners that have code for it: a CUDA build is tried only on cards it can run.
+    pc: { cards: card ? [{ ...card, ids: known[0]?.ids ?? [], ...(known[0] ? { runners: runnersForCard(known[0]) } : {}) }, ...known.slice(1).map(c => ({ name: c.label, total: c.total, free: c.total, ids: c.ids, runners: runnersForCard(c) }))] : [], cores: hardware.cores, threads: s.chat.threads, models: list, runners: cardRunners() },
     model: { ...m, moe, ...((shape?.mtp ?? 0) > 0 ? { mtp: true } : {}), layers, expertsPerLayer: perLayer, rest, ctxBytes: shape ? cacheBytes(shape, run.ctx, run.cache) : 0, guesser: g ? { ...g, ctxBytes: gShape ? cacheBytes(gShape, run.ctx, 'f16') : 0 } : null },
   };
 }

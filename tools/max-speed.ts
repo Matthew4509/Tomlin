@@ -1,7 +1,6 @@
-// Measures the chat model loaded in TOMLIN on this PC, the same way every time, for Max mode's speed test
-// (docs/handoffs/HANDOFF-2026-10-23-MAX-MODE-PLUMBING.md): writing speed from a short question, reading speed from a
-// long one, each asked three times. TOMLIN must be running with the model loaded and its page open (the /v1 door
-// passes only then). Nothing is saved; the figures are printed.
+// Measures the chat model loaded in TOMLIN on this PC, the same way every time, for Max mode's speed test: writing
+// speed from a short question, reading speed from a long one, each asked three times. TOMLIN must be running with the
+// model loaded and its page open (the /v1 door passes only then). Nothing is saved; the figures are printed.
 //   node tools/max-speed.ts            (TOMLIN on 8740)
 //   node tools/max-speed.ts 8741
 const port = Number(process.argv[2]) || 8740;

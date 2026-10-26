@@ -98,11 +98,11 @@ const NUMBER_WORDS: Record<string, number> = {
 };
 const NUM = `(\\d{1,2}|${Object.keys(NUMBER_WORDS).join('|')})`;
 const AGE_PATTERNS = [
-  new RegExp(`\\b${NUM}\\s*(?:-|\\s)?\\s*(?:yo|y/o|y\\.o\\.?)\\b`, 'gi'),
-  new RegExp(`\\b${NUM}\\s*(?:-|\\s)?\\s*(?:yrs?|years?|year)\\s*-?\\s*olds?\\b`, 'gi'),
+  new RegExp(`\\b${NUM}\\s*(?:-\\s*)?(?:yo|y/o|y\\.o\\.?)\\b`, 'gi'),
+  new RegExp(`\\b${NUM}\\s*(?:-\\s*)?(?:yrs?|years?|year)\\s*(?:-\\s*)?olds?\\b`, 'gi'),
   new RegExp(`\\b(?:age|aged|ages|age of)\\s*(?:of\\s*)?${NUM}\\b`, 'gi'),
   new RegExp(`\\b(?:i am|i'm|im|who is|who's|whos|who was|who are|she was|he was|was only|she is|she's|shes|he is|he's|hes|you are|you're|youre|ur|they are|they're|is only|is just|only|just turned|turned|turning)\\s+(?:only\\s+|just\\s+|barely\\s+)?${NUM}(?![\\d%]|[.,:/]\\d|\\s*(?:min|mins|minute|minutes|hour|hours|hrs?|sec|secs|seconds?|days?|weeks?|months?|km|kms|miles?|mi|foot|feet|ft|inch|inches|in|cm|mm|kg|kgs|lbs?|pounds?|stone|percent|times|x|am|pm|o'clock|of|out|and a half|drinks?|beers?|shots?|dollars?|bucks|quid))`, 'gi'),
-  new RegExp(`\\b${NUM}\\s*(?:st|nd|rd|th)?\\s+grade(r|rs)?\\b`, 'gi'),
+  new RegExp(`\\b${NUM}(?:\\s*(?:st|nd|rd|th))?\\s+grade(r|rs)?\\b`, 'gi'),
   /\bgrade\s+(\d{1,2})\b/gi,
   /\byear\s+(\d{1,2})\s+(?:student|pupil)s?\b/gi,
   /\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+grade(r|rs)?\b/gi,
@@ -131,8 +131,8 @@ function ageUnder18(p: string): string | null {
 }
 
 const PERSON = 'girls?|boys?|gf|bf|girlfriend|boyfriend|daughter|son|niece|nephew|sister|brother|cousin|step ?daughter|step ?son|student|virgin|babysitter|body|child|kid|female|male|f|m';
-const BARE_YEARS = new RegExp(`\\b${NUM}\\s*(?:-|\\s)?\\s*(?:yrs?|years?)\\b(?!\\s*-?\\s*olds?\\b)`, 'gi');
-const PERSON_AFTER = new RegExp(`^\\s*-?\\s*(?:${PERSON})\\b`);
+const BARE_YEARS = new RegExp(`\\b${NUM}\\s*(?:-\\s*)?(?:yrs?|years?)\\b(?!\\s*(?:-\\s*)?olds?\\b)`, 'gi');
+const PERSON_AFTER = new RegExp(`^\\s*(?:-\\s*)?(?:${PERSON})\\b`);
 const PERSON_BEFORE = new RegExp(`\\b(?:${PERSON}|her|him|she|he|she's|he's|shes|hes)\\s*[,:(-]?\\s*$`);
 const DURATION_BEFORE = /\b(for|past|last|over|after|within|in|been|together|married|almost|nearly|about|around|than|every|those|these|many|few)\s*$/;
 const DURATION_AFTER = /^\s*(ago|later|now|since|before|back|together|married|of|in|on|from|and|or|old|younger|older|apart|between)\b/;

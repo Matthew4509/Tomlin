@@ -93,6 +93,18 @@ export class Runtimes {
    * (downloaded) build counts only when it was unpacked from the files this version pins.
    */
   exePin(id: string, engine: Engine = this.pins[id]?.engine ?? (id.startsWith('sd-') ? 'sd' : 'llama')): string | null {
+    // Remembered a few seconds: Home asked this hundreds of times a poll (each model's fit and place), each a read of
+    // pin.json and a look in the folder, on the server's thread. Unpacking or removing a build here forgets it at once.
+    const had = this.found.get(id);
+    if (had && Date.now() - had.at < 5000) return had.exe;
+    const exe = this.lookUp(id, engine);
+    this.found.set(id, { exe, at: Date.now() });
+    return exe;
+  }
+
+  private found = new Map<string, { exe: string | null; at: number }>();
+
+  private lookUp(id: string, engine: Engine): string | null {
     const pin = this.pins[id];
     if (!pin) return null;
     if (this.kept !== this.dir) {
@@ -184,6 +196,7 @@ export class Runtimes {
     const pin = this.pins[id];
     if (!pin) throw new Error(`There is no pinned ${id} build.`);
     const target = join(this.kept, id);
+    this.found.delete(id);
     await rm(target, { recursive: true, force: true });
     await mkdir(target, { recursive: true });
     // Windows' own tar unpacks zips; named by full path because Git's tar reads "C:\..." as a remote machine.
@@ -191,6 +204,7 @@ export class Runtimes {
     for (const file of zips) await run(tar, ['-x', '-f', file, '-C', target], { windowsHide: true });
     await writeFile(join(target, PIN_FILE), pinKey(pin));
     for (const file of zips) await rm(file, { force: true });
+    this.found.delete(id);
     if (!this.installedPin(id)) throw new Error(`The ${pin.name} download unpacked, but its server program was not inside. The release may have changed shape.`);
   }
 
@@ -210,6 +224,7 @@ export class Runtimes {
   /** Takes a downloaded build away (runtime/<id>/ in the home, and its kept zips); never a runner the app folder ships. */
   async removePin(id: string): Promise<void> {
     if (this.kept === this.dir) throw new Error('A runner in the app folder is taken away by hand, not from here.');
+    this.found.delete(id);
     const pin = this.pins[id];
     await rm(join(this.kept, id), { recursive: true, force: true });
     for (const k of pin?.parts.keys() ?? []) {
@@ -351,6 +366,17 @@ export function pinWhy(pin: RuntimePin | undefined, gpus: GpuFacts[], driver: st
   const need = usable.every(f => f.fit === 'native') ? c.driver : c.jitDriver ?? c.driver;
   if (driver && !driverAtLeast(driver, need)) return `"${pc}" has NVIDIA driver ${driver}; the ${label(pin)} needs ${need} or newer there. Update the driver (from nvidia.com, or Windows Update) on that PC, then try again.`;
   return '';
+}
+
+/**
+ * Whether a build can run a model spread over exactly `cards` (the ones a model is held to, or every card): code for
+ * each NVIDIA card among them and a driver new enough. pinWhy asks less (code for some card on the PC), so a PC with a
+ * GTX 1060 and an RTX 5080 can use CUDA 13 while a model held to the GTX 1060 cannot.
+ */
+export function buildFits(pin: RuntimePin | undefined, cards: GpuFacts[], driver: string | null): boolean {
+  if (!pin || pin.device !== 'cuda') return true;
+  const nv = cards.filter(g => g.vendor === 'nvidia' && !g.integrated);
+  return !pinWhy(pin, nv, driver) && nv.every(g => codeFor(pin, g.cc) !== 'none');
 }
 
 /**

@@ -564,6 +564,25 @@ rather than misread it.
   Big contexts: messages up to 1,000,000 characters, documents whole when they fit, the reading shown as it goes,
   only what is new read each turn, a chat over the model's count cut down and sent again. Settings: the Set up menu
   stays on the left on every page it opens, and Staff, Jobs and Files are pages there, not windows.
+- **2.0.60:** Max mode (still hidden) is hidden on the lending side too: the Lend tick, its Help line and its place in
+  Allow all show only on a PC started with TOMLIN_MAX, and a PC without it lends nothing. Removing a link ends a loan to
+  that PC at once; a loan ended while it starts lends nothing; the RPC server and the presence reader end with TOMLIN;
+  a runner that gives up while its stream opens no longer keeps the other PC lending (or crashes TOMLIN). A very long
+  line in a document keeps true line numbers and is read whole as one line; two different NVIDIA cards are named each
+  by name ("RTX 3090 + GTX 1060"), not as two of one; a Hugging Face link with a broken %-escape gets the plain answer.
+  Mixed cards: a model held to some cards starts on a CUDA build with code for each of them (CUDA 13 held to a GTX 1060
+  beside an RTX 5080 starts on CUDA 12, and says so; CUDA 13 on a Pascal card crashes); the speed finder tries a CUDA
+  build only on cards it has code for, and its "Now" row says when a saved runner cannot run here.
+  Sturdier and faster: half an emoji cut by a length limit never reaches the model (it refused the whole chat after);
+  a failed first read of the settings is tried again; two chat-list changes at once both stay; Disconnect during
+  Connect leaves no runner behind. Home no longer looks for the runners on disk hundreds of times a poll; a model in a
+  big "other folder" is found without walking it again per model; long answers are watched for loops at a fraction of
+  the cost; a long run of spaces no longer stalls the content check. The Bridge's scan reads a test script left in the
+  web root as live code, reads the code behind thousands of pictures, reads a UTF-16 .env and keys in minified lines,
+  names files too big or locked to read, and reads a launch.json with a BOM; the push check and the review prompt no
+  longer hold the app for seconds on a big site. Home with months of projects (300) answers in about 90 ms a poll, not
+  400: a project's plan is read again only when its file changed. A linked PC sends a long answer as it grows, not all
+  of it again at every word (an 8K-token answer was 306 MB over the home network; now a few MB).
 - **2.0.59:** Data backups thin out by age instead of keeping only the last 5: the newest 5, then one a day for a week,
   one a week for a month and one every 3 months for a year. Two pictures of one prompt kept in a project in the same
   minute are both handed in (the second named " 2"), never one written over the other.

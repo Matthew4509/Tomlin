@@ -132,13 +132,35 @@ export function pdfParts(pages: string[]): DocPart[] {
   return pages.flatMap((text, i) => splitText(text).map(t => ({ page: i + 1, text: t })));
 }
 
-/** A text file as parts, each with the lines it holds (cut at line ends, so line numbers stay true). */
+/**
+ * A very long line cut into pieces of at most `size`, at a space where there is one in the second half (the space
+ * starts the next piece, so no trimming loses it): joined with nothing, the pieces are the line again.
+ */
+function linePieces(line: string, size: number): string[] {
+  const out: string[] = [];
+  let rest = line;
+  while (rest.length > size) {
+    const space = rest.lastIndexOf(' ', size - 1);
+    const at = space >= size / 2 ? space : size;
+    out.push(rest.slice(0, at));
+    rest = rest.slice(at);
+  }
+  out.push(rest);
+  return out;
+}
+
+/**
+ * A text file as parts, each with the lines it holds (cut at line ends, so line numbers stay true). A very long line
+ * (minified code) is cut into pieces: a part may then start or end inside it, and both parts name it.
+ */
 export function textParts(text: string, size = PART_CHARS): DocPart[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const out: DocPart[] = [];
   let cur: string[] = [];
   let first = 1;
   let n = 0;
+  /** The line the last piece taken came from. */
+  let at = 0;
   const flush = (last: number) => {
     // Blank lines off both ends, but the first line keeps its indent (code read whole needs it).
     const t = cur.join('\n').replace(/^(\s*\n)+/, '').trimEnd();
@@ -147,14 +169,16 @@ export function textParts(text: string, size = PART_CHARS): DocPart[] {
     n = 0;
   };
   lines.forEach((line, i) => {
-    // A very long line (minified code) is cut into pieces of its own.
-    const pieces = line.length > size ? splitText(line, size) : [line];
-    for (const piece of pieces) {
-      if (n && n + piece.length + 1 > size) flush(i);
+    const pieces = line.length > size ? linePieces(line, size) : [line];
+    pieces.forEach((piece, k) => {
+      if (n && n + piece.length + 1 > size) flush(at);
       if (!cur.length) first = i + 1;
-      cur.push(piece);
+      // The rest of a line already begun in this part goes on it, not on a line of its own.
+      if (k && cur.length) cur[cur.length - 1] += piece;
+      else cur.push(piece);
       n += piece.length + 1;
-    }
+      at = i + 1;
+    });
   });
   flush(lines.length);
   return out;
@@ -287,7 +311,9 @@ export function wholeText(d: Doc): string {
   let out = '';
   let last = 0;
   for (const p of d.parts) {
-    out += (out ? '\n'.repeat(Math.max(1, (p.lines?.[0] ?? last + 1) - last)) : '') + p.text;
+    // A part that starts on the line the one before ended on holds the rest of a long line: joined as it was cut.
+    const from = p.lines?.[0] ?? last + 1;
+    out += (out ? (from === last ? '' : '\n'.repeat(Math.max(1, from - last))) : '') + p.text;
     last = p.lines?.[1] ?? last + 1;
   }
   return out;

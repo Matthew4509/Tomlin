@@ -12,7 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repoOf } from '../src/release.ts';
 import { PARTS, SKIP } from '../src/update.ts';
-import { ensureKey, keyHits, nextSteps, signZip } from './sign.ts';
+import { ensureKey, keyHits, nativeGaps, nextSteps, signZip } from './sign.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
@@ -38,6 +38,13 @@ await rm(zip, { force: true });
 await rm(`${zip}.sig`, { force: true });
 for (const p of PARTS) await cp(join(ROOT, p), join(stage, name, p), { recursive: true, filter: src => !SKIP.test(src.slice(ROOT.length)) });
 for (const d of ['models/chat', 'models/image/loras']) await mkdir(join(stage, name, ...d.split('/')), { recursive: true });
+// The Windows builds of sharp and onnxruntime landed (npm install --include=optional puts them there).
+const gaps = nativeGaps(join(stage, name));
+if (gaps.length) {
+  await rm(stage, { recursive: true, force: true });
+  console.error(`Pack stopped: the zip would miss ${gaps.length} Windows part(s) of the picture tools. Run  npm install --include=optional  then pack again:\n  ${gaps.join('\n  ')}`);
+  process.exit(1);
+}
 // A private key (the release key above all) never ships: a .pem / .key / .p12 / .pfx file, or a key block in any file.
 const keys = keyHits(join(stage, name));
 if (keys.length) {

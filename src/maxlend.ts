@@ -1,7 +1,7 @@
 // Max mode on a node: lending this PC's card memory (or its RAM, with no card) to one linked PC at a time. The linked
 // PC's chat runner uses it through llama.cpp's RPC server (ggml-rpc-server), which listens on 127.0.0.1 only and is
-// reached only through the sealed stream (src/linkstream.ts). It lends only with "Lend card memory to linked PCs
-// (Max mode)" ticked, and only while nobody is using this PC: Windows locked, or no key press or mouse move for the
+// reached only through the sealed stream (src/linkstream.ts). It lends only on a PC started with TOMLIN_MAX (maxShown),
+// with "Lend card memory to linked PCs (Max mode)" ticked, and only while nobody is using this PC: Windows locked, or no key press or mouse move for the
 // minutes its owner chose (5 unless changed). Someone coming back to it, "I need to use the pc", the tick taken off or
 // sharing turned off ends the loan within a second or two: the RPC server is stopped and the linked PC's answer ends
 // there (it is asked again on what is left). Plain rules and the parts that run it; tested in test/maxlend.test.ts.
@@ -14,6 +14,23 @@ import type { Duplex } from 'node:stream';
 import type { Allow } from './carry.ts';
 import { alive } from './hardware.ts';
 import * as leftovers from './leftovers.ts';
+
+/**
+ * Max mode is hidden until its screens ship: only a PC started with TOMLIN_MAX set (the same switch that names the PCs
+ * to borrow from, src/jobrun/maxhost.ts) shows the Lend tick and lends. Elsewhere a tick saved before (Allow all once
+ * ticked it) counts for nothing.
+ */
+export const maxShown = (env: NodeJS.ProcessEnv = process.env) => !!(env.TOMLIN_MAX ?? '').trim();
+
+/** The RPC servers and presence readers running now: ended with TOMLIN (its window closed, Quit), never left lending. */
+const running = new Set<ChildProcess>();
+process.on('exit', () => {
+  for (const c of running) if (c.exitCode === null) c.kill();
+});
+function keepTrack(child: ChildProcess): void {
+  running.add(child);
+  child.on('exit', () => running.delete(child));
+}
 
 /** Minutes with no key press or mouse move before this PC lends (its owner picks one). */
 export const LEND_IDLE_CHOICES = [2, 5, 10, 15, 30, 60] as const;
@@ -53,8 +70,9 @@ export interface Lease {
  * Why this PC will not lend to `by` now, in plain words for the linked PC; '' when it will. `presence` null: not read
  * yet (or it cannot be read on this PC): it does not lend then.
  */
-export function lendWhy(o: { pc: string; on: boolean; allow: Allow; away: boolean; presence: Presence | null; idleMinutes: number; lease: Lease | null; by: { hash: string } }): string {
+export function lendWhy(o: { pc: string; on: boolean; shown: boolean; allow: Allow; away: boolean; presence: Presence | null; idleMinutes: number; lease: Lease | null; by: { hash: string } }): string {
   if (!o.on) return `"${o.pc}" is not lending to other PCs now (it is not a node).`;
+  if (!o.shown) return `"${o.pc}" does not lend its card memory: Max mode is not switched on there.`;
   if (!o.allow.lend) return `"${o.pc}" does not lend its card memory: its owner ticks "Lend card memory to linked PCs (Max mode)" under Network there.`;
   if (o.away) return `someone is using "${o.pc}" (they pressed "I need to use the pc"), so it lends nothing for now.`;
   if (o.lease && o.lease.hash !== o.by.hash) return `"${o.pc}" is lending its card memory to "${o.lease.name}" now. One PC borrows it at a time.`;
@@ -63,9 +81,10 @@ export function lendWhy(o: { pc: string; on: boolean; allow: Allow; away: boolea
   return '';
 }
 
-/** Why a loan already running must end now ('' while it may go on). */
-export function loanEnds(o: { on: boolean; allow: Allow; away: boolean; presence: Presence | null }): string {
+/** Why a loan already running must end now ('' while it may go on). `paired`: the links this PC still has. */
+export function loanEnds(o: { on: boolean; allow: Allow; away: boolean; presence: Presence | null; lease: Lease | null; paired: { hash: string }[] }): string {
   if (!o.on) return 'sharing was turned off there';
+  if (o.lease && !o.paired.some(p => p.hash === o.lease!.hash)) return `the link to "${o.lease.name}" was removed`;
   if (!o.allow.lend) return 'its owner took the Max mode tick off';
   if (o.away) return 'someone there pressed "I need to use the pc"';
   if (o.presence && ownerBack(o.presence)) return 'someone started using it';
@@ -129,6 +148,7 @@ export class PresenceReader {
   private start(): void {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PRESENCE_SCRIPT, 'utf16le').toString('base64')], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     this.child = child;
+    keepTrack(child);
     leftovers.started(child.pid, 'powershell.exe');
     let buf = '';
     child.stdout?.on('data', (b: Buffer) => {
@@ -150,6 +170,11 @@ export class PresenceReader {
       if (this.child && Date.now() - this.wantedAt > 180_000) this.stop();
     }, 30_000);
     this.timer.unref();
+  }
+
+  /** The reader's process, while it runs. */
+  get pid(): number | null {
+    return this.child?.pid ?? null;
   }
 
   stop(): void {
@@ -212,6 +237,8 @@ export class Lender {
   private idleSince = 0;
   private watch: NodeJS.Timeout | null = null;
   private starting: Promise<number> | null = null;
+  /** One more for every end(): a start that sees it change stops before it lends anything. */
+  private ends = 0;
   private cacheDir: string;
   private check: () => string;
 
@@ -222,6 +249,16 @@ export class Lender {
 
   view() {
     return { lease: this.lease, streams: this.streams.size, ended: this.ended };
+  }
+
+  /** The RPC server's process, while it runs. */
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
+  /** Starts the RPC server program on `port` (a test puts a stand-in here). */
+  protected spawnRpc(program: RpcProgram, port: number, cache: boolean): ChildProcess {
+    return spawn(program.exe, rpcArgs(port, program, cache), { windowsHide: true, stdio: 'ignore', env: { ...process.env, LLAMA_CACHE: this.cacheDir, ...(program.device === 'cuda' ? { CUDA_CACHE_MAXSIZE: process.env.CUDA_CACHE_MAXSIZE || String(4 * 2 ** 30) } : {}) } });
   }
 
   /** The RPC server's port for `by` (started when it is not running). Throws in plain words when it cannot start. */
@@ -241,10 +278,14 @@ export class Lender {
   }
 
   private async start(program: RpcProgram): Promise<number> {
+    const ends = this.ends;
     const port = await freePort();
     await mkdir(this.cacheDir, { recursive: true }).catch(() => undefined);
     const room = await statfs(this.cacheDir).then(s => s.bavail * s.bsize, () => 0);
-    const child = spawn(program.exe, rpcArgs(port, program, room >= CACHE_DISK), { windowsHide: true, stdio: 'ignore', env: { ...process.env, LLAMA_CACHE: this.cacheDir, ...(program.device === 'cuda' ? { CUDA_CACHE_MAXSIZE: process.env.CUDA_CACHE_MAXSIZE || String(4 * 2 ** 30) } : {}) } });
+    // Ended while the port and the disk were read (sharing turned off, someone came back): nothing is started.
+    if (this.ends !== ends) throw new Error('the loan ended as it started');
+    const child = this.spawnRpc(program, port, room >= CACHE_DISK);
+    keepTrack(child);
     leftovers.started(child.pid, program.exe);
     this.child = child;
     child.on('error', () => undefined);
@@ -285,6 +326,7 @@ export class Lender {
 
   /** Ends the loan now: the streams are cut and the RPC server is ended (and waited for). */
   async end(why: string): Promise<void> {
+    this.ends++;
     if (this.lease) this.ended = { to: this.lease.name, why, at: new Date().toISOString() };
     this.lease = null;
     this.port = 0;

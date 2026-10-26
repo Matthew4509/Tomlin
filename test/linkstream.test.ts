@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, connect, type Socket } from 'node:net';
 import { randomBytes } from 'node:crypto';
-import { FRAME, newNonce, Opener, Sealer, sealedPipe, streamKeys } from '../src/linkstream.ts';
+import { FRAME, joinWhenOpen, newNonce, Opener, Sealer, sealedPipe, streamKeys } from '../src/linkstream.ts';
 
 const linkKeys = randomBytes(64);
 
@@ -116,6 +116,33 @@ test('a changed byte on the network ends both sides', async () => {
   assert.match(await r.nodeEnded, /could not be opened/);
   await r.hostEnded;
   r.close();
+});
+
+test('the runner closing its side while the stream is still opening: the stream is closed at once, not held open by its heartbeats', async () => {
+  // A paused socket still hears its other end go (and a reset as an error, which must not go unheard and crash TOMLIN).
+  for (const how of ['closed', 'reset'] as const) {
+    const [runner, local] = await pair();
+    const [wire, nodeEnd] = await pair();
+    const nodeClosed = new Promise<void>(r => nodeEnd.once('close', () => r()));
+    nodeEnd.on('error', () => undefined);
+    // Opening takes a while (up to 30 s on a real network); the runner gives up meanwhile.
+    const joined = joinWhenOpen(local, async () => {
+      if (how === 'reset') runner.resetAndDestroy();
+      else runner.destroy();
+      await new Promise(r => setTimeout(r, 300));
+      return { socket: wire, keys: streamKeys(linkKeys, newNonce(), newNonce(), 'host') };
+    });
+    assert.match(await joined, /the runner closed its side before the stream opened/, how);
+    await Promise.race([nodeClosed, new Promise((_, no) => setTimeout(() => no(new Error(`${how}: the stream to the other PC was left open`)), 2000))]);
+    assert.ok(wire.destroyed, how);
+  }
+});
+
+test('a stream that could not be opened closes the runner\'s side and says why', async () => {
+  const [runner, local] = await pair();
+  const runnerClosed = new Promise<void>(r => runner.once('close', () => r()));
+  await assert.rejects(joinWhenOpen(local, async () => { throw new Error('"Worker PC" could not be reached'); }), /could not be reached/);
+  await runnerClosed;
 });
 
 test('a PC that goes quiet is dropped after the silent time', async () => {

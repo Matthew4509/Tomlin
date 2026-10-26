@@ -1,6 +1,6 @@
 // A job on disk: its plan, the step waiting for the person, its events (the room), and the packet each worker reads.
 import { stamp } from '../folders.ts';
-import { appendFile, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import * as jobs from '../jobs.ts';
 import type { Job } from '../jobs.ts';
@@ -43,7 +43,11 @@ export async function loadJob(id: unknown): Promise<Job | null> {
 
 export async function saveJob(job: Job): Promise<void> {
   job.updated = new Date().toISOString();
-  const r = await ws.save(await d.workspaceDir(), jobs.planPath(job.id), JSON.stringify(job, null, 2));
+  const root = await d.workspaceDir();
+  // Read again at the next listing, whatever the file's time says (two saves in one tick can keep the same time).
+  plans.delete(join(root, 'jobs', job.id, 'plan.json'));
+  const r = await ws.save(root, jobs.planPath(job.id), JSON.stringify(job, null, 2));
+  plans.delete(join(root, 'jobs', job.id, 'plan.json'));
   if ('error' in r) throw new Error(r.error);
 }
 
@@ -101,15 +105,36 @@ export async function addEvent(id: string, e: NewEvent): Promise<void> {
 
 export const left = (job: Job) => job.steps.filter(s => s.status === 'todo').length;
 
-/** Every job in the workspace, newest first, read once. */
+/**
+ * Plans read before, by file, with the file's time and size: one that did not change is not read again. Home is polled
+ * every 3 s by each open window, and every poll read and parsed every job's plan (300 jobs: 0.4 s a poll, measured).
+ */
+const plans = new Map<string, { mtimeMs: number; size: number; job: Job | null }>();
+
+/** The newest 30 jobs in the workspace, newest first: copies, so a caller that changes one never changes what is kept. */
 export async function allJobs(): Promise<Job[]> {
-  const names = await readdir(join(await d.workspaceDir(), 'jobs')).catch(() => [] as string[]);
+  const root = await d.workspaceDir();
+  const names = await readdir(join(root, 'jobs')).catch(() => [] as string[]);
   const out: Job[] = [];
+  const seen = new Set<string>();
   for (const id of names.filter(jobs.validId)) {
-    const job = await loadJob(id);
-    if (job) out.push(job);
+    const file = join(root, 'jobs', id, 'plan.json');
+    seen.add(file);
+    const st = await stat(file).catch(() => null);
+    if (!st) {
+      plans.delete(file);
+      continue;
+    }
+    let had = plans.get(file);
+    if (!had || had.mtimeMs !== st.mtimeMs || had.size !== st.size) {
+      had = { mtimeMs: st.mtimeMs, size: st.size, job: await loadJob(id) };
+      plans.set(file, had);
+    }
+    if (had.job) out.push(had.job);
   }
-  return out.sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 30);
+  // A job removed, or another workspace picked: its plan is let go.
+  for (const file of plans.keys()) if (!seen.has(file)) plans.delete(file);
+  return out.sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 30).map(job => structuredClone(job));
 }
 
 export async function listJobs() {

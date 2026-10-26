@@ -51,7 +51,8 @@ function look(d) {
 
 // The folder a launch.json start entry runs in, when that is a folder of this project (cwd, or an argument naming one).
 function launchFolders(dir) {
-  let j = null; try { j = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'launch.json'), 'utf8')); } catch { return []; }
+  // A BOM (Notepad, PowerShell 5.1) is not JSON: dropped first, or the start entry is lost and the wrong copy scanned.
+  let j = null; try { j = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'launch.json'), 'utf8').replace(/^﻿/, '')); } catch { return []; }
   const out = new Set();
   for (const c of (j && Array.isArray(j.configurations) ? j.configurations : [])) {
     if (!c || typeof c !== 'object') continue;

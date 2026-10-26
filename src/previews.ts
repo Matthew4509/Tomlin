@@ -1,4 +1,4 @@
-// Chat previews (his idea, 22 Oct): a picture of a project's running site beside its chats in a person's window, so a
+// Chat previews: a picture of a project's running site beside its chats in a person's window, so a
 // chat is known at a glance. The picture is the Bridge's own (its hidden Edge, src/bridge/snaps.js), matched to the
 // project by folder only. One picture a "day": a day starts at the first use after a 5-hour gap (working till 2 am and
 // back at 9 = new pictures at 9), and the first message sent that day in a chat of that project takes one in the

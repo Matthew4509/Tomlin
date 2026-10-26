@@ -10,12 +10,12 @@ import { cardsOf, listDevices, type Card } from '../devices.ts';
 import { runnerEnv } from '../worker.ts';
 import { log } from '../log.ts';
 import type { Gpu } from '../hardware.ts';
-import { type Device, missingCardRunner, RUNNER_NAMES, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName } from '../runtimes.ts';
+import { buildFits, ccFromName, cudaOrder, type Device, type GpuFacts, missingCardRunner, RUNNER_NAMES, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName } from '../runtimes.ts';
 import { noCardStart } from '../runnerpush.ts';
 import { chatArgs, TEMPLATE_FAULT, whyItFailed } from '../llama.ts';
 import { Pane } from '../pane.ts';
 import * as runnersOf from '../runners.ts';
-import { readings, streamChat } from '../engine.ts';
+import { readings, runnerJson, streamChat } from '../engine.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
@@ -308,19 +308,44 @@ export function cardRunners(): RunnerName[] {
   return out;
 }
 
-/** The runner a model is held to when that build is installed here and this PC can use it; undefined: Auto. */
-function heldRunner(run: RunOptions): RunnerName | undefined {
-  const r = run.runner;
-  return r && RUNNER_NAMES.includes(r) && cardRunners().includes(r) ? r : undefined;
+const nameKey = (s: string) => s.toLowerCase().replace(/\(r\)|\(tm\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+/** A card as the runners list it, with its compute level from this PC's hardware list (else from its name). */
+function gpuOfCard(c: Card): GpuFacts {
+  const g = hardware.gpus.find(x => x.vendor === 'nvidia' && nameKey(x.name) === nameKey(c.label) && (!x.total || Math.abs(x.total - c.total) <= x.total * 0.15));
+  return { name: c.label, vendor: c.ids.some(id => id.startsWith('CUDA')) ? 'nvidia' : g?.vendor ?? 'other', integrated: false, total: c.total, cc: g?.cc ?? ccFromName(c.label) };
+}
+/** The NVIDIA cards a model with these settings is spread over: the ones it is held to, else every one here. */
+function gpusFor(run: RunOptions): GpuFacts[] {
+  const every = hardware.gpus.filter(g => g.vendor === 'nvidia' && !g.integrated);
+  const held = run.cards?.length ? cardList.filter(c => c.ids.some(id => run.cards!.includes(id))) : [];
+  return held.length ? held.map(gpuOfCard).filter(g => g.vendor === 'nvidia') : every;
+}
+/** The card runners with code for this card (a CUDA build may have none for an older one): the speed finder's rows. */
+export function runnersForCard(c: Card): RunnerName[] {
+  return cardRunners().filter(r => runnerDevice(r) !== 'cuda' || (c.ids.some(id => id.startsWith('CUDA')) && buildFits(runtimes.pins[RUNNER_PINS[r]], [gpuOfCard(c)], hardware.nvidiaDriver ?? null)));
 }
 
-/** The program a chat start on `device` runs: the build the model is held to, or the one Auto picks here. */
-function chatExe(device: Device, held: RunnerName | undefined): { exe: string; runner?: string } {
+/**
+ * The runner a model is held to when that build is installed here, this PC can use it, and (for a CUDA build) it has
+ * code for every card the model is held to: CUDA 13 held to a GTX 1060 beside an RTX 5080 is not. Undefined: Auto.
+ */
+function heldRunner(run: RunOptions): RunnerName | undefined {
+  const r = run.runner;
+  if (!r || !RUNNER_NAMES.includes(r) || !cardRunners().includes(r)) return undefined;
+  return runnerDevice(r) !== 'cuda' || buildFits(runtimes.pins[RUNNER_PINS[r]], gpusFor(run), hardware.nvidiaDriver ?? null) ? r : undefined;
+}
+
+/**
+ * The program a chat start on `device` runs: the build the model is held to, or the one Auto picks for the cards it is
+ * held to (or every card here).
+ */
+function chatExe(device: Device, held: RunnerName | undefined, run: RunOptions): { exe: string; runner?: string } {
   if (held && runnerDevice(held) === device) {
     const exe = runtimes.exePin(RUNNER_PINS[held]);
     if (exe) return { exe, runner: held };
   }
-  const id = runtimes.id('llama', device);
+  const fits = device === 'cuda' && run.cards?.length ? cudaOrder(runtimes.pins, 'llama', gpusFor(run), hardware.nvidiaDriver ?? null).find(id => runtimes.installedPin(id)) : undefined;
+  const id = fits ?? runtimes.id('llama', device);
   const named = runnerOfPin(id);
   return { exe: runtimes.exePin(id)!, ...(named ? { runner: named } : {}) };
 }
@@ -383,7 +408,10 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   const started = { ...run, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };
   const draftName = draftPath ? draftPath.split(/[\\/]/).pop()!.replace(/\.gguf$/i, '') : '';
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
+  const held = heldRunner(run);
+  const runnerWords: Record<RunnerName, string> = { cuda: 'CUDA 12', cuda13: 'CUDA 13', vulkan: 'Vulkan' };
   const notes = [
+    asked !== 'cpu' && run.runner && !held ? `This model is set to the ${runnerWords[run.runner] ?? run.runner} runner, which is not installed here or has no code for ${run.cards?.length ? 'the cards it is held to' : 'this PC\'s cards'}: Auto picked the runner instead.` : '',
     asked !== 'cpu' ? missingCardRunner('llama', hardware.gpus, d => runtimes.installed('llama', d)) : '',
     asked !== 'cpu' && noCard.size ? `Skipped: ${[...noCard.values()].join('; ')}.` : '',
     asked === 'auto' && autoSkipsGpu('llama') ? `Auto picked the CPU: faster for chat than the built-in graphics chip (choose GPU to use it anyway).` : '',
@@ -394,7 +422,6 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     max?.lent.length ? `Max mode: borrowing the card memory of ${max.lent.map(n => `"${n}"`).join(' and ')}.` : '',
     ...(max?.notes ?? []),
   ].filter(Boolean);
-  const held = heldRunner(run);
   const loading = runner.connect({
     model: id,
     modelName: name,
@@ -404,8 +431,8 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     // when it is installed and this PC can use it.
     devices: devicesForRun(devicesFor('llama', asked), held && runnerDevice(held)),
     expectedSeconds: expected,
-    build: device => ({ ...chatExe(device, held), args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
-    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { ...chatExe(device, held), args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
+    build: device => ({ ...chatExe(device, held, run), args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
+    retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { ...chatExe(device, held, run), args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
     why: whyItFailed,
     // A card start that put the model on the CPU counts as failed (Max mode's lent cards aside): the next device is
     // tried, and Auto skips that runner from now on.
@@ -542,7 +569,7 @@ export async function openAiChat(req: IncomingMessage, res: ServerResponse): Pro
   takeChat(ac, runner, '', '', 'A program asking through /v1');
   res.once('close', () => ac.abort());
   try {
-    const upstream = await fetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(runner.worker.base) }, body: JSON.stringify(b), signal: ac.signal });
+    const upstream = await fetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(runner.worker.base) }, body: runnerJson(b), signal: ac.signal });
     res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
     // Passed through as it comes; its end is kept to read llama.cpp's timings, so the answer counts on this PC (src/meter.ts).
     const dec = new TextDecoder();

@@ -748,15 +748,19 @@ function drawNodeSwitch(n) {
 
 /**
  * "Sharing permissions": Allow all, Sharing of models, Enable backups, Allow host to update TOMLIN remotely, Allow host
- * to test and change model run settings, Lend card memory (Max mode) (sending a model here needs no tick since 2.0.56). Each tick is saved
+ * to test and change model run settings, Lend card memory (Max mode, shown only with TOMLIN_MAX) (sending a model here needs no tick since 2.0.56). Each tick is saved
  * at once (with the app lock PIN); a refused or cancelled PIN puts the ticks back as saved at the next refresh.
  */
 function drawNodeAllow(sh) {
   const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false, lend: false };
+  // Max mode is hidden until its screens ship: the Lend tick and its Help line show only on a PC started with TOMLIN_MAX.
+  const shown = sh.lend?.shown === true;
+  homeUi.maxShown = shown;
+  for (const m of document.querySelectorAll('[data-max]')) m.hidden = !shown;
   if (!homeUi.nodeSaving) {
     for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.checked = a[t.dataset.allow] === true;
     const all = $('#node-allow-all');
-    all.checked = a.pull && a.backup && a.update && a.tune && a.lend;
+    all.checked = a.pull && a.backup && a.update && a.tune && (a.lend || !shown);
     all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.lend);
     if (sh.lend) $('#node-lend-idle').value = String(sh.lend.idle);
   }
@@ -807,7 +811,10 @@ function saveAllow(changed) {
   return nodeShare({ allow: { ...now, ...changed } });
 }
 for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.addEventListener('change', () => saveAllow({}));
-$('#node-allow-all').addEventListener('change', e => saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, lend: e.target.checked }));
+$('#node-allow-all').addEventListener('change', e => {
+  const shown = homeUi.maxShown === true;
+  saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, lend: e.target.checked && shown });
+});
 $('#node-lend-idle').addEventListener('change', e => nodeShare({ lendIdle: Number(e.target.value) }));
 
 /** "Models other PCs can use": every model on this PC, listed (nothing to tick: linked PCs may use them all). */

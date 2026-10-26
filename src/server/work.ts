@@ -3,7 +3,7 @@ import type { ServerResponse } from 'node:http';
 import { readFile, stat, copyFile, mkdir } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { extname, join } from 'node:path';
-import { repeatCut, streamChat } from '../engine.ts';
+import { repeatWatch, streamChat } from '../engine.ts';
 import { cleanPrompt } from '../chatpic.ts';
 import { toneOf } from '../persona.ts';
 import { nowModel, sizeB, roleOf, drawsFor, type StaffMember } from '../staff.ts';
@@ -91,8 +91,9 @@ async function blogWrite(res: ServerResponse, b: Record<string, unknown>): Promi
   try {
     // The tone picked in the blog writer, else the chat's.
     const tone = toneOf(typeof b.tone === 'string' && b.tone ? b.tone : (await store.settings()).tone).prompt;
+    const repeats = repeatWatch();
     await streamChat(chat.worker.base, chat.view.model ?? '', [{ role: 'system', content: blogSystem(ask, tone) }, { role: 'user', content: `Write the post about: ${ask.topic}` }], text => {
-      const cut = repeatCut(text);
+      const cut = repeats(text);
       shown = cut ?? text;
       send('text', { text: shown });
       if (cut !== null) ac.abort();

@@ -127,6 +127,8 @@ export class Worker {
   view: WorkerView;
   port: number | null = null;
   private child: ChildProcess | null = null;
+  /** One more for every end(): a start that sees it change starts nothing. */
+  private ends = 0;
   private log: string[] = [];
   private errors: string[] = [];
   /** This start's lines about the devices it found and used (runnerpush.startFact), from the first on. */
@@ -164,7 +166,10 @@ export class Worker {
    * caller may try another device) or 'cancelled' (Disconnect was pressed while it loaded).
    */
   async launch(spec: LaunchSpec): Promise<'ready' | 'failed' | 'cancelled'> {
+    const ends = this.ends;
     const port = await freePort();
+    // Ended while the port was found (Disconnect pressed at once): nothing is started, so nothing is left running.
+    if (this.ends !== ends) return 'cancelled';
     const key = randomBytes(24).toString('hex');
     this.log = [];
     this.errors = [];
@@ -197,7 +202,9 @@ export class Worker {
     // made a start on the card look like one on the CPU.
     for (const stream of [child.stdout, child.stderr]) {
       const split = lineSplitter();
-      stream?.on('data', (b: Buffer) => keep(split(b.toString())));
+      // Decoded as a stream: a character of two or more bytes (a model path in another language) cut by a chunk stays whole.
+      stream?.setEncoding('utf8');
+      stream?.on('data', (b: string) => keep(split(b)));
       stream?.on('end', () => keep(split.rest()));
     }
     let exited = false;
@@ -238,6 +245,7 @@ export class Worker {
 
   /** Ends the runner and waits until the system no longer lists it. True when it is gone. */
   async end(): Promise<boolean> {
+    this.ends++;
     const child = this.child;
     if (this.port) forget(`http://127.0.0.1:${this.port}`);
     this.child = null;

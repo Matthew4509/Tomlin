@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COUNTER_GRACE, NVIDIA_SMI, chipOf, engineBusy, smiRows, totalFromName, unreadOf } from '../src/hardware.ts';
+import { COUNTER_GRACE, NVIDIA_SMI, cardsName, chipOf, engineBusy, smiRows, totalFromName, unreadOf } from '../src/hardware.ts';
+
+test('NVIDIA cards together are named as they are: two the same as "2 ×", different ones each by name', () => {
+  assert.equal(cardsName([{ name: 'NVIDIA GeForce RTX 3060' }]), 'NVIDIA GeForce RTX 3060');
+  assert.equal(cardsName([{ name: 'NVIDIA GeForce RTX 3060' }, { name: 'NVIDIA GeForce RTX 3060' }]), '2 × NVIDIA GeForce RTX 3060');
+  // His RTX 3090 + GTX 1060 plan: never "2 × RTX 3090".
+  assert.equal(cardsName([{ name: 'NVIDIA GeForce RTX 3090' }, { name: 'NVIDIA GeForce GTX 1060 6GB' }]), 'NVIDIA GeForce RTX 3090 + NVIDIA GeForce GTX 1060 6GB');
+  assert.equal(cardsName([{ name: 'RTX 3060' }, { name: 'GTX 1060' }, { name: 'RTX 3060' }]), '2 × RTX 3060 + GTX 1060');
+  assert.equal(cardsName([]), '');
+});
 
 const col = (pid: number, chip: string, eng: number, type: string) => `\\\\PC\\GPU Engine(pid_${pid}_luid_0x00000000_${chip}_phys_0_eng_${eng}_engtype_${type})\\Utilization Percentage`;
 

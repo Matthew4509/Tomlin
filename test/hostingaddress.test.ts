@@ -11,7 +11,7 @@ const { cleanHost, homeHostWhy } = createRequire(import.meta.url)('../src/bridge
 };
 
 test('a private address of any range, or a .local name, is not a web host; a real host name is', () => {
-  for (const t of ['172.20.1.5', '100.64.0.1', '0.0.0.0', '127.0.0.1', '10.1.2.3', '192.168.0.226', '169.254.9.9', 'printer.local', 'my.localhost'])
+  for (const t of ['172.20.1.5', '100.64.0.1', '0.0.0.0', '127.0.0.1', '10.1.2.3', '192.168.0.77', '169.254.9.9', 'printer.local', 'my.localhost'])
     assert.match(cleanHost(t).error ?? '', /is this PC or your home network, not a web host/, t);
   assert.deepEqual(cleanHost('https://server123.yourhost.com:2083/cpsess1/x'), { host: 'server123.yourhost.com', port: 2083 });
   assert.deepEqual(cleanHost('172.32.0.1'), { host: '172.32.0.1', port: null }, 'outside 172.16-31 is a public address');

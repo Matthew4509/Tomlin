@@ -103,7 +103,11 @@ export class Pane {
         await this.worker.end();
         spec = attempt === 0 ? req.retry?.(device, tail) ?? null : null;
       }
-      if (result === 'cancelled' || this.view.state !== 'loading') return this.view;
+      if (result === 'cancelled' || this.view.state !== 'loading') {
+        // Ready, but Disconnect came meanwhile: the runner it started is ended too, never left holding memory.
+        if (result === 'ready') await this.worker.end();
+        return this.view;
+      }
       let noCard = '';
       if (result === 'ready') {
         const seconds = Math.round((Date.now() - (this.view.loadStartedAt ?? Date.now())) / 100) / 10;

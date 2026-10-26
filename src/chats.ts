@@ -162,12 +162,18 @@ export class Chats {
     return `chats/${id}.json`;
   }
 
+  /** The list being read: two asks at once share one read (each with its own copy, the second's change undid the first's). */
+  private reading: Promise<ChatInfo[]> | null = null;
+
   private async index(): Promise<ChatInfo[]> {
-    if (!this.cache) {
-      const list = await this.store.readJson<ChatInfo[]>(INDEX, []);
-      this.cache = Array.isArray(list) ? list.filter(c => c && ID.test(c.id) && typeof c.who === 'string') : [];
-    }
-    return this.cache;
+    if (this.cache) return this.cache;
+    this.reading ??= this.store.readJson<ChatInfo[]>(INDEX, []).then(list => {
+      this.cache ??= Array.isArray(list) ? list.filter(c => c && ID.test(c.id) && typeof c.who === 'string') : [];
+      return this.cache;
+    }).finally(() => {
+      this.reading = null;
+    });
+    return this.reading;
   }
 
   // A save that fails (a full disk) leaves the list in memory changed and the file not: the list is read from the file

@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { headerFindings, compareLive, siteOf } = require('./live');
-const { disclosurePass, publishedFiles, RULE: DISC_RULES } = require('./disclosure');
+const { disclosurePass, publishedFiles, decodeText, RULE: DISC_RULES } = require('./disclosure');
 const { gitConfigRisky } = require('./gitstate');
 const { fingerprint, applyJudged } = require('./judged');
 const { findRoots } = require('./roots');
@@ -247,10 +247,15 @@ function blockedByHtaccess(file) {
   return false;
 }
 
+// A file the scan reads (code, a .env, a note): only these count toward MAX_FILES, so 6,500 pictures never stop the
+// scan before the code behind them.
+const readable = name => CODE_EXT.test(name) || /^\.env/i.test(name) || /\.md$/i.test(name);
+
 function listFiles(dir, skip) {
   const out = [];
+  let counted = 0;
   const walk = (d, inWebroot, depth) => {
-    if (out.length >= MAX_FILES || depth > 12) return;
+    if (counted >= MAX_FILES || depth > 12) return;
     let ents = [];
     try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
@@ -263,13 +268,23 @@ function listFiles(dir, skip) {
         if (skip.has(path.relative(dir, p).replace(/\\/g, '/').toLowerCase())) continue;
         walk(p, inWebroot || WEBROOT_NAMES.test(e.name), depth + 1);
       } else if (e.isFile()) {
+        if (readable(e.name)) {
+          if (counted >= MAX_FILES) return;
+          counted++;
+        }
         out.push({ p, inWebroot, name: e.name });
       }
     }
   };
   walk(dir, false, 0);
+  out.full = counted >= MAX_FILES;
   return out;
 }
+
+/** Test-framework files: describe/it/test, a TestCase, assertions, pytest or unittest. */
+const TEST_FRAMEWORK = /\bextends\s+\w*TestCase\b|\bPHPUnit\b|\b(describe|it|test)\s*\(\s*['"`]|\bexpect\s*\(|\bassert(Equals|Same|True|False)\s*\(|^\s*(import|from)\s+(pytest|unittest)\b/m;
+/** Slices of a long line (minified code), overlapping so a key across a cut is still whole in one. */
+const slicesOf = line => { const out = []; for (let k = 0; k < line.length; k += 1800) out.push(line.slice(k, k + 2000)); return out; };
 
 function codeAudit(dir, skipList, opts = {}) {
   newRun();
@@ -281,6 +296,8 @@ function codeAudit(dir, skipList, opts = {}) {
   const exposed = new Map(); // rule|folder -> finding (one per folder, with a count)
   const read = [], docs = []; // every file read, and the notes (.md), for the cross-file checks (lib/cross.js)
   let scanned = 0, readBytes = 0, overTotal = 0;
+  const tooBig = []; // code files over MAX_BYTES, named in a note (never skipped without a word)
+  const unreadable = []; // code files that could not be opened, named in a note too
   for (const f of files) {
     const rel = path.relative(dir, f.p).replace(/\\/g, '/');
     if (f.oldCopy) {
@@ -312,14 +329,20 @@ function codeAudit(dir, skipList, opts = {}) {
     if (!CODE_EXT.test(f.name) && !/^\.env/i.test(f.name)) continue;
     if (/\.min\.js$|package-lock\.json$|\.map$/i.test(f.name)) continue;
     let st; try { st = fs.statSync(f.p); } catch { continue; }
-    if (st.size > MAX_BYTES) continue;
+    if (st.size > MAX_BYTES) { tooBig.push(rel); continue; }
     if (readBytes + st.size > MAX_TOTAL) { overTotal++; continue; }
     readBytes += st.size;
-    let text; try { text = fs.readFileSync(f.p, 'utf8'); } catch { continue; }
+    // Whatever it was saved as: a .env written by Windows PowerShell 5.1 is UTF-16, and read as UTF-8 its keys vanish.
+    // One that cannot be opened (held by another program, or locked by the antivirus as a web shell) is named in a note.
+    let text; try { text = decodeText(fs.readFileSync(f.p)); } catch { unreadable.push(rel); continue; }
+    if (text === null) continue;
     scanned++;
     const lines = text.split(/\r?\n/);
     const ctx = { text, rel, abs: f.p, dir };
-    const isTest = /(^|\/)(tests?|spec|__tests__|fixtures?)\//i.test(rel) || /\.(test|spec)\./i.test(f.name) || /^test_\w*\.py$/i.test(f.name);
+    const testName = /(^|\/)(tests?|spec|__tests__|fixtures?)\//i.test(rel) || /\.(test|spec)\./i.test(f.name) || /^test_\w*\.py$/i.test(f.name);
+    // In the folder visitors reach, a test's name is not enough (public_html/test/db.php runs live): only a test
+    // framework's own file is taken as a test there.
+    const isTest = testName && (!f.inWebroot || TEST_FRAMEWORK.test(text));
     read.push({ rel, name: f.name, text, lines, isTest });
     if (/privacy/i.test(f.name) && /\.(html?|php|md|tsx?|jsx?|vue|json|txt)$/i.test(f.name)) privacy.push(text.toLowerCase());
     if (!isTest && /\.(html?|php|m?js|tsx|jsx|vue|twig)$/i.test(f.name)) lines.forEach((l, i) => {
@@ -346,7 +369,8 @@ function codeAudit(dir, skipList, opts = {}) {
       if (r.fileLacks && r.fileLacks.test(text)) continue;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (line.length > 2000 || !r.re.test(line)) continue;
+        // A long line (minified code) is read in slices for keys only: the other rules would take too long on it.
+        if (line.length > 2000 ? r.area !== 'secrets' || !slicesOf(line).some(s => r.re.test(s)) : !r.re.test(line)) continue;
         if (r.area !== 'secrets' && !r.comments && COMMENT_LINE.test(line)) continue;
         if (r.except && r.except.test(line)) continue;
         if (r.test && !r.test(line, ctx, lines, i)) continue;
@@ -368,6 +392,8 @@ function codeAudit(dir, skipList, opts = {}) {
   }
   const notes = [];
   if (overTotal) notes.push('The scan reads up to ' + (MAX_TOTAL >> 20) + ' MB of code in all: ' + overTotal + ' more files were not read.');
+  if (unreadable.length) notes.push(unreadable.length + ' code file' + (unreadable.length === 1 ? '' : 's') + ' could not be opened, so ' + (unreadable.length === 1 ? 'it was' : 'they were') + ' not checked: ' + unreadable.slice(0, 5).join(', ') + (unreadable.length > 5 ? '…' : '') + '. Another program may hold ' + (unreadable.length === 1 ? 'it' : 'them') + ', or the antivirus may have blocked ' + (unreadable.length === 1 ? 'it' : 'them') + ' (it does that to files that look like a web shell: look at it first).');
+  if (tooBig.length) notes.push(tooBig.length + ' code file' + (tooBig.length === 1 ? '' : 's') + ' over ' + (MAX_BYTES >> 10) + ' KB ' + (tooBig.length === 1 ? 'was' : 'were') + ' not read: ' + tooBig.slice(0, 5).join(', ') + (tooBig.length > 5 ? '…' : '') + '. Check ' + (tooBig.length === 1 ? 'it' : 'them') + ' by hand, or split ' + (tooBig.length === 1 ? 'it' : 'them') + '.');
   let has = null;
   for (const e of exposed.values()) {
     // An archive a page of the project links to (a download, an update feed) is published on purpose.
@@ -402,7 +428,7 @@ function codeAudit(dir, skipList, opts = {}) {
     (r, f, i, title) => ({ rule: r.id, sev: r.sev, area: r.area, title: title || r.title, where: f.rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(f.lines[i] || '') }));
   findings.push(...cross.findings);
   notes.push(...cross.notes);
-  return { findings: mergeCopies(findings), notes, filesSeen: files.length, filesScanned: scanned, truncated: files.length >= MAX_FILES };
+  return { findings: mergeCopies(findings), notes, filesSeen: files.length, filesScanned: scanned, truncated: files.full === true };
 }
 
 // The same line in the same file name across several folders (old release copies: v1.5/, v1.6/ ...) is one fault,

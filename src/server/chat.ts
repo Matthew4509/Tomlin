@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { log } from '../log.ts';
 import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine, wholeSection } from '../docs.ts';
 import type { ChatLine } from '../store.ts';
-import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatCut, streamChat, THINK_ROOM, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
+import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatWatch, streamChat, THINK_ROOM, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { pictureAsk } from '../chatpic.ts';
 import { cleanAnswer, roleOf, isPlain, type StaffMember } from '../staff.ts';
@@ -496,8 +496,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: webPerCall, total: webTotal, onStatus: say }) : null;
         web = turnWeb;
         const tools = turnWeb ? { defs: WEB_TOOLS, run: (n: string, a: string, sig: AbortSignal, round: number) => turnWeb.run(n, a, sig, round), rounds: WEB_ROUNDS, onCall: (n: string, a: string) => say(callWords(n, a)) } : undefined;
+        const repeats = repeatWatch();
         return streamChat(runner.worker.base!, runner.view.model ?? '', turns, text => {
-          const loop = repeatCut(text);
+          const loop = repeats(text);
           shown = fresh(loop ?? text);
           show(shown);
           if (loop !== null) {

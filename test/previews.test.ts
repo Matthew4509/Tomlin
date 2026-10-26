@@ -1,4 +1,4 @@
-// Chat previews (his idea, 22 Oct): a picture of a project's running site beside its chats in a person's window. One
+// Chat previews: a picture of a project's running site beside its chats in a person's window. One
 // picture a "day" (a day starts at the first use after a 5-hour gap), taken in the background by the first message
 // sent that day in a chat of that project, only when its site is already running.
 import { test } from 'node:test';

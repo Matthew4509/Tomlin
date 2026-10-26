@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { publicOf, zipCheck } from '../src/release.ts';
-import { carried, ensureKey, keyHits, signZip } from '../tools/sign.ts';
+import { carried, ensureKey, keyHits, nativeGaps, signZip } from '../tools/sign.ts';
 
 // Every folder made here is removed when the file ends.
 const made: string[] = [];
@@ -79,4 +79,19 @@ test('no private key ships: a key file, or a key block in any file, is found', (
   writeFileSync(join(d, 'release.pem'), 'anything');
   writeFileSync(join(d, 'cert.P12'), 'anything');
   assert.deepEqual(keyHits(d).sort(), ['cert.P12', 'release.pem', 'src/deep/c.js', 'src/deep/d.bin']);
+});
+
+test('a zip without the Windows picture parts is never made: each missing one is named', () => {
+  const d = tmp();
+  assert.deepEqual(nativeGaps(d).length, 3);
+  const sharp = join(d, 'node_modules', '@img', 'sharp-win32-x64', 'lib');
+  mkdirSync(sharp, { recursive: true });
+  writeFileSync(join(sharp, 'sharp-win32-x64-0.35.5.node'), 'x');
+  assert.match(nativeGaps(d).join('\n'), /libvips/);
+  writeFileSync(join(sharp, 'libvips-42.dll'), 'x');
+  assert.deepEqual(nativeGaps(d), ['onnxruntime-node (background removal): node_modules/onnxruntime-node/bin/napi-v*/win32/x64/onnxruntime_binding.node']);
+  const ort = join(d, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6', 'win32', 'x64');
+  mkdirSync(ort, { recursive: true });
+  writeFileSync(join(ort, 'onnxruntime_binding.node'), 'x');
+  assert.deepEqual(nativeGaps(d), []);
 });

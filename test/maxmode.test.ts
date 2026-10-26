@@ -31,6 +31,16 @@ function rpcMemory(): number {
   return [...out.matchAll(/"([\d.,\s]+) K"/g)].reduce((n, m) => n + Number(m[1].replace(/\D/g, '')) * 1024, 0);
 }
 
+/** NVIDIA card memory in use on this PC (bytes, every card), 0 with no NVIDIA card: a node with a card lends from it. */
+function cardMemory(): number {
+  try {
+    const out = execFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'nvidia-smi.exe'), ['--query-gpu=memory.used', '--format=csv,noheader,nounits'], { encoding: 'utf8' });
+    return out.split(/\r?\n/).filter(Boolean).reduce((n, l) => n + Number(l.trim()) * 2 ** 20, 0);
+  } catch {
+    return 0;
+  }
+}
+
 const model = realModel();
 
 test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answers through it, and ends when someone comes back', { timeout: 300_000, skip: model ? false : `${Q08} is not on this PC` }, async () => {
@@ -43,7 +53,8 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     const presence = join(top, 'presence.txt');
     // Someone is using the node: a key press a second ago.
     writeFileSync(presence, '1000 0');
-    const node = await startPc({ root: ROOT, home: nodeDir, env: { TEST_PRESENCE_FILE: presence } });
+    // Max mode is hidden unless TOMLIN_MAX is set: on the node too, so it shows the Lend tick and lends.
+    const node = await startPc({ root: ROOT, home: nodeDir, env: { TEST_PRESENCE_FILE: presence, MAX: 'on' } });
     pcs.push(node);
     const hostDir = join(top, 'host');
     mkdirSync(join(hostDir, 'models', 'chat'), { recursive: true });
@@ -81,16 +92,18 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
 
     // 3. Nobody there for 10 minutes: it lends, the host loads through it and answers.
     writeFileSync(presence, '600000 0');
-    const before = rpcMemory();
+    const before = rpcMemory() + cardMemory();
     p = await load();
     assert.equal(p.state, 'connected', JSON.stringify(p));
     assert.match(p.note ?? '', /Max mode: borrowing the card memory of "Test node"/);
     const lent = await lendNow();
     assert.ok(lent.to, JSON.stringify(lent));
     assert.ok(lent.streams >= 1, `llama-server holds a stream to the node: ${JSON.stringify(lent)}`);
-    // The node's RPC server holds the model's layers (the 0.8B file is about 0.5 GB).
-    const held = rpcMemory() - before;
-    assert.ok(held > 300 * 2 ** 20, `the RPC server holds ${Math.round(held / 2 ** 20)} MB`);
+    // The node's RPC server holds the model's layers (the 0.8B file is about 0.5 GB): in RAM, or on the node's card when
+    // it has one (its RPC server is the card runner's then). On one PC the host's own runner is on that card too, so
+    // the two are counted together.
+    const held = rpcMemory() + cardMemory() - before;
+    assert.ok(held > 300 * 2 ** 20, `the RPC server holds ${Math.round(held / 2 ** 20)} MB (RAM and card)`);
     const a = await ask();
     assert.equal(a.status, 200);
     const answer = (await a.json()) as { choices: { message: { content: string } }[] };
@@ -105,7 +118,8 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
       return !l.to && l.ended ? l : null;
     }, 15_000, 300);
     assert.equal(ended.ended.why, 'someone started using it');
-    assert.ok(rpcMemory() < 50 * 2 ** 20, 'the RPC server was ended');
+    // The loan is marked ended as the RPC server is told to stop; it is gone a moment later (longer under load).
+    await until('the RPC server to be ended', async () => (rpcMemory() < 50 * 2 ** 20 ? true : null), 15_000, 300);
     const after = await ask().catch(() => null);
     assert.ok(!after || after.status !== 200, 'no answer comes from a model whose layers were taken back');
     const stopped = await until('the host to say the model stopped', async () => {

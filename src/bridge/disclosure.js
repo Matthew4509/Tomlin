@@ -49,11 +49,19 @@ const bounded = src => '(?<![A-Za-z0-9])(?:' + src + ')(?![A-Za-z0-9])';
 // Only written against a path separator or an @ on one side: \<name>, /<name>, @<name>, <name>@, <name>\.
 const nearPath = src => '(?:(?<=[\\\\/@])(?:' + src + ')(?![A-Za-z0-9])|(?<![A-Za-z0-9])(?:' + src + ')(?=[\\\\/@]))';
 
+// Asked of git at most once a minute (in memory only, never written): each ask starts git and holds the server's thread
+// about 240 ms, and every audit, review prompt, push check and Private details page asked twice.
+const gitAsked = new Map();
 function gitGlobal(key) {
-  try { return execFileSync('git', ['config', '--global', key], { encoding: 'utf8', windowsHide: true, timeout: 5000 }).trim(); } catch { return ''; }
+  const had = gitAsked.get(key);
+  if (had && Date.now() - had.at < 60_000) return had.value;
+  let value = '';
+  try { value = execFileSync('git', ['config', '--global', key], { encoding: 'utf8', windowsHide: true, timeout: 5000 }).trim(); } catch {}
+  gitAsked.set(key, { value, at: Date.now() });
+  return value;
 }
 
-// Read from this PC each time, never stored. workingFolders: the folders that hold the projects.
+// Read from this PC (the git name and email remembered a minute, in memory), never stored. workingFolders: the folders that hold the projects.
 function autoDetails(workingFolders = []) {
   const out = [];
   const add = (label, value, extra) => { if (value && String(value).length >= 4) out.push({ label, value: String(value), auto: true, ...extra }); };

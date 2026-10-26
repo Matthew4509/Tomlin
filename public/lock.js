@@ -229,7 +229,7 @@ function fillAppIdle() {
   box.replaceChildren(...(v?.idleChoices ?? [5, 10, 15, 30, 60]).filter(m => m > 0).map(m => el('option', { value: String(m), text: String(m) })));
   box.value = String(v?.idleMinutes > 0 ? v.idleMinutes : 15);
 }
-/** The window's words follow the kind picked: his wording for a PIN, the same for a password. */
+/** The window's words follow the kind picked: the same wording for a PIN and for a password. */
 function drawNewKind(kind) {
   const w = kind === 'password' ? 'password' : 'pin';
   $('#applock-pin-label').textContent = `Create a new ${w}`;

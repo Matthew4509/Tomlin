@@ -149,3 +149,33 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
   if (o.head?.length) fromWire(o.head);
   return ended;
 }
+
+/**
+ * The runner's own connection (`plain`, held paused) joined to a sealed stream once `open` has made it. Opening can take
+ * up to 30 s, and a paused socket still hears its other end go: a runner that closed its side meanwhile (it stopped, or
+ * gave up) gets the new stream closed at once, never held open by its heartbeats (the other PC would go on lending to
+ * nobody). Resolves with why it ended, as sealedPipe; rejects when the stream could not be opened (`plain` is closed).
+ */
+export async function joinWhenOpen(plain: Duplex, open: () => Promise<{ socket: Duplex; keys: { send: Buffer; read: Buffer }; head?: Buffer }>, side: Side = 'host'): Promise<string> {
+  plain.pause();
+  let gone = false;
+  const goneNow = () => void (gone = true);
+  // A reset arrives as an error: heard here, or it would end TOMLIN.
+  for (const ev of ['close', 'end', 'error']) plain.on(ev, goneNow);
+  let wire: Awaited<ReturnType<typeof open>>;
+  try {
+    wire = await open();
+  } catch (e) {
+    plain.destroy();
+    throw e;
+  } finally {
+    for (const ev of ['close', 'end', 'error']) plain.off(ev, goneNow);
+  }
+  if (gone || plain.destroyed) {
+    wire.socket.destroy();
+    plain.destroy();
+    return 'the runner closed its side before the stream opened';
+  }
+  plain.resume();
+  return sealedPipe(plain, wire.socket, wire.keys, side, { head: wire.head });
+}

@@ -92,6 +92,25 @@ export function keyHits(dir: string): string[] {
   return hits;
 }
 
+// The Windows builds of the picture tools are optional packages: a plain npm install on another platform, or one with
+// optional packages left out, leaves them behind, and sharp is imported at start (images.ts and four more), so a zip
+// without them stops on every PC before it answers.
+const NATIVE: { what: string; dir: string[]; file: RegExp; shown: string }[] = [
+  { what: 'sharp (pictures)', dir: ['node_modules', '@img', 'sharp-win32-x64', 'lib'], file: /^sharp-win32-x64.*\.node$/i, shown: 'sharp-win32-x64-*.node' },
+  { what: 'sharp (pictures)', dir: ['node_modules', '@img', 'sharp-win32-x64', 'lib'], file: /^libvips-\d+\.dll$/i, shown: 'libvips-*.dll' },
+];
+
+/** The Windows parts a copy of the app under `dir` cannot start or work without, each named with where it belongs. */
+export function nativeGaps(dir: string): string[] {
+  const has = (d: string, file: RegExp) => existsSync(d) && readdirSync(d).some(n => file.test(n));
+  const gaps = NATIVE.filter(n => !has(join(dir, ...n.dir), n.file)).map(n => `${n.what}: ${n.dir.join('/')}/${n.shown}`);
+  const ort = join(dir, 'node_modules', 'onnxruntime-node', 'bin');
+  const napi = existsSync(ort) ? readdirSync(ort).filter(n => /^napi-v\d+$/.test(n)) : [];
+  if (!napi.some(n => existsSync(join(ort, n, 'win32', 'x64', 'onnxruntime_binding.node'))))
+    gaps.push('onnxruntime-node (background removal): node_modules/onnxruntime-node/bin/napi-v*/win32/x64/onnxruntime_binding.node');
+  return gaps;
+}
+
 /** The steps that stay yours: the GitHub Release with both files. */
 export function nextSteps(version: string, repo: string | null): string {
   const name = `tomlin-${version}.zip`;

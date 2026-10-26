@@ -7,7 +7,11 @@ rem The copy's own Node.js (runtime\node) first, so a PC without Node.js runs it
 if exist "%~dp0runtime\node\node.exe" set "PATH=%~dp0runtime\node;%PATH%"
 where node >nul 2>nul || (echo Node.js is not installed. Install it from https://nodejs.org ^(version 22.18 or newer^), then start TOMLIN again. & pause & exit /b 1)
 node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)" || (echo This Node.js is too old for TOMLIN. Install version 22.18 or newer from https://nodejs.org, then start TOMLIN again. & pause & exit /b 1)
-if not exist node_modules\sharp (echo Installing the picture tools ^(one time^)... & call npm install --omit=dev --no-audit --no-fund || (pause & exit /b 1))
+rem sharp's Windows build is an optional package of its own: without it TOMLIN stops at start, so both are looked for.
+set SM_NO_PIC=
+if not exist node_modules\sharp set SM_NO_PIC=1
+if not exist node_modules\@img\sharp-win32-x64\lib set SM_NO_PIC=1
+if defined SM_NO_PIC (echo Installing the picture tools ^(one time^)... & call npm install --omit=dev --include=optional --no-audit --no-fund || (pause & exit /b 1))
 if not exist runtime\llama-cpu\llama-server.exe (echo The model runners are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
 if not exist runtime\sd-cpu\sd-server.exe (echo The model runners are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
 rem The model runners need Microsoft's Visual C++ Runtime (src/vcrt.ts); a clean Windows lacks it. Said, not stopped.

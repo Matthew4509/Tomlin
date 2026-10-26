@@ -173,6 +173,37 @@ export function everyFew<A extends unknown[]>(ms: number, fn: (...a: A) => void)
 }
 
 /**
+ * The answer so far, sent on as it grows but not at every word-piece: each event carries all of it, and a linked PC
+ * seals every one while the main PC opens and reads every one (an 8K-token answer sent per word-piece was 306 MB over
+ * the link). At most every 150 ms, and less often as it grows (its length / 40 ms: 1.4 s at 56,000 characters, 2 s at
+ * most). flush() sends what is waiting: called before done or an error, so the last words are never lost.
+ */
+export function paced(send: (text: string) => void, now: () => number = Date.now): { push: (text: string) => void; flush: () => void } {
+  let last = -Infinity;
+  let pending: string | null = null;
+  let timer: NodeJS.Timeout | null = null;
+  const gap = (length: number) => Math.min(2000, Math.max(150, length / 40));
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (pending === null) return;
+    const text = pending;
+    pending = null;
+    last = now();
+    send(text);
+  };
+  return {
+    push(text) {
+      pending = text;
+      const wait = last + gap(text.length) - now();
+      if (wait <= 0) flush();
+      else timer ??= setTimeout(flush, wait);
+    },
+    flush,
+  };
+}
+
+/**
  * A small model can fall into a loop, writing the same paragraph again and again until its allowance runs out.
  * Returns the answer cut before the repeat once a finished paragraph comes round a second time, or a sentence a third
  * time; null while it is not repeating.
@@ -199,6 +230,21 @@ export function repeatCut(text: string): string | null {
     if (n === 3) return text.slice(0, secondAt.get(s)).trimEnd();
   }
   return null;
+}
+
+/**
+ * repeatCut for an answer as it streams: looked at again once the text has grown by a sixteenth since the last look
+ * (200 characters at least), not at every word-piece. Each look reads the whole answer, so looking every word-piece cost
+ * 10 s of CPU over an 8K-token answer and 35 s over a 16K one (measured); this is linear. A loop is cut at the same place,
+ * a little later in the stream.
+ */
+export function repeatWatch(): (text: string) => string | null {
+  let at = 0;
+  return text => {
+    if (text.length - at < Math.max(200, at / 16)) return null;
+    at = text.length;
+    return repeatCut(text);
+  };
 }
 
 export interface Streamed {
@@ -317,6 +363,13 @@ export const CONTINUE_ASK = 'Your last answer was cut off by its length limit. C
  * hire, asked with plainStyle. A model's working before its answer (llama.cpp sends it apart, as reasoning_content, or
  * it comes inside <think> tags) is never shown as the answer: it goes to `onThought`.
  */
+/**
+ * A request to a model runner as JSON, every text made whole: a length limit that cut an emoji in two (a note, a log
+ * line, a page part, a step summary) leaves half of it, and llama-server refuses the whole request over one lone half
+ * (a 500, measured), and every later turn that carries that text with it.
+ */
+export const runnerJson = (body: unknown): string => JSON.stringify(body, (_k, v: unknown) => (typeof v === 'string' ? v.toWellFormed() : v));
+
 export async function streamChat(base: string, model: string, turns: ChatTurn[], onText: (text: string) => void, signal: AbortSignal, maxTokens = MAX_ANSWER, opts: AskOpts = {}): Promise<Streamed> {
   const style = opts.plain ? plainStyle(model, opts.think) : chatStyle(model, opts.think);
   // Its own stop as well as the caller's: working that goes round in circles is stopped here (below).
@@ -335,7 +388,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       method: 'POST',
       headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
       // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word.
-      body: JSON.stringify({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, ...(opts.onReading ? { return_progress: true } : {}) }),
+      body: runnerJson({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, ...(opts.onReading ? { return_progress: true } : {}) }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {

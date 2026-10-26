@@ -88,7 +88,7 @@ test('S5: an old PIN file is made again at the higher cost; a 4-digit PIN turns 
   assert.equal((await pc.post('/api/applock', { action: 'lock' })).status, 200);
   assert.equal((await pc.post('/api/applock', { action: 'unlock', pin: '2468' })).status, 200, 'the same PIN opens it after the new hash');
 
-  // A 4-digit PIN is fine for a node (his call: most people like 4 digits). Turning it on asks no PIN, as before;
+  // A 4-digit PIN is fine for a node (most people like 4 digits). Turning it on asks no PIN, as before;
   // while it is a node, a change asks it, and a 4-digit PIN can still be set.
   const on = await pc.post('/api/share', { on: true });
   assert.equal(on.status, 200, JSON.stringify(on.body));

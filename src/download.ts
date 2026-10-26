@@ -116,7 +116,13 @@ export function parseHfLink(link: string): { repo: string; rev: string; path: st
     return null;
   }
   if (u.protocol !== 'https:' || !/^(www\.)?huggingface\.co$/i.test(u.hostname)) return null;
-  const parts = u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  let parts: string[];
+  try {
+    parts = u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    // A broken %-escape ("...GGUF%"): not a link it can use.
+    return null;
+  }
   if (parts.length < 2 || ['api', 'datasets', 'spaces', 'docs', 'models'].includes(parts[0])) return null;
   const repo = `${parts[0]}/${parts[1]}`;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;

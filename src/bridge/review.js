@@ -23,11 +23,15 @@ const GROUPS = [
 const HELPER = /(^|\/)(tools|scripts|bin|parity|docs?)\//i;
 function walk(dir, max = 4000) {
   const out = [];
+  // Every entry looked at counts here too: 40,000 pictures in uploads/ were walked whole, on the server's thread.
+  let seen = 0;
   const go = (d, depth) => {
-    if (out.length >= max || depth > 10) return;
+    if (out.length >= max || seen >= max * 10 || depth > 10) return;
     let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
-      if (out.length >= max) return; // one folder with a great many files stops here too
+      if (out.length >= max || ++seen >= max * 10) return; // one folder with a great many files stops here too
+      // A file that is not code (a picture) is passed over before its path is worked out.
+      if (e.isFile() && !(CODE.test(e.name) || e.name === '.htaccess')) continue;
       const p = path.join(d, e.name), rel = path.relative(dir, p).replace(/\\/g, '/');
       if (SKIP.test(rel) || e.name.startsWith('.') && e.name !== '.htaccess') continue;
       if (e.isDirectory()) go(p, depth + 1); else if (e.isFile() && (CODE.test(e.name) || e.name === '.htaccess')) out.push(rel);

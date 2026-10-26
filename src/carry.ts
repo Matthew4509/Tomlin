@@ -31,10 +31,13 @@ export interface Allow {
 
 export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false };
 
-/** The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read. */
-export function cleanAllow(raw: unknown): Allow {
+/**
+ * The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read.
+ * `lendShown` false (Max mode hidden on this PC, src/maxlend.ts maxShown): the Lend tick counts as off.
+ */
+export function cleanAllow(raw: unknown, lendShown = true): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: o.lend === true };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: lendShown && o.lend === true };
 }
 
 /** "Allow all" is ticked when every one is. */

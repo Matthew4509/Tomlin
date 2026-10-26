@@ -182,6 +182,13 @@ export function cardsTogether(cards: Array<{ total: number; used: number }>): { 
   return { count: cards.length, total: cards.reduce((a, c) => a + c.total, 0), used: cards.reduce((a, c) => a + c.used, 0) };
 }
 
+/** The NVIDIA cards' name as one: "RTX 3060", "2 × RTX 3060", or each by name when they differ ("RTX 3090 + GTX 1060"). */
+export function cardsName(cards: Array<{ name: string }>): string {
+  const count = new Map<string, number>();
+  for (const c of cards) count.set(c.name, (count.get(c.name) ?? 0) + 1);
+  return [...count].map(([name, n]) => (n > 1 ? `${n} × ${name}` : name)).join(' + ');
+}
+
 /** The nvidia-smi that answered (one of NVIDIA_SMI); null once none did, so the once-a-second reading stops asking. */
 let smiAt: string | null | undefined;
 
@@ -384,9 +391,10 @@ export class Sampler {
       const since = Date.now() - this.countersStarted;
       if (this.nvidia && card.vendor === 'nvidia') {
         // Every NVIDIA card together: a model is split across them, so what fits is what all of them hold.
-        const all = cardsTogether(await nvidiaCards());
+        const rows = await nvidiaCards();
+        const all = cardsTogether(rows);
         const unread = unreadOf(adapters.size, since, !!all);
-        gpu = { name: all ? (all.count > 1 ? `${all.count} × ${card.name}` : card.name) : card.name, used: all?.used ?? 0, total: all?.total ?? card.total, shared: false, ...work, ...(unread ? { unread } : {}) };
+        gpu = { name: all ? cardsName(rows) || card.name : card.name, used: all?.used ?? 0, total: all?.total ?? card.total, shared: false, ...work, ...(unread ? { unread } : {}) };
       } else {
         const unread = unreadOf(adapters.size, since, false);
         gpu = card.integrated

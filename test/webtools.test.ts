@@ -176,7 +176,7 @@ test('this PC and the home network are never reached by a page read, by address 
   await assert.rejects(w.fetchPublic(`http://127.0.0.1:${port}/`, opts), /this PC or a home network address/);
   await assert.rejects(w.fetchPublic(`http://localhost:${port}/`, opts), /points at this PC or a home network address/);
   await assert.rejects(w.fetchPublic('http://[::1]:9/', opts), /this PC or a home network address/);
-  await assert.rejects(w.fetchPublic('http://192.168.0.226:8740/', opts), /this PC or a home network address/);
+  await assert.rejects(w.fetchPublic('http://192.168.0.77:8740/', opts), /this PC or a home network address/);
   await assert.rejects(w.fetchPublic('file:///C:/Windows/win.ini', opts), /file address/);
   // The same request, not limited to the public web (only your own SearXNG is asked so), does reach it.
   const r = await w.fetchPublic(`http://127.0.0.1:${port}/`, { ...opts, publicOnly: false });

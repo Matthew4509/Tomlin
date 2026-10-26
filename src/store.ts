@@ -192,7 +192,11 @@ export class Store {
 
   settings(): Promise<Settings> {
     if (this.cache) return Promise.resolve(this.cache);
-    return (this.loading ??= this.load());
+    // A read that failed (the file held by another program for a moment) is tried again at the next ask, never kept.
+    return (this.loading ??= this.load().catch(e => {
+      this.loading = null;
+      throw e;
+    }));
   }
 
   private async load(): Promise<Settings> {

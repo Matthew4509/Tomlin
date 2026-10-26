@@ -19,21 +19,24 @@ const presence = new maxlend.PresenceReader();
 let lender: maxlend.Lender | null = null;
 
 const idleMinutes = () => maxlend.cleanLendIdle(shareState.lendIdle);
-const facts = () => ({ on: shareState.on, allow: carry.cleanAllow(shareState.allow), away: !!shareState.away });
+const facts = () => ({ on: shareState.on, allow: carry.cleanAllow(shareState.allow, maxlend.maxShown()), away: !!shareState.away });
 
 function theLender(): maxlend.Lender {
-  lender ??= new maxlend.Lender(maxlend.cacheDirOf(d.store.dir), () => maxlend.loanEnds({ ...facts(), presence: presence.now() }));
+  lender ??= new maxlend.Lender(maxlend.cacheDirOf(d.store.dir), () => maxlend.loanEnds({ ...facts(), presence: presence.now(), lease: lender?.lease ?? null, paired: shareState.paired }));
   return lender;
 }
 
-/** For this PC's Network page: who borrows it now, and how the last loan ended. */
+/** For this PC's Network page: who borrows it now, how the last loan ended, and whether Max mode is shown at all. */
 export function lendView() {
   const v = lender?.view() ?? { lease: null, streams: 0, ended: null };
-  return { idle: idleMinutes(), to: v.lease?.name ?? null, since: v.lease?.since ?? null, streams: v.streams, ended: v.ended };
+  return { shown: maxlend.maxShown(), idle: idleMinutes(), to: v.lease?.name ?? null, since: v.lease?.since ?? null, streams: v.streams, ended: v.ended };
 }
 
 /** For a linked PC's hello: lent to whom now (null: to nobody). */
 export const lentTo = () => lender?.lease?.name ?? null;
+
+/** Whether the link with token fingerprint `hash` is the one borrowing this PC's card now. */
+export const lendingTo = (hash: string) => lender?.lease?.hash === hash;
 
 /** Ends a loan now (sharing turned off, the worker door closed). */
 export const endLoan = (why: string) => lender?.end(why) ?? Promise.resolve();
@@ -67,7 +70,7 @@ export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
     const l = theLender();
     // The reader starts at the first ask: a second or two for its first reading.
     const p = presence.now() ?? (await presence.first());
-    const why = maxlend.lendWhy({ pc: shareState.name, ...facts(), presence: p, idleMinutes: idleMinutes(), lease: l.lease, by: who });
+    const why = maxlend.lendWhy({ pc: shareState.name, ...facts(), shown: maxlend.maxShown(), presence: p, idleMinutes: idleMinutes(), lease: l.lease, by: who });
     if (why) return refuse(socket, 409, why);
     let port: number;
     try {

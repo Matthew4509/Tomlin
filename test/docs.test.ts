@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanDocName, docKind, docSection, Docs, findParts, pagesAsked, ranges, readDoc, sourcesLine, splitText, textParts, words, type Doc } from '../src/docs.ts';
+import { cleanDocName, docKind, docSection, Docs, findParts, pagesAsked, ranges, readDoc, sourcesLine, splitText, textParts, wholeText, words, type Doc } from '../src/docs.ts';
 
 /** A plain PDF with one page per entry (each entry's lines in Helvetica), written by hand: enough for a reader test. */
 export function makePdf(pages: string[][]): Uint8Array {
@@ -96,6 +96,21 @@ test('a text file keeps true line numbers in its parts', () => {
   for (const p of parts) assert.ok(p.text.startsWith(`line ${p.lines![0]}:`), `${p.lines}`);
   const found = findParts([{ id: 'a', name: 'log.txt', kind: 'text', pages: 300, chars: 0, at: '', parts }], 'what is on line 250?', 4000);
   assert.ok(found.length > 0);
+});
+
+test('a very long line (minified code) cut into parts keeps true line numbers, and read whole it is one line again', () => {
+  const long = Array.from({ length: 400 }, (_, i) => `var v${i}=f(${i});`).join(' ') + 'end_of_the_long_line();';
+  const text = ['// head', 'const x = 1;', long, 'end();'].join('\n');
+  const parts = textParts(text);
+  assert.ok(parts.length >= 3, `${parts.length} parts`);
+  for (const p of parts) assert.ok(p.lines![0] <= p.lines![1], `a part's lines run forwards: ${p.lines}`);
+  assert.deepEqual(parts[0].lines, [1, 2], 'the head (the first piece of line 3 is too big to share its part)');
+  for (const p of parts.slice(1, -1)) assert.deepEqual(p.lines, [3, 3], 'pieces of line 3');
+  assert.deepEqual(parts.at(-1)!.lines, [3, 4], 'the end of line 3 and line 4');
+  const found = parts.map(part => ({ doc: 'app.min.js', part, score: 1 }));
+  assert.doesNotMatch(sourcesLine(found), /3-2/);
+  const d: Doc = { id: 'a', name: 'app.min.js', kind: 'text', pages: 4, chars: text.length, at: '', parts };
+  assert.equal(wholeText(d), text, 'read whole, the file is exactly as it was: the long line whole, nothing added');
 });
 
 test('a file a chat cannot read says why in plain words', async () => {

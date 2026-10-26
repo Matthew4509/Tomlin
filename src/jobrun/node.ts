@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import * as jobs from '../jobs.ts';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
-import { everyFew, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
+import { everyFew, paced, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import * as nodestaff from '../nodestaff.ts';
@@ -27,8 +27,8 @@ import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
-import { endLoan, lendView, lentTo, maxUpgrade } from './maxnode.ts';
-import { cleanLendIdle } from '../maxlend.ts';
+import { endLoan, lendingTo, lendView, lentTo, maxUpgrade } from './maxnode.ts';
+import { cleanLendIdle, maxShown } from '../maxlend.ts';
 
 // ---- This PC as a worker for other PCs (off unless its owner turns it on) ----
 
@@ -533,6 +533,8 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
   lending.add(id);
   let answered = false;
   await runFor(res, keep, `Answering for ${forPc}`, { pc: forPc, link, project: projectOf(b) }, async (send, signal) => {
+    // The answer so far is sealed and sent as it grows, not at every word-piece (src/engine.ts paced).
+    const words = paced(text => send('text', { text }));
     try {
       const got = await brainForRef(id, forPc, 'on that PC', text => send('status', { text }), signal);
       loadedFor(id, forPc, link, fresh);
@@ -542,11 +544,13 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
         told = true;
       }
       const web = got.here ? await webFor(b, send) : null;
-      if (turns) await got.brain.chat(turns, maxTokens, text => send('text', { text }), signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
-      else await got.brain.ask(ask.system, ask.user, maxTokens, text => send('text', { text }), signal, web ? { tools: web.box } : undefined);
+      if (turns) await got.brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
+      else await got.brain.ask(ask.system, ask.user, maxTokens, words.push, signal, web ? { tools: web.box } : undefined);
+      words.flush();
       send('done', { model: name, speed: got.brain.last ?? null, thought: got.brain.thought ?? null, usage: usedHere(), ...(got.brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
       answered = true;
     } catch (e) {
+      words.flush();
       send('error', { text: (e as Error).message });
     } finally {
       lending.delete(id);
@@ -740,7 +744,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p === '/worker/hello') {
       const v = d.chat.view;
       const models = await sharedNow();
-      const allow = carry.cleanAllow(shareState.allow);
+      const allow = carry.cleanAllow(shareState.allow, maxShown());
       const up = { since: d.startedAt, pc: Math.round(uptime()) };
       const installed = installedAt();
       // The disk that keeps other PCs' backups here (read at once, no program started), so they see the room left.
@@ -859,13 +863,16 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const verdict = checkMessage(turns ? turns.at(-1)!.content : user, { recent: [] });
       if (!verdict.ok) return workerJson(res, 400, { error: REFUSAL[verdict.reason] });
       return await runFor(res, keep, `Working on a step for ${who.name}`, { pc: who.name, link: keepOf(who), project: projectOf(b) }, async (send, signal) => {
+        const words = paced(text => send('text', { text }));
         try {
           const brain = localBrain('');
           const web = await webFor(b, send);
-          if (turns) await brain.chat(turns, maxTokens, text => send('text', { text }), signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
-          else await brain.ask(system, user, maxTokens, text => send('text', { text }), signal, web ? { tools: web.box } : undefined);
+          if (turns) await brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
+          else await brain.ask(system, user, maxTokens, words.push, signal, web ? { tools: web.box } : undefined);
+          words.flush();
           send('done', { model: d.chat.view.modelName ?? '', speed: brain.last ?? null, thought: brain.thought ?? null, usage: usedHere(), ...(brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
         } catch (e) {
+          words.flush();
           send('error', { text: (e as Error).message });
         }
       });
@@ -1008,7 +1015,7 @@ export async function setShare(b: Record<string, unknown>) {
   if ('name' in b) shareState.name = String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'Worker PC';
   shareState.port = port;
   if ('pinOn' in b) shareState.pinOn = b.pinOn === true;
-  if ('allow' in b) shareState.allow = carry.cleanAllow(b.allow);
+  if ('allow' in b) shareState.allow = carry.cleanAllow(b.allow, maxShown());
   if ('lendIdle' in b) shareState.lendIdle = cleanLendIdle(b.lendIdle);
   if (b.newPin === true || (shareState.pinOn && !shareState.pin)) shareState.pin = share.newPin();
   if (b.newCode === true) shareState.code = share.newCode();
@@ -1018,6 +1025,9 @@ export async function setShare(b: Record<string, unknown>) {
   if (b.unpairAll === true) shareState.paired = [];
   if ('on' in b) shareState.on = b.on === true;
   await saveShare();
+  // A PC borrowing this one's card whose link was just removed: its loan ends now, not at the next check.
+  const borrower = lentTo();
+  if (borrower && !shareState.paired.some(p => lendingTo(String(p.hash ?? '')))) await endLoan(`the link to "${borrower}" was removed`);
   // The link part restarts only when it has to (turned on or off, a new port, or not listening): a restart cuts every
   // answer, step and picture the host is waiting for, and a name, a code or "Start when this PC starts" is read live.
   if (shareState.on !== was.on || shareState.port !== was.port || (shareState.on && !shareServer)) await applyShare();

@@ -182,3 +182,15 @@ test('plain euphemisms for sex count, so a minor beside them is refused; everyda
   ]) assert.equal(checkMessage(m, ctx).ok, false, m);
   for (const m of ['the kids sleep with me when it thunders', 'my son is 15 and loves school', 'I slept with the window open']) assert.equal(checkMessage(m, ctx).ok, true, m);
 });
+
+test('a long run of spaces after a number never slows the age check (it was quadratic: 6 s at 20,000 spaces)', () => {
+  for (const gap of [' ', '\t']) {
+    const t0 = Date.now();
+    checkMessage(`naked. she is 1${gap.repeat(20000)}x`, none);
+    minorWords(`a 1${gap.repeat(20000)}x`);
+    assert.ok(Date.now() - t0 < 100, `${Date.now() - t0} ms`);
+  }
+  // The pattern still reads an age written with spaces or a hyphen.
+  assert.equal(checkMessage('naked pics of a 15 - year - old', none).ok, false);
+  assert.equal(checkMessage('naked pics of a 15yo', none).ok, false);
+});

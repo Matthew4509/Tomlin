@@ -6,7 +6,7 @@ import { request } from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
-import { newNonce, sealedPipe, streamKeys } from '../linkstream.ts';
+import { joinWhenOpen, newNonce, streamKeys } from '../linkstream.ts';
 import type { Remote } from '../store.ts';
 import { log } from '../log.ts';
 import { backupsOnly, backupsOnlyWhy, onHomeNetwork } from './links.ts';
@@ -69,20 +69,15 @@ async function portFor(r: Remote): Promise<number> {
   if (had) return had.port;
   const entry = { server: createServer(), port: 0, last: '' };
   entry.server.on('connection', (local: Socket) => {
-    local.pause();
     const now = (d.store.peek()?.remotes ?? []).find(x => x.id === r.id) ?? r;
-    openWire(now).then(({ socket, keys, head }) => {
-      local.resume();
-      void sealedPipe(local, socket, keys, 'host', { head }).then(why => {
-        if (why) {
-          entry.last = why;
-          log.warn('max', `The stream to "${now.name}" ended: ${why}`);
-        }
-      });
+    joinWhenOpen(local, () => openWire(now)).then(why => {
+      if (why) {
+        entry.last = why;
+        log.warn('max', `The stream to "${now.name}" ended: ${why}`);
+      }
     }, (e: Error) => {
       entry.last = e.message;
       log.warn('max', `"${now.name}" did not lend: ${e.message}`);
-      local.destroy();
     });
   });
   await new Promise<void>((resolve, reject) => {

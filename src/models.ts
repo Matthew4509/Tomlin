@@ -1,9 +1,9 @@
 // The chat models TOMLIN can use: its own models/ folder, plus one other folder named in models-folder.txt (LM Studio's,
 // for example; the files stay where they are). A model's id is its path inside its folder; one from the other folder
 // starts "*/" (a character no Windows file name can hold, so the two can never be confused).
-import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { listModels, modelPath } from './llama.ts';
+import { listModels } from './llama.ts';
 import { listOllama, ollamaDir } from './ollama.ts';
 
 const OTHER = '*/';
@@ -93,16 +93,22 @@ export class Models {
     return [...own, ...other, ...ollama].sort((a, b) => a.bytes - b.bytes);
   }
 
-  /** A model's full path from its id, only when listing found it. */
+  /**
+   * A model's full path from its id, only when listing found it (so a name can never reach outside its folder). Looked up
+   * in the listing (kept a moment, cacheMs), not by walking the folder again for each model: 100 models in a folder of
+   * 5,000 files took 41 s, every one of them on the server's thread.
+   */
   path(id: string): string | null {
     if (id.startsWith(OLLAMA)) {
       return this.ollama ? listOllama(this.ollama).find(m => m.name === id.slice(OLLAMA.length))?.blob ?? null : null;
     }
+    const m = this.list().find(x => x.id === id);
+    if (!m) return null;
     if (id.startsWith(OTHER)) {
       const dir = this.other();
-      return dir ? modelPath(dir, id.slice(OTHER.length)) : null;
+      return dir ? join(dir, ...m.file.split('/')) : null;
     }
-    return modelPath(this.own, id) ?? this.copies().map(dir => modelPath(dir, id)).find(Boolean) ?? null;
+    return [this.own, ...this.copies()].map(dir => join(dir, ...m.file.split('/'))).find(p => existsSync(p)) ?? null;
   }
 
   /** True when a file of this name is already in either folder (so a pinned model is "installed"). */

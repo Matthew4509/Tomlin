@@ -15,9 +15,10 @@ const MB = 2 ** 20;
 export interface PcFacts {
   /**
    * Graphics cards chat can use here, with memory of their own (none: the CPU only), biggest first. Bytes. `ids`: each
-   * runner's name for it (src/devices.ts), for card choice; none known: no card rows.
+   * runner's name for it (src/devices.ts), for card choice; none known: no card rows. `runners`: the card runners with
+   * code for it (a CUDA build may have none for an older card); not known: every one.
    */
-  cards: { name: string; total: number; free: number; ids?: string[] }[];
+  cards: { name: string; total: number; free: number; ids?: string[]; runners?: RunnerName[] }[];
   /** Physical cores. */
   cores: number;
   /** The PC's chat threads now (0: llama.cpp's own choice). */
@@ -237,17 +238,32 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
   // More than one card runner here (CUDA 12, CUDA 13 and Vulkan for an NVIDIA card): each other one, tried first, as
   // the runner can change both speeds either way (measured 21 Oct, GTX 1060, Qwen3.5 4B: Vulkan wrote 34 tok/s against
   // 30, CUDA read 54 against 40). The one in use is the model's own, else the first Auto tries.
+  // A CUDA build is tried only on cards it has code for (each card's `runners`): on a mixed PC (a GTX 1060 and an RTX
+  // 5080) CUDA 13 is tried on the RTX 5080 alone; a build with code for none of the cards the model uses is not tried.
   const inUse = r.runner && pc.runners?.includes(r.runner) ? r.runner : pc.runners?.[0];
   if (card && inUse && pc.runners && pc.runners.length > 1) {
-    const others = pc.runners.filter(x => x !== inUse);
-    cand.unshift(...others.map(other => ({ id: `runner-${other}`, name: `${RUNNER_NAME[other]} runner (instead of ${RUNNER_NAME[inUse]})`, why: other === 'vulkan' || inUse === 'vulkan' ? 'This PC has more than one runner for its card: a model can write faster on one and read faster on the other.' : 'Two CUDA builds can run this card: the newer one may have code made for it, the older one is the one measured before.', run: { ...r, runner: other }, quick: true })));
+    const using = r.cards?.length ? pc.cards.filter(c => c.ids?.some(id => r.cards!.includes(id))) : pc.cards;
+    const names = (cs: PcFacts['cards']) => cs.map(c => c.name).join(' + ');
+    const rows: (Setup & { quick: boolean })[] = [];
+    for (const other of pc.runners.filter(x => x !== inUse)) {
+      const can = using.filter(c => !c.runners || c.runners.includes(other));
+      const cannot = using.filter(c => !can.includes(c));
+      const name = `${RUNNER_NAME[other]} runner (instead of ${RUNNER_NAME[inUse]})`;
+      const why = other === 'vulkan' || inUse === 'vulkan' ? 'This PC has more than one runner for its card: a model can write faster on one and read faster on the other.' : 'Two CUDA builds can run this card: the newer one may have code made for it, the older one is the one measured before.';
+      if (!cannot.length) rows.push({ id: `runner-${other}`, name, why, run: { ...r, runner: other }, quick: true });
+      else if (can.length && can.every(c => c.ids?.length)) rows.push({ id: `runner-${other}`, name: `${name}, only on the ${names(can)}`, why: `${why} It has no code for the ${names(cannot)}, so it is tried on the rest.`, run: { ...r, runner: other, cards: can.flatMap(c => c.ids!) }, quick: true });
+      else left.push({ name: `${RUNNER_NAME[other]} runner`, why: `it has no code for the ${names(cannot)}: not tried` });
+    }
+    cand.unshift(...rows);
   }
 
   const limit = size === 'quick' ? 3 : 7;
   const picked = (size === 'quick' ? cand.filter(c => c.quick) : cand).slice(0, limit);
   for (const c of cand) if (!picked.includes(c)) left.push({ name: c.name, why: size === 'quick' && !c.quick ? 'tried in Full only' : size === 'quick' ? 'Quick tries the 3 most likely: tried in Full' : 'no room in Full (8 rows at most)' });
   const cardNames = (ids: string[]) => pc.cards.filter(c => c.ids?.some(id => ids.includes(id))).map(c => c.name).join(' + ') || 'chosen cards';
-  const a: Setup = { id: 'a', name: `Now: ${describeRun(r, undefined, cardNames)}`, why: 'The setup in use now: the yardstick.', run: r };
+  // A runner saved for the model that this PC cannot use (CUDA 13 on a Pascal card) is not what it starts on: said so.
+  const off = r.runner && pc.runners && !pc.runners.includes(r.runner) ? r.runner : undefined;
+  const a: Setup = { id: 'a', name: `Now: ${describeRun(off ? { ...r, runner: undefined } : r, undefined, cardNames)}${off ? ` (set to the ${RUNNER_NAME[off]} runner, which cannot run here: Auto's runner is used)` : ''}`, why: 'The setup in use now: the yardstick.', run: r };
   const rows: Setup[] = [a, ...picked.map(({ quick: _q, ...s }) => s)];
   for (const n of [...new Set(contexts)]) {
     if (n !== r.ctx) rows.push({ id: `ctx-${n}`, name: `Context ${n.toLocaleString('en')} tokens`, why: 'You ticked this size to test.', run: { ...r, ctx: n } });

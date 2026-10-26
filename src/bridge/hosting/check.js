@@ -96,7 +96,13 @@ async function candidates(projectDir, folder, missed) {
   if (!list) return { rels: walk(folder, missed), ignored: [], ignoredMissed: [] };
   // A listed file that is gone (deleted, not committed yet) or is a folder (a submodule) is not one to send; one that
   // is there but cannot be looked at (no rights, held) stays, so the check names it instead of dropping it.
-  const rels = [...new Set(list.map(f => f.rel.replace(/\\/g, '/')))].filter(rel => { try { return fs.statSync(path.join(folder, rel)).isFile(); } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR'; } });
+  // Looked at a few hundred at a time, with a moment for everything else between (a big site is thousands of files).
+  const rels = [];
+  let n = 0;
+  for (const rel of new Set(list.map(f => f.rel.replace(/\\/g, '/')))) {
+    if (++n % 200 === 0) await new Promise(r => setImmediate(r));
+    try { if (fs.statSync(path.join(folder, rel)).isFile()) rels.push(rel); } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') rels.push(rel); }
+  }
   // Also the files git leaves out, so they are shown as left out with that reason, never dropped without a word. What
   // that walk could not see matters only when they are sent too (the tick), so it is kept for the check to decide.
   const known = new Set(rels.map(x => x.toLowerCase()));
@@ -136,7 +142,11 @@ async function checkFolder(opts) {
   const matcher = disclosure.makeMatcher({ details: [...(opts.details || []), ...(opts.otherDetails || [])] });
   let bytes = 0;
   if (rels.length >= MAX_FILES || cut) findings.push({ rule: 'COUNT', rel: '(more files)', line: 0, what: 'the folder has more than ' + MAX_FILES.toLocaleString('en') + ' files, the most TOMLIN looks at, so the list to send is not complete: pick a smaller upload folder in Set up', key: '', canIgnore: false });
+  let done = 0;
   for (const rel of rels) {
+    // A moment for everything else between files: a big site (WordPress, 20,000 files) held the server's one thread
+    // for 13 s in one go, and every chat and linked PC with it.
+    if (++done % 25 === 0) await new Promise(r => setImmediate(r));
     const hard = HARD.find(([re]) => re.test(rel));
     if (hard) { left.push({ rel, why: hard[1] }); continue; }
     const soft = SOFT.find(([k, re]) => re.test(rel) && !send.has(k));

@@ -1,5 +1,5 @@
 // Who answers: a model on this PC, a linked PC's, or a hire's own brains with their fallback and backup.
-import { CONTINUE_ASK, NoPrefill, streamChat, repeatCut, type AskOpts, type ChatTurn } from '../engine.ts';
+import { CONTINUE_ASK, NoPrefill, streamChat, repeatWatch, type AskOpts, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { matchModel, nowModel, type StaffMember } from '../staff.ts';
 import { chatNeed, memOfReport, ramFit } from '../calc.ts';
@@ -28,8 +28,9 @@ export function localBrain(label: string, runner?: Pane): Brain {
     brain.thought = null;
     brain.cut = false;
     try {
+      const repeats = repeatWatch();
       const ask = (t: ChatTurn[]) => streamChat(r.worker.base!, r.view.model ?? '', t, text => {
-        const cut = repeatCut(text);
+        const cut = repeats(text);
         shown = cut ?? text;
         onText(shown);
         if (cut !== null) {
