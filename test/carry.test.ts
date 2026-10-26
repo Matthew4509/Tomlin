@@ -2,7 +2,7 @@
 // through the node's doors (a model, a split model, a restore point), cut short and carried on.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,15 +24,23 @@ after(() => {
 const MB = 2 ** 20;
 
 const shared = (id: string, kind: 'chat' | 'image' = 'chat', name = id.replace(/\.gguf$/, '')): SharedModel => ({ id, name, kind, bytes: 5 * MB, ctx: 8192, loaded: false, busy: false });
-const pc = (o: Partial<carry.NetPc> = {}): carry.NetPc => ({ id: 'aaaa1111', name: 'Worker PC', ok: true, away: null, can: ['models', 'carry'], allow: { pull: true, backup: true, update: false, tune: false, lend: false }, models: [], ...o });
+const pc = (o: Partial<carry.NetPc> = {}): carry.NetPc => ({ id: 'aaaa1111', name: 'Worker PC', ok: true, away: null, can: ['models', 'carry'], allow: { pull: true, backup: true, update: false, tune: false, lend: false, receive: false, give: false }, models: [], ...o });
 
 test('what linked PCs may do: off until ticked, only true counts, Allow all is all three; the old push tick is not read', () => {
   assert.deepEqual(carry.cleanAllow(undefined), carry.NO_ALLOW);
-  assert.deepEqual(carry.cleanAllow({ pull: 'yes', backup: 1, push: true }), { pull: false, backup: false, update: false, tune: false, lend: false });
-  assert.deepEqual(carry.cleanAllow({ pull: true, backup: true, push: false, update: true, tune: false, lend: false }), { pull: true, backup: true, update: true, tune: false, lend: false });
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true }), true);
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: false, tune: false, lend: false }), false);
-  assert.equal(carry.allowsAll({ pull: true, backup: false, update: true, tune: false, lend: false }), false);
+  assert.deepEqual(carry.cleanAllow({ pull: 'yes', backup: 1, push: true }), { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false });
+  assert.deepEqual(carry.cleanAllow({ pull: true, backup: true, push: false, update: true, tune: false, lend: false, receive: false, give: false }), { pull: true, backup: true, update: true, tune: false, lend: false, receive: false, give: false });
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true }), true);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: false, tune: false, lend: false, receive: false, give: false }), false);
+  assert.equal(carry.allowsAll({ pull: true, backup: false, update: true, tune: false, lend: false, receive: false, give: false }), false);
+  // Audit X3 (26 Oct): "Accept models from linked PCs" is a tick of its own, off until ticked, and part of Allow all.
+  assert.equal(carry.cleanAllow({ receive: true }).receive, true);
+  assert.equal(carry.cleanAllow({ receive: 'yes' }).receive, false);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true, receive: false, give: true }), false);
+  // 26 Oct: "Let linked PCs pull TOMLIN updates from here" (an update pulled from this PC) is its own tick too.
+  assert.equal(carry.cleanAllow({ give: true }).give, true);
+  assert.equal(carry.cleanAllow({ give: 'yes', update: true }).give, false);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: false }), false);
 });
 
 test('names that may cross: a model file name or a backup name only, never a way out of the folder', () => {
@@ -51,7 +59,7 @@ test('a split model is all its parts, in order; a part missing leaves just the f
 
 test('the node network list: only shared models, once each, where each can be copied from, and why not', () => {
   const a = pc({ id: 'a', name: 'Worker PC', models: [shared('Qwen-2B.gguf'), shared('dreamshaper', 'image', 'DreamShaper 8')] });
-  const b = pc({ id: 'b', name: 'Office', allow: { pull: false, backup: true, update: false, tune: false, lend: false }, models: [shared('lmstudio/x/qwen-2b.gguf', 'chat', 'Qwen-2B'), shared('ollama:qwen3:4b', 'chat', 'qwen3:4b')] });
+  const b = pc({ id: 'b', name: 'Office', allow: { pull: false, backup: true, update: false, tune: false, lend: false, receive: false, give: false }, models: [shared('lmstudio/x/qwen-2b.gguf', 'chat', 'Qwen-2B'), shared('ollama:qwen3:4b', 'chat', 'qwen3:4b')] });
   const c = pc({ id: 'c', name: 'Old one', can: ['models'], allow: null, models: [shared('Gemma.gguf')] });
   const d = pc({ id: 'd', name: 'Busy', away: '2026-10-06T10:00:00Z', models: [shared('Gemma.gguf')] });
   const rows = carry.networkList([a, b, c, d], { chatFiles: ['gemma.gguf'], pictures: [] });
@@ -67,27 +75,32 @@ test('the node network list: only shared models, once each, where each can be co
   assert.match(carry.copyWhy(pc({ ok: false }), 'x'), /off or not answering/);
 });
 
-test('send and keep-a-restore-point say why not, naming the tick on that PC (sending a model needs no tick)', () => {
+test('send and keep-a-restore-point say why not, naming the tick on that PC (sending a model needs "Accept models from linked PCs" there)', () => {
+  const asks = ['models', 'carry', 'receive'];
+  assert.match(carry.sendWhy(pc({ can: asks })), /Accept models from linked PCs/);
+  assert.equal(carry.sendWhy(pc({ can: asks, allow: { pull: false, backup: false, update: false, tune: false, lend: false, receive: true, give: false } })), '');
+  // A node before the tick existed asks none (it takes the model, as it always did).
   assert.equal(carry.sendWhy(pc()), '');
-  assert.equal(carry.sendWhy(pc({ allow: { pull: false, backup: false, update: false, tune: false, lend: false } })), '');
   assert.match(carry.sendWhy(pc({ away: '2026-10-06T10:00:00Z' })), /being used by its owner/);
   assert.equal(carry.backupWhy(pc()), '');
-  assert.match(carry.backupWhy(pc({ allow: { pull: true, backup: false, update: false, tune: false, lend: false } })), /Enable backups/);
+  assert.match(carry.backupWhy(pc({ allow: { pull: true, backup: false, update: false, tune: false, lend: false, receive: false, give: false } })), /Enable backups/);
   assert.match(carry.backupWhy(pc({ allow: null })), /older/);
 });
 
 test('Download to a linked PC: refused when it is off, kept for backups, or is too old to download (no tick needed)', () => {
   const can = ['models', 'carry', 'fetch'];
   assert.equal(carry.fetchWhy(pc({ can })), '');
+  // The node downloads it itself (no file from this PC): "Accept models from linked PCs" is not needed.
+  assert.equal(carry.fetchWhy(pc({ can: [...can, 'receive'] })), '');
   assert.match(carry.fetchWhy(pc({ can, ok: false })), /off or not answering/);
   assert.match(carry.fetchWhy(pc({ can, backupsOnly: true })), /Backups only/);
-  assert.equal(carry.fetchWhy(pc({ can, allow: { pull: false, backup: false, update: false, tune: false, lend: false } })), '');
+  assert.equal(carry.fetchWhy(pc({ can, allow: { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false } })), '');
   assert.match(carry.fetchWhy(pc()), /older TOMLIN.*update it there first/);
   // A short word for each, for the To list beside Download.
   assert.equal(carry.fetchCode(pc({ can })), '');
   assert.equal(carry.fetchCode(pc({ can, ok: false })), 'off');
   assert.equal(carry.fetchCode(pc({ can, backupsOnly: true })), 'backups');
-  assert.equal(carry.fetchCode(pc({ can, allow: { pull: false, backup: false, update: false, tune: false, lend: false } })), '');
+  assert.equal(carry.fetchCode(pc({ can, allow: { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false } })), '');
   assert.equal(carry.fetchCode(pc()), 'old');
 });
 
@@ -103,11 +116,11 @@ test('a piece sealed for the link opens only with its key and its place', () => 
 });
 
 /** A node with a models folder and a restore-point folder, and a wire to it as a linked PC sees it. */
-function aNode(o: { allow?: carry.Allow; free?: number } = {}) {
+function aNode(o: { allow?: carry.Allow; free?: number; pictures?: Record<string, { name: string; bytes: number; sha256: string }[]> } = {}) {
   const root = tmp();
   const chatDir = join(root, 'models', 'chat');
   mkdirSync(chatDir, { recursive: true });
-  let allow = o.allow ?? { pull: true, backup: true, update: false, tune: false, lend: false };
+  let allow = o.allow ?? { pull: true, backup: true, update: false, tune: false, lend: false, receive: true, give: false };
   const installed: string[] = [];
   const handle = carry.nodeSide({
     allow: () => allow,
@@ -120,7 +133,7 @@ function aNode(o: { allow?: carry.Allow; free?: number } = {}) {
     pictureFiles: () => null,
     chatDir,
     chatHas: name => existsSync(join(chatDir, name)),
-    pictureDest: () => null,
+    pictureDest: id => o.pictures?.[id]?.map(f => ({ ...f, path: join(root, 'models', 'image', f.name), have: existsSync(join(root, 'models', 'image', f.name)) })) ?? null,
     keptRoot: join(root, 'kept'),
     freeBytes: async () => o.free ?? Infinity,
     onInstalled: name => installed.push(name),
@@ -178,7 +191,7 @@ test('copying a shared model: 40 MB comes over in 16 MB pieces, whole; cut short
 });
 
 test('copying is refused when the node does not allow it, or the model is not on it', async () => {
-  const node = aNode({ allow: { pull: false, backup: true, update: false, tune: false, lend: false } });
+  const node = aNode({ allow: { pull: false, backup: true, update: false, tune: false, lend: false, receive: false, give: false } });
   fileOf(node.chatDir, 'A.gguf', 1000);
   const dest = async () => [join(tmp(), 'A.gguf')];
   const go = (model: string, n = node) => carry.pull(n.wireAs(laptop), { kind: 'chat', model, dest, progress: () => undefined, signal: new AbortController().signal });
@@ -227,12 +240,16 @@ test('a split model cut off after its first part is not "there already": the nex
   assert.equal('json' in again && again.json.at, files[0].bytes);
 });
 
-test('sending: taken with no tick at all; refused for a bad file name or no room; a piece crossing twice is carried on from, not doubled', async () => {
+test('sending: taken only with "Accept models from linked PCs" ticked; refused for a bad file name or no room; a piece crossing twice is carried on from, not doubled', async () => {
   const mine = tmp();
   const data = fileOf(mine, 'Gemma.gguf', 33 * MB);
   const files = [{ name: 'Gemma.gguf', path: join(mine, 'Gemma.gguf'), bytes: data.length }];
   const go = (n: ReturnType<typeof aNode>, f = files, w = n.wireAs(laptop)) => carry.push(w, { kind: 'chat', model: 'Gemma.gguf', name: 'Gemma', files: f, progress: () => undefined, signal: new AbortController().signal });
-  const open = aNode({ allow: { pull: false, backup: false, update: false, tune: false, lend: false } });
+  // Audit X3: any linked PC could place a file of its choosing on a node, and have its runner read it.
+  const shut = aNode({ allow: { pull: true, backup: true, update: true, tune: true, lend: true, receive: false, give: false } });
+  await assert.rejects(go(shut), /Accept models from linked PCs/);
+  assert.ok(!existsSync(join(shut.chatDir, 'Gemma.gguf')) && !existsSync(join(shut.chatDir, 'Gemma.gguf.part')));
+  const open = aNode({ allow: { pull: false, backup: false, update: false, tune: false, lend: false, receive: true, give: false } });
   assert.equal(await go(open), true);
   assert.ok(readFileSync(join(open.chatDir, 'Gemma.gguf')).equals(data));
   await assert.rejects(go(aNode(), [{ ...files[0], name: '../evil.gguf' }]), /not named as a model file/);
@@ -293,7 +310,7 @@ test('restore points: kept per linked PC (newest 3), listed and brought back eve
   assert.deepEqual(list.map(x => x.name.slice(0, 10)), ['2026-10-04', '2026-10-03', '2026-10-02']);
   assert.deepEqual(await carry.keptHere(join(node.root, 'kept')), [{ name: 'Laptop', count: 3, bytes: list.reduce((n, x) => n + x.bytes, 0), newest: Math.max(...list.map(x => x.at)) }]);
 
-  node.setAllow({ pull: false, backup: false, update: false, tune: false, lend: false });
+  node.setAllow({ pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false });
   const back = tmp();
   await carry.pullBackup(w, { name: list[0].name, bytes: list[0].bytes, dest: join(back, list[0].name), progress: () => undefined, signal: new AbortController().signal });
   assert.ok(readFileSync(join(back, list[0].name)).equals(made[3]));
@@ -387,4 +404,21 @@ test('a backup disk: read from this PC, and cleaned when a hello says it', async
   assert.ok(here && here.total > 0 && here.free >= 0 && here.free <= here.total, 'a folder not made yet reads its nearest parent');
   assert.deepEqual(carry.cleanDisk({ total: 1000.4, free: 250 }), { total: 1000, free: 250 });
   for (const bad of [null, {}, { total: 0, free: 0 }, { total: 10, free: 20 }, { total: 'x', free: 1 }, { total: 10, free: -1 }]) assert.equal(carry.cleanDisk(bad), null);
+});
+
+test('a picture model sent to a node is checked against the SHA-256 its registry gives: other bytes of the same size are thrown away', async () => {
+  const mine = tmp();
+  const good = fileOf(mine, 'flux-good.safetensors', 3 * MB);
+  const bad = fileOf(mine, 'flux-bad.safetensors', 3 * MB);
+  const sha = createHash('sha256').update(good).digest('hex');
+  const node = aNode({ pictures: { flux: [{ name: 'flux.safetensors', bytes: good.length, sha256: sha }] } });
+  mkdirSync(join(node.chatDir, '..', 'image'), { recursive: true });
+  const send = (path: string) => carry.push(node.wireAs(laptop), { kind: 'image', model: 'flux', name: 'Flux', files: [{ name: 'flux.safetensors', path, bytes: good.length }], progress: () => undefined, signal: new AbortController().signal });
+  await assert.rejects(send(join(mine, 'flux-bad.safetensors')), /not the file .* registry/);
+  assert.ok(!existsSync(join(node.chatDir, '..', 'image', 'flux.safetensors')), 'not put in place');
+  assert.ok(!existsSync(join(node.chatDir, '..', 'image', 'flux.safetensors.part')), 'and its part thrown away');
+  assert.deepEqual(node.installed, []);
+  assert.equal(await send(join(mine, 'flux-good.safetensors')), true);
+  assert.ok(readFileSync(join(node.chatDir, '..', 'image', 'flux.safetensors')).equals(good));
+  assert.ok(bad.length === good.length);
 });

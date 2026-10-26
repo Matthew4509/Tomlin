@@ -82,7 +82,7 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     await unload();
 
     // 2. Ticked, but someone is using the node.
-    const tick = await node.post('/api/share', { allow: { pull: false, backup: false, update: false, tune: false, lend: true }, lendIdle: 5, appPin: NODE_PIN });
+    const tick = await node.post('/api/share', { allow: { pull: false, backup: false, update: false, tune: false, lend: true, receive: true, give: false }, lendIdle: 5, appPin: NODE_PIN });
     assert.equal(tick.status, 200, JSON.stringify(tick.body));
     assert.equal(tick.body.lend.idle, 5);
     p = await load();

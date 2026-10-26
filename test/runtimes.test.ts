@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { driverAtLeast, missingCardRunner, runnerWhy } from '../src/runtimes.ts';
+import { driverAtLeast, missingCardRunner, pageDownloads, runnerWhy } from '../src/runtimes.ts';
 
 const p2000 = [{ name: 'NVIDIA Quadro P2000', integrated: false }];
 
 test('missing card runner: a card of its own with only the CPU runner says so and names the fix', () => {
   const t = missingCardRunner('sd', p2000, () => false);
   assert.match(t, /NVIDIA Quadro P2000/);
+  // The page's own Download first (audit C6: an AMD or Intel PC had only the command line), the command as well.
+  assert.match(t, /Models, Model runners: Download .*Vulkan/);
   assert.match(t, /npm run fetch -- sd-vulkan/);
 });
 
@@ -79,4 +81,11 @@ test('a runner\'s program is looked up on disk once, not on every Home poll (1,0
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the page downloads the card runners (CUDA and Vulkan), never the CPU ones that come with TOMLIN', () => {
+  assert.equal(pageDownloads({ engine: 'sd', device: 'vulkan' }), true, 'an AMD or Intel PC gets the picture runner for its card from the page');
+  assert.equal(pageDownloads({ engine: 'llama', device: 'cuda' }), true);
+  assert.equal(pageDownloads({ engine: 'llama', device: 'cpu' }), false);
+  assert.equal(pageDownloads(undefined), false);
 });

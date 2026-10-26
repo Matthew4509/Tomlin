@@ -44,7 +44,8 @@ const mp = {
   /** The chat-model download now (from /api/chatmodels/get). */
   job: null,
 };
-const MP_GB = n => `${(n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1)} GB`;
+// Under 0.1 GB in MB: a Vulkan runner (about 30 MB) read "0.0 GB".
+const MP_GB = n => (n > 0 && n < 0.1 * 2 ** 30 ? `${Math.max(1, Math.round(n / 2 ** 20))} MB` : `${(n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1)} GB`);
 
 // Chat models people often start with. Each was checked on Hugging Face (public, not gated) on 4 Oct 2026; the sizes and
 // files are read from Hugging Face when the page opens, never written here.
@@ -389,9 +390,12 @@ function runnerPick(r) {
   return el('div', { class: 'mp-get' }, el('label', { class: 'mp-to' }, el('span', { text: 'Send to' }), sel), btn, said);
 }
 
-/** A runner row's buttons: Download or Remove on this PC (Download only with an NVIDIA card here), and Send to a linked PC. */
+/**
+ * A runner row's buttons: Download (a CUDA one only with an NVIDIA card here; a Vulkan one for any card) or Remove (CUDA
+ * only: Vulkan may have come with TOMLIN) on this PC, and Send to a linked PC (CUDA only).
+ */
 function runnerButtons(r) {
-  if (r.device !== 'cuda') return null;
+  if (r.device !== 'cuda' && r.device !== 'vulkan') return null;
   const parts = [];
   const g = r.getting;
   if (g && !g.done && !g.error) {
@@ -400,7 +404,7 @@ function runnerButtons(r) {
       el('div', { class: 'dl-track', role: 'progressbar', 'aria-label': `Downloading ${r.name}`, 'aria-valuenow': String(pc) }, el('span', { class: 'dl-fill', 'data-w': String(pc) })),
       el('span', { class: 'dl-text', text: `${g.checking ? 'Checking' : 'Downloading'} ${pc}% of ${MP_GB(g.bytes)}` }),
       el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: async () => { await api('/api/runtimes/stop', { id: r.id }); mpLoad(); } })));
-  } else if (r.installed || r.zips) {
+  } else if (r.device === 'cuda' && (r.installed || r.zips)) {
     parts.push(el('button', {
       class: 'btn quiet', type: 'button', text: r.installed ? 'Remove from this PC' : 'Remove its files from this PC',
       title: r.installed ? 'Takes the NVIDIA runner off this PC (and its kept files): models run on the graphics chip (Vulkan) again from their next load.' : `Deletes the ${MP_GB(r.bytes)} of files kept here for sending to another PC.`,
@@ -419,7 +423,7 @@ function runnerButtons(r) {
   if (!r.installed && !r.why && !(g && !g.done && !g.error)) {
     parts.push(el('button', {
       class: 'btn primary', type: 'button', text: `Download ${MP_GB(r.bytes)}`,
-      title: 'Downloads it from the llama.cpp release on GitHub, checks each file by SHA-256 and unpacks it for this PC. The next model loaded uses it.',
+      title: `Downloads it from the ${r.engine === 'sd' ? 'stable-diffusion.cpp' : 'llama.cpp'} release on GitHub, checks each file by SHA-256 and unpacks it for this PC. The next model loaded uses it.`,
       onclick: async e => {
         e.currentTarget.disabled = true;
         e.currentTarget.textContent = 'Starting…';
@@ -434,16 +438,17 @@ function runnerButtons(r) {
     }));
   }
   // Sending between PCs: the chat runner only (a node says how its chat runner is, not its picture one).
-  const pick = r.engine === 'llama' ? runnerPick(r) : null;
+  const pick = r.engine === 'llama' && r.device === 'cuda' ? runnerPick(r) : null;
   if (pick) parts.push(pick);
   return parts.length ? el('div', { class: 'mp-get' }, ...parts) : null;
 }
 
 /** What a runner row says under its name. */
 function runnerMore(r) {
+  if (r.device === 'vulkan') return r.installed ? [] : [`For any graphics card (AMD, Intel or NVIDIA): ${r.engine === 'sd' ? 'pictures' : 'chat'} on the card instead of the CPU.`, ...(r.getting?.error ? [`✕ ${r.getting.error}`] : []), `Licence: ${r.licence}.`];
   if (r.device !== 'cuda') return r.installed ? [] : [`To install it, close TOMLIN and run: npm run fetch -- ${r.id}`];
   const more = [
-    r.engine !== 'llama' ? 'For NVIDIA cards: usually faster than the graphics chip (Vulkan) runner. Auto uses it once it is here.'
+    r.engine !== 'llama' ? 'For NVIDIA cards from the GTX 10 series (Pascal) on, with code made for each up to the RTX 50 series: usually faster than the graphics chip (Vulkan) runner. Auto uses it once it is here.'
       : r.cuda === '13.4' ? 'For NVIDIA cards from the RTX 20 and GTX 16 series on, with code made for RTX 30, 40 and 50 cards. Not for GTX 10 series (Pascal) cards or older.'
         : 'For NVIDIA cards, older ones too (GTX 750 and newer): RTX 30 and 40 cards have code made for them, other cards have it compiled at their first start.',
   ];

@@ -7,7 +7,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cacheBytes, expertWeights, modelShape } from '../gguf.ts';
 import { runFinder, request, timingsOf, type FinderRun } from '../finderrun.ts';
-import { cardsNow, estimateMinutes, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
+import { cardsNow, estimateMinutes, finderCards, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
 import { guessersFor, type Listed } from '../runset.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import { hereKey } from '../speed.ts';
@@ -49,12 +49,12 @@ async function factsFor(id: string, run: RunOptions): Promise<{ pc: PcFacts; mod
   const g = guessersFor(m, list).map(x => list.find(y => y.id === x)!).sort((a, b) => a.bytes - b.bytes)[0];
   const gShape = g ? await modelShape(chatModels.path(g.id) ?? '') : null;
   const card = cardNow();
-  // Every card the runners can use (biggest first, as cardNow's): the finder's card rows choose among them.
+  // Every card the runners can use, biggest first, each with the runners that have code for it (a CUDA build is tried
+  // only on cards it can run): the finder's card rows choose among them.
   const known = card ? await readCards() : [];
   const s = await store.settings();
   return {
-    // Each card with the runners that have code for it: a CUDA build is tried only on cards it can run.
-    pc: { cards: card ? [{ ...card, ids: known[0]?.ids ?? [], ...(known[0] ? { runners: runnersForCard(known[0]) } : {}) }, ...known.slice(1).map(c => ({ name: c.label, total: c.total, free: c.total, ids: c.ids, runners: runnersForCard(c) }))] : [], cores: hardware.cores, threads: s.chat.threads, models: list, runners: cardRunners() },
+    pc: { cards: finderCards(known, card, runnersForCard), cores: hardware.cores, threads: s.chat.threads, models: list, runners: cardRunners() },
     model: { ...m, moe, ...((shape?.mtp ?? 0) > 0 ? { mtp: true } : {}), layers, expertsPerLayer: perLayer, rest, ctxBytes: shape ? cacheBytes(shape, run.ctx, run.cache) : 0, guesser: g ? { ...g, ctxBytes: gShape ? cacheBytes(gShape, run.ctx, 'f16') : 0 } : null },
   };
 }

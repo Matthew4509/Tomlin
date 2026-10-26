@@ -475,6 +475,15 @@ export async function linkCount(): Promise<{ working: number; broken: string[] }
   return { working: s.remotes.filter(r => link.keysOf(r.key)).length, broken: s.remotes.filter(r => !link.keysOf(r.key)).map(r => r.name) };
 }
 
+/**
+ * A linked PC ahead of this one (a newer version, or the same with other files): whether Update this PC from it can take
+ * its TOMLIN here (why '' ), or why not; null when it is not ahead. other: the same version with other files.
+ */
+export function pullOf(h: Pick<Hello, 'name' | 'version' | 'build' | 'away' | 'can' | 'allow'>, name = h.name) {
+  const why = update.pullWhy({ name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can ?? [], allowGive: h.allow?.give === true }, d.version, d.build(), d.update.restarts);
+  return why === null ? null : { why, mine: d.version, build: update.shortBuild(d.build()), other: !update.newer(h.version, d.version) };
+}
+
 export async function remoteStatus() {
   const s = await d.store.settings();
   return Promise.all(s.remotes.map(async r => {
@@ -483,7 +492,7 @@ export async function remoteStatus() {
       const behind = update.updateWhy({ name: r.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, d.version, d.build());
       // build: the 7 characters shown beside its version ('' from an older TOMLIN); update.other: the same version with
       // different files, and update.build this PC's, for "Runs 2.0.48 but different files from this PC (build x there, y here)".
-      return { id: r.id, name: r.name, url: r.url, ok: true, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, runner: h.runner, backupsOnly: r.backupsOnly === true, update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' } };
+      return { id: r.id, name: r.name, url: r.url, ok: true, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, runner: h.runner, backupsOnly: r.backupsOnly === true, update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
     } catch (e) {
       return { id: r.id, name: r.name, url: r.url, ok: false, backupsOnly: r.backupsOnly === true, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true };
     }

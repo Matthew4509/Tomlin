@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import { writeAtomic } from './atomic.ts';
 import { entriesWhy, unpackedWhy, zipEntries } from './newcopy.ts';
 import { PIN_FILE, pinKey, type RuntimePin } from './runtimes.ts';
+import { CODES_FILE } from './recovery.ts';
 
 const run = promisify(execFile);
 
@@ -186,11 +187,14 @@ const stamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1)
 export const SNAP_PROFILE = './bridge/snaps/profile';
 /** Also left out: Push live's connections, secrets and push records (sealed for this Windows account, and they stay in place). */
 export const HOSTING = './bridge/hosting';
+/** Never in a restore point sent from here (since 2.0.5x): a brought-back one that carries them was made elsewhere. */
+const NEVER_SENT = ['share.json', 'app-lock.json'];
 /**
  * Left out of a restore point kept on another PC (Back up to a linked PC), with the keys to the linked PCs in
- * settings.json: this PC's sharing code and paired links, and its PIN. That PC keeps the chats, never the keys.
+ * settings.json: this PC's sharing code and paired links, its PIN and recovery codes, and the backup claims waiting on
+ * it. That PC keeps the chats, never the keys; putting one back keeps this PC's own (carryKept).
  */
-const NOT_ELSEWHERE = ['share.json', 'app-lock.json'];
+const NOT_ELSEWHERE = [...NEVER_SENT, CODES_FILE, 'claims.json'];
 /** In a restore point kept on another PC: says what was left out, so putting it back keeps this PC's own. */
 export const ELSEWHERE_MARK = 'kept-elsewhere.json';
 const tar = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar');
@@ -355,7 +359,11 @@ async function carryKept(old: string, data: string): Promise<void> {
   }
 }
 
-/** A restore point kept on another PC, unpacked at `fresh`: each linked PC takes this PC's key to it as it is now. */
+/**
+ * A restore point kept on another PC, unpacked at `fresh`: each linked PC takes this PC's key to it as it is now, and
+ * a linked PC this PC does not know now comes back with no key (one sent from here carries none; one that does was
+ * written elsewhere: audit X1).
+ */
 async function keysFromHere(fresh: string, data: string): Promise<void> {
   type Settings = { remotes?: Record<string, unknown>[]; webSearch?: Record<string, unknown> };
   const read = async (f: string) => JSON.parse(await readFile(f, 'utf8')) as Settings;
@@ -366,7 +374,8 @@ async function keysFromHere(fresh: string, data: string): Promise<void> {
     const mine = new Map((Array.isArray(now.remotes) ? now.remotes : []).map(r => [r.id, r]));
     back.remotes = back.remotes.map(r => {
       const m = mine.get(r.id);
-      return m ? { ...r, token: m.token, ...(m.key ? { key: m.key } : {}) } : r;
+      const { key: _key, ...rest } = r;
+      return m ? { ...rest, token: m.token, ...(m.key ? { key: m.key } : {}) } : { ...rest, token: '' };
     });
   }
   // This PC's web search key as it is now (a restore point for another PC carries none).
@@ -400,6 +409,16 @@ export async function broughtBackWhy(dir: string, name: string, file: string): P
   const want = (await readSent(dir).catch(() => ({} as Record<string, string>)))[name];
   if (!want) return 'unchecked';
   return (await sha256Of(file)) === want ? '' : 'the restore point that came back is not the one this PC sent (it was changed on that PC, or cut short), so it was not kept';
+}
+
+/** In backups/: the restore points that came back from another PC, by name (the newest 200). */
+const BROUGHT_FILE = '.brought.json';
+const readBrought = async (dir: string) => JSON.parse(await readFile(join(dir, BROUGHT_FILE), 'utf8').catch(() => '[]')) as string[];
+
+/** Notes that the restore point `name` came back from another PC: putting it back then keeps this PC's keys and PIN. */
+export async function recordBrought(dir: string, name: string): Promise<void> {
+  const list = (await readBrought(dir).catch(() => [] as string[])).filter(n => n !== name);
+  await writeAtomic(join(dir, BROUGHT_FILE), JSON.stringify([...list, name].slice(-200)));
 }
 
 /** A swap cut off last time: finished (the new data is in place) or undone (data.old goes back). */
@@ -533,9 +552,16 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
     await rm(fresh, { recursive: true, force: true });
     return no(opened);
   }
-  // Kept on another PC: it holds no keys to the linked PCs, no sharing code and no PIN, so this PC's own stay.
-  const elsewhere = existsSync(join(fresh, ELSEWHERE_MARK));
+  // Kept on another PC: it holds no keys to the linked PCs, no sharing code and no PIN, so this PC's own stay. Whether it
+  // came back from one is this PC's own record, not the mark inside the zip (that PC could take the mark out).
+  const brought = (await readBrought(home.backups).catch(() => [] as string[])).includes(basename(name));
+  if (brought && NEVER_SENT.some(f => existsSync(join(fresh, f)))) {
+    await rm(fresh, { recursive: true, force: true });
+    return no('that restore point came back from another PC carrying a PIN or sharing settings, which one sent from here never holds, so it was made or changed there');
+  }
+  const elsewhere = brought || existsSync(join(fresh, ELSEWHERE_MARK));
   if (elsewhere) {
+    for (const f of NOT_ELSEWHERE) await rm(join(fresh, f), { force: true });
     await keysFromHere(fresh, home.data);
     await rm(join(fresh, ELSEWHERE_MARK), { force: true });
   }

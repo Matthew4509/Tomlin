@@ -36,8 +36,8 @@ let netLast = [];
 function drawNetTransfers(list) {
   netLast = list;
   const verb = t => (t.state === 'done'
-    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
-    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
+    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, pull: `Took ${t.what} from "${t.pcName}" for this PC`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
+    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
   $('#net-transfers').replaceChildren(...list.map(t => {
     const fill = el('div', { class: 'p-fill' });
     const frac = t.bytes ? t.done / t.bytes : 0;
@@ -46,7 +46,9 @@ function drawNetTransfers(list) {
     // An update says only what was sent, in one short line.
     const sent = t.kind === 'update' && t.state !== 'failed' && t.state !== 'stopped'
       ? `Sent: ${!t.bytes ? (working ? 'comparing the files…' : 'nothing had changed.') : t.done < t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : working ? `${netSize(t.bytes)}, starting it there…` : `${netSize(t.bytes)}. ${t.said}`}`
-      : null;
+      : t.kind === 'pull' && t.state !== 'failed' && t.state !== 'stopped'
+        ? `Copied here: ${!t.bytes ? (working ? 'comparing the files…' : 'nothing had changed.') : t.done < t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : working ? `${netSize(t.bytes)}, checking and starting it…` : `${netSize(t.bytes)}. ${t.said}`}`
+        : null;
     // A runner: downloaded here first (when its files are not here yet), sent, then checked and unpacked there.
     const runner = t.kind === 'runner' && working && t.bytes
       ? (t.stage === 'get' ? `Downloading it here first: ${netSize(t.done)} of ${netSize(t.bytes)}` : t.done < t.bytes ? `Sent ${netSize(t.done)} of ${netSize(t.bytes)}` : `Sent. "${t.pcName}" is checking and unpacking it…`)
@@ -186,6 +188,7 @@ app.openNet = async () => {
 for (const b of document.querySelectorAll('[data-net]')) b.addEventListener('click', () => app.openNet());
 
 // ---- The update screen: the four steps of "Update it", each ticked only once it has really happened ----
+// A pull (Update this PC from it) shows the same screen with this PC's steps, then waits for this PC to start again.
 
 const updDlg = $('#upd-dlg');
 const UPD_STEPS = ['compare', 'send', 'start', 'check'];
@@ -196,16 +199,24 @@ const updAt = t => (t.state === 'done' ? UPD_STEPS.length : Math.max(0, UPD_STEP
 
 function drawUpd(t, shown) {
   const pc = `"${t.pcName}"`;
+  const pull = t.kind === 'pull';
   const version = t.what.replace(/^TOMLIN /, '');
   const sending = t.bytes ? (t.done < t.bytes ? `: ${netSize(t.done)} of ${netSize(t.bytes)}` : `: ${netSize(t.bytes)}`) : '';
-  const labels = [
+  const labels = pull ? [
+    `Comparing the files with ${pc}`,
+    shown > 1 && !t.bytes ? 'Getting what changed: nothing had changed' : `Getting what changed from ${pc}${shown >= 1 ? sending : ''}`,
+    'Checking every file on this PC',
+    `Starting TOMLIN ${version} on this PC`,
+  ] : [
     'Comparing the files',
     shown > 1 && !t.bytes ? 'Sending what changed: nothing had changed' : `Sending what changed${shown >= 1 ? sending : ''}`,
     `Starting the new version on ${pc}`,
     `Checking ${pc} answers with ${version}`,
   ];
   const failed = t.state === 'failed' || t.state === 'stopped';
-  $('#upd-title').textContent = t.state === 'done' ? `${pc} is updated to TOMLIN ${version}` : `Updating ${pc} to TOMLIN ${version}`;
+  $('#upd-title').textContent = pull
+    ? (t.state === 'done' ? `This PC is starting TOMLIN ${version}` : `Updating this PC to TOMLIN ${version} from ${pc}`)
+    : t.state === 'done' ? `${pc} is updated to TOMLIN ${version}` : `Updating ${pc} to TOMLIN ${version}`;
   $('#upd-steps').replaceChildren(...labels.map((text, i) => {
     const state = i < shown ? 'done' : i === shown ? (failed ? 'failed' : 'now') : 'later';
     return el('li', { class: `upd-${state}`, 'aria-current': state === 'now' ? 'step' : null },
@@ -217,7 +228,7 @@ function drawUpd(t, shown) {
   line.className = failed ? 'fault-line' : 'hint';
   line.textContent = failed ? `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`
     : t.state === 'done' && shown >= UPD_STEPS.length ? t.said
-    : shown === 2 && t.wait ? `${pc} is busy (${t.wait}): the new version starts there when that is done.` : '';
+    : shown === 2 && t.wait ? (pull ? `This PC is busy (${t.wait}): the new version starts when that is done.` : `${pc} is busy (${t.wait}): the new version starts there when that is done.`) : '';
   const over = failed || (t.state === 'done' && shown >= UPD_STEPS.length);
   $('#upd-keep').hidden = over;
   $('#upd-stop').hidden = over || shown >= 2;
@@ -239,6 +250,16 @@ app.openUpdate = transfer => {
   let shown = 0;
   let moved = 0;
   clearInterval(updTimer);
+  // A pull: this PC ends and starts the new version once it is in; the page opens again when it answers (keep.js
+  // waitForRestart: another start time, or the lock screen).
+  let before = null;
+  let waiting = false;
+  const restartSeen = () => {
+    if (waiting || before === null) return;
+    waiting = true;
+    waitForRestart(before);
+  };
+  if (t.kind === 'pull') void fetch('/api/keep', { cache: 'no-store' }).then(r => r.json()).then(k => void (before = k.startedAt ?? null), () => undefined);
   $('#upd-stop').onclick = async () => {
     $('#upd-stop').disabled = true;
     await api('/api/network/stop', { id: t.id }).catch(() => undefined);
@@ -252,8 +273,10 @@ app.openUpdate = transfer => {
     try {
       t = (await api('/api/network/transfers')).transfers.find(x => x.id === t.id) ?? t;
     } catch {
-      // the next half second asks again
+      // the next half second asks again; a pull starting this PC's new version: TOMLIN here is ending.
+      if (t.kind === 'pull' && t.stage === 'start') restartSeen();
     }
+    if (t.kind === 'pull' && t.state === 'done') restartSeen();
     const real = updAt(t);
     // A fault is said at the step it happened in, at once.
     if (t.state === 'failed' || t.state === 'stopped') shown = real;

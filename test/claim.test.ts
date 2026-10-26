@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NODE_PIN, freePort, link, nodeHome, startPc, transferEnd, unlock, until, type Pc } from './pcs.ts';
+import { NODE_PIN, codeIn, freePort, link, nodeHome, startPc, transferEnd, unlock, until, type Pc } from './pcs.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -90,7 +90,7 @@ test('A3 + A4: backup name and PIN on the backup PC, then a new PC gets the back
     // ---- A4, on a new PC ----
     const fresh = await startPc({ root: ROOT, home: join(top, 'new') });
     pcs.push(fresh);
-    const newPc = await link(fresh, workerPort);
+    const newPc = await link(fresh, workerPort, codeIn(nodeDir));
     assert.deepEqual((await fresh.get(`/api/network/backups?pc=${newPc}`)).body.backups, [], 'a new link starts with an empty folder');
     // The name is taken on that backup PC.
     const taken = await fresh.post('/api/network/owner', { pc: newPc, name: 'kid 1', pin: '9999', pin2: '9999' });
@@ -129,11 +129,13 @@ test('A3 + A4: backup name and PIN on the backup PC, then a new PC gets the back
     const end = await transferEnd(fresh, back.body.transfer.id);
     assert.equal(end.state, 'done', end.said);
     assert.equal(statSync(join(top, 'new', 'backups', listedNew[0].name)).size, listedNew[0].bytes);
+    // Noted as come back from another PC (audit X1): putting it back keeps this PC's PIN, sharing and link keys.
+    assert.ok(JSON.parse(readFileSync(join(top, 'new', 'backups', '.brought.json'), 'utf8')).includes(listedNew[0].name));
 
     // ---- A recovery code in place of the PIN; Don't allow; the code is used either way ----
     const third = await startPc({ root: ROOT, home: join(top, 'third') });
     pcs.push(third);
-    const thirdPc = await link(third, workerPort);
+    const thirdPc = await link(third, workerPort, codeIn(nodeDir));
     const byCode = await third.post('/api/network/claim', { pc: thirdPc, name: 'Kid 1', code: codes[4] });
     assert.equal(byCode.status, 200, JSON.stringify(byCode.body));
     const c2 = ((await node.get('/api/jobs/setup')).body.share.claims as { id: string }[])[0];

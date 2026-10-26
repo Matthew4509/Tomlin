@@ -9,6 +9,7 @@ import { Pane, type ConnectRequest } from './pane.ts';
 import type { Asked } from './worker.ts';
 import type { Store } from './store.ts';
 import { missingCardRunner, type Runtimes, type Device } from './runtimes.ts';
+import { pictureOffload } from './devices.ts';
 import type { HardwareInfo, Sampler } from './hardware.ts';
 import { Registry, type RegistryModel } from './registry.ts';
 import { Gallery, type Picture, type Shelf } from './gallery.ts';
@@ -90,6 +91,8 @@ export interface ImagesDeps {
   /** The main chat runner (only whether it is connected is read). */
   chatPane: Pick<Pane, 'view'>;
   devicesFor: (engine: 'llama' | 'sd', asked: Asked) => Device[];
+  /** The device the picture runner for `device` is held to (--backend), or null for its own pick. */
+  sdDevice?: (device: Device) => Promise<string | null>;
   fit: (bytes: number, pane: 'chat' | 'image') => { level: 'ok' | 'tight' | 'no'; need: number; free: number; otherOn: boolean };
 }
 
@@ -175,10 +178,10 @@ export class Images {
     return Math.max(this.registry.bytes(m), m.minRamGB * GB * 0.8);
   }
 
-  /** True when the model is bigger than the graphics card's own memory, so its weights must wait in RAM. */
+  /** True when the model is known to be bigger than the biggest graphics card's own memory, so its weights wait in RAM. */
   private overCard(m: RegistryModel): boolean {
-    const card = this.deps.hardware.gpus.find(g => !g.integrated && g.total);
-    return !card?.total || this.registry.bytes(m) > card.total * 0.85;
+    const card = this.deps.hardware.gpus.filter(g => !g.integrated && g.total).sort((a, b) => b.total! - a.total!)[0];
+    return pictureOffload(this.registry.bytes(m), card?.total ?? null);
   }
 
   /** Will this model run on this PC at all? (The free-memory check at Connect is separate.) */
@@ -201,9 +204,11 @@ export class Images {
     return { by, path };
   }
 
-  private args(m: RegistryModel, port: number, threads: number, decoder: Decoder, device: Device = 'cpu'): string[] {
+  private args(m: RegistryModel, port: number, threads: number, decoder: Decoder, device: Device = 'cpu', backend: string | null = null): string[] {
     const { path } = this.files(m);
     const args: string[] = [];
+    // The card it runs on, when the runner sees more than one graphics chip (src/devices.ts pickSdDevice).
+    if (backend) args.push('--backend', backend);
     if (path('model')) args.push('-m', path('model')!);
     if (path('diffusion')) args.push('--diffusion-model', path('diffusion')!);
     if (path('llm')) args.push('--llm', path('llm')!);
@@ -225,17 +230,22 @@ export class Images {
     await this.deps.store.saveSettings({ image: { model: id, asked, threads } });
     const s = await this.deps.store.settings();
     const decoder = this.decoder;
+    // The CUDA picture runner's own list first: one that lists no card is skipped by devicesFor.
+    if (!devices && asked !== 'cpu') await this.deps.sdDevice?.('cuda');
+    const tried = devices ?? this.deps.devicesFor('sd', asked);
+    const backends = new Map<Device, string | null>();
+    for (const d of tried) backends.set(d, d === 'cpu' ? null : ((await this.deps.sdDevice?.(d)) ?? null));
     const req: ConnectRequest = {
       model: id,
       modelName: m.name,
       asked,
       threads,
-      devices: devices ?? this.deps.devicesFor('sd', asked),
+      devices: tried,
       note: note ?? ((asked !== 'cpu' ? missingCardRunner('sd', this.deps.hardware.gpus, d => this.deps.runtimes.installed('sd', d)) : '') || undefined),
       expectedSeconds: s.loadSeconds[`image:${id}`] ?? Math.round(this.registry.bytes(m) / (200 * 2 ** 20)) + 4,
       build: device => ({
         exe: this.deps.runtimes.exe('sd', device)!,
-        args: port => this.args(m, port, threads, decoder, device),
+        args: port => this.args(m, port, threads, decoder, device, backends.get(device) ?? null),
         ready: async port => (await fetch(`http://127.0.0.1:${port}/sdcpp/v1/capabilities`)).ok,
         device,
         timeoutSeconds: 900,

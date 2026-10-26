@@ -8,6 +8,9 @@
 // one with other files: its build id differs), and nothing
 // starts while the node works for someone. Plain parts here, tested in test/update.test.ts; the doors are in
 // src/jobrun/copies.ts (the host sending) and src/jobrun/node.ts (the node taking it).
+// An update can also be pulled (26 Oct): the person at a PC takes a newer TOMLIN from a linked PC whose owner ticked
+// "Let linked PCs pull TOMLIN updates from here" (giveSide: its own app files only, read-only). The pulling PC runs the
+// same checks as for a push (updateSide's `here`, reached only from itself), without the tick or the PIN a push needs.
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -277,11 +280,22 @@ export interface UpdateNodeDeps {
   /** What this PC is doing for someone now (an answer, a picture, a copy), or null when nothing. */
   busy: () => string | null;
   freeBytes?: (dir: string) => Promise<number>;
-  /** The new copy is whole in `dir`: note who updated it, point "start with Windows" at it, write next-copy.txt, end. */
-  done: (dir: string, version: string, by: string) => Promise<void>;
+  /**
+   * The new copy is whole in `dir`: note who updated it (`pulled`: taken from that PC by someone here), point "start with
+   * Windows" at it, write next-copy.txt, end.
+   */
+  done: (dir: string, version: string, by: string, pulled?: boolean) => Promise<void>;
+  /**
+   * This PC's app lock PIN, typed on the PC sending an update (audit X2): checked, with wrong tries counted per link
+   * (`who`) apart from the lock screen's. Unset (tests of the copy itself): no PIN is asked.
+   */
+  pinCheck?: (pin: unknown, who: string) => Promise<{ ok: true } | { status: number; error: string }>;
 }
 
 const no = (status: number, error: string) => ({ status, json: { error } as Record<string, unknown> });
+
+/** Who an update pulled by this PC itself comes from, as `updateSide` keeps it: never a link's key (those are hex). */
+const HERE = 'this PC';
 
 /** An update's files while they come in, beside the app's copies (.shelby- before the TOMLIN name). */
 const INCOMING = /^\.(tomlin|shelby)-\d+\.\d+\.\d+-incoming$/;
@@ -304,7 +318,11 @@ export async function sweepIncoming(parent: string, keep: string, olderMs: numbe
   return gone;
 }
 
-/** The doors of a node for updates: /worker/update-offer, -put, -finish, -drop. */
+/**
+ * The doors of a node for updates: /worker/update-offer, -put, -finish, -drop. `here` takes the same steps for an
+ * update this PC pulls itself (pullUpdate): the tick and the PIN a push needs are not asked, since the person is at this
+ * PC; every check of the files is. The worker door never reaches `here`.
+ */
 export function updateSide(d: UpdateNodeDeps) {
   const room = d.freeBytes ?? freeBytes;
   const cache = new Map<string, { key: string; sha: string }>();
@@ -317,8 +335,8 @@ export function updateSide(d: UpdateNodeDeps) {
 
   // The same version is taken too when it is other files (both build ids known and different): the build id says what
   // code each copy is, so one number held by two apps no longer stops the update.
-  const why = (version: unknown, build?: unknown): string | null => {
-    if (!d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`;
+  const why = (version: unknown, build?: unknown, here = false): string | null => {
+    if (!here && !d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`;
     if (!d.restarts) return `TOMLIN on "${d.pcName()}" was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself. Install it there with Install TOMLIN.cmd (or start it with Start TOMLIN.cmd), then update it again.`;
     if (!isVersion(version)) return 'the update did not say its version.';
     if (newer(version, d.version)) return null;
@@ -334,12 +352,21 @@ export function updateSide(d: UpdateNodeDeps) {
     return current;
   };
 
-  const handle = async function handle(p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece?: Buffer): Promise<{ status: number; json: Record<string, unknown> }> {
+  const door = async (p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece: Buffer | undefined, here: boolean): Promise<{ status: number; json: Record<string, unknown> }> => {
     switch (p) {
+      case '/worker/update-pin': {
+        // The sending page's quick check, so a wrong PIN is said at once (the offer checks it again).
+        const ok = d.pinCheck ? await d.pinCheck(b.appPin, who.key) : { ok: true as const };
+        return 'error' in ok ? { status: ok.status, json: { error: `"${d.pcName()}" ${ok.error}.`, needPin: true } } : { status: 200, json: { ok: true } };
+      }
       case '/worker/update-offer': {
-        const refused = why(b.version, b.build);
+        const refused = why(b.version, b.build, here);
         if (refused) return no(403, refused);
-        if (current && current.from !== who.key && Date.now() - current.at < 10 * 60_000) return no(409, `another PC is updating "${d.pcName()}" now.`);
+        if (d.pinCheck && !here) {
+          const ok = await d.pinCheck(b.appPin, who.key);
+          if ('error' in ok) return { status: ok.status, json: { error: `"${d.pcName()}" ${ok.error}.`, needPin: true } };
+        }
+        if (current && current.from !== who.key && Date.now() - current.at < 10 * 60_000) return no(409, current.from === HERE ? `"${d.pcName()}" is taking an update from "${current.fromName}" now.` : `another PC is updating "${d.pcName()}" now.`);
         const files = cleanManifest(b.files);
         if (typeof files === 'string') return no(400, files);
         // The build named must be the files listed: else the new copy would be another build than the one sent.
@@ -370,7 +397,7 @@ export function updateSide(d: UpdateNodeDeps) {
       case '/worker/update-put': {
         const c = mine(b, who.key);
         if (!c) return no(409, 'that update is not the one coming in here now: start it again.');
-        if (!d.allowed()) return no(403, why(b.version, c.build)!);
+        if (!here && !d.allowed()) return no(403, why(b.version, c.build)!);
         const f = c.files[Number(b.file)];
         if (!f || !piece) return no(400, 'that piece is not part of the update.');
         const dest = join(c.staging, ...f.path.split('/'));
@@ -392,7 +419,7 @@ export function updateSide(d: UpdateNodeDeps) {
       case '/worker/update-finish': {
         const c = mine(b, who.key);
         if (!c) return no(409, 'that update is not the one coming in here now: start it again.');
-        const refused = why(b.version, c.build);
+        const refused = why(b.version, c.build, here);
         if (refused) return no(403, refused);
         const busy = d.busy();
         if (busy) return { status: 200, json: { busy } };
@@ -435,7 +462,7 @@ export function updateSide(d: UpdateNodeDeps) {
         const version = c.version;
         current = null;
         starting = { version, fromName: who.name };
-        await d.done(final, version, who.name);
+        await d.done(final, version, who.name, here);
         return { status: 200, json: { done: true, folder: basename(final) } };
       }
       case '/worker/update-drop': {
@@ -457,7 +484,64 @@ export function updateSide(d: UpdateNodeDeps) {
   const incoming = (now = Date.now()): { version: string; from: string; starting: boolean } | null =>
     starting ? { version: starting.version, from: starting.fromName, starting: true }
       : current && now - current.at < 2 * 60_000 ? { version: current.version, from: current.fromName, starting: false } : null;
-  return Object.assign(handle, { incoming, swept });
+  const handle = (p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece?: Buffer) => door(p, b, who, piece, false);
+  /** An update this PC pulls from the linked PC named `from` (pullUpdate), never asked for over the link. */
+  const here = (p: string, b: Record<string, unknown>, from: string, piece?: Buffer) => door(p, b, { key: HERE, name: from }, piece, true);
+  return Object.assign(handle, { incoming, swept, here });
+}
+
+// ---- The side of a PC that lets linked PCs pull its TOMLIN ----
+
+export const GIVE_TICK = 'Let linked PCs pull TOMLIN updates from here';
+export const giveRefused = (name: string) => `"${name}" does not let linked PCs pull TOMLIN updates from it (its owner ticks "${GIVE_TICK}" under Network)`;
+
+export interface GiveDeps {
+  /** This copy's app folder and version, as it started. */
+  root: string;
+  version: string;
+  /** This copy's build id, read at start ('' until then). */
+  build: () => string;
+  /** Its owner ticked "Let linked PCs pull TOMLIN updates from here". */
+  allowed: () => boolean;
+  pcName: () => string;
+}
+
+/**
+ * The doors a linked PC pulls this PC's TOMLIN through: /worker/update-list (its version, build and app files) and
+ * /worker/update-get (a piece of one of them). Only the files of the list it gave (the release zip's: PARTS without
+ * SKIP), looked up by their exact path, so nothing else (data, models, settings, keys) can be named; nothing is written;
+ * only while its folder still holds the copy that runs.
+ */
+export function giveSide(d: GiveDeps) {
+  const cache = new Map<string, { key: string; sha: string }>();
+  /** The list given last, which the pieces are asked from. */
+  let listed: { version: string; build: string; files: Map<string, AppFile> } | null = null;
+  return async function give(p: string, b: Record<string, unknown>): Promise<{ status: number; json: Record<string, unknown> } | { status: 200; piece: Buffer }> {
+    const name = d.pcName();
+    if (!d.allowed()) return no(403, `${giveRefused(name)}.`);
+    switch (p) {
+      case '/worker/update-list': {
+        const own = d.build();
+        if (!isBuild(own)) return no(409, `"${name}" is still reading its own files after starting, so it cannot give them yet. Try again in a minute.`);
+        const onDisk = await versionIn(d.root);
+        if (onDisk !== d.version) return no(409, `"${name}" runs TOMLIN ${d.version}, but its folder now holds ${onDisk || 'no TOMLIN'}: its owner can close TOMLIN there and start it again, then try again.`);
+        const files = (await appFiles(d.root, cache)).map(({ path, bytes, sha }) => ({ path, bytes, sha }));
+        if (buildIdOf(files) !== own) return no(409, `"${name}" cannot give its TOMLIN now: its folder changed after TOMLIN started there (its files are no longer build ${shortBuild(own)}, the one that runs). Its owner can close TOMLIN there and start it again, then try again.`);
+        listed = { version: d.version, build: own, files: new Map(files.map(f => [f.path, f])) };
+        return { status: 200, json: { version: d.version, build: own, files } };
+      }
+      case '/worker/update-get': {
+        const f = listed && typeof b.path === 'string' ? listed.files.get(b.path) : undefined;
+        if (!listed || !f) return no(404, `that file is not part of the TOMLIN "${name}" gives.`);
+        if (b.version !== listed.version || b.build !== listed.build || listed.build !== d.build()) return no(409, `"${name}" gives another TOMLIN now than the list this PC has: start the update again.`);
+        const from = Number(b.from);
+        if (!Number.isSafeInteger(from) || from < 0 || from >= f.bytes) return no(400, 'that piece is not part of the file.');
+        return { status: 200, piece: await readPiece(join(d.root, ...f.path.split('/')), from) };
+      }
+      default:
+        return no(404, 'this PC does not know that door.');
+    }
+  };
 }
 
 // ---- The host's side ----
@@ -480,13 +564,13 @@ export function updateWhy(pc: { name: string; ok: boolean; version: string; buil
  * Sends this copy to a linked PC: the list, then only the files it does not have, then "finish". While that PC works
  * for someone it is asked again every 10 seconds (up to 15 minutes). Gives the new folder's name there.
  */
-export async function pushUpdate(w: Wire, o: { version: string; root: string; files: AppFile[]; progress: (p: Partial<Progress> & { stage?: 'compare' | 'send' | 'start' }) => void; signal: AbortSignal; waiting?: (busy: string) => void; wait?: (ms: number) => Promise<void> }): Promise<string> {
+export async function pushUpdate(w: Wire, o: { version: string; root: string; files: AppFile[]; /** That PC's app lock PIN (one that asks it: audit X2). */ pin?: string; progress: (p: Partial<Progress> & { stage?: 'compare' | 'send' | 'start' }) => void; signal: AbortSignal; waiting?: (busy: string) => void; wait?: (ms: number) => Promise<void>; /** Where a piece comes from (a pull: the PC it is pulled from); else read from `root`. */ read?: (f: AppFile, at: number) => Promise<Buffer> }): Promise<string> {
   const wait = o.wait ?? (ms => new Promise(r => setTimeout(r, ms)));
   o.progress({ stage: 'compare' });
   // The build id of exactly these files: a node at the same version takes them when its own build differs (an older
   // node ignores it and goes by the version, as before).
   const build = buildIdOf(o.files);
-  const offer = await w.ask('/worker/update-offer', { version: o.version, build, files: o.files.map(({ path, bytes, sha }) => ({ path, bytes, sha })) });
+  const offer = await w.ask('/worker/update-offer', { version: o.version, build, files: o.files.map(({ path, bytes, sha }) => ({ path, bytes, sha })), ...(o.pin !== undefined ? { appPin: o.pin } : {}) });
   const need = (Array.isArray(offer.need) ? offer.need : []).map(Number);
   const at0 = (Array.isArray(offer.at) ? offer.at : []).map(Number);
   const bytes = need.reduce((n, k) => n + (o.files[k]?.bytes ?? 0), 0);
@@ -502,7 +586,7 @@ export async function pushUpdate(w: Wire, o: { version: string; root: string; fi
     for (let at = Math.max(0, Math.min(at0[j] || 0, f.bytes)); at < f.bytes;) {
       if (o.signal.aborted) await stop();
       o.progress({ done: before + at, bytes });
-      const r = await w.putPiece('/worker/update-put', { version: o.version, file: k, from: at }, await readPiece(join(o.root, ...(f.from ?? f.path).split('/')), at));
+      const r = await w.putPiece('/worker/update-put', { version: o.version, file: k, from: at }, await (o.read ? o.read(f, at) : readPiece(join(o.root, ...(f.from ?? f.path).split('/')), at)));
       at = Number(r.at);
       if (!Number.isSafeInteger(at) || at < 0) throw new Error('that PC did not say how much it has.');
     }
@@ -518,6 +602,62 @@ export async function pushUpdate(w: Wire, o: { version: string; root: string; fi
     o.waiting?.(r.busy);
     await wait(10_000);
   }
+}
+
+// ---- Pulling an update: this PC's side ----
+
+/** updateSide's `here`, bound to the PC pulled from. */
+export type Here = (p: string, b: Record<string, unknown>, piece?: Buffer) => Promise<{ status: number; json: Record<string, unknown> }>;
+
+/**
+ * Takes a linked PC's TOMLIN into this PC: its list (checked as a push's is), then the steps of a push run here (`here`:
+ * offer, each missing piece fetched from that PC and put, finish), so this PC builds and checks the new copy itself and
+ * starts it as a pushed one. Gives the version, build and new folder.
+ */
+export async function pullUpdate(w: Wire, here: Here, o: { progress: (p: Partial<Progress> & { stage?: 'compare' | 'send' | 'start' }) => void; signal: AbortSignal; waiting?: (busy: string) => void; wait?: (ms: number) => Promise<void> }): Promise<{ version: string; build: string; folder: string }> {
+  o.progress({ stage: 'compare' });
+  const list = await w.ask('/worker/update-list', {});
+  const version = list.version;
+  if (!isVersion(version)) throw new Error('that PC did not say what version of TOMLIN it gives, so nothing was taken.');
+  const build = list.build;
+  if (!isBuild(build)) throw new Error('that PC did not say what build its files are, so nothing was taken.');
+  const files = cleanManifest(list.files);
+  if (typeof files === 'string') throw new Error(files);
+  if (buildIdOf(files) !== build) throw new Error(`the list of files that PC sent is not build ${shortBuild(build)} as it said, so nothing was taken. Try again; if it says so again, close TOMLIN there and start it again.`);
+  const local: Wire = {
+    async ask(p, b) {
+      const a = await here(p, b);
+      if (a.status !== 200) throw new Error(String(a.json.error ?? `this PC answered ${a.status}`));
+      return a.json;
+    },
+    async putPiece(p, b, piece) {
+      const a = await here(p, b, piece);
+      // Out of place (a piece already in): it says where it is, as over the link.
+      if (a.status === 409 && typeof a.json.at === 'number') return a.json;
+      if (a.status !== 200) throw new Error(String(a.json.error ?? `this PC answered ${a.status}`));
+      return a.json;
+    },
+    async getPiece() {
+      throw new Error('a pull takes its pieces from the PC it pulls from.');
+    },
+  };
+  const folder = await pushUpdate(local, { version, root: '', files, progress: o.progress, signal: o.signal, waiting: o.waiting, wait: o.wait, read: (f, at) => w.getPiece('/worker/update-get', { version, build, path: f.path, from: at }) });
+  return { version, build, folder };
+}
+
+/**
+ * Why this PC cannot pull a linked PC's TOMLIN now ('' when it can; null when that PC is not ahead of this one: a higher
+ * version, or the same version with other files).
+ */
+export function pullWhy(pc: { name: string; ok: boolean; version: string; build?: string; away: string | null; can: string[]; allowGive: boolean }, mine: string, mineBuild: string, restartsHere: boolean): string | null {
+  const ahead = !!pc.version && !!standing({ version: mine, build: mineBuild }, pc.version, pc.build ?? '');
+  if (!pc.ok) return ahead ? `"${pc.name}" is off or not answering now` : null;
+  if (!ahead) return null;
+  if (!pc.can.includes('give')) return `"${pc.name}" runs TOMLIN ${pc.version} without the way to give updates to other PCs: update this PC from there instead (Update it there, on its Network page)`;
+  if (pc.away) return `"${pc.name}" is being used by its owner for now`;
+  if (!pc.allowGive) return `"${pc.name}" does not let linked PCs pull TOMLIN updates from it (its owner can tick "${GIVE_TICK}" there)`;
+  if (!restartsHere) return 'TOMLIN on this PC was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself';
+  return '';
 }
 
 // ---- A TOMLIN zip uploaded on this PC ----

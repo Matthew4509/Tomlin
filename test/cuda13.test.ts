@@ -75,7 +75,10 @@ test('how each build runs on a card: code made for it, compiled at the first sta
   assert.equal(codeFor(C13, 120), 'native');
   assert.equal(codeFor(C13, 121), 'native');
   assert.equal(codeFor(C13, null), 'unknown');
-  assert.equal(codeFor(PINS['sd-cuda'], 61), 'unknown');
+  // A pin with no code list: not known. The picture runner has one since 26 Oct (read from its ggml-cuda.dll).
+  assert.equal(codeFor({ ...PINS['sd-cuda'], cuda: undefined }, 61), 'unknown');
+  assert.equal(codeFor(PINS['sd-cuda'], 61), 'native');
+  assert.equal(codeFor(PINS['sd-cuda'], 52), 'none');
 });
 
 test('why a PC cannot use a build: no NVIDIA card, a card it has no code for (naming the one that works), a driver too old for its code', () => {
@@ -93,9 +96,13 @@ test('why a PC cannot use a build: no NVIDIA card, a card it has no code for (na
   assert.equal(pinWhy(C13, [RTX5080], null), '');
   // A card whose level is not known: usable, but only with the driver that can compile the build's PTX.
   assert.match(pinWhy(C13, [nv('NVIDIA Mystery 9000', null)], '581.57'), /needs 615 or newer/);
-  // A pin with no code list (the picture runner) keeps the CUDA 12 rule.
+  // A pin with no code list keeps the CUDA 12 rule.
+  const noList = { ...PINS['sd-cuda'], cuda: undefined };
+  assert.equal(pinWhy(noList, [GTX1060], '581.57'), '');
+  assert.match(pinWhy(noList, [GTX1060], '536.23'), /needs 551\.61 or newer/);
+  // The picture runner's own list: CUDA 12.8 Update 1, so 572.61.
   assert.equal(pinWhy(PINS['sd-cuda'], [GTX1060], '581.57'), '');
-  assert.match(pinWhy(PINS['sd-cuda'], [GTX1060], '536.23'), /needs 551\.61 or newer/);
+  assert.match(pinWhy(PINS['sd-cuda'], [GTX1060], '536.23'), /the CUDA 12\.8 runner needs 572\.61 or newer/);
 });
 
 test('the order Auto tries the CUDA builds in: code made for the biggest card first, then the older build; one a PC cannot use is left out', () => {

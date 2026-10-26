@@ -169,7 +169,10 @@ export interface ShareState {
   name: string;
   /** This PC's own id (made once, kept; not secret): a PC that links again finds the same chats with its staff. */
   id: string;
-  /** This PC's setup code (made once, kept): a PC that wants to link with this one must type it. */
+  /**
+   * This PC's setup code: a PC that wants to link with this one must type it. A new one is made after every link
+   * (audit X4: someone who once saw it on the screen could link later, unseen).
+   */
   code: string;
   /** Whether a PIN is asked for as well as the setup code (off by default). */
   pinOn: boolean;
@@ -185,8 +188,10 @@ export interface ShareState {
   allow?: Allow;
   /** Max mode: minutes with nobody using this PC before it lends its card memory (src/maxlend.ts; 5 unless changed). */
   lendIdle?: number;
-  /** The last update a linked PC pushed here (src/update.ts): to which version, by whom, when. */
-  updated?: { version: string; by: string; at: string } | null;
+  /** The last update a linked PC pushed here (src/update.ts): to which version, by whom, when; `pulled`: taken from that PC by someone here. */
+  updated?: { version: string; by: string; at: string; pulled?: boolean } | null;
+  /** The last PC that linked here: shown on the Network page with the new setup code; `dropped`: the oldest link it pushed out (10 at most). */
+  lastLinked?: { name: string; at: string; dropped?: string } | null;
 }
 
 export const DEFAULT_SHARE: ShareState = { on: false, port: 8741, name: 'Worker PC', id: '', code: '', pinOn: false, pin: '', paired: [], models: [] };

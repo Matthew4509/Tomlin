@@ -6,6 +6,7 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { cpus, freemem, totalmem } from 'node:os';
 import { promisify } from 'node:util';
+import { builtIn } from './devices.ts';
 import { ccFromName, ccNumber } from './runtimes.ts';
 
 const run = promisify(execFile);
@@ -133,53 +134,104 @@ function vendorOf(name: string): Gpu['vendor'] {
   return 'other';
 }
 
+/**
+ * The graphics chips, from readHardware's PowerShell lines ("GPU|name|AdapterRAM|qwMemorySize") and nvidia-smi.
+ * AdapterRAM is 32-bit: every card of 4 GB or more reads 4 GB (or 0, when the size wraps). The registry's
+ * HardwareInformation.qwMemorySize, read from each present device's own driver key (so a card taken out, whose key stays,
+ * never counts), holds the true size for every make; it is believed when larger. An NVIDIA card then takes nvidia-smi's
+ * figure, else the size in its name. A chip built into the processor (devices.ts builtIn) has no memory of its own.
+ */
+export function gpusFrom(cim: string, smi: SmiRow[], caps: (number | null)[]): Gpu[] {
+  const gpus: Gpu[] = [];
+  for (const line of cim.split(/\r?\n/)) {
+    const [kind, name, adapterRam, registry] = line.trim().split('|');
+    if (kind !== 'GPU' || !name || /basic display|basic render|remote display|virtual/i.test(name)) continue;
+    const adapter = Number(adapterRam) > 0 ? Number(adapterRam) : null;
+    const reg = Number(registry) > 0 ? Number(registry) : null;
+    gpus.push({ name, vendor: vendorOf(name), total: reg !== null && reg > (adapter ?? 0) ? reg : adapter, integrated: builtIn(name) });
+  }
+  // Each card once: two cards of the same make have the same name, so a card already matched is not matched again.
+  const matched = new Set<Gpu>();
+  const windowsListed = new Set(gpus);
+  for (const [k, g] of smi.entries()) {
+    const known = gpus.find(x => x.vendor === 'nvidia' && !matched.has(x) && (x.name.includes(g.name) || g.name.includes(x.name)));
+    if (known) matched.add(known);
+    const cc = caps.length === smi.length ? caps[k] : null;
+    if (known) {
+      // "[N/A]" (a TCC or MIG card): what Windows said stands.
+      known.total = g.total ?? known.total;
+      known.cc = cc;
+    } else gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false, cc });
+  }
+  // nvidia-smi answered but did not list a card Windows lists (Code 43, a card the driver gave up on): the runners
+  // cannot use it either, so it is not a card here (audit C11).
+  if (smi.length) for (const g of [...gpus]) if (g.vendor === 'nvidia' && windowsListed.has(g) && !matched.has(g)) gpus.splice(gpus.indexOf(g), 1);
+  // No nvidia-smi answered: a 4 GB-capped report is checked against the size in its name.
+  for (const g of gpus) if (g.vendor === 'nvidia' && !matched.has(g)) g.total = totalFromName(g.name, g.total);
+  for (const g of gpus) if (g.vendor === 'nvidia') g.cc = g.cc ?? ccFromName(g.name);
+  for (const g of gpus) if (g.integrated) g.total = null;
+  return gpus;
+}
+
+/** The processor's cores, and each graphics chip with its registry memory size from its own driver key (see gpusFrom). */
+const VIDEO_PS = [
+  'Get-CimInstance Win32_Processor | % { "CPU|$($_.NumberOfCores)" }',
+  'Get-CimInstance Win32_VideoController | % { $m = ""; try { $d = (Get-ItemProperty -LiteralPath "HKLM:\\SYSTEM\\CurrentControlSet\\Enum\\$($_.PNPDeviceID)" -Name Driver -ErrorAction Stop).Driver; '
+    + 'if ($d) { $p = Get-ItemProperty -LiteralPath "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\$d" -ErrorAction Stop; $m = $p."HardwareInformation.qwMemorySize"; '
+    + 'if (-not $m) { $b = $p."HardwareInformation.MemorySize"; if ($b -is [byte[]]) { $m = [BitConverter]::ToUInt32($b, 0) } else { $m = $b } } } } catch {}; "GPU|$($_.Name)|$($_.AdapterRAM)|$m" }',
+].join('; ');
+
+/** What Windows listed at start, kept to read the cards again when nvidia-smi answers late (SmiReader.takeBack). */
+let lastCim = '';
+
 /** Read once at start: the processor, RAM and graphics chips. */
 export async function readHardware(): Promise<HardwareInfo> {
   const list = cpus();
   const info: HardwareInfo = { cpuName: list[0]?.model.trim() ?? 'Processor', cores: Math.max(1, Math.round(list.length / 2)), threads: list.length, ram: totalmem(), gpus: [] };
   if (process.platform !== 'win32') return info;
+  let cim = '';
   try {
-    const ps = 'Get-CimInstance Win32_Processor | % { "CPU|$($_.NumberOfCores)" }; Get-CimInstance Win32_VideoController | % { "GPU|$($_.Name)|$($_.AdapterRAM)" }';
-    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, timeout: 20_000 });
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', VIDEO_PS], { windowsHide: true, timeout: 20_000 });
+    cim = stdout;
     let cores = 0;
     for (const line of stdout.split(/\r?\n/)) {
-      const [kind, a, b] = line.trim().split('|');
+      const [kind, a] = line.trim().split('|');
       if (kind === 'CPU') cores += Number(a) || 0;
-      if (kind === 'GPU' && a && !/basic display|basic render|remote display|virtual/i.test(a)) {
-        const vendor = vendorOf(a);
-        info.gpus.push({ name: a, vendor, total: Number(b) > 0 ? Number(b) : null, integrated: vendor === 'intel' && !/arc/i.test(a) });
-      }
     }
     if (cores) info.cores = cores;
   } catch {
     // keep the guesses from os.cpus()
   }
-  // AdapterRAM stops at 4 GB, so an NVIDIA card's real total comes from nvidia-smi.
-  // Each card once: two cards of the same make have the same name, so a card already matched is not matched again.
-  const matched = new Set<Gpu>();
-  const smi = await nvidiaCards();
-  const caps = smi.length ? await nvidiaCaps() : [];
-  info.nvidiaDriver = smi.find(g => g.driver)?.driver ?? null;
-  for (const [k, g] of smi.entries()) {
-    const known = info.gpus.find(x => x.vendor === 'nvidia' && !matched.has(x) && (x.name.includes(g.name) || g.name.includes(x.name)));
-    if (known) matched.add(known);
-    const cc = caps.length === smi.length ? caps[k] : null;
-    if (known) {
-      known.total = g.total;
-      known.cc = cc;
-    } else info.gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false, cc });
-  }
-  // No nvidia-smi answered for a card: its 4 GB-capped report is checked against the size in its name.
-  for (const g of info.gpus) if (g.vendor === 'nvidia' && !matched.has(g)) g.total = totalFromName(g.name, g.total);
-  for (const g of info.gpus) if (g.vendor === 'nvidia') g.cc = g.cc ?? ccFromName(g.name);
-  for (const g of info.gpus) if (g.integrated) g.total = null;
+  lastCim = cim;
+  const rows = await smi.rows();
+  const caps = rows.length ? await smi.caps() : [];
+  info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
+  info.gpus = gpusFrom(cim, rows, caps);
   return info;
 }
 
-/** The NVIDIA cards as one: how many, their memory added up. Null when nvidia-smi gave nothing. */
-export function cardsTogether(cards: Array<{ total: number; used: number }>): { count: number; total: number; used: number } | null {
-  if (!cards.length) return null;
-  return { count: cards.length, total: cards.reduce((a, c) => a + c.total, 0), used: cards.reduce((a, c) => a + c.used, 0) };
+/** The NVIDIA cards as one: how many, their memory added up. Null when nvidia-smi gave nothing (or only "[N/A]"). */
+export function cardsTogether(cards: Array<{ total: number | null; used: number | null }>): { count: number; total: number; used: number } | null {
+  const read = cards.filter((c): c is { total: number; used: number | null } => c.total !== null);
+  if (!read.length) return null;
+  return { count: read.length, total: read.reduce((a, c) => a + c.total, 0), used: read.reduce((a, c) => a + (c.used ?? 0), 0) };
+}
+
+/**
+ * `fn`, never running twice at once: a call while one is still running is skipped. The once-a-second reading waits on
+ * nvidia-smi and tasklist (10 s each at worst), so overlapping ticks would pile up processes.
+ */
+export function oneAtATime(fn: () => Promise<void>): () => Promise<void> {
+  let running = false;
+  return async () => {
+    if (running) return;
+    running = true;
+    try {
+      await fn();
+    } finally {
+      running = false;
+    }
+  };
 }
 
 /** The NVIDIA cards' name as one: "RTX 3060", "2 × RTX 3060", or each by name when they differ ("RTX 3090 + GTX 1060"). */
@@ -189,46 +241,89 @@ export function cardsName(cards: Array<{ name: string }>): string {
   return [...count].map(([name, n]) => (n > 1 ? `${n} × ${name}` : name)).join(' + ');
 }
 
-/** The nvidia-smi that answered (one of NVIDIA_SMI); null once none did, so the once-a-second reading stops asking. */
-let smiAt: string | null | undefined;
+
+/** One card as nvidia-smi gives it: memory in bytes, null when it says "[N/A]" (a TCC or MIG card). */
+export interface SmiRow {
+  name: string;
+  total: number | null;
+  used: number | null;
+  driver: string | null;
+}
 
 /** nvidia-smi's answer to the query below: each card's name, memory (MB there, bytes here) and the driver's version. */
-export function smiRows(stdout: string): Array<{ name: string; total: number; used: number; driver: string | null }> {
+export function smiRows(stdout: string): SmiRow[] {
+  const mb = (s: string | undefined) => (/^\d+(\.\d+)?$/.test(s ?? '') ? Number(s) * 2 ** 20 : null);
   return stdout.split(/\r?\n/).filter(Boolean).map(l => {
     const [name, total, used, driver] = l.split(',').map(s => s.trim());
-    return { name, total: Number(total) * 2 ** 20, used: Number(used) * 2 ** 20, driver: /^\d+(\.\d+)+$/.test(driver ?? '') ? driver : null };
+    return { name, total: mb(total), used: mb(used), driver: /^\d+(\.\d+)+$/.test(driver ?? '') ? driver : null };
   });
 }
 
-async function nvidiaCards(): Promise<Array<{ name: string; total: number; used: number; driver: string | null }>> {
-  if (smiAt === null) return [];
-  for (const exe of smiAt ? [smiAt] : NVIDIA_SMI) {
-    try {
-      const { stdout } = await run(exe, ['--query-gpu=name,memory.total,memory.used,driver_version', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 10_000 });
-      smiAt = exe;
-      return smiRows(stdout);
-    } catch {
-      // the next place, if any
-    }
-  }
-  // Searched every place and none answered: no NVIDIA card, or no driver tool. One that worked before may answer again.
-  if (smiAt === undefined) smiAt = null;
-  return [];
-}
+/** How long nvidia-smi is left alone after no place answered (an Optimus card asleep, an antivirus holding it). */
+export const SMI_RETRY = 60_000;
 
 /**
- * Each NVIDIA card's sm level, in nvidia-smi's order, asked on its own: a driver too old to know compute_cap refuses the
- * whole question, and the memory reading must not go with it. [] when it cannot say.
+ * nvidia-smi: found once (one of `places`), then asked every second. When no place answers it is asked again once a
+ * minute rather than never (audit C5: one slow answer at start meant no NVIDIA readings all session), and takeBack()
+ * says once that it answered after not answering, so the cards are read again.
  */
-async function nvidiaCaps(): Promise<(number | null)[]> {
-  if (!smiAt) return [];
-  try {
-    const { stdout } = await run(smiAt, ['--query-gpu=compute_cap', '--format=csv,noheader'], { windowsHide: true, timeout: 10_000 });
-    return stdout.split(/\r?\n/).filter(l => l.trim()).map(ccNumber);
-  } catch {
+export class SmiReader {
+  /** The place that answered; null while none has. */
+  at: string | null = null;
+  private failedAt: number | null = null;
+  private back = false;
+  private ask: (exe: string, args: string[]) => Promise<string>;
+  private now: () => number;
+  private places: string[];
+  constructor(
+    ask: (exe: string, args: string[]) => Promise<string> = async (exe, args) => (await run(exe, args, { windowsHide: true, timeout: 10_000 })).stdout,
+    now: () => number = Date.now,
+    places: string[] = NVIDIA_SMI,
+  ) {
+    this.ask = ask;
+    this.now = now;
+    this.places = places;
+  }
+
+  async rows(): Promise<SmiRow[]> {
+    if (this.at === null && this.failedAt !== null && this.now() - this.failedAt < SMI_RETRY) return [];
+    for (const exe of this.at ? [this.at] : this.places) {
+      try {
+        const out = await this.ask(exe, ['--query-gpu=name,memory.total,memory.used,driver_version', '--format=csv,noheader,nounits']);
+        if (this.at === null && this.failedAt !== null) this.back = true;
+        this.at = exe;
+        this.failedAt = null;
+        return smiRows(out);
+      } catch {
+        // the next place, if any
+      }
+    }
+    // No place answered: no NVIDIA card, no driver tool, or one too slow now. One that worked before may answer again.
+    if (this.at === null) this.failedAt = this.now();
     return [];
   }
+
+  /** True once after nvidia-smi answers having not answered before. */
+  takeBack(): boolean {
+    const was = this.back;
+    this.back = false;
+    return was;
+  }
+
+  /**
+   * Each NVIDIA card's sm level, in nvidia-smi's order, asked on its own: a driver too old to know compute_cap refuses
+   * the whole question, and the memory reading must not go with it. [] when it cannot say.
+   */
+  async caps(): Promise<(number | null)[]> {
+    if (!this.at) return [];
+    try {
+      return (await this.ask(this.at, ['--query-gpu=compute_cap', '--format=csv,noheader'])).split(/\r?\n/).filter(l => l.trim()).map(ccNumber);
+    } catch {
+      return [];
+    }
+  }
 }
+const smi = new SmiReader();
 
 /** The last good reading per process: on a busy PC tasklist can time out, and a loaded model then read as 0 MB. */
 const lastRam = new Map<number, number>();
@@ -308,7 +403,8 @@ export class Sampler {
 
   start(): void {
     this.restartCounters();
-    this.timer = setInterval(() => void this.tick(), 1000);
+    const tick = oneAtATime(() => this.tick());
+    this.timer = setInterval(() => void tick(), 1000);
     this.timer.unref();
     process.on('exit', () => {
       this.typeperf?.kill();
@@ -391,7 +487,12 @@ export class Sampler {
       const since = Date.now() - this.countersStarted;
       if (this.nvidia && card.vendor === 'nvidia') {
         // Every NVIDIA card together: a model is split across them, so what fits is what all of them hold.
-        const rows = await nvidiaCards();
+        const rows = await smi.rows();
+        if (smi.takeBack()) {
+          // nvidia-smi answered late: the cards' true memory, sm level and the driver, read again in place.
+          this.info.gpus.splice(0, Infinity, ...gpusFrom(lastCim, rows, await smi.caps()));
+          this.info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
+        }
         const all = cardsTogether(rows);
         const unread = unreadOf(adapters.size, since, !!all);
         gpu = { name: all ? cardsName(rows) || card.name : card.name, used: all?.used ?? 0, total: all?.total ?? card.total, shared: false, ...work, ...(unread ? { unread } : {}) };

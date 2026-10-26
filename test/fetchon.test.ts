@@ -63,6 +63,8 @@ test('two PCs: Download to a linked PC runs on that PC (no push tick needed) and
       assert.equal(get.status, 409, JSON.stringify(get.body));
     }
     assert.equal((await host.post('/api/runtimes/get', { id: 'llama-cpu' })).status, 400);
+    // A Vulkan runner can be downloaded from the page, but only the NVIDIA ones are taken away from here.
+    assert.equal((await host.post('/api/runtimes/remove', { id: 'llama-vulkan' })).status, 400);
 
     // Kept for backups only: refused here, with the reason, and nothing is started.
     const off = await host.post('/api/remotes', { action: 'backups-only', id: pc, on: true });

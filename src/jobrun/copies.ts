@@ -9,12 +9,13 @@ import * as update from '../update.ts';
 import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
 import * as pb from '../projectbackup.ts';
-import { broughtBackWhy, recordSent } from '../keep.ts';
+import { broughtBackWhy, recordBrought, recordSent } from '../keep.ts';
 import { cleanPin, hashSecret } from '../lock.ts';
 import { cleanBackupName, NUDGE_CHECKS } from '../owner.ts';
 import type { Remote } from '../store.ts';
 import { d, sleep } from './shared.ts';
 import { hello, onHomeNetwork, remoteStatus } from './links.ts';
+import { pullHere } from './node.ts';
 import type { Hello } from '../jobrun.ts';
 
 // ---- Copies between linked PCs (src/carry.ts): this PC's side ----
@@ -351,6 +352,19 @@ export async function updatePc(b: Record<string, unknown>) {
   const onDisk = await update.versionIn(d.update.root);
   if (onDisk && onDisk !== d.version) return { status: 409, body: { error: `This PC runs TOMLIN ${d.version}, but its folder now holds ${onDisk}: it changed after TOMLIN started here, so the files would not match the version sent. Close TOMLIN on this PC and start it again, then press Update it.` } };
   const w = wireFor(r);
+  // That PC asks its own app lock PIN for an update (audit X2): typed on this page, checked there at once, so a wrong
+  // one is said before anything starts. An older PC asks none.
+  const asksPin = Array.isArray(h.can) && h.can.includes('update-pin');
+  const pin = typeof b.nodePin === 'string' ? b.nodePin : '';
+  if (asksPin) {
+    if (!pin) return { status: 409, body: { error: `Type the app lock PIN of "${r.name}" (the one that opens TOMLIN there) to update it.`, needNodePin: true } };
+    try {
+      await w.ask('/worker/update-pin', { appPin: pin });
+    } catch (e) {
+      // Its own words (they name it); the wire's message when it said none (not reached, an older answer).
+      return { status: 403, body: { error: (e as { said?: string }).said || (e as Error).message, needNodePin: true } };
+    }
+  }
   const t = transfers.start({ kind: 'update', what: `TOMLIN ${d.version}`, pc: r.id, pcName: r.name }, async (progress, signal) => {
     const files = await update.appFiles(d.update.root, ownHashes);
     // What is sent is what this copy runs: its build id, read at start, must still be its folder's (else the PC there
@@ -359,7 +373,7 @@ export async function updatePc(b: Record<string, unknown>) {
     const mine = d.build();
     if (mine && sent !== mine) throw new Error(`this PC's folder changed after TOMLIN started here (its files are no longer build ${update.shortBuild(mine)}, the one that runs), so nothing was sent. Close TOMLIN on this PC and start it again, then press Update it.`);
     const before = h.up?.since ?? null;
-    const push = (list: update.AppFile[]) => update.pushUpdate(w, { version: d.version, root: d.update.root, files: list, progress, signal, waiting: busy => progress({ wait: busy }) });
+    const push = (list: update.AppFile[]) => update.pushUpdate(w, { version: d.version, root: d.update.root, files: list, ...(asksPin ? { pin } : {}), progress, signal, waiting: busy => progress({ wait: busy }) });
     // An older PC refuses a copy that names a file it does not know (nothing is kept there yet): a PC from before
     // 2.0.50 the welcome page, one from before the TOMLIN name "Start TOMLIN.cmd" too. The same copy again without
     // them, or with the launcher under the name it takes (update.retryFor), until it is taken or refused for another reason.
@@ -385,6 +399,32 @@ export async function updatePc(b: Record<string, unknown>) {
       if (now.up?.since && now.up.since !== before) throw new Error(`"${r.name}" started again with TOMLIN ${now.version}, but its files are build ${update.shortBuild(now.build)}, not ${update.shortBuild(sent)} as sent. Look in "${folder}" on that PC, then press Update it again.`);
     }
     throw new Error(`the new version is in "${folder}" on "${r.name}", but it has not answered for 3 minutes. Look at that PC: its TOMLIN window says what happened.`);
+  });
+  return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
+}
+
+/**
+ * Takes a linked PC's newer TOMLIN into this PC (Update this PC from it), asked by someone at this PC: that PC gives its
+ * own app files only when its owner ticked "Let linked PCs pull TOMLIN updates from here", and asks no PIN (nothing
+ * changes there). This PC builds and checks the new copy as it would a pushed one, then starts it by itself.
+ */
+export async function pullFrom(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  let h: Hello;
+  try {
+    h = await hello(r, 5000);
+  } catch (e) {
+    return { status: 502, body: { error: `"${r.name}" could not be reached (${(e as Error).message}).` } };
+  }
+  const why = update.pullWhy({ name: r.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, allowGive: h.allow?.give === true }, d.version, d.build(), d.update.restarts);
+  if (why === null) return { status: 409, body: { error: `"${r.name}" runs TOMLIN ${h.version || 'older than this PC'}${h.build && h.build === d.build() ? `, the same files as this PC (build ${update.shortBuild(h.build)})` : ''}: there is nothing newer to take from there.` } };
+  if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
+  const w = wireFor(r);
+  const t = transfers.start({ kind: 'pull', what: `TOMLIN ${h.version}`, pc: r.id, pcName: r.name }, async (progress, signal) => {
+    // The busy words are this PC's own here ("someone at that PC…" is how a pushing PC hears them).
+    const got = await update.pullUpdate(w, pullHere(r.name), { progress, signal, waiting: busy => progress({ wait: busy.replace(/\bthat PC\b/g, 'this PC') }) });
+    return `TOMLIN ${got.version} (build ${update.shortBuild(got.build)}) from "${r.name}" is in "${got.folder}" beside this copy, and this PC starts it now. This page opens again by itself; the old version stays in its folder.`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
 }
@@ -417,6 +457,8 @@ export async function bringBack(b: Record<string, unknown>) {
       throw new Error(why);
     }
     await rename(coming, dest);
+    // Noted here, not trusted from inside the zip: putting it back then keeps this PC's PIN, sharing and link keys.
+    await recordBrought(d.carry.backupsDir, name);
     return `It is in this PC's backups now: Settings, Your data and updates, then Put back beside it.${why === 'unchecked' ? ' It could not be checked against what was sent (it was sent before this check, or this PC\'s record of it is gone); putting it back still checks it is a plain backup.' : ''}`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };

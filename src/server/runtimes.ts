@@ -1,8 +1,8 @@
 // The model runners on this PC, for the Models page's runner rows: which are here, why the CUDA one cannot help (no
-// NVIDIA card, an old driver), downloading it here (checked, in the background, with Stop) and taking it away. Sending
-// it to a linked PC is src/jobrun/copies.ts runnerTo.
+// NVIDIA card, an old driver), downloading a card runner here (CUDA or Vulkan: checked, in the background, with Stop)
+// and taking a CUDA one away. Sending it to a linked PC is src/jobrun/copies.ts runnerTo.
 import { type Progress } from '../download.ts';
-import { pinWhy } from '../runtimes.ts';
+import { pageDownloads, pinWhy } from '../runtimes.ts';
 import { hardware, json, runtimes, type Routes } from './core.ts';
 import { images, runners } from './panes.ts';
 
@@ -48,8 +48,9 @@ export const runtimesGet: Routes = {
 
 export const runtimesPost: Routes = {
   '/api/runtimes/get': ({ res, b }) => {
-    const c = cudaPin(b);
-    if (!c) return json(res, 400, { error: 'Only the NVIDIA (CUDA) runners are downloaded from here; the others come with TOMLIN.' });
+    const id = String(b.id ?? '');
+    const c = pageDownloads(runtimes.pins[id]) ? { id, pin: runtimes.pins[id] } : null;
+    if (!c) return json(res, 400, { error: 'Only the card runners (CUDA, Vulkan) are downloaded from here; the CPU ones come with TOMLIN.' });
     const why = whyHere(c.id);
     if (why) return json(res, 409, { error: why });
     if (runtimes.installedPin(c.id)) return json(res, 409, { error: `${c.pin.name} is on this PC already.` });

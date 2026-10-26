@@ -59,7 +59,7 @@ export function lanList(): { address: string; via: string }[] {
 }
 
 export function shareView() {
-  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */
@@ -236,6 +236,10 @@ function runnerHello(): runnerpush.RunnerHello {
 
 /** The doors for updates pushed by a linked PC (src/update.ts). Made by startNode. */
 let updateNode: ReturnType<typeof update.updateSide>;
+/** The doors a linked PC pulls this PC's TOMLIN through, behind "Let linked PCs pull TOMLIN updates from here". Made by startNode. */
+let giveNode: ReturnType<typeof update.giveSide>;
+/** An update this PC pulls from the linked PC `from` (src/jobrun/copies.ts pullFrom): the same steps as one pushed here. */
+export const pullHere: (from: string) => update.Here = from => (p, b, piece) => updateNode.here(p, b, from, piece);
 
 /** A request's body as bytes (a piece of a file), refused past `limit`. */
 async function rawBody(req: IncomingMessage, limit: number): Promise<Buffer> {
@@ -701,8 +705,15 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const proven = !!old;
       const kept = proven ? shareState.paired.filter(x => x !== old) : shareState.paired;
       const keep = proven ? keepOf(old!) : randomBytes(8).toString('hex');
-      shareState.paired = [...kept.slice(-9), { ...(from ? { from } : {}), keep, name: String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'A manager PC', hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString() }];
+      const name = String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'A manager PC';
+      // Ten links at most: the oldest goes, and the owner is told which.
+      const dropped = kept.slice(0, Math.max(0, kept.length - 9)).map(x => x.name).join(', ');
+      shareState.paired = [...kept.slice(-9), { ...(from ? { from } : {}), keep, name, hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString() }];
+      // The code is used up (audit X4): someone who once saw it cannot link later, unseen. The owner sees who linked.
+      shareState.code = share.newCode();
+      shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
       await saveShare();
+      d.onLinked?.(name, dropped);
       return workerJson(res, 200, got.answer);
     }
     // Only enough to be found on the home network: that this is TOMLIN, its name, whether it asks for a PIN.
@@ -750,11 +761,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // The disk that keeps other PCs' backups here (read at once, no program started), so they see the room left.
       const disk = await carry.diskOf(d.carry.keptRoot);
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
+      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'update-pin', 'give'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
       // The connected models are named (every model here is lent).
       const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id);
       const img = imageHello();
-      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
+      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'update-pin', 'give'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
     }
     // This PC's meters for the head of a paired PC's chat with someone here: read from what the sampler measured in
     // the last second for this PC's own top bar, so asking every few seconds adds no measuring here.
@@ -816,6 +827,15 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
       if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
       const a = await runSetHere(body, who.name);
+      return workerJson(res, a.status, a.json);
+    }
+    // This PC's own app files, read-only, for a linked PC that pulls its TOMLIN (only with its owner's tick).
+    if (p === '/worker/update-list' || p === '/worker/update-get') {
+      const a = await giveNode(p, body);
+      if ('piece' in a) {
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return void res.end(link.sealBytes(link.toHost(keys), a.piece, `piece|${opened.id}`));
+      }
       return workerJson(res, a.status, a.json);
     }
     if (p.startsWith('/worker/update-')) {
@@ -1079,14 +1099,22 @@ export function startNode(): void {
     allowed: () => shareState.allow?.update === true,
     pcName: () => shareState.name,
     restarts: d.update.restarts,
+    pinCheck: (pin, who) => d.updatePinCheck(pin, who),
     // A restart cuts what is running: someone at this PC, or work for a linked PC, finishes first.
     busy: () => [...serving.values()][0] ?? (lending.size || drawing ? 'answering for a linked PC' : d.busy() ? 'someone at that PC is getting an answer' : d.imageBusy() ? 'someone at that PC is drawing a picture' : actionBusy() ? 'a job is running on that PC' : d.chat.view.state === 'loading' || d.imagePane.view.state === 'loading' ? 'a model is loading on that PC' : null),
-    done: async (dir, version, by) => {
-      shareState.updated = { version, by: String(by).slice(0, 40), at: new Date().toISOString() };
+    done: async (dir, version, by, pulled) => {
+      shareState.updated = { version, by: String(by).slice(0, 40), at: new Date().toISOString(), ...(pulled ? { pulled: true } : {}) };
       await saveShare();
-      console.log(`"${by}" updated TOMLIN here to ${version}: starting it from ${dir}.`);
+      console.log(pulled ? `TOMLIN ${version} was pulled here from "${by}": starting it from ${dir}.` : `"${by}" updated TOMLIN here to ${version}: starting it from ${dir}.`);
       await d.update.switchTo(dir);
     },
+  });
+  giveNode = update.giveSide({
+    root: d.update.root,
+    version: d.version,
+    build: d.build,
+    allowed: () => carry.cleanAllow(shareState.allow).give,
+    pcName: () => shareState.name,
   });
   // When the picture model last drew, or was loaded (src/picturelock.ts: unloaded while locked after a while with nothing drawn).
   let pictureUsedAt = Date.now();

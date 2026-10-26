@@ -34,7 +34,8 @@
       "parts": [{ "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-vulkan-x64.zip", "bytes": 30067605, "sha256": "60e6850d650417409f18c2170ab5e27335db96da70cd3d1ad1e930bcffc2fd35" }]
     },
     "sd-cuda": {
-      "engine": "sd", "device": "cuda", "name": "stable-diffusion.cpp master-929, CUDA 12 (NVIDIA)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "engine": "sd", "device": "cuda", "name": "stable-diffusion.cpp master-929, CUDA 12.8 (NVIDIA, GTX 10 series and newer)", "licence": "MIT; CUDA runtime under NVIDIA's licence",
+      "cuda": { "version": "12.8", "native": [61, 70, 75, 80, 86, 89, 90, 100, 120], "ptx": [61, 70, 75, 80, 86, 89, 90, 100, 120], "driver": "572.61" },
       "parts": [
         { "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-cuda12-x64.zip", "bytes": 337915440, "sha256": "217d6dead9abd3f827fc338268555cc179234e7e6330ef21ecb1c985e19d2dc7" },
         { "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/cudart-sd-bin-win-cu12-x64.zip", "bytes": 563452046, "sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d" }

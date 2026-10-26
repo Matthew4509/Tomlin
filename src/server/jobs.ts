@@ -10,7 +10,7 @@ import * as carry from '../carry.ts';
 import { pinWhy } from '../runtimes.ts';
 import { BUILD, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
 import { scope } from '../meter.ts';
-import { appLock, appLockOn, appPinCheck, recoveryHashes, sameAsLock, whenCodesChange } from './locks.ts';
+import { appLock, appLockOn, appPinCheck, recoveryHashes, sameAsLock, updatePinCheck, whenCodesChange } from './locks.ts';
 import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcProgram, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
 import { answeringBusy, stepAnswers, stopOn } from './answering.ts';
 import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
@@ -92,6 +92,7 @@ export function startJobs(): void {
     appLockOn,
     appLocked: () => appLockOn() && !appLock.isOpen(),
     appPinCheck,
+    updatePinCheck,
     unloadAll: async (still = () => true) => {
       for (const p of [...runners]) if (still() && (p.view.state === 'connected' || p.view.state === 'loading')) await p.disconnect();
       if (still() && (images.pane.view.state === 'connected' || images.pane.view.state === 'loading')) await images.pane.disconnect();
@@ -99,6 +100,7 @@ export function startJobs(): void {
     onNodeAway: name => void notifier.tell('stuck', `${name}: I need to log off for now. Its work goes to other PCs.`, 'nodes:').catch(() => undefined),
     onNodeAsk: (name, hours) => void notifier.tell('stuck', `${name}: ${askText(hours)}. Answer it on Home.`, 'nodes:').catch(() => undefined),
     onClaim: (name, pc) => void notifier.tell('question', `${name} wants their backups on a new PC (${pc}). Allow or Don't allow it on the Network page.`, 'nodes:').catch(() => undefined),
+    onLinked: (name, dropped) => void notifier.tell('question', `"${name}" linked to this PC. Not you? Remove it on the Network page (PCs linked to this one). The setup code is a new one now.${dropped ? ` The oldest link, "${dropped}", was removed (10 at most).` : ''}`, 'nodes:').catch(() => undefined),
     sameAsLock,
     recoveryHashes,
     autostart: startupOf,
@@ -141,7 +143,7 @@ export function startJobs(): void {
           } catch {
             // not here
           }
-          return { name: images.registry.fileName(f), path: images.registry.ownPath(m, f), bytes: f.bytes, have };
+          return { name: images.registry.fileName(f), path: images.registry.ownPath(m, f), bytes: f.bytes, have, sha256: f.sha256 };
         });
       },
       keptRoot: join(HOME.home, 'backups from other PCs'),

@@ -28,7 +28,7 @@ import { d, useDeps } from './jobrun/shared.ts';
 import { canKeep, canThink, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc } from './jobrun/copies.ts';
+import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
 import { applyShare, askHost, claimsWaiting, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
@@ -122,6 +122,8 @@ export interface JobDeps {
   appLocked: () => boolean;
   /** Checks the app lock PIN (wrong tries are counted there). */
   appPinCheck: (pin: unknown) => Promise<{ ok: true } | { status: number; error: string }>;
+  /** This PC's app lock PIN typed on a linked PC sending it an update (audit X2), counted per link (src/server/locks.ts). */
+  updatePinCheck: (pin: unknown, who: string) => Promise<{ ok: true } | { status: number; error: string }>;
   /** Unloads every model on this PC (F7 E5: the node gives way). */
   /** Unloads every model here; `still` is asked before each one (the node may be started again part-way). */
   unloadAll: (still?: () => boolean) => Promise<void>;
@@ -138,6 +140,8 @@ export interface JobDeps {
   onNodeAsk?: (name: string, hours: number) => void;
   /** A4: a new PC asks for a linked PC's backups kept here (the backup name, the new PC's name): the owner is told. */
   onClaim?: (name: string, pc: string) => void;
+  /** A PC linked here (its setup code was used, and a new one made); `dropped`: the oldest link it pushed out. */
+  onLinked?: (name: string, dropped: string) => void;
   /** A3: the app lock's kind when `pin` is also what opens TOMLIN here (the "same as your screen PIN" nudge), else null. */
   sameAsLock?: (pin: string) => Promise<'pin' | 'password' | null | { wait: number }>;
   /** A3: this PC's recovery codes as their hashes (src/recovery.ts), or null when it has none. */
@@ -172,7 +176,7 @@ export interface CarryDeps {
   chatDir: string;
   chatHas: (name: string) => boolean;
   pictureFiles: (id: string) => carry.FileRef[] | null;
-  pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean }[] | null;
+  pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
   /** Restore points kept on this PC for linked PCs. */
   keptRoot: string;
   /** This PC's own backups folder. */
@@ -312,7 +316,7 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;
   }
-  if (p === '/api/home/pcs') return d.json(res, 200, { pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), activity: r.ok ? (r.away ? 'owner' : 'available') : 'offline', backupsOnly: r.backupsOnly === true, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, ...home.pcState(r) })) }), true;
+  if (p === '/api/home/pcs') return d.json(res, 200, { pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), activity: r.ok ? (r.away ? 'owner' : 'available') : 'offline', backupsOnly: r.backupsOnly === true, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, newer: r.ok && r.pull && !r.pull.why ? { version: r.version, mine: r.pull.mine, other: r.pull.other } : null, ...home.pcState(r) })) }), true;
   return false;
 }
 
@@ -340,6 +344,7 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/owner': reply(await ownerSetOn(b)); return true;
     case '/api/network/claim': reply(await claimOn(b)); return true;
     case '/api/network/update': reply(await updatePc(b)); return true;
+    case '/api/network/pull': reply(await pullFrom(b)); return true;
     case '/api/network/runner': reply(await runnerTo(b)); return true;
     case '/api/network/runner-remove': reply(await runnerOff(b)); return true;
     case '/api/network/run-set': reply(await runSetOn(b)); return true;

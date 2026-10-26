@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, link, nodeHome, sleep, startPc, transferEnd, unlock, until, NODE_PIN, type Pc } from './pcs.ts';
+import { codeIn, freePort, link, nodeHome, sleep, startPc, transferEnd, unlock, until, NODE_CODE, NODE_PIN, type Pc } from './pcs.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -84,12 +84,19 @@ test('two PCs: the node\'s front door, and project backups through it (the round
     // ---- Linking: the code shown on the node, typed on the host ----
     const pc = await link(host, workerPort);
     const door = `http://127.0.0.1:${workerPort}`;
+    // Audit X4 (26 Oct): the code is used up by a link (someone who once saw it cannot link later), and the node's
+    // owner is told who linked.
+    const shareNow = () => JSON.parse(readFileSync(join(nodeDir, 'data', 'share.json'), 'utf8')) as { code: string; lastLinked?: { name: string; at: string; dropped?: string } };
+    assert.notEqual(shareNow().code, NODE_CODE, 'a new setup code after linking');
+    assert.ok(shareNow().lastLinked?.name, JSON.stringify(shareNow().lastLinked));
+    const stale = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${workerPort}`, code: NODE_CODE });
+    assert.equal(stale.status === 200, false, 'the old code links nothing now');
 
     // ---- Linked again (a new code, an update): Backups only, set on this PC, stays ----
     const remoteOf = () => (JSON.parse(readFileSync(join(hostDir, 'data', 'settings.json'), 'utf8')).remotes as { id: string; backupsOnly?: boolean }[]).find(r => r.id === pc);
     assert.equal((await host.post('/api/remotes', { action: 'backups-only', id: pc, on: true })).status, 200);
     assert.equal(remoteOf()?.backupsOnly, true);
-    assert.equal(await link(host, workerPort), pc, 'the same PC keeps its id');
+    assert.equal(await link(host, workerPort, codeIn(nodeDir)), pc, 'the same PC keeps its id');
     assert.equal(remoteOf()?.backupsOnly, true, 'linking the same PC again keeps Backups only');
     assert.equal((await host.post('/api/remotes', { action: 'backups-only', id: pc, on: false })).status, 200);
 
@@ -200,7 +207,7 @@ test('two PCs: the node\'s front door, and project backups through it (the round
     const keepsOf = () => (JSON.parse(readFileSync(join(nodeDir, 'data', 'share.json'), 'utf8')).paired as { keep: string }[]).map(x => x.keep);
     const before = keepsOf();
     const again = await until('the node to link at its new address', async () => {
-      const a = await host.post('/api/remotes', { action: 'add', url: `localhost:${workerPort}`, code: 'TEST-NQDE' });
+      const a = await host.post('/api/remotes', { action: 'add', url: `localhost:${workerPort}`, code: codeIn(nodeDir) });
       return a.status === 200 ? a : null;
     }, 30_000, 1000);
     assert.equal(again.status, 200);

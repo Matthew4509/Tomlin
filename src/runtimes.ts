@@ -294,19 +294,25 @@ export function ccNumber(text: string | undefined): number | null {
  */
 export function ccFromName(name: string): number | null {
   const n = name.replace(/\s+/g, ' ');
-  // Order matters: "RTX 5000 Ada" and "Quadro RTX 5000" are not RTX 50 cards.
+  // Order matters: "RTX 5000 Ada" and "Quadro RTX 5000" are not RTX 50 cards; the RTX 2050 and MX570 are Ampere, the
+  // MX450/550 Turing, the MX110/130 Maxwell, though their numbers say otherwise.
   const rules: [RegExp, number][] = [
-    [/\bRTX \d{4} Ada\b|\bL40S?\b|\bL4\b/i, 89],
+    [/\bRTX \d{4} (SFF )?Ada\b|\bL40S?\b|\bL4\b|\bL20\b/i, 89],
     [/\bQuadro RTX\b|\bTITAN RTX\b/i, 75],
+    [/\bGB10\b/i, 121],
     [/\bRTX PRO \d{4}\b|\bRTX 50[5-9]0\b/i, 120],
+    [/\bB[12]00\b/i, 100],
     [/\bH100\b|\bH200\b|\bGH200\b/i, 90],
     [/\bRTX 40[5-9]0\b/i, 89],
-    [/\bA100\b|\bA30\b/i, 80],
-    [/\bRTX 30[5-9]0\b|\bRTX A\d{3,4}\b|\bA10G?\b|\bA40\b|\bA2\b/i, 86],
-    [/\bRTX 20[5-8]0\b|\bGTX 16[5-6]0\b|\bQuadro T\d{3,4}\b|\bTesla T4\b|\bT\d{3,4}\b/i, 75],
+    [/\bA100\b|\bA800\b|\bA30\b/i, 80],
+    [/\bRTX 2050\b|\bMX570\b|\bRTX 30[5-9]0\b|\bRTX A\d{3,4}\b|\bA10G?\b|\bA40\b|\bA2\b/i, 86],
+    [/\bMX[45]50\b|\bGTX 1630\b|\bRTX 20[5-8]0\b|\bGTX 16[5-6]0\b|\bQuadro T\d{3,4}\b|\bTesla T4\b|\bT\d{3,4}\b/i, 75],
     [/\bTITAN V\b|\bV100\b|\bGV100\b/i, 70],
     [/\bP100\b/i, 60],
-    [/\bGTX 10\d0\b|\bTITAN Xp\b|\bQuadro P\d{3,4}\b|\bTesla P\d+\b|\bMX[1-3]\d0\b|\bGT 1030\b/i, 61],
+    [/\bMX1[13]0\b/i, 50],
+    [/\bGTX 10\d0\b|\bTITAN Xp?\b \(Pascal\)|\bTITAN Xp\b|\bQuadro P\d{3,4}\b|\bTesla P\d+\b|\bMX[1-3]\d0\b|\bGT 1030\b/i, 61],
+    // Kepler. Not "Quadro K": the K620, K1200 and K2200 are Maxwell; unknown is safe there.
+    [/\bGTX 7[6-8]0\b|\bGTX TITAN( Black| Z)?\b(?! X)|\bTesla K\d+\b/i, 35],
     [/\bGTX 9\d0\b|\bGTX 7[45]0\b|\bQuadro M\d{3,4}\b|\bTesla M\d+\b|\bTITAN X\b/i, 50],
   ];
   for (const [re, cc] of rules) if (re.test(n)) return cc;
@@ -401,8 +407,11 @@ export function cudaOrder(pins: Record<string, RuntimePin>, engine: Engine, gpus
  * What to say when this PC has a graphics card of its own but no runner that can use it, so everything runs on the CPU
  * (an older zip carried only the CPU runners). Empty when a card runner is there, or the PC has no card of its own.
  */
+/** The runners the Models page downloads: the card ones (CUDA, Vulkan); the CPU ones come with TOMLIN. */
+export const pageDownloads = (pin: { engine: string; device: string } | undefined) => pin?.device === 'cuda' || pin?.device === 'vulkan';
+
 export function missingCardRunner(engine: Engine, gpus: { name: string; integrated: boolean }[], installed: (device: Device) => boolean): string {
   const card = gpus.find(g => !g.integrated);
   if (!card || installed('vulkan') || installed('cuda')) return '';
-  return `This PC has ${card.name}, but no runner for it is installed, so this runs on the CPU (much slower). To use the card: close TOMLIN, open a command window in its folder, run npm run fetch -- ${engine}-vulkan, then start it again.`;
+  return `This PC has ${card.name}, but no runner for it is installed, so this runs on the CPU (much slower). To use the card: Models, Model runners: Download the ${engine === 'sd' ? 'picture' : 'chat'} runner for Vulkan, then Connect again (or close TOMLIN, run npm run fetch -- ${engine}-vulkan in its folder, and start it again).`;
 }

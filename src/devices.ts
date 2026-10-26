@@ -38,8 +38,20 @@ export function parseDevices(out: string): RunnerDevice[] {
   return found;
 }
 
-/** A chip built into the processor, by the names Intel and AMD give them (the hardware list says so where it can). */
-const BUILT_IN = /\b(Intel\(R\) (UHD|HD|Iris)|Intel (UHD|HD|Iris)|AMD Radeon\(TM\) Graphics|Radeon Vega \d+ Graphics|Microsoft Basic)/i;
+/**
+ * A chip built into the processor, by the names Intel, AMD and Qualcomm give them: Intel UHD/HD/Iris and the Arc built
+ * into Core Ultra ("Arc(TM) Graphics", "Arc(TM) 140V GPU"; an Arc card has a letter and number, "Arc A770", "Arc B580",
+ * "Arc Pro A60"), AMD's "Radeon(TM) Graphics", "Radeon 780M / 890M / 8060S Graphics", "Radeon 610M", "Vega 8" and
+ * "R7 Graphics" (a Radeon card is "RX", "PRO" or "VII"), and Adreno. The one rule for the hardware list and the runners'
+ * lists (src/hardware.ts gpusFrom, cardsOf below).
+ */
+export function builtIn(name: string): boolean {
+  const n = name.replace(/\((R|TM)\)/gi, '').replace(/\s+/g, ' ');
+  if (/\bIntel\b.*\b(UHD|HD|Iris)\b/i.test(n)) return true;
+  if (/\bArc\b/i.test(n)) return !/\bArc (Pro )?[AB]\d{2,3}/i.test(n);
+  if (/\bRadeon\b/i.test(n)) return !/\bRadeon (RX|PRO|VII)\b/i.test(n) && /\bRadeon ((\d{3,4}[MS]|Vega \d+)( Graphics)?|R\d Graphics|Graphics)\b/i.test(n);
+  return /\bAdreno\b|\bMicrosoft Basic\b/i.test(n);
+}
 
 const key = (s: string) => s.toLowerCase().replace(/\(r\)|\(tm\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -49,12 +61,12 @@ const key = (s: string) => s.toLowerCase().replace(/\(r\)|\(tm\)/g, '').replace(
  * chips (by `integrated`, names from this PC's hardware list, or the names above) are left out. Biggest first.
  */
 export function cardsOf(lists: RunnerDevice[][], integrated: string[] = []): Card[] {
-  const builtIn = new Set(integrated.map(key));
+  const listed = new Set(integrated.map(key));
   const cards: (Card & { k: string })[] = [];
   for (const list of lists) {
     const taken = new Set<Card>();
     for (const d of list) {
-      if (BUILT_IN.test(d.desc) || builtIn.has(key(d.desc))) continue;
+      if (builtIn(d.desc) || listed.has(key(d.desc))) continue;
       const k = key(d.desc);
       const same = cards.find(c => !taken.has(c) && c.k === k && Math.abs(c.total - d.total) <= c.total * 0.1 && !c.ids.some(id => id.replace(/\d+$/, '') === d.id.replace(/\d+$/, '')));
       if (same) {
@@ -68,6 +80,20 @@ export function cardsOf(lists: RunnerDevice[][], integrated: string[] = []): Car
     }
   }
   return cards.sort((a, b) => b.total - a.total).map(({ k: _k, ...c }) => c);
+}
+
+/** A runner lists a chip built into the processor (llama.cpp's Vulkan build then uses it, beside any card). */
+export const builtInListed = (lists: RunnerDevice[][], integrated: string[] = []) =>
+  lists.some(list => list.some(d => builtIn(d.desc) || integrated.map(key).includes(key(d.desc))));
+
+/**
+ * The cards a chat start names (-dev): the model's own choice; else, when a runner lists a chip built into the
+ * processor beside real cards, every real card, so llama.cpp (which spreads layers over every chip it finds) leaves the
+ * built-in one out. Undefined: llama.cpp picks, as before.
+ */
+export function startCards(saved: string[] | undefined, cards: Card[], builtInHere: boolean): string[] | undefined {
+  if (saved?.length) return saved;
+  return builtInHere && cards.length ? cards.flatMap(c => c.ids) : saved;
 }
 
 /** The ids in `ids` that `device`'s runner knows ("CUDA…" for CUDA, "Vulkan…" for Vulkan; none for the CPU). */
@@ -84,6 +110,37 @@ export function cleanCardIds(v: unknown): string[] {
 
 /** The cards `ids` name, by label (for plain words); an id no card has is left out. */
 export const cardLabels = (cards: Card[], ids: string[]) => cards.filter(c => c.ids.some(id => ids.includes(id))).map(c => c.label);
+
+/** The devices in the picture runner's `sd-server --list-devices` output: one "name<TAB>description" a line. */
+export function parseSdDevices(out: string): { name: string; desc: string }[] {
+  return out.split(/\r?\n/).map(l => /^([A-Za-z]+\d*)\t(.+?)\s*$/.exec(l)).filter((m): m is RegExpExecArray => !!m).map(m => ({ name: m[1], desc: m[2] }));
+}
+
+/**
+ * The device the picture runner is held to (--backend): the biggest real card by the hardware list, when the runner
+ * sees more than one graphics chip (left alone, it picks one itself, a built-in chip listed first included). Null: one
+ * graphics device, or only built-in chips, so its own pick stands.
+ */
+export function pickSdDevice(list: { name: string; desc: string }[], gpus: { name: string; total: number | null; integrated: boolean }[]): string | null {
+  const chips = list.filter(d => !/^cpu$/i.test(d.name));
+  const cards = chips.filter(d => !builtIn(d.desc) && !gpus.some(g => g.integrated && key(g.name) === key(d.desc)));
+  if (chips.length < 2 || !cards.length) return null;
+  const biggest = [...gpus].filter(g => !g.integrated && g.total).sort((a, b) => b.total! - a.total!)[0];
+  return (biggest && cards.find(d => key(d.desc).includes(key(biggest.name)) || key(biggest.name).includes(key(d.desc))))?.name ?? cards[0].name;
+}
+
+/**
+ * A picture model's weights wait in RAM (--offload-to-cpu) only when the model is known to be bigger than 85% of the
+ * card; a card of unknown size is left to sd-server's own fit (--auto-fit, on by default), which reads the free memory.
+ */
+export const pictureOffload = (bytes: number, cardTotal: number | null) => cardTotal !== null && bytes > cardTotal * 0.85;
+
+/** Reads the picture runner's device list (it loads its card libraries, lists, and ends): [] when it cannot. */
+export function listSdDevices(exe: string, env?: NodeJS.ProcessEnv): Promise<{ name: string; desc: string }[]> {
+  return new Promise(resolve => {
+    execFile(exe, ['--list-devices'], { windowsHide: true, timeout: 30_000, env }, (_e, stdout, stderr) => resolve(parseSdDevices(`${stdout}\n${stderr}`)));
+  });
+}
 
 /** Reads one runner's device list (the program loads its card libraries, lists, and ends): [] when it cannot. */
 export function listDevices(exe: string, env?: NodeJS.ProcessEnv): Promise<RunnerDevice[]> {

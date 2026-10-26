@@ -399,15 +399,41 @@
     const version = v.here ? `TOMLIN ${v.version}${built(v.build)}`
       : v.fault ? `Did not answer just now: ${v.fault.replace(/\.$/, '')}. Its version is not known until it answers.`
       : older ? `${v.update.other ? `"${v.name}" runs ${v.version} but different files from this PC (build ${v.build} there, ${v.update.build} here)` : `Outdated: ${v.version} (this PC ${v.update.mine})`}${v.update.why ? `. ${v.update.why.charAt(0).toUpperCase()}${v.update.why.slice(1)}` : ''}`
+      : v.pull ? `${v.pull.other ? `"${v.name}" runs ${v.version} with different files from this PC (build ${v.build} there, ${v.pull.build} here)` : `Newer: ${v.version} (this PC ${v.pull.mine})`}${v.pull.why ? `. ${v.pull.why.charAt(0).toUpperCase()}${v.pull.why.slice(1)}` : ''}`
       : v.version === v.ours ? `TOMLIN ${v.version}${built(v.build)}: Up to date${v.installed ? `: Last updated ${new Date(v.installed).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}`
       : `TOMLIN ${v.version ?? '(it did not say)'}: this PC runs ${v.ours}`;
+    // ---- Ahead of this PC (a newer version, or the same one with different files): Update this PC from it, or why not ----
+    const ahead = !v.here && !older && !v.fault && v.pull;
     let go = null;
+    if (ahead && !v.pull.why) {
+      go = el('button', { class: 'btn primary', type: 'button', text: 'Update this PC from it' });
+      go.addEventListener('click', async () => {
+        go.disabled = true;
+        try {
+          const r = typeof pullWithAsk === 'function' ? await pullWithAsk({ id: v.id, name: v.name, version: v.version, build: v.build }) : await api('/api/network/pull', { pc: v.id });
+          if (!r) {
+            go.disabled = false;
+            return;
+          }
+          dlg.close();
+          app.openUpdate(r.transfer);
+        } catch (e) {
+          say(e.message, true);
+          go.disabled = false;
+        }
+      });
+    }
     if (older && !v.update.why) {
       go = el('button', { class: 'btn primary', type: 'button', text: 'Update it' });
       go.addEventListener('click', async () => {
         go.disabled = true;
         try {
-          const r = await api('/api/network/update', { pc: v.id });
+          // That PC's own PIN, asked when it asks one (audit X2; home.js updatePcWithPin).
+          const r = typeof updatePcWithPin === 'function' ? await updatePcWithPin({ id: v.id, name: v.name }) : await api('/api/network/update', { pc: v.id });
+          if (!r) {
+            go.disabled = false;
+            return;
+          }
           // The update's own screen: its steps, and "Keep this window open".
           dlg.close();
           app.openUpdate(r.transfer);
@@ -440,7 +466,7 @@
     const powerCost = v.meter?.costs.power ?? v.mine.costs.power;
     const stat = (label, value, sub) => el('div', { class: 'pc-stat' }, el('span', { class: 'pc-stat-label', text: label }), el('strong', { class: 'pc-stat-value', text: value }), sub ? el('span', { class: 'hint', text: sub }) : null);
     const strip = el('div', { class: 'pc-strip' },
-      stat('TOMLIN', v.version ?? '—', v.here ? 'This PC' : v.fault ? 'Not answering' : older ? (v.update.other ? 'Different files' : 'Outdated') : v.version === v.ours ? 'Up to date' : ''),
+      stat('TOMLIN', v.version ?? '—', v.here ? 'This PC' : v.fault ? 'Not answering' : older ? (v.update.other ? 'Different files' : 'Outdated') : ahead ? (v.pull.other ? 'Different files' : 'Newer') : v.version === v.ours ? 'Up to date' : ''),
       stat('Tokens processed', t ? tokens(t.in + t.cached + t.out) : '—', t ? `since ${when(v.meter.since)}` : 'Not counted there'),
       stat('Time worked', t?.ms ? span(t.ms / 1000) : '—', t ? `${t.answers.toLocaleString('en-GB')} answer${t.answers === 1 ? '' : 's'}` : ''),
       stat('Est. power cost', powerCost === null ? '—' : money(powerCost), powerCost === null ? 'Set the watts and price below' : 'While working, your watts and price'));

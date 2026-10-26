@@ -128,3 +128,61 @@ test('no restore opens a zip with a link or a name that climbs out; the data sta
   }
   await rm(join(h.backups, 'bad.zip'), { force: true });
 });
+
+// Audit X1 (26 Oct): a restore point brought back from a linked PC was only checked for its shape. One made on that PC
+// could carry its owner's PIN, sharing settings (this PC becoming its node) and link keys, and "Put back" took them.
+const TAR = join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe');
+async function zipOf(h: ReturnType<typeof keep.resolveHome>, name: string, files: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), 'tomlin-crafted-'));
+  made.push(dir);
+  for (const [f, text] of Object.entries(files)) await put(join(dir, ...f.split('/')), text);
+  execFileSync(TAR, ['-a', '-c', '-f', join(h.backups, name), '-C', dir, '.']);
+}
+
+test('a restore point that came back from another PC carrying a PIN or sharing settings is refused; this PC\'s stay', async () => {
+  const h = await home();
+  await mkdir(h.backups, { recursive: true });
+  await zipOf(h, '2026-10-26 120000 kept on Laptop.zip', {
+    'chats/c1.json': '["from the other PC"]',
+    'settings.json': JSON.stringify(SETTINGS),
+    'app-lock.json': '{"hash":"THEIR-PIN"}',
+    'share.json': '{"code":"THEIR-CODE","paired":["them"]}',
+  });
+  await keep.recordBrought(h.backups, '2026-10-26 120000 kept on Laptop.zip');
+  const note = await keep.restore(h, '2026-10-26 120000 kept on Laptop.zip', '2.0.61');
+  assert.match(note, /^Nothing was restored: .*came back from another PC/);
+  assert.equal(await readFile(join(h.data, 'app-lock.json'), 'utf8'), '{"hash":"PIN-HASH"}');
+  assert.match(await readFile(join(h.data, 'share.json'), 'utf8'), /SECRET-CODE/);
+  assert.equal(await readFile(join(h.data, 'chats', 'c1.json'), 'utf8'), '["hello"]');
+});
+
+test('one that came back without the mark keeps this PC\'s recovery codes, claims and link keys; a link it does not know comes back with no key', async () => {
+  const h = await home();
+  await put(join(h.data, 'recovery-codes.json'), '{"codes":["MINE"]}');
+  await put(join(h.data, 'claims.json'), '[]');
+  await mkdir(h.backups, { recursive: true });
+  const evil = { id: 'evil', name: 'Their PC', url: 'http://192.168.1.99:8741', token: 'e'.repeat(64), key: 'THEIR-KEY' };
+  await zipOf(h, '2026-10-26 120100 kept on Laptop.zip', {
+    'chats/c1.json': '["back"]',
+    'settings.json': JSON.stringify({ ...SETTINGS, remotes: [...SETTINGS.remotes, evil] }),
+    'recovery-codes.json': '{"codes":["THEIRS"]}',
+    'claims.json': '[{"from":"them"}]',
+  });
+  await keep.recordBrought(h.backups, '2026-10-26 120100 kept on Laptop.zip');
+  const note = await keep.restore(h, '2026-10-26 120100 kept on Laptop.zip', '2.0.61');
+  assert.match(note, /Restored the backup/);
+  assert.equal(await readFile(join(h.data, 'chats', 'c1.json'), 'utf8'), '["back"]');
+  assert.equal(await readFile(join(h.data, 'recovery-codes.json'), 'utf8'), '{"codes":["MINE"]}');
+  assert.equal(await readFile(join(h.data, 'claims.json'), 'utf8'), '[]');
+  assert.equal(await readFile(join(h.data, 'app-lock.json'), 'utf8'), '{"hash":"PIN-HASH"}');
+  const s = JSON.parse(await readFile(join(h.data, 'settings.json'), 'utf8'));
+  assert.deepEqual(s.remotes.map((r: Record<string, unknown>) => [r.id, r.token, r.key ?? null]), [['p1', 't'.repeat(64), 'K1'], ['p2', 'u'.repeat(64), null], ['evil', '', null]]);
+});
+
+test('a restore point made here is put back whole, as before (its PIN and sharing are this PC\'s own)', async () => {
+  const h = await home();
+  const here = await keep.backup(h, 'by hand');
+  await put(join(h.data, 'app-lock.json'), '{"hash":"NEWER"}');
+  assert.match(await keep.restore(h, here, '2.0.61'), /Restored the backup/);
+  assert.equal(await readFile(join(h.data, 'app-lock.json'), 'utf8'), '{"hash":"PIN-HASH"}');
+});

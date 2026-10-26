@@ -7,9 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildFits, ccFromName, codeFor, cudaOrder, pinWhy, type GpuFacts, type RunnerName, type RuntimePin } from '../src/runtimes.ts';
+import { buildFits, ccFromName, codeFor, cudaOrder, missingCardRunner, pinWhy, type GpuFacts, type RunnerName, type RuntimePin } from '../src/runtimes.ts';
 import { cardsOf, type RunnerDevice } from '../src/devices.ts';
-import { cardsName } from '../src/hardware.ts';
+import { cardsName, gpusFrom } from '../src/hardware.ts';
 import { setupsFor, type ModelFacts, type NowFacts, type PcFacts } from '../src/speedfinder.ts';
 
 const GB = 2 ** 30;
@@ -41,17 +41,31 @@ const CATALOG: { name: string; cc: number; gb: number }[] = [
   { name: 'NVIDIA GeForce RTX 5080', cc: 120, gb: 16 },
   { name: 'NVIDIA GeForce RTX 5090', cc: 120, gb: 32 },
   { name: 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', cc: 120, gb: 96 },
+  // Audit 26 Oct (cards.md section 6): laptops, small and odd names, Kepler, data-centre Blackwell.
+  { name: 'NVIDIA GeForce RTX 2050', cc: 86, gb: 4 },
+  { name: 'NVIDIA GeForce MX450', cc: 75, gb: 2 },
+  { name: 'NVIDIA GeForce MX570', cc: 86, gb: 2 },
+  { name: 'NVIDIA GeForce MX130', cc: 50, gb: 2 },
+  { name: 'NVIDIA GeForce RTX 4060 Laptop GPU', cc: 89, gb: 8 },
+  { name: 'NVIDIA GeForce RTX 3050 6GB Laptop GPU', cc: 86, gb: 6 },
+  { name: 'NVIDIA RTX 4000 SFF Ada Generation', cc: 89, gb: 20 },
+  { name: 'NVIDIA TITAN X (Pascal)', cc: 61, gb: 12 },
+  { name: 'NVIDIA GeForce GTX 780', cc: 35, gb: 3 },
+  { name: 'Tesla K80', cc: 37, gb: 12 },
+  { name: 'NVIDIA B200', cc: 100, gb: 180 },
+  { name: 'NVIDIA GB10', cc: 121, gb: 128 },
 ];
 type Card = (typeof CATALOG)[number];
 
 /** Drivers people really run (null: it could not be read). */
-const DRIVERS = ['470.14', '551.61', '560.94', '572.83', '582.78', '591.44', null] as const;
-/** The drivers a card runs on: Maxwell, Pascal and Volta end with the 580 branch; Ada and Hopper start at 520, Blackwell at 570. */
+const DRIVERS = ['470.14', '474.82', '539.19', '551.61', '560.94', '572.83', '582.78', '591.44', '615.10', null] as const;
+/** The drivers a card runs on: Kepler ends with the 470 branch; Maxwell, Pascal and Volta with the 580 branch; Ada and Hopper start at 520, Blackwell at 570. */
 const runsOn = (c: Card, d: string | null) => {
   if (d === null) return true;
   const v = Number(d);
+  if (c.cc < 50 && v >= 475) return false;
   if (c.cc < 75 && v >= 590) return false;
-  if (c.cc >= 120 && v < 570) return false;
+  if (c.cc >= 100 && v < 570) return false;
   if (c.cc >= 89 && v < 520) return false;
   return true;
 };
@@ -93,6 +107,9 @@ test('the card name alone gives a safe compute level: never above the true one, 
     assert.ok(got !== null, `${c.name}: no level from its name`);
     assert.ok(got! <= c.cc && Math.floor(got! / 10) === Math.floor(c.cc / 10), `${c.name}: ${got} from the name, ${c.cc} in truth`);
   }
+  // Quadro K is Kepler or Maxwell by model (K1200 is Maxwell): not guessed from the name, so CUDA is still tried.
+  assert.equal(ccFromName('Quadro K1200'), null);
+  assert.equal(ccFromName('NVIDIA GeForce GTX TITAN X'), 50, 'the Maxwell TITAN X, not the Pascal one');
 });
 
 test('Auto, every card on every driver: the CUDA build it starts has code for every card, a driver new enough, and native code when one has it', () => {
@@ -110,7 +127,8 @@ test('Auto, every card on every driver: the CUDA build it starts has code for ev
       const pick = order[0];
       const coverable = CUDA_IDS.filter(id => covers(id, s.cards) && (!s.driver || atLeast(s.driver, needs(id, s.cards))));
       if (!coverable.length) {
-        noCuda.push(label(s));
+        // No build has code for a Kepler card: its start lists no card, and Auto goes on to Vulkan (noCard).
+        if (!s.cards.some(c => c.cc < 50)) noCuda.push(label(s));
         continue;
       }
       assert.ok(pick, `${label(s)}: no CUDA build picked, though ${coverable.join(', ')} would run`);
@@ -149,6 +167,7 @@ test('a model held to some cards: the build must have code for every card it is 
   for (const s of setups()) {
     if (s.driver && !atLeast(s.driver, '551.61')) continue;
     for (const c of s.cards) {
+      if (c.cc < 50) continue; // Kepler: no build has code for it (see Auto, above)
       const id = cudaOrder(PINS, 'llama', [gpu(c)], s.driver)[0];
       assert.ok(id && buildFits(PINS[id], [gpu(c)], s.driver), `${label(s)}: a model held to the ${c.name} gets ${id}`);
     }
@@ -265,4 +284,50 @@ test('the cards\' name says what is there, for every set', () => {
     else for (const k of kinds) assert.ok(name.includes(k), `${name} names ${k}`);
     assert.ok(!(kinds.size > 1 && /^\d+ × /.test(name) && name.split(' + ').length === 1), `${name}: different cards named as one kind`);
   }
+});
+
+// Audit C1-C3 (26 Oct): PCs with no NVIDIA card, from the lines Windows gives (src/hardware.ts gpusFrom), through the
+// same decisions. Before, the APU and Core Ultra PCs were told to fetch Vulkan and Auto ran on the built-in chip.
+const CAP = 4293918720;
+const NON_NVIDIA: { pc: string; cim: string; vulkan: string[]; card: string | null; gb: number }[] = [
+  { pc: 'AMD only, RX 7900 XTX', cim: `GPU|AMD Radeon RX 7900 XTX|${CAP}|${24 * GB}`, vulkan: ['AMD Radeon RX 7900 XTX'], card: 'AMD Radeon RX 7900 XTX', gb: 24 },
+  { pc: 'Arc only, A770', cim: `GPU|Intel(R) Arc(TM) A770 Graphics|${CAP}|${16 * GB}`, vulkan: ['Intel(R) Arc(TM) A770 Graphics'], card: 'Intel(R) Arc(TM) A770 Graphics', gb: 16 },
+  { pc: 'Ryzen APU only, 780M', cim: 'GPU|AMD Radeon(TM) 780M Graphics|536870912|536870912', vulkan: ['AMD Radeon 780M Graphics'], card: null, gb: 0 },
+  { pc: 'Ryzen 5600G', cim: 'GPU|AMD Radeon(TM) Graphics|536870912|', vulkan: ['AMD Radeon(TM) Graphics'], card: null, gb: 0 },
+  { pc: 'Core Ultra, Arc built in', cim: 'GPU|Intel(R) Arc(TM) 140V GPU (16GB)|134217728|', vulkan: ['Intel(R) Arc(TM) 140V GPU (16GB)'], card: null, gb: 0 },
+  { pc: 'Ryzen laptop + RX 7600S', cim: `GPU|AMD Radeon(TM) 780M Graphics|536870912|\nGPU|AMD Radeon RX 7600S|${CAP}|${8 * GB}`, vulkan: ['AMD Radeon 780M Graphics', 'AMD Radeon RX 7600S'], card: 'AMD Radeon RX 7600S', gb: 8 },
+  { pc: 'a VM with no graphics chip', cim: 'GPU|Microsoft Basic Display Adapter||', vulkan: [], card: null, gb: 0 },
+];
+
+test('PCs with no NVIDIA card: no CUDA build, the true card size, built-in chips never a card, and Auto on the CPU when only a built-in chip is there', () => {
+  for (const p of NON_NVIDIA) {
+    const gpus = gpusFrom(p.cim, [], []);
+    assert.deepEqual(cudaOrder(PINS, 'llama', gpus, null), [], `${p.pc}: no CUDA build`);
+    const cards = gpus.filter(g => !g.integrated);
+    assert.deepEqual(cards.map(g => [g.name, g.total]), p.card ? [[p.card, p.gb * GB]] : [], `${p.pc}: its cards`);
+    // Auto skips the graphics chip when every chip is built in (src/server/panes.ts autoSkipsGpu).
+    assert.equal(gpus.length > 0 && gpus.every(g => g.integrated), !p.card && gpus.length > 0, `${p.pc}: Auto on the CPU`);
+    // "Fetch the Vulkan runner" is said only to a PC with a real card.
+    const words = missingCardRunner('llama', gpus, () => false);
+    assert.equal(!!words, !!p.card, `${p.pc}: ${words}`);
+    if (p.card) assert.ok(words.includes(`This PC has ${p.card},`), words);
+    // The runner's own list: the built-in chip left out.
+    const list: RunnerDevice[] = p.vulkan.map((d, i) => ({ id: `Vulkan${i}`, desc: d, total: (d === p.card ? p.gb : 16) * GB, free: 0 }));
+    assert.deepEqual(cardsOf([list], gpus.filter(g => g.integrated).map(g => g.name)).map(c => c.label), p.card ? [p.card] : [], `${p.pc}: runner cards`);
+  }
+});
+
+// Audit C6 (26 Oct): the picture runner's CUDA build carried no list of the cards it has code for, so it was picked for
+// every NVIDIA card. Read from its ggml-cuda.dll (sd master-929, built with CUDA 12.8 Update 1, nvcc V12.8.93): native
+// code and PTX for sm 61, 70, 75, 80, 86, 89, 90, 100 and 120; none for Maxwell. Driver floor from NVIDIA's table: 572.61.
+test('the CUDA picture runner: code for Pascal to Blackwell, none for Maxwell, and a 572.61 driver or newer', () => {
+  const sd = PINS['sd-cuda'];
+  assert.deepEqual(sd.cuda, { version: '12.8', native: [61, 70, 75, 80, 86, 89, 90, 100, 120], ptx: [61, 70, 75, 80, 86, 89, 90, 100, 120], driver: '572.61' });
+  const by = (n: string) => gpu(CATALOG.find(c => c.name.includes(n))!);
+  assert.deepEqual(cudaOrder(PINS, 'sd', [by('GTX 1060')], '582.78'), ['sd-cuda']);
+  assert.deepEqual(cudaOrder(PINS, 'sd', [by('RTX 5080')], '582.78'), ['sd-cuda'], 'native code for the RTX 50 series');
+  assert.deepEqual(cudaOrder(PINS, 'sd', [by('GTX 980')], '582.78'), [], 'no code for a Maxwell card: pictures run on Vulkan');
+  assert.deepEqual(cudaOrder(PINS, 'sd', [by('RTX 3060')], '560.94'), [], 'a driver older than CUDA 12.8 needs');
+  assert.match(pinWhy(sd, [by('GTX 980')], '582.78'), /no code for it: it needs a GTX 10 series \(Pascal\) card or newer/);
+  for (const c of CATALOG) if (c.cc >= 61) assert.notEqual(codeFor(sd, c.cc), 'none', c.name);
 });

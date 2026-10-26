@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { freemem } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { RpcProgram } from '../maxlend.ts';
-import { cardsOf, listDevices, type Card } from '../devices.ts';
+import { builtInListed, cardsOf, listDevices, listSdDevices, pickSdDevice, startCards, type Card } from '../devices.ts';
 import { runnerEnv } from '../worker.ts';
 import { log } from '../log.ts';
 import type { Gpu } from '../hardware.ts';
@@ -73,7 +73,7 @@ export const chat = {
   disconnect: () => main().disconnect(),
   busy: () => main().busy(),
 };
-export const images = new Images({ root: ROOT, models: HOME.models, data: HOME.data, store, runtimes, hardware, sampler, chatPane: chat, devicesFor: (e, a) => devicesFor(e, a), fit: (b, p) => fit(b, p) });
+export const images = new Images({ root: ROOT, models: HOME.models, data: HOME.data, store, runtimes, hardware, sampler, chatPane: chat, devicesFor: (e, a) => devicesFor(e, a), sdDevice: d => sdDevice(d), fit: (b, p) => fit(b, p) });
 // The folder chosen under Models > "Models in another folder" is searched for picture-model files too.
 images.registry.copies = () => [...cachedCopies(), ...(chatModels.other() ? [chatModels.other()!] : [])];
 const panes = { chat, image: images.pane };
@@ -156,6 +156,8 @@ async function status() {
  */
 let cardList: Card[] = [];
 let cardsRead: { key: string; done: Promise<Card[]> } | null = null;
+/** A runner lists a chip built into the processor: a chat start then names the cards (devices.ts startCards). */
+let builtInHere = false;
 /**
  * A card runner that cannot use any card here, and why: its own device list was empty (a CUDA build with no NVIDIA
  * driver, or none for the card), or a start of it said so (runnerpush.noCardStart). Auto skips it until the runners
@@ -173,12 +175,38 @@ export function readCards(): Promise<Card[]> {
         // An NVIDIA card here that the CUDA runner does not list: that runner cannot use it.
         const at = exes.findIndex(x => x.d === 'cuda');
         if (at >= 0 && !lists[at].length && cardsRead?.key === key) noCard.set('cuda', `the CUDA runner (${runtimes.pins[runtimes.id('llama', 'cuda')]?.name ?? 'CUDA'}) lists no card it can use on this PC`);
-        return (cardList = cardsOf(lists, hardware.gpus.filter(g => g.integrated).map(g => g.name)));
+        const integrated = hardware.gpus.filter(g => g.integrated).map(g => g.name);
+        builtInHere = builtInListed(lists, integrated);
+        return (cardList = cardsOf(lists, integrated));
       }),
     };
   }
   return cardsRead.done;
 }
+/**
+ * The picture runner's own device list per installed card build (sd-server --list-devices), read once per program.
+ * A CUDA picture runner that lists no CUDA device cannot use any card here: pictures skip it (audit C6), as chat does
+ * with noCard, instead of a failed start before Vulkan at every Connect.
+ */
+const sdLists = new Map<string, Promise<{ name: string; desc: string }[]>>();
+const noPictureCard = new Map<Device, string>();
+function sdDevices(device: Device): Promise<{ name: string; desc: string }[]> {
+  const exe = device === 'cpu' ? null : runtimes.exe('sd', device);
+  if (!exe) return Promise.resolve([]);
+  let read = sdLists.get(exe);
+  if (!read) {
+    read = listSdDevices(exe, runnerEnv(device)).then(list => {
+      if (device === 'cuda' && !list.some(d => /^CUDA\d/i.test(d.name))) noPictureCard.set('cuda', `the CUDA picture runner lists no card it can use on this PC`);
+      else noPictureCard.delete(device);
+      return list;
+    });
+    sdLists.set(exe, read);
+  }
+  return read;
+}
+/** The device a picture model is held to on `device`'s runner (src/devices.ts pickSdDevice), or null. */
+export const sdDevice = async (device: Device) => pickSdDevice(await sdDevices(device), hardware.gpus);
+
 /** The cards as last read (reading them again in the background when the runners changed). */
 export function cardsNow(): Card[] {
   void readCards();
@@ -272,7 +300,7 @@ export function chatList() {
  */
 function devicesFor(engine: 'llama' | 'sd', asked: Asked): Device[] {
   const gpu: Device[] = [];
-  const found = (d: Device) => engine !== 'llama' || !noCard.has(d);
+  const found = (d: Device) => !(engine === 'llama' ? noCard : noPictureCard).has(d);
   if (hardware.gpus.some(g => g.vendor === 'nvidia') && runtimes.usable(engine, 'cuda') && found('cuda')) gpu.push('cuda');
   if (hardware.gpus.length && runtimes.installed(engine, 'vulkan') && found('vulkan')) gpu.push('vulkan');
   const cpu: Device[] = runtimes.installed(engine, 'cpu') ? ['cpu'] : [];
@@ -405,7 +433,9 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   const draftPath = run.draft ? chatModels.path(run.draft) : null;
   // Max mode (hidden: TOMLIN_MAX names the linked PCs): their cards join this load as more devices.
   const max = maxPcs().length ? await rpcFor() : null;
-  const started = { ...run, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };
+  // A laptop's built-in chip beside its card: Vulkan would spread the layers over both, so the cards are named.
+  const cards = startCards(run.cards, await readCards(), builtInHere);
+  const started = { ...run, cards, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };
   const draftName = draftPath ? draftPath.split(/[\\/]/).pop()!.replace(/\.gguf$/i, '') : '';
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
   const held = heldRunner(run);

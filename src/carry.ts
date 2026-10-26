@@ -8,6 +8,8 @@
 // cut short carries on from where it stopped. Sending a model to a node needs no tick there (2.0.56): every linked PC
 // may. The parts (both sides) are here, tested in test/carry.test.ts; the doors are in src/jobrun/copies.ts (this PC
 // asking) and src/jobrun/node.ts (a node answering).
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { open, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { SharedModel } from './nodestaff.ts';
@@ -27,9 +29,19 @@ export interface Allow {
   tune: boolean;
   /** "Lend card memory to linked PCs (Max mode)" (2.0.58): a linked PC's chat runner may use this PC's card while nobody is using it (src/maxlend.ts). */
   lend: boolean;
+  /**
+   * "Accept models from linked PCs" (2.0.61): a linked PC may send a model here, which this PC's runners then read.
+   * Before, any linked PC could, with no tick (audit X3).
+   */
+  receive: boolean;
+  /**
+   * "Let linked PCs pull TOMLIN updates from here" (26 Oct): a linked PC may copy this PC's app files (only those, read
+   * only) to update itself from them (src/update.ts giveSide).
+   */
+  give: boolean;
 }
 
-export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false };
+export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false };
 
 /**
  * The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read.
@@ -37,11 +49,11 @@ export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune
  */
 export function cleanAllow(raw: unknown, lendShown = true): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: lendShown && o.lend === true };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: lendShown && o.lend === true, receive: o.receive === true, give: o.give === true };
 }
 
 /** "Allow all" is ticked when every one is. */
-export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune && a.lend;
+export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune && a.lend && a.receive && a.give;
 
 // ---- Sizes ----
 
@@ -155,17 +167,30 @@ export function networkList(pcs: NetPc[], here: { chatFiles: string[]; pictures:
   return [...rows.values()].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'chat' ? -1 : 1));
 }
 
-/** Why one of this PC's models cannot be sent to a linked PC now ('' when it can). */
-export function sendWhy(pc: NetPc): string {
+/** Why a linked PC cannot take a model at all now: off, busy with its owner, or too old ('' when it can). */
+function takeWhy(pc: NetPc): string {
   if (!pc.ok) return `"${pc.name}" is off or not answering now`;
   if (pc.away) return `"${pc.name}" is being used by its owner for now`;
   if (!pc.can.includes('carry') || !pc.allow) return `"${pc.name}" runs an older TOMLIN: update it there first`;
   return '';
 }
 
+/** Why one of this PC's models cannot be sent to a linked PC now ('' when it can). */
+export function sendWhy(pc: NetPc): string {
+  const why = takeWhy(pc);
+  if (why) return why;
+  // A node from before the tick (it does not say 'receive') takes models as it always did.
+  if (pc.can.includes('receive') && !pc.allow?.receive) return receiveRefused(pc.name);
+  return '';
+}
+
+/** Why a node takes no model sent to it: the tick, named as its owner sees it. */
+export const receiveRefused = (name: string) => `"${name}" does not take models from other PCs now (its owner ticks "Accept models from linked PCs" under Network)`;
+
 /** Why a linked PC cannot download a model itself now (Download, To that PC, on the Models page): '' when it can. */
 export function fetchWhy(pc: NetPc): string {
-  const why = sendWhy(pc);
+  // Downloaded by that PC itself from where TOMLIN gets models (no file from this one): no "Accept models" tick.
+  const why = takeWhy(pc);
   if (why) return why;
   if (pc.backupsOnly) return `"${pc.name}" is set to Backups only: no model is downloaded to it (untick Backups only on its card to use it for models)`;
   if (!pc.can.includes('fetch')) return `"${pc.name}" runs an older TOMLIN that cannot download a model by itself: update it there first`;
@@ -297,6 +322,13 @@ async function startAt(part: string, bytes: number): Promise<number> {
   return 0;
 }
 
+/** A file's SHA-256, read as a stream (a picture model's file can be several GB). */
+async function sha256File(file: string): Promise<string> {
+  const h = createHash('sha256');
+  for await (const chunk of createReadStream(file)) h.update(chunk);
+  return h.digest('hex');
+}
+
 /** A received file that reached its size takes its place. False when it is not whole (it stays as a part). */
 export async function finish(part: string, dest: string, bytes: number): Promise<boolean> {
   if ((await sizeOf(part)) !== bytes) return false;
@@ -359,7 +391,7 @@ export interface NodeDeps {
   /** A chat model file of this name is here already (in any of its folders). */
   chatHas: (name: string) => boolean;
   /** Where each file of picture model `id` goes here, and whether it is here whole; null when this PC does not know it. */
-  pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean }[] | null;
+  pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
   /** The folder of restore points kept for linked PCs. */
   keptRoot: string;
   freeBytes?: (dir: string) => Promise<number>;
@@ -399,14 +431,16 @@ export function nodeSide(d: NodeDeps) {
   /** Where each file of a model sent here goes; or why it cannot come. */
   // Every file of a model whole on this PC (a split model cut off after its first part is not there yet).
   const allWhole = async (files: { path: string; bytes: number }[]) => (await Promise.all(files.map(f => sizeOf(f.path)))).every((n, k) => n === files[k].bytes);
-  async function incoming(b: Record<string, unknown>): Promise<{ files: { name: string; path: string; bytes: number }[]; have: boolean } | string> {
+  // `asked`: false for a stopped send's tidy-up, which goes on even once the tick is off.
+  async function incoming(b: Record<string, unknown>, asked = true): Promise<{ files: { name: string; path: string; bytes: number; sha256?: string }[]; have: boolean } | string> {
+    if (asked && !d.allow().receive) return `${receiveRefused(d.pcName())}.`;
     const raw = Array.isArray(b.files) ? b.files.slice(0, 64) : [];
     if (b.kind === 'image') {
       const dest = typeof b.model === 'string' ? d.pictureDest(b.model) : null;
       if (!dest) return `"${d.pcName()}" runs a TOMLIN that does not know that picture model: update it there first.`;
       const sent = raw.map(f => int((f as Record<string, unknown>)?.bytes));
       if (sent.length !== dest.length || dest.some((f, k) => f.bytes !== sent[k])) return `"${d.pcName()}" knows another version of that picture model: update TOMLIN on both PCs.`;
-      return { files: dest.map(({ name, path, bytes }) => ({ name, path, bytes })), have: dest.every(f => f.have) };
+      return { files: dest.map(({ name, path, bytes, sha256 }) => ({ name, path, bytes, sha256 })), have: dest.every(f => f.have) };
     }
     const files: { name: string; path: string; bytes: number }[] = [];
     for (const f of raw) {
@@ -461,6 +495,12 @@ export function nodeSide(d: NodeDeps) {
           await rm(partOf(f.path), { force: true });
           return no(400, 'more came than the file holds, so it was thrown away. Send it again.');
         }
+        // A picture model's file is the registry's, byte for byte (its SHA-256), before it takes its place.
+        if (r.at === f.bytes && f.sha256 && (await sha256File(partOf(f.path))) !== f.sha256) {
+          writing.delete(f.path);
+          await rm(partOf(f.path), { force: true });
+          return no(400, `${basename(f.path)} that came is not the file TOMLIN's registry names (its SHA-256 differs), so it was thrown away.`);
+        }
         const done = r.at === f.bytes && (await finish(partOf(f.path), f.path, f.bytes));
         if (done) {
           writing.delete(f.path);
@@ -470,7 +510,7 @@ export function nodeSide(d: NodeDeps) {
       }
       case '/worker/carry-drop': {
         // A send that was stopped: its unfinished parts go (whole files stay).
-        const got = await incoming(b);
+        const got = await incoming(b, false);
         if (typeof got === 'string') return no(403, got);
         for (const f of got.files) {
           const w = writing.get(f.path);
@@ -806,8 +846,8 @@ export async function pullBackup(w: Wire, o: { name: string; bytes: number; dest
 
 export interface Transfer {
   id: string;
-  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; backup: a restore point to it; bring: one back; update: this TOMLIN to it; projects: the projects backed up to it; restore: brought back from it; fetch: a model that PC downloads itself; runner: the CUDA runner sent to it. */
-  kind: 'copy' | 'send' | 'backup' | 'bring' | 'update' | 'projects' | 'restore' | 'fetch' | 'runner';
+  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; backup: a restore point to it; bring: one back; update: this TOMLIN to it; pull: its TOMLIN taken into this PC; projects: the projects backed up to it; restore: brought back from it; fetch: a model that PC downloads itself; runner: the CUDA runner sent to it. */
+  kind: 'copy' | 'send' | 'backup' | 'bring' | 'update' | 'pull' | 'projects' | 'restore' | 'fetch' | 'runner';
   what: string;
   pc: string;
   pcName: string;
@@ -839,6 +879,7 @@ export class Transfers {
     if (kind === 'runner') return `Stopped. Nothing half-sent is left on "${pcName}", and what was downloaded here is kept: send it again to carry on.`;
     if (kind === 'backup' || kind === 'projects') return 'Stopped. Back up again when you are ready.';
     if (kind === 'update') return `Stopped. Nothing was changed on "${pcName}": it still runs its old version.`;
+    if (kind === 'pull') return 'Stopped. Nothing was changed on this PC: it still runs its old version.';
     if (kind === 'fetch') return `Stopped on "${pcName}". Download it again when you are ready.`;
     return 'Stopped. Press it again to carry on from where it stopped.';
   }

@@ -114,6 +114,22 @@ export function cardsNow(cards: PcFacts['cards'], now: { name: string; total: nu
   return big ? cards.map(c => (c === big ? { ...c, free: now.free } : c)) : [now];
 }
 
+/**
+ * The finder's cards: the runners' own list (src/devices.ts cardsOf, biggest first), each with its runner names and the
+ * runners that have code for it, and the room read now (`now`: the card the bar reads, with its free memory) on the card
+ * of that name, else on the biggest. Every card comes from the one list, so a card's name, size and runner names are one
+ * card's (audit C8). No runner list yet: the card read now, without names; none read now: the CPU only.
+ */
+export function finderCards(known: { label: string; total: number; ids: string[] }[], now: { name: string; total: number; free: number } | null, runnersFor: (c: { label: string; total: number; ids: string[] }) => RunnerName[]): PcFacts['cards'] {
+  if (!now) return [];
+  if (!known.length) return [now];
+  const cards = known.map(c => ({ name: c.label, total: c.total, free: c.total, ids: c.ids, runners: runnersFor(c) }));
+  const same = (a: string, b: string) => a.toLowerCase().includes(b.toLowerCase()) || b.toLowerCase().includes(a.toLowerCase());
+  const read = cards.find(c => same(c.name, now.name)) ?? cards[0];
+  read.free = Math.max(0, Math.min(read.total, read.total - (now.total - now.free)));
+  return cards;
+}
+
 const RUNNER_NAME: Record<RunnerName, string> = { cuda: 'CUDA 12', cuda13: 'CUDA 13', vulkan: 'Vulkan' };
 
 /** A setup in plain words. */

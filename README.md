@@ -160,6 +160,11 @@ data it zips the `data` folder into `backups` (models are not in them). The newe
 one a day for a week, one a week for a month, one every 3 months for a year. **Settings** (top bar),
 **Your data and updates**, opens the folder, backs up by hand and puts a backup back.
 
+From a linked PC (2.0.61): when a PC this one links to runs a newer TOMLIN and its owner ticked **Let linked PCs pull
+TOMLIN updates from here**, its window under Network has **Update this PC from it**. Only the files that differ are
+copied over the encrypted link, each is checked, and this PC starts the new version beside its old one. No PIN of the
+other PC is asked: nothing changes there, and it gives only its own app files.
+
 Coming from a version that kept everything inside its own folder (2.0.25 and older): the first start finds that folder
 beside the new one (or the same folder) and asks **Import your chats?** It copies the data (the old folder keeps its
 own) and moves the models and graphics-card runners (no download). TOMLIN starts again to do it. **Start
@@ -528,7 +533,8 @@ rather than misread it.
   **Sharing of models** (linked PCs may copy the models ticked to share), **Host can back up** (since 2.0.44 **Enable backups**: a linked PC may keep a
   restore point there: a zip of its data/, the newest 3 from each PC, in the home folder's "backups from other PCs")
   and **Allow host to push models** (a linked PC may install one of its models in this PC's chat models folder; it is
-  not shared until ticked; retired in 2.0.56: any linked PC may send one, no tick). All off until ticked; each change
+  not shared until ticked; retired in 2.0.56: any linked PC may send one, no tick; back in 2.0.61 as **Accept models from
+  linked PCs**, and a picture model sent is checked against TOMLIN's list of its files). All off until ticked; each change
   asks the app lock PIN. A PC keeps listing and bringing
   back its own restore points after the backup tick is taken off. On any PC, **My local LLMs**
   (Nodes and memory > Other PCs, and the Models page) lists every model the linked PCs share, once each, with **Get a
@@ -876,6 +882,15 @@ rather than misread it.
   for someone (an answer, a picture) the host asks again every 10 s for up to 15 minutes. A node older than 2.0.33
   is updated by hand once (unzip); from then on from the host. Measured on one laptop: same code, a version step, 662
   bytes crossed and the node answered as the new version in about 15 s.
+- **Updates pulled from a linked PC (2.0.61):** the other way round, started by the person at the PC that is behind.
+  Since 2.0.61 a push asks the receiving PC's own app lock PIN (so a guest cannot update another PC); a pull asks none,
+  because nothing changes on the PC it comes from. That PC's owner ticks **Let linked PCs pull TOMLIN updates from
+  here** (off until ticked; Allow all covers it). It then answers `/worker/update-list` (its version, build id and app
+  files: PARTS without SKIP) and `/worker/update-get` (a piece of a file in that list, looked up by its exact path, so
+  nothing else can be named), read-only, and only while its folder still holds the copy that runs. The PC pulling runs
+  the same steps and checks as for a pushed update (`updateSide` in `src/update.ts`, reached for a pull only from that
+  PC itself): every path and hash, the build id equal to the files, a whole copy beside the old one, then exit 76.
+  A push and a pull never come in at once. A PC can pull only from a PC in its own linked-PCs list.
 - **The Staff window** has two sides: **Your staff** on the left (with **Hire staff**, which opens its own window),
   and **Edit Staff** on the right. Edit (in Staff, the left panel's pencil, or Nodes and memory) opens that person on the Edit Staff side:
   photo, name, headline, Talk to, Mute and Fire, then About, Models, Role and level, Audition, Speed and Memory; a

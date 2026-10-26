@@ -143,6 +143,28 @@ export async function appPinCheck(v: unknown): Promise<{ ok: true } | { status: 
   return { ok: true };
 }
 
+/** Wrong PINs typed on other PCs to update this one: counted per link, apart from the lock screen's (appGuard). */
+const updateGuard = new PinGuard();
+
+/**
+ * This PC's app lock PIN or password, typed on a linked PC to send it an update (audit X2): only someone who knows it
+ * (the PC's admin, not a guest, not a program on the other PC) can. Wrong tries count per link (`who`): 5 in 10 minutes
+ * stop that link, 20 from all stop every update for 10 minutes, and the lock screen here is never locked by them.
+ */
+export async function updatePinCheck(v: unknown, who: string): Promise<{ ok: true } | { status: number; error: string }> {
+  if (appDamaged) return { status: 409, error: damagedLock(APP_LOCK_FILE) };
+  if (!appFile) return { status: 409, error: 'has no app lock, so it takes no update from another PC: set one there (the padlock, top right), then update it again' };
+  const w = word();
+  const wait = updateGuard.lockedFor(who) || updateGuard.pausedFor();
+  if (wait) return { status: 429, error: `had too many wrong ${w}s typed for it: wait ${wait} minute${wait > 1 ? 's' : ''}, then update it again` };
+  const secret = cleanSecret(kindOf(), v);
+  if (!secret) return { status: 403, error: `asks for its app lock ${w} (the one that opens TOMLIN there) to take an update` };
+  updateGuard.wrong(who);
+  if (!(await secretMatches(secret, appFile))) return { status: 403, error: `says that ${w} is wrong: type the app lock ${w} that opens TOMLIN there` };
+  updateGuard.right(who);
+  return { ok: true };
+}
+
 export async function appLockAction(req: IncomingMessage, res: ServerResponse, b: Record<string, unknown>): Promise<void> {
   const wait = appGuard.lockedFor('local');
   const tooMany = () => json(res, 429, { error: `Too many wrong tries. Wait ${wait} minute${wait > 1 ? 's' : ''}, then try again.` });

@@ -100,10 +100,10 @@ test('a version is newer number by number', () => {
 });
 
 /** A node running `oldVersion` in its own folder, its update doors, and a wire to them. */
-function aNode(o: { allowed?: boolean; restarts?: boolean; busy?: () => string | null; extraOld?: Record<string, string>; build?: () => string } = {}) {
+function aNode(o: { allowed?: boolean; restarts?: boolean; busy?: () => string | null; extraOld?: Record<string, string>; build?: () => string; pin?: string } = {}) {
   const parent = tmp();
   const root = aCopy(parent, '2.0.32', { 'src/partner.ts': 'her own words', 'src/old-only.ts': 'gone in the new one', ...o.extraOld });
-  const done: { dir: string; version: string; by: string }[] = [];
+  const done: { dir: string; version: string; by: string; pulled?: boolean }[] = [];
   const handle = update.updateSide({
     root,
     version: '2.0.32',
@@ -114,7 +114,9 @@ function aNode(o: { allowed?: boolean; restarts?: boolean; busy?: () => string |
     restarts: o.restarts ?? true,
     busy: o.busy ?? (() => null),
     freeBytes: async () => Infinity,
-    done: async (dir, version, by) => void done.push({ dir, version, by }),
+    done: async (dir, version, by, pulled) => void done.push({ dir, version, by, ...(pulled ? { pulled } : {}) }),
+    // Audit X2: a node that asks its own app lock PIN for an update pushed to it.
+    ...(o.pin ? { pinCheck: async (v: unknown) => (v === o.pin ? { ok: true as const } : { status: 403, error: v ? 'says that PIN is wrong' : 'asks for its app lock PIN' }) } : {}),
   });
   const puts: string[] = [];
   const wire = (tamper = false): Wire => ({
@@ -175,6 +177,25 @@ test('an update is refused without the tick, when not newer, or when the node ca
   await assert.rejects(go(aNode({ allowed: false })), /Allow host to update TOMLIN/);
   await assert.rejects(go(aNode(), '2.0.32'), /only a newer version is taken/);
   await assert.rejects(go(aNode({ restarts: false })), /not started by its installed program or Start TOMLIN.cmd/);
+});
+
+// Audit X2 (26 Oct): an update pushed over the link carried no check beyond the tick, so any program on a linked PC (or
+// someone holding its link keys) could run code on every node. Now the node's own app lock PIN is typed on the sending
+// PC for each update: an admin knows it, a guest or a program does not. Pulling an update, started at the PC itself,
+// will need none.
+test('a node that asks its PIN takes no update without it or with a wrong one, and nothing crosses before it is right', async () => {
+  const host = hostCopy();
+  const files = await update.appFiles(host);
+  const node = aNode({ pin: '4711' });
+  const go = (pin?: string) => update.pushUpdate(node.wire(), { version: '2.0.33', root: host, files, ...(pin !== undefined ? { pin } : {}), progress: () => undefined, signal: new AbortController().signal });
+  await assert.rejects(go(), /"Worker PC" asks for its app lock PIN\./);
+  await assert.rejects(go('1234'), /"Worker PC" says that PIN is wrong/);
+  assert.deepEqual(node.puts, [], 'not one file crossed');
+  // The quick check before the update starts (the sending page asks again at once after a wrong one).
+  assert.equal((await node.handle('/worker/update-pin', { appPin: '1234' }, { key: 'b1b2b3b4', name: 'Laptop' })).status, 403);
+  assert.equal((await node.handle('/worker/update-pin', { appPin: '4711' }, { key: 'b1b2b3b4', name: 'Laptop' })).status, 200);
+  assert.equal(await go('4711'), 'tomlin-2.0.33');
+  assert.equal(node.done.length, 1);
 });
 
 test('a busy node is asked again until it is free; nothing restarts while it works for someone', async () => {
@@ -437,4 +458,160 @@ test('an older PC that refuses a file it does not know gets the same copy withou
   assert.equal(update.retryFor(files, files, new Error('no room on that PC')), null);
   // The welcome page is not part of the build id, so leaving it out does not make the PC look different afterwards.
   assert.ok(update.NEWER_FILES.every(p => !update.BUILD_PARTS.some(b => p === b || p.startsWith(`${b}/`))));
+});
+
+// ---- Pulling an update (26 Oct): the person at a PC takes a newer TOMLIN from a linked PC that lets it ----
+// A guest can never push an update to another PC (a push asks that PC's own app lock PIN, audit X2), but may pull one
+// from the network. The PC giving it serves only its own app files, read-only, behind a tick of its own; the
+// PC pulling it runs the very same checks a push gets (updateSide), called from itself, so it needs no PIN there.
+
+/** The PC that gives an update: a newer copy with its doors, as its owner ticked (or not) "Let linked PCs pull…". */
+async function aGiver(o: { allowed?: boolean; version?: string; build?: () => string; copyVersion?: string } = {}) {
+  const root = aCopy(tmp(), o.copyVersion ?? o.version ?? '2.0.33', { 'src/new-part.ts': '// new in 2.0.33\n', 'src/partner.ts': 'private', 'data/settings.json': '{"secret":1}' });
+  const own = await update.buildId(root);
+  let allowed = o.allowed ?? true;
+  const give = update.giveSide({ root, version: o.version ?? '2.0.33', build: o.build ?? (() => own), allowed: () => allowed, pcName: () => 'Big PC' });
+  const gets: string[] = [];
+  const wire = (w: { tamper?: boolean; list?: (v: Record<string, unknown>) => Record<string, unknown>; onPiece?: () => void } = {}): Wire => ({
+    ask: async (p, b) => {
+      const a = await give(p, b);
+      if (a.status !== 200 || !('json' in a)) throw new Error(`"Big PC": ${String('json' in a ? a.json.error : 'a piece')}`);
+      return w.list ? w.list(a.json) : a.json;
+    },
+    getPiece: async (p, b) => {
+      const a = await give(p, b);
+      if (!('piece' in a)) throw new Error(`"Big PC": ${String(a.json.error)}`);
+      gets.push(String(b.path));
+      w.onPiece?.();
+      return w.tamper ? Buffer.from(a.piece.toString().toUpperCase()) : a.piece;
+    },
+    putPiece: async () => {
+      throw new Error('a pull never sends a piece to the PC it pulls from');
+    },
+  });
+  return { root, give, wire, gets, own, allow: (v: boolean) => void (allowed = v) };
+}
+const pullInto = (node: ReturnType<typeof aNode>) => (p: string, b: Record<string, unknown>, piece?: Buffer) => node.handle.here(p, b, 'Big PC', piece);
+const errorOf = (a: { json: Record<string, unknown> } | { piece: Buffer }) => ('json' in a ? String(a.json.error ?? '') : '');
+
+test('a PC gives only its own app files, read-only and behind its own tick; nothing else can be named', async () => {
+  const g = await aGiver({ allowed: false });
+  const refused = await g.give('/worker/update-list', {});
+  assert.equal(refused.status, 403);
+  assert.match(errorOf(refused), /"Big PC" does not let linked PCs pull TOMLIN updates from it \(its owner ticks "Let linked PCs pull TOMLIN updates from here" under Network\)/);
+  assert.equal((await g.give('/worker/update-get', { version: '2.0.33', build: g.own, path: 'src/server.ts', from: 0 })).status, 403);
+  g.allow(true);
+  const list = await g.give('/worker/update-list', {});
+  assert.equal(list.status, 200);
+  const said = (list as { json: Record<string, unknown> }).json;
+  assert.equal(said.version, '2.0.33');
+  assert.equal(said.build, g.own);
+  const files = said.files as update.AppFile[];
+  assert.deepEqual(files, (await update.appFiles(g.root)).map(({ path, bytes, sha }) => ({ path, bytes, sha })));
+  for (const never of ['src/partner.ts', 'data/settings.json']) assert.ok(!files.some(f => f.path === never), never);
+  const get = (b: Record<string, unknown>) => g.give('/worker/update-get', { version: '2.0.33', build: g.own, from: 0, ...b });
+  const piece = await get({ path: 'src/server.ts' });
+  assert.ok('piece' in piece);
+  assert.equal(piece.piece.toString(), '// server 2.0.33\n');
+  assert.equal(((await get({ path: 'node_modules/sharp/index.js', from: 4000 })) as { piece: Buffer }).piece.length, 1000);
+  // Only a file of the list it gave: no data, no private files, no way out of the folder, no other folder.
+  for (const path of ['data/settings.json', 'src/partner.ts', '../shelby-2.0.32/src/server.ts', 'src/../data/settings.json', 'src/nothere.ts', 'C:/Windows/win.ini', 'SRC/SERVER.TS', 7]) {
+    const a = await get({ path });
+    assert.ok(!('piece' in a) && a.status === 404, `${String(path)}: ${a.status}`);
+  }
+  for (const from of [-1, 9999, 'x']) assert.equal((await get({ path: 'src/server.ts', from })).status, 400, String(from));
+  // Another version or build than the list it gave: that list is not what it holds now.
+  assert.equal((await get({ path: 'src/server.ts', version: '2.0.32' })).status, 409);
+  assert.equal((await get({ path: 'src/server.ts', build: 'c'.repeat(16) })).status, 409);
+  // Read-only: what it does not give is as it was.
+  assert.equal(readFileSync(join(g.root, 'data', 'settings.json'), 'utf8'), '{"secret":1}');
+});
+
+test('a PC gives nothing when its folder is not the copy that runs, or before it has read its own files', async () => {
+  // Started as 2.0.32, then 2.0.33 was unzipped over it.
+  const moved = await aGiver({ version: '2.0.32', copyVersion: '2.0.33' });
+  assert.match(errorOf(await moved.give('/worker/update-list', {})), /"Big PC" runs TOMLIN 2\.0\.32, but its folder now holds 2\.0\.33.*close TOMLIN there and start it again/);
+  const other = await aGiver({ build: () => 'c'.repeat(16) });
+  assert.match(errorOf(await other.give('/worker/update-list', {})), /its folder changed after TOMLIN started there.*close TOMLIN there and start it again/);
+  const early = await aGiver({ build: () => '' });
+  const a = await early.give('/worker/update-list', {});
+  assert.equal(a.status, 409);
+  assert.match(errorOf(a), /still reading its own files after starting.*in a minute/);
+});
+
+test('a pull: only the changed files come, the new copy is whole beside the old one, no PIN and no tick asked here', async () => {
+  // The PC pulling asks its own PIN for a push and has its push tick off: neither is asked for a pull started on it.
+  const node = aNode({ pin: '4711', allowed: false });
+  const g = await aGiver();
+  const stages: string[] = [];
+  const got = await update.pullUpdate(g.wire(), pullInto(node), { progress: p => void (p.stage && stages.at(-1) !== p.stage && stages.push(p.stage)), signal: new AbortController().signal });
+  assert.deepEqual(got, { version: '2.0.33', build: g.own, folder: 'tomlin-2.0.33' });
+  assert.deepEqual(stages, ['compare', 'send', 'start']);
+  assert.deepEqual(g.gets.sort(), ['package.json', 'src/new-part.ts', 'src/server.ts']);
+  const dir = join(node.parent, 'tomlin-2.0.33');
+  assert.deepEqual(node.done, [{ dir, version: '2.0.33', by: 'Big PC', pulled: true }]);
+  assert.equal(await update.buildId(dir), g.own, 'the new copy is the build the other PC runs');
+  assert.equal(readFileSync(join(dir, 'src', 'server.ts'), 'utf8'), '// server 2.0.33\n');
+  for (const never of ['src/partner.ts', 'data/settings.json', 'src/old-only.ts']) assert.equal(existsSync(join(dir, ...never.split('/'))), false, never);
+  assert.equal(readFileSync(join(node.root, 'src', 'server.ts'), 'utf8'), '// server 2.0.32\n', 'the old copy stays for going back');
+  assert.deepEqual(readdirSync(node.parent).sort(), ['shelby-2.0.32', 'tomlin-2.0.33']);
+  // Over the link the same PC still takes no push without its tick.
+  const newer = aCopy(tmp(), '2.0.34');
+  await assert.rejects(update.pushUpdate(node.wire(), { version: '2.0.34', root: newer, files: await update.appFiles(newer), pin: '4711', progress: () => undefined, signal: new AbortController().signal }), /Allow host to update TOMLIN/);
+});
+
+test('a pull checks what a push checks: not newer, a list that lies, a path out of the folder, a piece changed on the way', async () => {
+  const go = (w: Wire, node = aNode()) => update.pullUpdate(w, pullInto(node), { progress: () => undefined, signal: new AbortController().signal });
+  await assert.rejects(go((await aGiver({ version: '2.0.31' })).wire()), /already runs TOMLIN 2\.0\.32: only a newer version is taken/);
+  const g = await aGiver();
+  // The build it names is not its files.
+  await assert.rejects(go(g.wire({ list: v => ({ ...v, build: 'd'.repeat(16) }) })), /not build ddddddd/);
+  // No build named: a pull takes only a list that says what build it is.
+  await assert.rejects(go(g.wire({ list: v => ({ ...v, build: undefined }) })), /did not say what build/);
+  // A path out of the folder, or a private file: refused before anything comes.
+  const node = aNode();
+  for (const path of ['../evil.ts', 'data/settings.json', 'src/partner.ts']) {
+    await assert.rejects(go(g.wire({ list: v => ({ ...v, files: [...(v.files as update.AppFile[]), { path, bytes: 1, sha: 'a'.repeat(64) }] }) }), node), /not named as an app file/, path);
+  }
+  assert.equal(node.handle.incoming(), null, 'nothing was offered');
+  // A piece changed on the way: thrown away, nothing started, no new folder.
+  const bad = aNode();
+  await assert.rejects(go(g.wire({ tamper: true }), bad), /did not arrive as it was sent/);
+  assert.equal(bad.done.length, 0);
+  assert.equal(existsSync(join(bad.parent, 'tomlin-2.0.33')), false);
+  // This PC cannot start a new copy by itself.
+  await assert.rejects(go(g.wire(), aNode({ restarts: false })), /not started by its installed program or Start TOMLIN.cmd/);
+});
+
+test('Stop on a pull leaves this PC as it was; a pull and a push never come in at once', async () => {
+  const node = aNode();
+  const g = await aGiver();
+  const ac = new AbortController();
+  await assert.rejects(update.pullUpdate(g.wire({ onPiece: () => ac.abort() }), pullInto(node), { progress: () => undefined, signal: ac.signal }), /Stopped/);
+  assert.deepEqual(readdirSync(node.parent), ['shelby-2.0.32']);
+  assert.equal(node.done.length, 0);
+  // A push coming in from a linked PC: a pull waits for it (and the other way round).
+  const files = await update.appFiles(g.root);
+  await node.wire().ask('/worker/update-offer', { version: '2.0.33', files });
+  await assert.rejects(update.pullUpdate(g.wire(), pullInto(node), { progress: () => undefined, signal: new AbortController().signal }), /another PC is updating "Worker PC" now/);
+  await node.wire().ask('/worker/update-drop', { version: '2.0.33' });
+  const pulling = aNode();
+  const offered = await pulling.handle.here('/worker/update-offer', { version: '2.0.33', build: g.own, files }, 'Big PC');
+  assert.equal(offered.status, 200);
+  await assert.rejects(pulling.wire().ask('/worker/update-offer', { version: '2.0.33', files }), /"Worker PC" is taking an update from "Big PC" now/);
+});
+
+test('this PC says when a linked PC has a newer TOMLIN it can pull, or why not, and nothing when it is not ahead', () => {
+  const a = 'a'.repeat(16);
+  const b = 'b'.repeat(16);
+  const pc = { name: 'Big PC', ok: true, version: '2.0.62', build: b, away: null, can: ['carry', 'update', 'give'], allowGive: true };
+  assert.equal(update.pullWhy(pc, '2.0.61', a, true), '');
+  assert.equal(update.pullWhy({ ...pc, version: '2.0.61' }, '2.0.61', a, true), '', 'the same version with other files');
+  assert.equal(update.pullWhy({ ...pc, version: '2.0.61', build: a }, '2.0.61', a, true), null, 'the same files');
+  assert.equal(update.pullWhy({ ...pc, version: '2.0.60' }, '2.0.61', a, true), null, 'older: Update it is for that one');
+  assert.match(update.pullWhy({ ...pc, ok: false }, '2.0.61', a, true)!, /"Big PC" is off or not answering now/);
+  assert.match(update.pullWhy({ ...pc, can: ['carry', 'update'] }, '2.0.61', a, true)!, /"Big PC" runs TOMLIN 2\.0\.62 without the way to give updates.*Update it there/);
+  assert.match(update.pullWhy({ ...pc, allowGive: false }, '2.0.61', a, true)!, /its owner can tick "Let linked PCs pull TOMLIN updates from here" there/);
+  assert.match(update.pullWhy({ ...pc, away: '2026-10-26T10:00:00Z' }, '2.0.61', a, true)!, /being used by its owner/);
+  assert.match(update.pullWhy(pc, '2.0.61', a, false)!, /TOMLIN on this PC was not started by its installed program or Start TOMLIN\.cmd/);
 });

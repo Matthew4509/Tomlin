@@ -86,6 +86,8 @@ async function pcView(id: string): Promise<{ status: number; body: unknown }> {
     return null;
   });
   const why = h ? update.updateWhy({ name: r!.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, VERSION, BUILD) : null;
+  // Ahead of this PC (a newer version, or the same with other files): whether "Update this PC from it" can take it here.
+  const pullWhy = h ? update.pullWhy({ name: r!.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can ?? [], allowGive: h.allow?.give === true }, VERSION, BUILD, process.env.TOMLIN_LOOP === '1') : null;
   const said = here ? { up: { since: STARTED_AT, pc: Math.round(pcUptime()) }, meter: meter.view(), at: Date.now() } : jobRoutes.lastSaid(key);
   const profile = await pcProfiles.get(key);
   const file = await readPower();
@@ -121,6 +123,7 @@ async function pcView(id: string): Promise<{ status: number; body: unknown }> {
       // What code it runs, 7 characters ('' from an older TOMLIN); update.other: the same version with different files.
       build: update.shortBuild(here ? BUILD : h?.build),
       update: why === null ? null : { why, mine: VERSION, build: update.shortBuild(BUILD), other: !!h && update.standing(h, VERSION, BUILD) === 'other' },
+      pull: pullWhy === null || !h ? null : { why: pullWhy, mine: VERSION, build: update.shortBuild(BUILD), other: !update.newer(h.version, VERSION) },
       ours: VERSION,
       ourBuild: update.shortBuild(BUILD),
       // Why a linked PC did not answer just now, in its own words ('' when it did).

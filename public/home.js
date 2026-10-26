@@ -357,8 +357,10 @@ function drawRail() {
     const at = twice.has(name) ? where(p, i) : '';
     // Answering with nothing loaded: still free for work (the green dot), but the word says it is asleep.
     const asleep = p.activity === 'available' && p.state === 'asleep' && !p.backupsOnly;
-    // Behind this PC: the yellow (!) on its card; its window (press the card) has Update it.
-    const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update it` : `Outdated: ${p.outdated.version} (this PC ${p.outdated.mine}): press to update it`) : '';
+    // Behind this PC: the yellow (!) on its card; its window (press the card) has Update it. Ahead of it, and it lets
+    // this PC take its TOMLIN: the same mark, and its window has Update this PC from it.
+    const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update it` : `Outdated: ${p.outdated.version} (this PC ${p.outdated.mine}): press to update it`)
+      : p.newer ? (p.newer.other ? `Runs ${p.newer.version} with different files from this PC: press to update this PC from it` : `Runs a newer TOMLIN, ${p.newer.version} (this PC ${p.newer.mine}): press to update this PC from it`) : '';
     const full = p.activity !== 'offline' ? fullWords(p.ramUsed, p.ram, `on "${p.name}"`) : '';
     const flag = [old, full].filter(Boolean).join('\n');
     const mem = homeUi.pcMem[p.id];
@@ -699,6 +701,10 @@ function drawNodeSwitch(n) {
   if (!typing($('#node-name')) && !saving) $('#node-name').value = sh.name;
   if (!typing($('#node-port')) && !saving) $('#node-port').value = String(sh.port);
   $('#node-code').textContent = sh.code;
+  // Each setup code links one PC, then a new one is made (audit X4): who used the last one, and when.
+  const ll = sh.lastLinked;
+  $('#node-linked').hidden = !ll;
+  $('#node-linked').textContent = ll ? `Last linked: "${ll.name}" on ${new Date(ll.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}, with the code before this one (each code links one PC). Not you? Remove it under "PCs linked to this one" below.${ll.dropped ? ` The oldest link, "${ll.dropped}", was removed to make room (10 at most).` : ''}` : '';
   // Too many wrong setup codes from the home network in 10 minutes: linking waits (S3).
   $('#node-link-paused').hidden = !sh.linkPaused;
   $('#node-link-paused').textContent = sh.linkPaused ? `(!) Linking to this PC is paused for ${sh.linkPaused} minute${sh.linkPaused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. If nobody here typed them, press New code.` : '';
@@ -748,11 +754,13 @@ function drawNodeSwitch(n) {
 
 /**
  * "Sharing permissions": Allow all, Sharing of models, Enable backups, Allow host to update TOMLIN remotely, Allow host
- * to test and change model run settings, Lend card memory (Max mode, shown only with TOMLIN_MAX) (sending a model here needs no tick since 2.0.56). Each tick is saved
+ * to test and change model run settings, Accept models from linked PCs (2.0.61: before, sending a model here needed no tick),
+ * Let linked PCs pull TOMLIN updates from here (2.0.61: a linked PC takes this PC's app files to update itself),
+ * Lend card memory (Max mode, shown only with TOMLIN_MAX). Each tick is saved
  * at once (with the app lock PIN); a refused or cancelled PIN puts the ticks back as saved at the next refresh.
  */
 function drawNodeAllow(sh) {
-  const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false, lend: false };
+  const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false };
   // Max mode is hidden until its screens ship: the Lend tick and its Help line show only on a PC started with TOMLIN_MAX.
   const shown = sh.lend?.shown === true;
   homeUi.maxShown = shown;
@@ -760,8 +768,8 @@ function drawNodeAllow(sh) {
   if (!homeUi.nodeSaving) {
     for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.checked = a[t.dataset.allow] === true;
     const all = $('#node-allow-all');
-    all.checked = a.pull && a.backup && a.update && a.tune && (a.lend || !shown);
-    all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.lend);
+    all.checked = a.pull && a.backup && a.update && a.tune && a.receive && a.give && (a.lend || !shown);
+    all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.receive || a.give || a.lend);
     if (sh.lend) $('#node-lend-idle').value = String(sh.lend.idle);
   }
   // Max mode: whom this PC lends its card memory to now, or how the last loan ended.
@@ -777,7 +785,7 @@ function drawNodeAllow(sh) {
   $('#node-restarts').hidden = sh.restarts !== false;
   const up = sh.updated;
   $('#node-updated').hidden = !up;
-  $('#node-updated').textContent = up ? `✓ Updated to TOMLIN ${up.version} by "${up.by}" on ${new Date(up.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.` : '';
+  $('#node-updated').textContent = up ? `✓ Updated to TOMLIN ${up.version} ${up.pulled ? `from "${up.by}" (taken here)` : `by "${up.by}"`} on ${new Date(up.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.` : '';
   const kept = sh.kept ?? [];
   const day = t => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' });
   const size = n => (n >= GB ? gb(n) : n >= 2 ** 20 ? `${Math.round(n / 2 ** 20)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -813,7 +821,7 @@ function saveAllow(changed) {
 for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.addEventListener('change', () => saveAllow({}));
 $('#node-allow-all').addEventListener('change', e => {
   const shown = homeUi.maxShown === true;
-  saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, lend: e.target.checked && shown });
+  saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, receive: e.target.checked, give: e.target.checked, lend: e.target.checked && shown });
 });
 $('#node-lend-idle').addEventListener('change', e => nodeShare({ lendIdle: Number(e.target.value) }));
 
@@ -852,8 +860,11 @@ function nodeFault(text) {
 /** Closes of the PIN window made by askAppPin itself, whose close events have not come yet. */
 let nodePinClosing = 0;
 
-/** The app lock PIN, asked when a change to this node needs it (F7 E3). Null when Cancel is pressed. */
-function askAppPin(fault) {
+/**
+ * The app lock PIN, asked when a change to this node needs it (F7 E3). `other`: another PC's name, whose own PIN is
+ * asked to update it (audit X2); it may be a password there, so the box takes either. Null when Cancel is pressed.
+ */
+function askAppPin(fault, other) {
   const dlg = $('#node-pin');
   return new Promise(resolve => {
     let done = false;
@@ -874,12 +885,14 @@ function askAppPin(fault) {
       else end(null);
     };
     // A1: the app lock may be a password: the box and its words follow the kind.
-    const kind = app.lockKind?.() ?? 'pin';
+    const kind = other ? 'password' : app.lockKind?.() ?? 'pin';
     const w = kind === 'password' ? 'password' : 'PIN';
     app.fitSecret?.($('#node-pin-input'), kind);
-    $('#node-pin-title').textContent = `Type the app lock ${w}`;
-    $('#node-pin-label').textContent = kind === 'password' ? 'Password' : 'PIN';
-    $('#node-pin-about').textContent = `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;
+    $('#node-pin-title').textContent = other ? `Type the app lock PIN of "${other}"` : `Type the app lock ${w}`;
+    $('#node-pin-label').textContent = other ? 'PIN (or password)' : kind === 'password' ? 'Password' : 'PIN';
+    $('#node-pin-about').textContent = other
+      ? `Updating another PC needs the PIN (or password) that opens TOMLIN on "${other}", typed here for this update. It is checked there and not kept here, so only someone who knows it can update that PC.`
+      : `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;
     $('#node-pin-fault').textContent = fault ?? '';
     $('#node-pin-fault').hidden = !fault;
     $('#node-pin-input').value = '';
@@ -891,6 +904,32 @@ function askAppPin(fault) {
     dlg.showModal();
     $('#node-pin-input').focus();
   });
+}
+
+/**
+ * "Update it" for linked PC `pc` ({ id, name }): a PC that asks its own app lock PIN (audit X2) has it asked here, and
+ * again after a wrong one. The update as started, or null when Cancel is pressed.
+ */
+async function updatePcWithPin(pc) {
+  let nodePin;
+  for (;;) {
+    try {
+      return await api('/api/network/update', nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
+    } catch (e) {
+      if (!e.data?.needNodePin) throw e;
+      nodePin = await askAppPin(nodePin === undefined ? '' : e.message, pc.name);
+      if (nodePin === null) return null;
+    }
+  }
+}
+
+/**
+ * "Update this PC from it" for linked PC `pc` ({ id, name, version, build }): said plainly first (the files come from
+ * that PC, not from TOMLIN's maker; this PC restarts into them), then started. The pull as started, or null on Cancel.
+ */
+async function pullWithAsk(pc) {
+  const ok = confirm(`Update this PC to TOMLIN ${pc.version}${pc.build ? ` (build ${pc.build})` : ''} from "${pc.name}"?\n\nThe files come from that PC, not from TOMLIN's maker. Only the ones that differ are copied, and each is checked. Then this PC closes TOMLIN for about half a minute and starts the new version: anything being written or drawn here stops. The old version stays in its folder beside the new one.`);
+  return ok ? api('/api/network/pull', { pc: pc.id }) : null;
 }
 
 /** Saves a change to this node (true when it was saved). */
@@ -1107,7 +1146,29 @@ function drawOthers(pcs) {
         p.update.why ? null : el('button', { class: 'btn primary', type: 'button', text: 'Update it', 'data-key': `update:${p.id}`, onclick: async e => {
           e.target.disabled = true;
           try {
-            const r = await api('/api/network/update', { pc: p.id });
+            const r = await updatePcWithPin(p);
+            if (!r) {
+              e.target.disabled = false;
+              return;
+            }
+            app.openUpdate(r.transfer);
+          } catch (err) {
+            sayHere($('#node-others-ask'), err.message);
+            e.target.disabled = false;
+          }
+        } })) : null,
+      // Ahead of this PC (a newer version, or the same one with different files): "Update this PC from it" takes its
+      // TOMLIN here (no PIN there: nothing changes on that PC), or why not.
+      p.ok && p.pull ? el('div', { class: 'node-update' },
+        el('span', { class: 'hint', text: `${p.pull.other ? `Runs ${p.version} with different files from this PC (build ${p.build} there, ${p.pull.build} here)` : `Newer: ${p.version} (this PC ${p.pull.mine})`}.${p.pull.why ? ` ${p.pull.why.charAt(0).toUpperCase()}${p.pull.why.slice(1)}.` : ''}` }),
+        p.pull.why ? null : el('button', { class: 'btn primary', type: 'button', text: 'Update this PC from it', 'data-key': `pull:${p.id}`, onclick: async e => {
+          e.target.disabled = true;
+          try {
+            const r = await pullWithAsk(p);
+            if (!r) {
+              e.target.disabled = false;
+              return;
+            }
             app.openUpdate(r.transfer);
           } catch (err) {
             sayHere($('#node-others-ask'), err.message);
@@ -1414,7 +1475,11 @@ function drawUpdateAll(pcs) {
   b.onclick = async () => {
     b.disabled = true;
     const failed = [];
-    for (const p of can) await api('/api/network/update', { pc: p.id }).catch(err => failed.push(`"${p.name}": ${err.message}`));
+    // Each PC asks its own PIN (audit X2); Cancel skips that one.
+    for (const p of can) {
+      const r = await updatePcWithPin(p).catch(err => void failed.push(`"${p.name}": ${err.message}`));
+      if (r === null) failed.push(`"${p.name}": its PIN was not typed.`);
+    }
     $('#node-update-all-line').textContent = failed.length ? `Not started on ${failed.join(' ')}` : '';
     // The updates under way show in Models on my other PCs, each with its own line.
     if (failed.length < can.length) app.openNet?.();

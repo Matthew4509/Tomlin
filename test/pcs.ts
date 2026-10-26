@@ -2,7 +2,7 @@
 // in %TEMP%, its worker door on a port of its own, and every place a copy could write (Startup, desktop, Start menu,
 // install folder, the Apps entry) moved into that home. Nothing here touches the real install or the real data.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { scryptSync } from 'node:crypto';
@@ -120,10 +120,13 @@ export async function unlock(node: Pc): Promise<void> {
   if (r.status !== 200 || !node.cookie) throw new Error(`The node did not unlock: ${r.status} ${JSON.stringify(r.body)}`);
 }
 
-/** Links `host` to the node whose worker door is at `workerPort`; gives the host's id for it. */
-export async function link(host: Pc, workerPort: number): Promise<string> {
+/** The setup code a node shows now: a new one after every link (audit X4), so a second PC reads it first. */
+export const codeIn = (home: string): string => JSON.parse(readFileSync(join(home, 'data', 'share.json'), 'utf8')).code;
+
+/** Links `host` to the node whose worker door is at `workerPort` with `code`; gives the host's id for it. */
+export async function link(host: Pc, workerPort: number, code = NODE_CODE): Promise<string> {
   const r = await until('the node\'s worker door to open', async () => {
-    const a = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${workerPort}`, code: NODE_CODE });
+    const a = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${workerPort}`, code });
     return a.status === 200 ? a : null;
   }, 30_000, 1000);
   const remotes = (await host.get('/api/remotes')).body?.remotes ?? r.body?.remotes ?? [];

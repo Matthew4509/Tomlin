@@ -10,8 +10,8 @@ import { alive } from '../src/hardware.ts';
 import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
 import { chatArgs, maxFault, whyItFailed } from '../src/llama.ts';
 
-const ALL = { pull: true, backup: true, update: true, tune: true, lend: true };
-const LEND = { ...carry.NO_ALLOW, lend: true };
+const ALL = { pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true };
+const LEND = { ...carry.NO_ALLOW, lend: true, receive: true };
 const min = 60_000;
 const base = { pc: 'Worker PC', on: true, shown: true, allow: LEND, away: false, presence: { idleMs: 10 * min, locked: false }, idleMinutes: 5, lease: null, by: { hash: 'a' } };
 const SRC = pathToFileURL(join(import.meta.dirname, '..', 'src', 'maxlend.ts')).href;
@@ -21,10 +21,10 @@ const PROGRAM: RpcProgram = { exe: 'ggml-rpc-server.exe', device: 'cpu', threads
 
 test('the Max mode tick is its own, and Allow all covers it', () => {
   assert.equal(carry.cleanAllow({ lend: 'yes' }).lend, false);
-  assert.equal(carry.cleanAllow({ lend: true }).lend, true);
+  assert.equal(carry.cleanAllow({ lend: true, receive: true }).lend, true);
   assert.equal(carry.allowsAll(ALL), true);
   // A node that had "Allow all" before this tick: Allow all shows unticked until it is ticked too.
-  assert.equal(carry.allowsAll({ ...ALL, lend: false }), false);
+  assert.equal(carry.allowsAll({ ...ALL, lend: false, receive: false }), false);
 });
 
 test('how long nobody must use the PC: 5 minutes unless its owner picked another of the choices', () => {

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, link, nodeHome, startPc, NODE_CODE, type Pc } from './pcs.ts';
+import { codeIn, freePort, link, nodeHome, startPc, NODE_CODE, type Pc } from './pcs.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -23,7 +23,8 @@ test('linking a second PC with a name already in use says so', { timeout: 300_00
     pcs.push(host);
 
     await link(host, portA);
-    const again = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${portA}`, code: NODE_CODE });
+    // A new setup code after each link (audit X4): the one the node shows now.
+    const again = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${portA}`, code: codeIn(join(top, 'a')) });
     assert.equal(again.status, 200);
     assert.equal(again.body.sameName, undefined, 'the same PC linked again is not a second one');
 
