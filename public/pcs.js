@@ -447,6 +447,12 @@
     // This PC only: Repair install, Shortcut to desktop, Start on start up, under Manage PC.
     let manage = null;
     if (v.here) {
+      // Update TOMLIN beside this PC's version: Update this install (This PC: models and updates), 2.0.63.
+      go = el('button', { class: 'btn primary', type: 'button', text: 'Update TOMLIN' });
+      go.addEventListener('click', () => {
+        dlg.close();
+        app.openUpdateInstall?.();
+      });
       manage = el('button', { class: 'btn quiet', type: 'button', text: 'Manage PC', 'aria-expanded': String(!installBox.hidden), 'aria-controls': 'pc-manage' });
       manage.addEventListener('click', () => {
         installBox.hidden = !installBox.hidden;

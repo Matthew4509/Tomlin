@@ -12,12 +12,12 @@ set SM_NO_PIC=
 if not exist node_modules\sharp set SM_NO_PIC=1
 if not exist node_modules\@img\sharp-win32-x64\lib set SM_NO_PIC=1
 if defined SM_NO_PIC (echo Installing the picture tools ^(one time^)... & call npm install --omit=dev --include=optional --no-audit --no-fund || (pause & exit /b 1))
-if not exist runtime\llama-cpu\llama-server.exe (echo The model runners are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
-if not exist runtime\sd-cpu\sd-server.exe (echo The model runners are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
+if not exist runtime\llama-cpu\llama-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
+if not exist runtime\sd-cpu\sd-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
 rem The model runners need Microsoft's Visual C++ Runtime (src/vcrt.ts); a clean Windows lacks it. Said, not stopped.
 set SM_NO_VCRT=
 for %%f in (vcruntime140.dll vcruntime140_1.dll msvcp140.dll msvcp140_1.dll msvcp140_atomic_wait.dll msvcp140_codecvt_ids.dll vcomp140.dll) do if not exist "%SystemRoot%\System32\%%f" set SM_NO_VCRT=1
-if defined SM_NO_VCRT (echo. & echo  This PC does not have the Microsoft Visual C++ Runtime, which the model runners need: TOMLIN opens, but no model will load. & echo  Install it from Microsoft: https://aka.ms/vc14/vc_redist.x64.exe ^(or run "Install TOMLIN.cmd", which offers it^), then press Connect. & echo.)
+if defined SM_NO_VCRT (echo. & echo  This PC does not have the Microsoft Visual C++ Runtime, which the model runners ^(the small programs that load a model and make it write or draw^) need: TOMLIN opens, but no model will load. & echo  Install it from Microsoft: https://aka.ms/vc14/vc_redist.x64.exe ^(or run "Install TOMLIN.cmd", which offers it^), then press Connect. & echo.)
 rem The browser opens once TOMLIN is ready (src/server.ts), not before.
 if not defined TOMLIN_NO_BROWSER set TOMLIN_OPEN=1
 rem TOMLIN ends with code 75 to start again (to bring in an older copy's data, or put a backup back), and with

@@ -145,13 +145,15 @@ test('Start with Windows for an installed copy starts its program, quietly; an u
   const root = tmp();
   const copy = join(root, 'shelby-2.0.34');
   mkdirSync(copy);
+  // The PC running this may have TOMLIN installed (it did, 27 Oct): the unzipped copy looks at an install root that is not there.
+  const env = { TOMLIN_INSTALL_ROOT: join(root, 'no-install-here') };
   assert.equal(installedExe(copy), null);
-  assert.match(startupScript(copy), /Start TOMLIN.cmd/);
+  assert.match(startupScript(copy, env), /Start TOMLIN.cmd/);
   writeFileSync(join(root, inst.EXE), '');
   writeFileSync(join(root, inst.CURRENT), 'shelby-2.0.34');
   assert.equal(installedExe(copy), join(root, inst.EXE));
-  assert.equal(startupScript(copy), inst.startupScriptFor(join(root, inst.EXE)));
-  assert.match(startupScript(copy), /start "" ".*TOMLIN.exe" --quiet\r\n$/);
+  assert.equal(startupScript(copy, env), inst.startupScriptFor(join(root, inst.EXE)));
+  assert.match(startupScript(copy, env), /start "" ".*TOMLIN.exe" --quiet\r\n$/);
 });
 
 test('every release and every pushed update carries the installer, the program\'s source, its icon and Node.js', () => {

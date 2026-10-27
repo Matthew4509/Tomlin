@@ -31,15 +31,22 @@ export function vcrtMissing(dir = systemDir(), platform = process.platform): str
 /** The line a runner's log gets when it ended for want of the runtime: the panes' reasons look for it. */
 export const VCRT_LINE = 'Windows could not start the runner: a Microsoft Visual C++ Runtime file it needs is missing on this PC.';
 
+/**
+ * What a model runner is, for every line that names one to a person (the installer's question, Start TOMLIN.cmd, the
+ * panes' faults, Help): a beginner at a new node asked whether it was someone running after models on the red carpet.
+ */
+export const RUNNER_WORDS = 'the small programs that load a model and make it write or draw';
+export const RUNNER_WORD = 'the small program that loads a model and makes it write or draw';
+
 /** The panes' words for it: what failed, why, and the way out. */
-export const VCRT_HELP = `The model runner could not start: this PC does not have the Microsoft Visual C++ Runtime, which it needs (a clean Windows does not come with it). Install it from Microsoft (${VCRT_URL}, free, about 19 MB), or run "Install TOMLIN.cmd" again and answer Yes when it offers it. Then press Connect again.`;
+export const VCRT_HELP = `The model runner (${RUNNER_WORD}) could not start: this PC does not have the Microsoft Visual C++ Runtime, which it needs (a clean Windows does not come with it). Install it from Microsoft (${VCRT_URL}, free, about 19 MB), or run "Install TOMLIN.cmd" again and answer Yes when it offers it. Then press Connect again.`;
 
 /** True when a runner's last lines say it ended for want of the runtime. */
 export const vcrtFault = (tail: string) => tail.includes(VCRT_LINE);
 
 /** The same Windows fault with the runtime present: one of the runner's own files beside it is missing (a damaged copy). */
 export const RUNNER_FILE_LINE = 'Windows could not start the runner: a file it needs is missing from its own folder.';
-export const RUNNER_FILE_HELP = 'The model runner could not start: a file it needs is missing from its folder (the copy is damaged, or a security program took it away). Run "Install TOMLIN.cmd" again (it repairs the copy), then press Connect again.';
+export const RUNNER_FILE_HELP = `The model runner (${RUNNER_WORD}) could not start: a file it needs is missing from its folder (the copy is damaged, or a security program took it away). Run "Install TOMLIN.cmd" again (it repairs the copy), then press Connect again.`;
 
 /** The line for a runner Windows could not start for want of a DLL: the runtime when it is missing, else its own files. */
 export const dllLine = (dir = systemDir()) => (vcrtMissing(dir).length ? VCRT_LINE : RUNNER_FILE_LINE);

@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 import { freeBytes, roomWhy } from '../carry.ts';
 import { missingFiles } from '../installer.ts';
 import { entriesWhy, testStart, unpackedWhy, zipEntries } from '../newcopy.ts';
-import { latestOf, repoOf, type SigCode, sigOf, WARN, zipCheck, type Latest } from '../release.ts';
+import { latestOf, noRelease, repoOf, type SigCode, sigOf, WARN, zipCheck, type Latest } from '../release.ts';
 import * as update from '../update.ts';
 import { BUILD, ROOT, type Routes, VERSION, json, restartInto } from './core.ts';
 import { jobRoutes } from './jobs.ts';
@@ -108,7 +108,7 @@ async function latest(): Promise<Latest | string> {
   } catch (e) {
     return `GitHub did not answer (${(e as Error).name === 'TimeoutError' ? 'it took too long' : 'no connection'}). Check this PC is online, then press Check git again; or use Check zip with a zip copied from another PC.`;
   }
-  if (r.status === 404) return `There is no release of TOMLIN on GitHub yet (github.com/${REPO}). This PC runs ${VERSION}.`;
+  if (r.status === 404) return noRelease(REPO, VERSION);
   if (r.status === 403 || r.status === 429) return 'GitHub is turning this PC away for asking too often just now. Wait an hour, then press Check git again.';
   if (!r.ok) return `GitHub answered ${r.status}. Try Check git again later.`;
   // A stand-in GitHub (TOMLIN_RELEASE_API, for checks) serves its own downloads; the real one's are on github.com.

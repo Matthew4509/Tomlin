@@ -104,6 +104,10 @@ export interface Latest {
 /** Only GitHub's own download addresses are followed (a release's assets live there); a test's stand-in names its own. */
 const fromBase = (url: unknown, base: string) => typeof url === 'string' && url.startsWith(base) && url.length < 600;
 
+/** Check git's answer when the repo has no release at all (GitHub's 404 for releases/latest): what to do instead. */
+export const noRelease = (repo: string, version: string): string =>
+  `There is no release of TOMLIN on GitHub yet (github.com/${repo}). This PC runs ${version}. To update by hand: Check zip with a tomlin-<version>.zip and its .zip.sig copied from another PC, or unzip that zip and run its Install TOMLIN.cmd.`;
+
 /**
  * GitHub's answer for the newest release -> what to download, or why there is nothing to take: no version in its tag
  * ("v2.0.56" or "2.0.56"), or the zip or its .sig not attached.

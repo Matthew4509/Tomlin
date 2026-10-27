@@ -6,6 +6,7 @@ import { Worker, type Asked, type LaunchSpec, type WorkerView } from './worker.t
 import type { Device } from './runtimes.ts';
 import { log } from './log.ts';
 import { MAX_STOPPED, maxFault } from './llama.ts';
+import { RUNNER_WORD } from './vcrt.ts';
 
 export interface ConnectRequest {
   model: string;
@@ -82,7 +83,7 @@ export class Pane {
     if (this.ending) await this.ending;
     if (this.view.state === 'connected' || this.view.state === 'loading') await this.disconnect();
     if (!req.devices.length) {
-      this.set({ state: 'failed', error: req.asked === 'gpu' ? 'No graphics build is installed for this pane, so GPU cannot be used. Choose Auto or CPU, or install the graphics build under Models.' : 'No model runner is installed. Run "npm run fetch" in the TOMLIN folder.', detail: null });
+      this.set({ state: 'failed', error: req.asked === 'gpu' ? 'No graphics build is installed for this pane, so GPU cannot be used. Choose Auto or CPU, or install the graphics build under Models.' : `No model runner (${RUNNER_WORD}) is installed. Run "npm run fetch" in the TOMLIN folder.`, detail: null });
       return this.view;
     }
     this.baseline = ramUsed();

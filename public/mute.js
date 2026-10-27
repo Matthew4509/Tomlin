@@ -145,6 +145,7 @@ app.drawMuteBar = drawMuteBar;
 
 /** Opens the Settings page (like Models, a page, not a window), each part drawn fresh from what the server says now. */
 function openSettings() {
+  $('#settings-update').replaceChildren(app.updateBox?.() ?? '');
   $('#settings-web').replaceChildren(app.webSearchBox?.() ?? '');
   $('#settings-notify').replaceChildren(app.notifyBox?.() ?? '');
   $('#settings-lock').replaceChildren(app.appLockBox?.() ?? '');

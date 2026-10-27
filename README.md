@@ -153,8 +153,8 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 (chats, staff, pictures, memory, settings, links to other PCs, the app lock), `models` (downloaded models),
 `runtime` (downloaded graphics-card runners) and `backups`. The app folder holds only the program.
 
-To update: **Update this install** (This PC: models and updates; Settings, Your data and updates, opens it), with **Check git**
-or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
+To update: **Update TOMLIN** (the Set up menu; also at the top of Settings and in the My PC window) opens **Update this
+install** on This PC: models and updates, with **Check git** or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
 data it zips the `data` folder into `backups` (models are not in them). The newest 5 are kept, and older ones thin out:
 one a day for a week, one a week for a month, one every 3 months for a year. **Settings** (top bar),

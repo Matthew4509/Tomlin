@@ -7,6 +7,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fetchChecked, type Progress } from './download.ts';
+import { RUNNER_WORD } from './vcrt.ts';
 
 const run = promisify(execFile);
 
@@ -442,5 +443,5 @@ export const pageDownloads = (pin: { engine: string; device: string } | undefine
 export function missingCardRunner(engine: Engine, gpus: { name: string; integrated: boolean }[], installed: (device: Device) => boolean): string {
   const card = gpus.find(g => !g.integrated);
   if (!card || installed('vulkan') || installed('cuda')) return '';
-  return `This PC has ${card.name}, but no runner for it is installed, so this runs on the CPU (much slower). To use the card: Models, Model runners: Download the ${engine === 'sd' ? 'picture' : 'chat'} runner for Vulkan, then Connect again (or close TOMLIN, run npm run fetch -- ${engine}-vulkan in its folder, and start it again).`;
+  return `This PC has ${card.name}, but no runner for it is installed (${RUNNER_WORD}; this one would use the card), so this runs on the CPU (much slower). To use the card: Models, Model runners: Download the ${engine === 'sd' ? 'picture' : 'chat'} runner for Vulkan, then Connect again (or close TOMLIN, run npm run fetch -- ${engine}-vulkan in its folder, and start it again).`;
 }

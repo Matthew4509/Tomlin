@@ -275,6 +275,7 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     else if (b.dataset.setup === 'models') app.openModels();
     else if (b.dataset.setup === 'nodes') openNodes();
     else if (b.dataset.setup === 'thispc') openThisPc();
+    else if (b.dataset.setup === 'update') app.openUpdateInstall?.();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();
     else if (b.dataset.setup === 'files') $('#files-open').click();
     else app.openPcs();

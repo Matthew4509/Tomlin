@@ -1085,7 +1085,7 @@ app.openPcs = async () => {
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
-/** Update this install (Settings, Your data and updates, opens it): on This PC: models and updates. */
+/** Update this install, on This PC: models and updates (opened by Update TOMLIN in the Set up menu, Settings and the My PC window). */
 app.openUpdateInstall = async () => {
   openThisPc();
   await new Promise(r => setTimeout(r, 100));
@@ -1358,25 +1358,60 @@ function gitSay(...kids) {
   gitBox().hidden = !kids.length;
   gitBox().replaceChildren(...kids);
 }
-$('#node-install-git').addEventListener('click', async e => {
-  const btn = e.currentTarget;
+/**
+ * Check git, pressed (`btn`): GitHub's newest TOMLIN, said through `say(...nodes)`, with a Download button when it is
+ * newer than this PC (`download(version, button)` takes it). One function for both places it is pressed: Update this
+ * install on This PC: models and updates, and the head of Settings (2.0.63).
+ */
+async function checkGit(btn, say, download) {
   btn.disabled = true;
-  $('#node-install-ask').hidden = true;
-  gitSay(el('p', { class: 'hint', role: 'status', text: 'Asking GitHub for the newest TOMLIN…' }));
+  say(el('p', { class: 'hint', role: 'status', text: 'Asking GitHub for the newest TOMLIN…' }));
   try {
     const r = await api('/api/install/git-check', {});
     const when = r.published ? ` (${new Date(r.published).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})` : '';
-    if (!r.newer) gitSay(el('p', { class: 'hint', role: 'status', text: `This PC runs the newest TOMLIN on GitHub: ${r.mine}${r.version !== r.mine ? ` (GitHub's newest is ${r.version})` : ''}.` }));
+    if (!r.newer) say(el('p', { class: 'hint', role: 'status', text: `This PC runs the newest TOMLIN on GitHub: ${r.mine}${r.version !== r.mine ? ` (GitHub's newest is ${r.version})` : ''}.` }));
     else {
-      gitSay(el('p', { class: 'hint', role: 'status', text: `TOMLIN ${r.version} is on GitHub${when}${r.bytes ? `, a ${dlSize(r.bytes)} download` : ''}. This PC runs ${r.mine}.${r.notes ? ` ${r.notes}` : ''}` }),
-        el('div', { class: 'team-actions' }, el('button', { class: 'btn primary', type: 'button', text: `Download ${r.version}`, onclick: ev => getGit(r.version, ev.currentTarget) })));
+      say(el('p', { class: 'hint', role: 'status', text: `TOMLIN ${r.version} is on GitHub${when}${r.bytes ? `, a ${dlSize(r.bytes)} download` : ''}. This PC runs ${r.mine}.${r.notes ? ` ${r.notes}` : ''}` }),
+        el('div', { class: 'team-actions' }, el('button', { class: 'btn primary', type: 'button', text: `Download ${r.version}`, onclick: ev => download(r.version, ev.currentTarget) })));
     }
   } catch (err) {
-    gitSay(el('p', { class: 'fault-line', role: 'alert', text: err.message }));
+    say(el('p', { class: 'fault-line', role: 'alert', text: err.message }));
   } finally {
     btn.disabled = false;
   }
+}
+$('#node-install-git').addEventListener('click', e => {
+  $('#node-install-ask').hidden = true;
+  checkGit(e.currentTarget, gitSay, getGit);
 });
+
+/**
+ * The first block of Settings (2.0.63; his laptop could not find the update): which TOMLIN this PC runs, Check git
+ * right there, and Update this install. A download found here is followed on Update this install (its bar, then
+ * Update now, are there), so the page opens on it first.
+ */
+app.updateBox = () => {
+  const line = el('p', { class: 'hint', role: 'status', text: 'Reading…' });
+  const said = el('div', { hidden: true });
+  const say = (...kids) => {
+    said.hidden = !kids.length;
+    said.replaceChildren(...kids);
+  };
+  const check = el('button', { class: 'btn primary', type: 'button', text: 'Check git', hidden: true });
+  check.addEventListener('click', () => checkGit(check, say, (version, button) => {
+    app.openUpdateInstall();
+    getGit(version, button);
+  }));
+  const open = el('button', { class: 'btn quiet', type: 'button', text: 'Update this install', onclick: () => app.openUpdateInstall() });
+  const box = el('div', { class: 'notify-box' }, el('h3', { text: 'TOMLIN' }), line, said, el('div', { class: 'team-actions' }, check, open));
+  api('/api/install/zip').then(v => {
+    line.textContent = `This PC runs TOMLIN ${v.version}${v.build ? ` (build ${v.build})` : ''}. ${v.restarts ? 'Check git asks GitHub for a newer one; Update this install also takes a zip you already have.' : 'It was not started by its installed program or Start TOMLIN.cmd, so it cannot update itself from here: close it, unzip the new version and run Install TOMLIN.cmd there.'}`;
+    check.hidden = !v.restarts || !v.repo;
+  }, err => {
+    line.textContent = err.message;
+  });
+  return box;
+};
 async function getGit(version, button) {
   button.disabled = true;
   try {

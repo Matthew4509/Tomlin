@@ -22,7 +22,7 @@ import { OLD_STARTUP_FILES, STARTUP_FILE, startupDir, startupFileIn, writeStartu
 import { STAMP, traySum } from '../src/trayfresh.ts';
 import { OLD_RULE_NAMES, RULE_NAME } from '../src/firewall.ts';
 import { resolveHome } from '../src/keep.ts';
-import { systemDir, VCRT_URL, vcrtMissing, vcrtTooOld } from '../src/vcrt.ts';
+import { RUNNER_WORDS, systemDir, VCRT_URL, vcrtMissing, vcrtTooOld } from '../src/vcrt.ts';
 import { planRepair, runRepair, windowsDeps } from '../src/repair.ts';
 
 const run = promisify(execFile);
@@ -129,8 +129,8 @@ async function runtimeCheck() {
   }
   if (!missing.length && !old) return;
   say(missing.length
-    ? `This PC does not have the Microsoft Visual C++ Runtime (${missing.join(', ')} missing). TOMLIN's model runners need it: without it TOMLIN opens, but no model loads.`
-    : `This PC's Microsoft Visual C++ Runtime (${old}) is older than TOMLIN's model runners need: without a newer one they may stop as they start.`);
+    ? `This PC does not have the Microsoft Visual C++ Runtime (${missing.join(', ')} missing). TOMLIN's model runners (${RUNNER_WORDS}) need it: without it TOMLIN opens, but no model loads.`
+    : `This PC's Microsoft Visual C++ Runtime (${old}) is older than TOMLIN's model runners (${RUNNER_WORDS}) need: without a newer one they may stop as they start.`);
   const later = `Install it later from Microsoft (${VCRT_URL}), then press Connect in TOMLIN.`;
   if (!(await ask('Download it from Microsoft (about 19 MB) and install it now? Windows asks for permission.', true, 'vcrt'))) {
     say(`Skipped. ${later}`);
