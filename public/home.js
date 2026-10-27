@@ -711,7 +711,9 @@ function drawNodeSwitch(n) {
   const asig = JSON.stringify(sh.addresses);
   if (asig !== homeUi.drawn.addrs) {
     homeUi.drawn.addrs = asig;
-    $('#node-addrs').replaceChildren(...(sh.addresses.length ? sh.addresses.map(a => {
+    // The home connection first; a virtual-machine, hotspot or VPN one is marked as not the one to type (2.0.64).
+    const addrs = [...sh.addresses].sort((x, y) => (x.kind === 'home' ? 0 : 1) - (y.kind === 'home' ? 0 : 1));
+    $('#node-addrs').replaceChildren(...(addrs.length ? addrs.map(a => {
       const copy = el('button', { class: 'link', type: 'button', text: 'Copy' });
       copy.addEventListener('click', async () => {
         try {
@@ -722,7 +724,7 @@ function drawNodeSwitch(n) {
         }
         setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
       });
-      return el('div', { class: 'node-code-row' }, el('code', { class: 'node-addr', text: a.address }), el('span', { class: 'hint', text: a.via }), copy);
+      return el('div', { class: 'node-code-row' }, el('code', { class: 'node-addr', text: a.address }), el('span', { class: 'hint', text: a.kind && a.kind !== 'home' ? `${a.via} (ignore: not your home network)` : a.via }), copy);
     }) : [el('p', { class: 'hint', text: 'No home-network address: this PC is not connected to a router (check its Wi-Fi or cable).' })]));
   }
   if (!saving) $('#node-autostart').checked = !!sh.autostart;
@@ -978,20 +980,34 @@ $('#node-code-new').addEventListener('click', async () => {
   if (await askHere($('#node-code-ask'), 'Make a new setup code? PCs already linked keep working; the old code stops working for new links.', 'Make a new code', 'Keep this code', false)) nodeShare({ newCode: true });
 });
 
-// ---- "Can other PCs reach this one?": reads this PC's network type and firewall, shows the lines that fix it ----
+// ---- The link helper's lines (src/linkhelp.ts): a mark, the words, and the steps under a fault ----
+const CHECK_MARK = { ok: '✓', bad: '✗', warn: '!', info: 'i' };
+const CHECK_SAID = { ok: 'Fine: ', bad: 'Problem: ', warn: 'Worth a look: ', info: 'Note: ' };
+function reachList(lines) {
+  return el('ul', { class: 'check-list' }, ...lines.map(l => el('li', { class: `check-${l.state}` },
+    el('span', { class: 'check-mark', 'aria-hidden': 'true', text: CHECK_MARK[l.state] ?? '' }),
+    el('div', {}, el('span', { class: 'sr-only', text: CHECK_SAID[l.state] ?? '' }), el('span', { text: l.text }),
+      l.steps?.length ? el('ol', { class: 'check-steps' }, ...l.steps.map(s => el('li', { text: s }))) : null))));
+}
+
+// ---- "Can other PCs reach this one?": this PC's own checklist (2.0.64), and the lines that fix its firewall ----
 $('#node-fw-check').addEventListener('click', async () => {
   const line = $('#node-fw-line');
   const btn = $('#node-fw-check');
   btn.disabled = true;
   $('#node-fw-fix').hidden = true;
+  $('#node-fw-type').hidden = true;
+  $('#node-fw-list').replaceChildren();
   line.textContent = 'Checking (up to a minute)…';
   try {
-    const r = await (await fetch('/api/share/firewall', { cache: 'no-store' })).json();
-    const others = r.others?.length ? ` ${r.others.join(', ')} also guards this PC, and Windows rules do not pass it: in it, mark your home network as trusted (in ESET: Setup > Network protection) or allow Node.js.` : '';
-    if (r.unknown) line.textContent = `Could not read this PC's firewall. Allow TCP port ${r.port} in for other PCs on your home network.`;
-    else if (r.ok) line.textContent = `✓ Windows lets other PCs in on port ${r.port} (${r.networks.map(n => `${n.alias}: ${n.category}`).join(', ') || 'no network'}).${others}`;
-    else {
-      line.textContent = `✗ ${r.problems.join(' ')}${others}`;
+    const r = await (await fetch('/api/share/reach', { cache: 'no-store' })).json();
+    line.textContent = r.ok ? '✓ Nothing on this PC is in the way.' : '✗ Something on this PC is in the way:';
+    $('#node-fw-list').replaceChildren(reachList(r.lines));
+    if (r.typeThis) {
+      $('#node-fw-addr').textContent = r.typeThis;
+      $('#node-fw-type').hidden = false;
+    }
+    if (r.fix) {
       $('#node-fw-code').textContent = r.fix;
       $('#node-fw-code').dataset.run = r.run;
       $('#node-fw-fix').hidden = false;
@@ -1000,6 +1016,16 @@ $('#node-fw-check').addEventListener('click', async () => {
     line.textContent = `Could not check: ${e.message}`;
   }
   btn.disabled = false;
+});
+$('#node-fw-addr-copy').addEventListener('click', async e => {
+  const b = e.currentTarget;
+  try {
+    await navigator.clipboard.writeText($('#node-fw-addr').textContent);
+    b.textContent = 'Copied';
+  } catch {
+    b.textContent = 'Select it and copy';
+  }
+  setTimeout(() => { b.textContent = 'Copy'; }, 2000);
 });
 $('#node-fw-copy').addEventListener('click', async () => {
   const b = $('#node-fw-copy');
@@ -1025,10 +1051,39 @@ async function linkPc(url, code, pin, fault, needPin) {
     return true;
   } catch (e) {
     fault.textContent = e.message;
-    if (e.data?.needPin || /link PIN, shown/.test(e.message)) needPin?.();
+    if (e.data?.needPin || /link PIN, shown|A link PIN is 6 digits/.test(e.message)) needPin?.();
+    // Nothing answered there: the link helper opens with the address, to test it from here (2.0.64).
+    if (e.data?.help) openLinkHelp(String(url).replace(/^http:\/\//, ''));
     return false;
   }
 }
+
+// ---- The link helper (2.0.64): tests the other PC from here and says what is in the way (src/linkhelp.ts) ----
+
+/** Opens the helper, with the address carried over when one was typed or found. */
+function openLinkHelp(address) {
+  if (address && !$('#link-help-addr').value) $('#link-help-addr').value = address;
+  $('#link-help').open = true;
+}
+$('#link-help-check').addEventListener('click', async () => {
+  const btn = $('#link-help-check');
+  const out = $('#link-help-out');
+  btn.disabled = true;
+  out.replaceChildren(el('p', { class: 'hint', role: 'status', text: 'Testing from here (up to half a minute)…' }));
+  const on = document.querySelector('input[name="link-help-on"]:checked')?.value;
+  try {
+    const r = await api('/api/remotes', { action: 'diagnose', nodeOn: on === 'yes' ? true : on === 'no' ? false : null, address: $('#link-help-addr').value, name: $('#link-help-name').value, port: Number($('#node-scan-port').value) || 8741 });
+    out.replaceChildren(
+      el('p', { class: r.state === 'ok' ? 'hint ok' : 'fault-line', role: 'status', text: `${r.state === 'ok' ? '✓' : '✗'} ${r.title}` }),
+      r.steps.length ? el('ol', { class: 'check-steps' }, ...r.steps.map(s => el('li', { text: s }))) : '',
+      r.lines.length ? reachList(r.lines) : '');
+    // Found and answering: its address goes to the link form, which only needs the setup code now.
+    if (r.state === 'ok' && $('#link-help-addr').value && !$('#node-addr').value) $('#node-addr').value = $('#link-help-addr').value;
+  } catch (e) {
+    out.replaceChildren(el('p', { class: 'fault-line', role: 'alert', text: e.message }));
+  }
+  btn.disabled = false;
+});
 
 $('#node-scan').addEventListener('click', async () => {
   const line = $('#node-scan-line');
@@ -1041,7 +1096,8 @@ $('#node-scan').addEventListener('click', async () => {
     const ranges = [...new Set(own.map(n => n.address.replace(/\.\d+$/, '.1 to .254')))];
     const looked = ranges.length ? ` Looked at every address ${ranges.join(' and ')} (this PC is ${own.map(n => `${n.address} on ${n.via}`).join(', ')}).` : ' This PC has no home-network address, so there was nothing to search: check its Wi-Fi or cable.';
     line.textContent = found.length ? `Found ${found.length} PC${found.length > 1 ? 's' : ''} with "Enable this PC as a node" on.${looked}`
-      : `None found.${looked} Compare with the address on the node's Setup card. Starts differently: type it below. Starts the same: on the node, press Check under "Can other PCs reach this one?" and run what it gives you.`;
+      : `None found.${looked} On the other PC, press Check under "Can other PCs reach this one?": it names what is in the way there. The Link helper below tests it from here.`;
+    if (!found.length) openLinkHelp();
     box.replaceChildren(...found.map(f => {
       const code = el('input', { type: 'text', maxlength: '9', autocomplete: 'off', placeholder: 'ABCD-EFGH', required: '', 'aria-label': `Setup code of ${f.name}` });
       // The link PIN box shows when that PC asks for one: at the scan, or when linking says so (turned on since).
@@ -1386,7 +1442,7 @@ $('#node-install-git').addEventListener('click', e => {
 });
 
 /**
- * The first block of Settings (2.0.63; his laptop could not find the update): which TOMLIN this PC runs, Check git
+ * The first block of Settings (2.0.63: the update was hard to find): which TOMLIN this PC runs, Check git
  * right there, and Update this install. A download found here is followed on Update this install (its bar, then
  * Update now, are there), so the page opens on it first.
  */

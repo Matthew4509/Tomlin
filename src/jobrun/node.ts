@@ -29,6 +29,7 @@ import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
 import { endLoan, lendingTo, lendView, lentTo, maxUpgrade } from './maxnode.ts';
 import { cleanLendIdle, maxShown } from '../maxlend.ts';
+import { adapterKind } from '../linkhelp.ts';
 
 // ---- This PC as a worker for other PCs (off unless its owner turns it on) ----
 
@@ -58,8 +59,11 @@ export function lanList(): { address: string; via: string }[] {
     .map(n => ({ address: n.address, via })));
 }
 
+/** True while the node port is open for other PCs (the link helper's checklist). */
+export const shareListening = () => !!shareServer;
+
 export function shareView() {
-  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */

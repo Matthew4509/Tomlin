@@ -9,6 +9,8 @@ import * as jobs from './jobs.ts';
 import type { Step } from './jobs.ts';
 import type { CheckResult } from './checks.ts';
 import * as firewall from './firewall.ts';
+import * as linkhelp from './linkhelp.ts';
+import * as netfacts from './netfacts.ts';
 import type { AskOpts, ChatTurn, ThoughtStop } from './engine.ts';
 import * as brains from './brains.ts';
 import type { Staff, StaffMember } from './staff.ts';
@@ -31,7 +33,7 @@ import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/si
 import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
-import { applyShare, askHost, claimsWaiting, impactOf, linkedUse, nodeView, projectsCopy, serving, setShare, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
+import { applyShare, askHost, claimsWaiting, impactOf, lanList, linkedUse, nodeView, projectsCopy, serving, setShare, shareListening, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
 import { goAway } from './jobrun/giveway.ts';
 
@@ -312,6 +314,15 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
   if (p === '/api/network/projects') return reply(res, await projectsOn(url.searchParams.get('pc'))), true;
   if (p === '/api/network/owner') return reply(res, await ownerOn(url.searchParams.get('pc'))), true;
   if (p === '/api/network/claim') return reply(res, await claimStateOn(url.searchParams.get('pc'))), true;
+  // The node's own checklist (the link helper, 2.0.64): its connection, how its address was set, its router, network
+  // type, firewall, other security programs, VPNs; and which address to type on the main PC.
+  if (p === '/api/share/reach') {
+    const [adapters, facts] = await Promise.all([netfacts.readAdapters(), firewall.read(shareState.port, process.execPath)]);
+    const judged = facts ? firewall.judge(facts, shareState.port, process.execPath) : null;
+    const known = adapters ?? lanList().map(n => ({ alias: n.via, address: n.address, prefix: 24, dhcp: null, gateway: null, gatewayAnswers: null }));
+    const report = linkhelp.nodeChecklist({ on: shareState.on, listening: shareListening(), port: shareState.port, adapters: known, firewall: judged, others: facts?.others ?? [] });
+    return d.json(res, 200, { ...report, fix: judged && !judged.ok ? judged.fix : '', run: judged && !judged.ok ? judged.run : '', port: shareState.port }), true;
+  }
   if (p === '/api/share/firewall') {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;

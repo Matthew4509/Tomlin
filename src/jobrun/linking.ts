@@ -1,9 +1,12 @@
 // This PC linking other PCs to it (they are its nodes): add one with its setup code, find TOMLIN on the home network,
 // answer a node's "I need to use the pc", start it again, Backups only, remove. This PC's own node side is node.ts.
 import { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
 import * as brains from '../brains.ts';
+import * as linkhelp from '../linkhelp.ts';
+import * as netfacts from '../netfacts.ts';
 import { d } from './shared.ts';
 import type { Remote } from '../store.ts';
 import { hello, seen, workerPost } from './links.ts';
@@ -22,15 +25,23 @@ function pairBody(ask: Record<string, unknown>, proofs: string[]): string {
 export async function remotes(b: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
   const s = await d.store.settings();
   if (b.action === 'add') {
-    const url = share.cleanWorkerUrl(b.url);
-    if (!url) return { status: 400, body: { error: 'That PC\'s address is not one on your home network. Press "Find PCs on my network" again, or type the address shown on that PC (for example 192.168.1.20:8741).' } };
+    // What was typed, read the way the link helper reads it (2.0.64): 192.178 for 192.168, the router's address, this
+    // PC's own. The router is known only from Windows' own list, read when the address could be one of those.
+    const typed = String(b.url ?? '');
+    const quick = lanList().map(n => ({ alias: n.via, address: n.address, prefix: 24, gateway: null }));
+    let advice = linkhelp.addressAdvice(typed, quick);
+    if (advice.problem || /\.1(:\d+)?\/?$/.test(typed.trim())) advice = linkhelp.addressAdvice(typed, await ownNow());
+    const url = advice.problem ? null : share.cleanWorkerUrl(typed);
+    if (!url) return { status: 400, body: { error: advice.problem ?? 'That PC\'s address is not one on your home network. Press "Find PCs on my network" again, or type the address shown on that PC (for example 192.168.1.20:8741).', suggest: advice.suggest } };
     const code = share.cleanCode(b.code);
     if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network (for example ABCD-EFGH).' } };
+    const pinWhy = linkhelp.pinAdvice(String(b.pin ?? ''));
+    if (pinWhy) return { status: 400, body: { error: pinWhy } };
     const pin = String(b.pin ?? '').replace(/\D/g, '');
     // A name (desk.local) must point inside the home network before anything is sent to it (S6).
     const outside = await share.homeNetworkWhy(url);
     if (outside) return { status: 400, body: { error: outside } };
-    const unreachable = (e: unknown) => ({ status: 502, body: { error: `Nothing answered at ${url} (${(e as Error).message}). Check the address, that TOMLIN runs on that PC with sharing on, and that its firewall lets the port through on a private network.` } });
+    const unreachable = (e: unknown) => ({ status: 502, body: { error: `Nothing answered at ${url.replace('http://', '')} (${(e as Error).message}).${advice.warn ? ` ${advice.warn}` : ''} The Link helper below tests it from here and says what is in the way.`, help: true } });
     // An older PC cannot make the encrypted link (F7 E1): said plainly, before anything is sent.
     let about: Record<string, unknown>;
     try {
@@ -83,6 +94,8 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // "Worker PC" are not read as one PC that is both off and on.
     const twin = others.find(r => r.name.toLowerCase() === name.toLowerCase());
     if (twin) return { status: 200, body: { ...(await setup()), sameName: `Linked. "${twin.name}" at ${twin.url} has the same name, so both cards show their address. To tell them apart, press one in the left panel and give it a Name.` } };
+  } else if (b.action === 'diagnose') {
+    return { status: 200, body: await diagnose(b) };
   } else if (b.action === 'scan') {
     return { status: 200, body: { found: await scan(Number(b.port) || share.DEFAULT_SHARE.port), own: lanList() } };
   } else if (b.action === 'answer') {
@@ -149,6 +162,53 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     seen.delete(id);
   } else return { status: 400, body: { error: 'Unknown worker action.' } };
   return { status: 200, body: await setup() };
+}
+
+/** This PC's home connections with their routers (Windows' own list), or its addresses alone when that cannot be read. */
+async function ownNow(): Promise<linkhelp.Own[]> {
+  const adapters = await netfacts.readAdapters();
+  return adapters ? linkhelp.homeOf(adapters) : lanList().map(n => ({ alias: n.via, address: n.address, prefix: 24, gateway: null }));
+}
+
+/**
+ * The link helper, from this PC (2.0.64): the address and name typed are read, then the other PC is tested from here
+ * (a ping, the node port, its hello) and Windows' list of nearby devices is read, and it all becomes one verdict
+ * (src/linkhelp.ts diagnoseLink). Only home-network addresses are ever asked; nothing is changed anywhere.
+ */
+async function diagnose(b: Record<string, unknown>): Promise<linkhelp.Verdict> {
+  const port = Number(b.port) >= 1 && Number(b.port) <= 65535 ? Math.trunc(Number(b.port)) : share.DEFAULT_SHARE.port;
+  const own = await ownNow();
+  const address = String(b.address ?? '').trim().slice(0, 200);
+  const name = String(b.name ?? '').trim().slice(0, 63);
+  const nodeOn = b.nodeOn === true ? true : b.nodeOn === false ? false : null;
+  const advice = address ? linkhelp.addressAdvice(address, own, port) : null;
+  const named = name ? { found: await netfacts.lookupName(name) } : null;
+  let host: string | null = null;
+  let at = port;
+  if (advice?.url && !advice.problem) {
+    const u = new URL(advice.url);
+    host = u.hostname.replace(/^\[|\]$/g, '');
+    at = Number(u.port) || port;
+    // A name is asked only when every address it gives is on the home network (S6).
+    if (!isIP(host) && (await share.homeNetworkWhy(advice.url))) host = null;
+  }
+  if (!host && named) host = named.found.find(ip => isIP(ip) === 4 && own.some(o => linkhelp.sameNet(o.address, ip, o.prefix))) ?? null;
+  let ping: boolean | null = null;
+  let probe: linkhelp.Probe | null = null;
+  let whoami: linkhelp.LinkFacts['whoami'] = null;
+  if (host) {
+    [ping, probe] = await Promise.all([isIP(host) ? netfacts.pingHost(host) : Promise.resolve(null), netfacts.probePort(host, at)]);
+    if (probe === 'open') {
+      try {
+        const j = (await (await fetch(`http://${isIP(host) === 6 ? `[${host}]` : host}:${at}/worker/whoami`, { signal: AbortSignal.timeout(4000) })).json()) as Record<string, unknown>;
+        whoami = { tomlin: j.app === 'smart-manager', version: String(j.version ?? '').slice(0, 20), linkOk: Number(j.link) === link.LINK_VERSION };
+      } catch {
+        whoami = { tomlin: false, version: '', linkOk: false };
+      }
+    }
+  }
+  const v6Only = linkhelp.countV6Only(await netfacts.readNeighbors(), own);
+  return linkhelp.diagnoseLink({ own, nodeOn, address, name, port: at, ping, probe, whoami, named, v6Only });
 }
 
 /**

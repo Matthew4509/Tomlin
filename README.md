@@ -494,6 +494,17 @@ rather than misread it.
   and, only if you tick it, a PIN as well; the port is under Advanced. On your main PC, Network: connect PCs > Find other PCs >
   **Find PCs on my network** lists the PCs with it on; type one's setup code (and PIN, if it asks) and press **Link**.
   Not found? Type its address instead. A PC linked again keeps the hires on its models (each node has a fixed id).
+- **Link helper (2.0.64):** when a node cannot be found or linked, each PC says what it can see, in plain words, with
+  the steps that fix it. On the node, **Can other PCs reach this one?** Check lists its own settings: its connection,
+  how its address was set (an address typed in by hand with no router behind it is named), its router, the network
+  type, Windows Firewall, other security programs and VPNs (warned about: they cannot be checked from there), and the
+  virtual-machine or hotspot connections to ignore; then the one address to type on the main PC. On the main PC,
+  **Link helper** (under Find other PCs; it opens by itself when Find finds nothing or a link fails) asks whether
+  TOMLIN is open there, its address and its name, then tests it from here: a ping, the node port (refused: nothing
+  listens; dropped: a firewall), its hello, a name lookup, and devices Windows has seen with no address on this
+  network. The link form also catches an address one key away from 192.168 (192.178), the router's own address,
+  this PC's own, and a 4-digit app lock PIN typed as the link PIN. Install TOMLIN.cmd now answers Yes to the firewall
+  question unless told No, and does not ask again when the rule is there.
 - **Private nodes (2.0.26):** the link between two PCs is encrypted. At linking each PC makes a fresh key pair
   (X25519) and both prove they know the node's setup code (and PIN) without sending it, so a device in the middle
   cannot join; every message after that (the words, job steps, pictures) is sealed with AES-256-GCM both ways, and a

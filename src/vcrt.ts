@@ -33,7 +33,7 @@ export const VCRT_LINE = 'Windows could not start the runner: a Microsoft Visual
 
 /**
  * What a model runner is, for every line that names one to a person (the installer's question, Start TOMLIN.cmd, the
- * panes' faults, Help): a beginner at a new node asked whether it was someone running after models on the red carpet.
+ * panes' faults, Help): the words alone meant nothing to someone new to running models.
  */
 export const RUNNER_WORDS = 'the small programs that load a model and make it write or draw';
 export const RUNNER_WORD = 'the small program that loads a model and makes it write or draw';

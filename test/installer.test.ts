@@ -87,7 +87,7 @@ test('shortcut, registry and firewall lines: quoted, this user only, the rule as
   assert.equal(v.DisplayVersion, '2.0.34');
   assert.equal(v.UninstallString, '"C:\\P\\TOMLIN\\TOMLIN.exe" --uninstall');
   assert.ok(reg.every(a => a[0] === 'add' && a[1] === 'HKCU\\X' && a.at(-1) === '/f'));
-  // Only this install's program is closed: another one (his own, while a test runs) is never touched.
+  // Only this install's program is closed: another one (the one in use on this PC, while a test runs) is never touched.
   const tray = inst.trayScript('C:\\T\\Smart Manager.exe', true);
   assert.match(tray, /Where-Object \{ \$_\.Path -eq 'C:\\T\\Smart Manager.exe' -or \$_\.Path -eq 'C:\\T\\Smart Manager.old.exe' \} \| Stop-Process -Force$/);
   // After a rebuild the running program is Smart Manager.old.exe: found by name too.

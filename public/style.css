@@ -868,6 +868,21 @@ dialog#profile::backdrop { background: rgba(0,0,0,.55); }
 #pane-image.away .conn-info { display: none !important; }
 .mp-hf-head { margin: 18px 0 6px; font-size: var(--fs-md); }
 .node-fw-code { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-size: var(--fs-xs); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+
+/* The link helper's lines (2.0.64): a mark, the words, and the steps under a fault. */
+.check-list { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 8px; font-size: var(--fs-sm); }
+.check-list > li { display: grid; grid-template-columns: 1.4em minmax(0, 1fr); gap: 6px; align-items: start; overflow-wrap: anywhere; }
+.check-mark { font-weight: 700; text-align: center; }
+.check-ok .check-mark { color: var(--good); }
+.check-bad .check-mark { color: var(--bad); }
+.check-warn .check-mark { color: var(--warn); }
+.check-info { color: var(--ink-soft); }
+.check-info .check-mark { font-style: italic; }
+.check-steps { margin: 4px 0 0; padding-left: 1.3em; display: grid; gap: 2px; }
+.link-help-out { display: grid; gap: 6px; margin-top: 8px; }
+.link-help-q { border: 0; margin: 4px 0; padding: 0; }
+.link-help-q legend { font-size: var(--fs-sm); margin-bottom: 4px; }
+.link-help-q .check { display: inline-flex; margin-right: 14px; }
 .node-link-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .node-link-form .field { margin: 0; }
 .node-scan-port { max-width: 170px; margin: 0; }

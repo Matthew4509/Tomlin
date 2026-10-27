@@ -130,7 +130,7 @@ test('a chit-chat line is not said again within 10 minutes by anyone; a work lin
     { id: 'qwen', text: 'Coffee first, then answers.', kind: 'chat', at: now - 3 * 60_000 },
     { id: 'tessa', text: 'Answered in "A".', kind: 'work', at: now - 60_000 },
   ];
-  // The same chit-chat from someone else 3 minutes later: left out (his paste: two hires, the same line, minutes apart).
+  // The same chit-chat from someone else 3 minutes later: left out (seen in use: two hires, the same line, minutes apart).
   assert.equal(B.saidLately(said, { id: 'qwen35', text: 'Coffee first, then answers.', kind: 'chat' }, now), true);
   // And from the same person: left out.
   assert.equal(B.saidLately(said, { id: 'qwen', text: 'Coffee first, then answers.', kind: 'chat' }, now), true);

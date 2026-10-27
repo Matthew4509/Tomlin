@@ -1,4 +1,4 @@
-// Finding the update (2.0.63; his laptop "couldn't find how"): Update this install (on This PC: models and updates) was
+// Finding the update (2.0.63: it was hard to find): Update this install (on This PC: models and updates) was
 // reached only by scrolling that page, or from Settings' foot. Now: an Update TOMLIN entry of its own in the Set up
 // menu, the version and Check git at the head of Settings, Update TOMLIN in the My PC window, and the no-release line
 // says what to do instead. Read from the page's own files, as test/settingspages.test.ts does; the line is a pure

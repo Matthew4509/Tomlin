@@ -1,4 +1,4 @@
-// Settings (his note, 10 Oct): the Set up menu on the left stays there on every page it opens (it used to give way to
+// Settings: the Set up menu on the left stays there on every page it opens (it used to give way to
 // the chat list on Models, Nodes and Link another PC, so he went back to Settings for the next one), and Staff, Jobs
 // and Files open as pages beside it, not as windows over it. Read from the page's own files (checked in the browser on
 // a scratch copy: each item, Close back to where it was opened from, phone width, night).

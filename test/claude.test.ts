@@ -17,8 +17,9 @@ test('the newest handover is found by the date in its name', () => {
   assert.equal(newestHandoff(['README.md', 'HANDOFF-2026-10-05-B.md', 'HANDOFF-2026-10-06-A.md', 'HANDOFF-2026-09-30-Z.md']), 'HANDOFF-2026-10-06-A.md');
   assert.equal(newestHandoff(['README.md']), null);
   // Several on one day: the highest version in the name, not the last name.
-  assert.equal(newestHandoff(['HANDOFF-2026-10-07-UPTIME-COSTS-2.0.39.md', 'HANDOFF-2026-10-07-TONE-TOKENS-2.0.42.md', 'HANDOFF-2026-10-07-QUEUE-2.0.41.md', 'HANDOFF-2026-10-07-WINDOW.md', 'HANDOFF-2026-10-06-Z-2.0.50.md']), 'HANDOFF-2026-10-07-TONE-TOKENS-2.0.42.md');
-  assert.equal(newestHandoff(['HANDOFF-2026-10-07-BAKED-2.0.35-NEXT.md', 'HANDOFF-2026-10-07-AUDIT-FIXES-2.0.35.md']), 'HANDOFF-2026-10-07-BAKED-2.0.35-NEXT.md');
+  // (Made-up names.)
+  assert.equal(newestHandoff(['HANDOFF-2026-10-07-ALPHA-2.0.39.md', 'HANDOFF-2026-10-07-BRAVO-2.0.42.md', 'HANDOFF-2026-10-07-CHARLIE-2.0.41.md', 'HANDOFF-2026-10-07-DELTA.md', 'HANDOFF-2026-10-06-Z-2.0.50.md']), 'HANDOFF-2026-10-07-BRAVO-2.0.42.md');
+  assert.equal(newestHandoff(['HANDOFF-2026-10-07-PAPA-2.0.35-NEXT.md', 'HANDOFF-2026-10-07-OSCAR-2.0.35.md']), 'HANDOFF-2026-10-07-PAPA-2.0.35-NEXT.md');
 });
 
 test('the prompt: the project manager, where things are, START HERE, the API and how to work', () => {

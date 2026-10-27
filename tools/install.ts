@@ -243,8 +243,13 @@ async function install() {
     if (want) await step('start TOMLIN with Windows', () => writeStartup(sdir, inst.startupScriptFor(exe)));
   }
 
-  // The firewall rule for a node: asked, then Windows asks for permission (administrator) once.
-  if (await ask('Will other PCs link to this one (it lends its models as a node)? Add the Windows firewall rule for that now (Windows asks you to allow it)?', false, 'firewall')) {
+  // The firewall rule for a node: asked, then Windows asks for permission (administrator) once. Yes unless answered No
+  // (2.0.64: a node installed with the old No default could not be reached, and nothing said why); the rule lets in PCs
+  // on the home network only, and nothing answers there until "Enable this PC as a node" is ticked. Already there (an
+  // update): not asked again, so Windows does not ask for permission at every update.
+  const ruleThere = !has('--no-firewall') && process.platform === 'win32' && (await firewallRules()) > 0;
+  if (ruleThere) say('The firewall rule that lets your other PCs link to this one is already there.');
+  else if (await ask('Will other PCs link to this one (it lends its models as a node)? Add the Windows firewall rule for that now? It lets in PCs on your home network only, and nothing answers until "Enable this PC as a node" is ticked (Windows asks you to allow it).', true, 'firewall')) {
     let port = 8741;
     try {
       port = Number(JSON.parse(await readFile(join(resolveHome().data, 'share.json'), 'utf8')).port) || 8741;
@@ -254,7 +259,7 @@ async function install() {
     const script = inst.firewallScript(port, RULE_NAME, OLD_RULE_NAMES);
     await step(`add the firewall rule for port ${port} (as administrator)`, async () => {
       const elevated = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','${Buffer.from(script, 'utf16le').toString('base64')}'`;
-      await powershell(elevated).catch(() => say('The firewall rule was not added (permission was not given). Nodes and memory > "Can other PCs reach this one?" shows the line to run later.'));
+      await powershell(elevated).catch(() => say('The firewall rule was not added (permission was not given). In TOMLIN, Network, "Can other PCs reach this one?" Check shows the line to run later.'));
     });
   }
 

@@ -1,4 +1,4 @@
-// One name per thing on screen (audit U4, his picks 22 Oct): a chat model, a picture model, Models on my other PCs, the
+// One name per thing on screen (audit U4): a chat model, a picture model, Models on my other PCs, the
 // Network page and its Connect a PC, the Models page ("Models: add or remove"), Start TOMLIN when this PC starts, and the
 // Models page's size filters and Mixture-of-experts tick. The old names are kept out of every screen (public/) and out of
 // what the server says (src/), so a new screen cannot bring one back. Staff names are his to keep as they are for now.

@@ -1,4 +1,4 @@
-// "Recent chats" in the left panel (his design, 22 Oct): one list where a project is one entry (its newest chat shown,
+// "Recent chats" in the left panel (the design chosen): one list where a project is one entry (its newest chat shown,
 // one press opens all its chats) and a chat in no project is its own entry; latest use first, pinned on top.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

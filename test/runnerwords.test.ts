@@ -1,6 +1,5 @@
-// "Model runner" explained wherever a person meets it (28 Oct: a new node's install asked about the Visual C++ Runtime
-// "TOMLIN's model runners need", and he, a beginner, asked whether that was someone running after models on the red
-// carpet). One phrase (src/vcrt.ts RUNNER_WORDS, singular RUNNER_WORD) in the installer's question, Start TOMLIN.cmd,
+// "Model runner" explained wherever a person meets it (2.0.63: a new node's install asked about the Visual C++ Runtime
+// "TOMLIN's model runners need", which means nothing to someone new to running models). One phrase (src/vcrt.ts RUNNER_WORDS, singular RUNNER_WORD) in the installer's question, Start TOMLIN.cmd,
 // the panes' faults, the no-runner lines, Help and the welcome page.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
