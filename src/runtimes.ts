@@ -269,6 +269,9 @@ export interface GpuFacts {
   integrated: boolean;
   total?: number | null;
   cc?: number | null;
+  /** In compute-only mode (TCC), and its place in nvidia-smi's list (src/hardware.ts). */
+  tcc?: boolean;
+  smiIndex?: number;
 }
 
 /**
@@ -343,7 +346,9 @@ const GENERATIONS: [number, string][] = [
   [80, 'an RTX 30 series (Ampere) card'],
   [75, 'an RTX 20 or GTX 16 series (Turing) card'],
   [70, 'a Volta card'],
-  [60, 'a GTX 10 series (Pascal) card'],
+  // Pascal is two levels: the Tesla P100 is sm 6.0, every other Pascal card 6.1 (a build may have code for 6.1 only).
+  [61, 'a GTX 10 series, Tesla P4/P40 or Quadro P card (sm 6.1; the Tesla P100 is sm 6.0)'],
+  [60, 'a Pascal card (the Tesla P100 is sm 6.0)'],
   [50, 'a GTX 750 or GTX 900 series (Maxwell) card'],
 ];
 const generationOf = (cc: number) => GENERATIONS.find(([from]) => cc >= from)?.[1] ?? 'a newer card';
@@ -407,6 +412,30 @@ export function cudaOrder(pins: Record<string, RuntimePin>, engine: Engine, gpus
  * What to say when this PC has a graphics card of its own but no runner that can use it, so everything runs on the CPU
  * (an older zip carried only the CPU runners). Empty when a card runner is there, or the PC has no card of its own.
  */
+/**
+ * Said when an NVIDIA card is in compute-only mode (TCC) and the runner for `what` is not CUDA (`usesCuda` false): the
+ * Vulkan runner cannot see that card, so it runs elsewhere (another chip, or the CPU). With the command that changes it.
+ */
+export function tccNote(gpus: GpuFacts[], usesCuda: boolean, what: 'chat' | 'pictures'): string {
+  if (usesCuda) return '';
+  const cards = gpus.filter(g => g.vendor === 'nvidia' && g.tcc);
+  if (!cards.length) return '';
+  const c = cards[0];
+  return `${c.name ?? 'An NVIDIA card'} is in compute-only mode (TCC): the CUDA runners can use it, but the Vulkan runner ${what === 'pictures' ? 'for pictures ' : ''}cannot see it, so ${what} run${what === 'chat' ? 's' : ''} elsewhere. To change it: open a command window as administrator, run nvidia-smi -i ${c.smiIndex ?? 0} -dm WDDM, then restart the PC.${cards.length > 1 ? ` (${cards.length} cards here are in TCC mode: change each by its number.)` : ''}`;
+}
+
+/**
+ * Said before a CUDA start when `pin` has no code made for this PC's NVIDIA cards, only PTX the driver compiles at the
+ * first start (a Pascal card on CUDA 12.4: minutes). The driver keeps what it compiled (the runner's code cache is
+ * 4 GB: worker.ts runnerEnv), so later starts are quick. '' when it has code made for them, or a card's level is unknown.
+ */
+export function firstStartNote(pin: RuntimePin | undefined, gpus: GpuFacts[]): string {
+  if (!pin?.cuda) return '';
+  const cards = gpus.filter(g => g.vendor === 'nvidia' && !g.integrated);
+  if (!cards.length || !cards.every(g => codeFor(pin, g.cc) === 'jit')) return '';
+  return `The first start on the ${cards.map(g => g.name).join(' and ')} compiles the CUDA runner's code for ${cards.length > 1 ? 'them' : 'it'} (a few minutes, once): later starts are quick.`;
+}
+
 /** The runners the Models page downloads: the card ones (CUDA, Vulkan); the CPU ones come with TOMLIN. */
 export const pageDownloads = (pin: { engine: string; device: string } | undefined) => pin?.device === 'cuda' || pin?.device === 'vulkan';
 

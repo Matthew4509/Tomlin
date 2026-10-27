@@ -195,3 +195,25 @@ test('when nvidia-smi answers, an NVIDIA card it does not list is left out; when
   assert.deepEqual(gpusFrom(cim, smi, [86]).map(g => g.name), ['NVIDIA GeForce RTX 3060', 'AMD Radeon RX 6600']);
   assert.deepEqual(gpusFrom(cim, [], []).map(g => g.name), ['NVIDIA GeForce RTX 3060', 'NVIDIA GeForce GTX 1060 6GB', 'AMD Radeon RX 6600']);
 });
+
+// 26 Oct: whether each NVIDIA card is in compute-only (TCC) mode, asked of nvidia-smi on its own (an old driver that
+// does not know the question must not take the memory reading with it), in nvidia-smi's order.
+test('the driver mode of each NVIDIA card is read apart, and a TCC card is marked with its place in nvidia-smi\'s list', async () => {
+  const smi = new SmiReader(async (_exe, args) => {
+    if (args[0].includes('driver_model')) return 'WDDM\nTCC\n';
+    return 'NVIDIA GeForce GTX 1060 6GB, 6144, 300, 573.48\nTesla P100-PCIE-16GB, 16384, 0, 573.48\n';
+  }, () => 0, ['a']);
+  const rows = await smi.rows();
+  const modes = await smi.modes();
+  assert.deepEqual(modes, ['WDDM', 'TCC']);
+  const gpus = gpusFrom(`GPU|NVIDIA GeForce GTX 1060 6GB|${CAP}|${6 * GiB}`, rows, [61, 60], modes);
+  assert.deepEqual(gpus.map(g => [g.name, g.tcc ?? false, g.smiIndex]), [['NVIDIA GeForce GTX 1060 6GB', false, 0], ['Tesla P100-PCIE-16GB', true, 1]]);
+  // A driver that cannot say: no mode, nothing marked.
+  const old = new SmiReader(async (_exe, args) => {
+    if (args[0].includes('driver_model')) throw new Error('Field "driver_model.current" is not a valid field');
+    return 'Tesla P100-PCIE-16GB, 16384, 0, 474.82\n';
+  }, () => 0, ['a']);
+  await old.rows();
+  assert.deepEqual(await old.modes(), []);
+  assert.equal(gpusFrom('', await old.rows(), [], [])[0].tcc, undefined);
+});

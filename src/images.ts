@@ -8,7 +8,7 @@ import { dirname, extname, join } from 'node:path';
 import { Pane, type ConnectRequest } from './pane.ts';
 import type { Asked } from './worker.ts';
 import type { Store } from './store.ts';
-import { missingCardRunner, type Runtimes, type Device } from './runtimes.ts';
+import { missingCardRunner, tccNote, type Runtimes, type Device } from './runtimes.ts';
 import { pictureOffload } from './devices.ts';
 import type { HardwareInfo, Sampler } from './hardware.ts';
 import { Registry, type RegistryModel } from './registry.ts';
@@ -241,7 +241,8 @@ export class Images {
       asked,
       threads,
       devices: tried,
-      note: note ?? ((asked !== 'cpu' ? missingCardRunner('sd', this.deps.hardware.gpus, d => this.deps.runtimes.installed('sd', d)) : '') || undefined),
+      // A card in compute-only mode (TCC) that the CUDA picture runner cannot use either (a Tesla P100) is said too.
+      note: note ?? ((asked !== 'cpu' ? [missingCardRunner('sd', this.deps.hardware.gpus, d => this.deps.runtimes.installed('sd', d)), tccNote(this.deps.hardware.gpus, tried.includes('cuda'), 'pictures')].filter(Boolean).join(' ') : '') || undefined),
       expectedSeconds: s.loadSeconds[`image:${id}`] ?? Math.round(this.registry.bytes(m) / (200 * 2 ** 20)) + 4,
       build: device => ({
         exe: this.deps.runtimes.exe('sd', device)!,

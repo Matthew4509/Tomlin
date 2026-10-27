@@ -54,6 +54,12 @@ const CATALOG: { name: string; cc: number; gb: number }[] = [
   { name: 'Tesla K80', cc: 37, gb: 12 },
   { name: 'NVIDIA B200', cc: 100, gb: 180 },
   { name: 'NVIDIA GB10', cc: 121, gb: 128 },
+  // 26 Oct, data-centre cards people buy second hand: no display output, passive cooling, often in TCC mode.
+  { name: 'Tesla P40', cc: 61, gb: 24 },
+  { name: 'Tesla P4', cc: 61, gb: 8 },
+  { name: 'Tesla P6', cc: 61, gb: 16 },
+  { name: 'Tesla M40 24GB', cc: 52, gb: 24 },
+  { name: 'Tesla V100-PCIE-32GB', cc: 70, gb: 32 },
 ];
 type Card = (typeof CATALOG)[number];
 
@@ -328,6 +334,9 @@ test('the CUDA picture runner: code for Pascal to Blackwell, none for Maxwell, a
   assert.deepEqual(cudaOrder(PINS, 'sd', [by('RTX 5080')], '582.78'), ['sd-cuda'], 'native code for the RTX 50 series');
   assert.deepEqual(cudaOrder(PINS, 'sd', [by('GTX 980')], '582.78'), [], 'no code for a Maxwell card: pictures run on Vulkan');
   assert.deepEqual(cudaOrder(PINS, 'sd', [by('RTX 3060')], '560.94'), [], 'a driver older than CUDA 12.8 needs');
-  assert.match(pinWhy(sd, [by('GTX 980')], '582.78'), /no code for it: it needs a GTX 10 series \(Pascal\) card or newer/);
+  assert.match(pinWhy(sd, [by('GTX 980')], '582.78'), /no code for it: it needs a GTX 10 series, Tesla P4\/P40 or Quadro P card \(sm 6\.1; the Tesla P100 is sm 6\.0\) or newer/);
+  // The P100 is Pascal too, one step below: the words say so instead of asking it for a Pascal card.
+  assert.match(pinWhy(sd, [by('P100')], '582.78'), /Tesla P100-PCIE-16GB, and the CUDA 12\.8 runner has no code for it: .*the Tesla P100 is sm 6\.0/);
+  assert.deepEqual(cudaOrder(PINS, 'sd', [by('Tesla P40')], '582.78'), ['sd-cuda']);
   for (const c of CATALOG) if (c.cc >= 61) assert.notEqual(codeFor(sd, c.cc), 'none', c.name);
 });

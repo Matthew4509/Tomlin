@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { driverAtLeast, missingCardRunner, pageDownloads, runnerWhy } from '../src/runtimes.ts';
+import { driverAtLeast, firstStartNote, missingCardRunner, pageDownloads, runnerWhy, tccNote } from '../src/runtimes.ts';
+import { readFileSync } from 'node:fs';
 
 const p2000 = [{ name: 'NVIDIA Quadro P2000', integrated: false }];
 
@@ -88,4 +89,27 @@ test('the page downloads the card runners (CUDA and Vulkan), never the CPU ones 
   assert.equal(pageDownloads({ engine: 'llama', device: 'cuda' }), true);
   assert.equal(pageDownloads({ engine: 'llama', device: 'cpu' }), false);
   assert.equal(pageDownloads(undefined), false);
+});
+
+const PINS = JSON.parse(readFileSync(new URL('../runtimes.json', import.meta.url), 'utf8')).runtimes;
+const P100 = { name: 'Tesla P100-PCIE-16GB', vendor: 'nvidia', integrated: false, total: 16 * 2 ** 30, cc: 60, tcc: true, smiIndex: 1 };
+
+// 26 Oct: a data-centre card (Tesla P40, P100, T4) often runs in TCC mode on Windows: CUDA uses it, but the Vulkan
+// runner and Windows' own graphics readings cannot see it. Said, with the way to change it, only when it matters.
+test('a card in compute-only (TCC) mode is named, with the command that changes it, when a runner other than CUDA would run', () => {
+  const t = tccNote([P100], false, 'pictures');
+  assert.match(t, /Tesla P100-PCIE-16GB is in compute-only mode \(TCC\)/);
+  assert.match(t, /nvidia-smi -i 1 -dm WDDM/);
+  assert.match(t, /pictures/);
+  assert.equal(tccNote([P100], true, 'chat'), '', 'CUDA runs on it: nothing to say');
+  assert.equal(tccNote([{ ...P100, tcc: false }], false, 'pictures'), '');
+  assert.equal(tccNote([], false, 'chat'), '');
+});
+
+test('the first start on a card the CUDA build has no code made for says it compiles once', () => {
+  const P40 = { name: 'Tesla P40', vendor: 'nvidia', integrated: false, total: 24 * 2 ** 30, cc: 61 };
+  assert.match(firstStartNote(PINS['llama-cuda'], [P40]), /first start on the Tesla P40 compiles .* once/);
+  assert.equal(firstStartNote(PINS['llama-cuda'], [{ ...P40, name: 'NVIDIA GeForce RTX 3060', cc: 86 }]), '', 'code made for it');
+  assert.equal(firstStartNote(PINS['llama-cpu'], [P40]), '');
+  assert.equal(firstStartNote(PINS['llama-cuda'], [{ ...P40, cc: null }]), '', 'not known: not said');
 });

@@ -10,7 +10,7 @@ import { builtInListed, cardsOf, listDevices, listSdDevices, pickSdDevice, start
 import { runnerEnv } from '../worker.ts';
 import { log } from '../log.ts';
 import type { Gpu } from '../hardware.ts';
-import { buildFits, ccFromName, cudaOrder, type Device, type GpuFacts, missingCardRunner, RUNNER_NAMES, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName } from '../runtimes.ts';
+import { buildFits, ccFromName, cudaOrder, type Device, type GpuFacts, firstStartNote, missingCardRunner, RUNNER_NAMES, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName, tccNote } from '../runtimes.ts';
 import { noCardStart } from '../runnerpush.ts';
 import { chatArgs, TEMPLATE_FAULT, whyItFailed } from '../llama.ts';
 import { Pane } from '../pane.ts';
@@ -367,16 +367,19 @@ function heldRunner(run: RunOptions): RunnerName | undefined {
  * The program a chat start on `device` runs: the build the model is held to, or the one Auto picks for the cards it is
  * held to (or every card here).
  */
-function chatExe(device: Device, held: RunnerName | undefined, run: RunOptions): { exe: string; runner?: string } {
+function chatExe(device: Device, held: RunnerName | undefined, run: RunOptions): { exe: string; runner?: string; id: string } {
   if (held && runnerDevice(held) === device) {
     const exe = runtimes.exePin(RUNNER_PINS[held]);
-    if (exe) return { exe, runner: held };
+    if (exe) return { exe, runner: held, id: RUNNER_PINS[held] };
   }
   const fits = device === 'cuda' && run.cards?.length ? cudaOrder(runtimes.pins, 'llama', gpusFor(run), hardware.nvidiaDriver ?? null).find(id => runtimes.installedPin(id)) : undefined;
   const id = fits ?? runtimes.id('llama', device);
   const named = runnerOfPin(id);
-  return { exe: runtimes.exePin(id)!, ...(named ? { runner: named } : {}) };
+  return { exe: runtimes.exePin(id)!, ...(named ? { runner: named } : {}), id };
 }
+
+/** The CUDA builds that have started on this PC since TOMLIN started: the "first start compiles" note is said before. */
+const cudaStarted = new Set<string>();
 
 /** True when Auto should use the CPU even though a graphics chip is there (only a built-in one, for chat). */
 function autoSkipsGpu(engine: 'llama' | 'sd'): boolean {
@@ -440,11 +443,17 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
   const held = heldRunner(run);
   const runnerWords: Record<RunnerName, string> = { cuda: 'CUDA 12', cuda13: 'CUDA 13', vulkan: 'Vulkan' };
+  const devices = devicesForRun(devicesFor('llama', asked), held && runnerDevice(held));
+  // The CUDA build this load would start, for the words about the card: a Pascal card compiles its code at the first
+  // start; a card in compute-only mode (TCC) is out of the Vulkan runner's sight.
+  const cudaPin = devices.includes('cuda') ? chatExe('cuda', held, run).id : '';
   const notes = [
     asked !== 'cpu' && run.runner && !held ? `This model is set to the ${runnerWords[run.runner] ?? run.runner} runner, which is not installed here or has no code for ${run.cards?.length ? 'the cards it is held to' : 'this PC\'s cards'}: Auto picked the runner instead.` : '',
     asked !== 'cpu' ? missingCardRunner('llama', hardware.gpus, d => runtimes.installed('llama', d)) : '',
     asked !== 'cpu' && noCard.size ? `Skipped: ${[...noCard.values()].join('; ')}.` : '',
     asked === 'auto' && autoSkipsGpu('llama') ? `Auto picked the CPU: faster for chat than the built-in graphics chip (choose GPU to use it anyway).` : '',
+    asked !== 'cpu' ? tccNote(hardware.gpus, !!cudaPin, 'chat') : '',
+    cudaPin && !cudaStarted.has(cudaPin) ? firstStartNote(runtimes.pins[cudaPin], run.cards?.length ? gpusFor(run) : hardware.gpus) : '',
     run.ctx !== DEFAULT_RUN.ctx || run.cache !== 'f16' ? `Context ${run.ctx.toLocaleString()} tokens${run.cache !== 'f16' ? `, ${run.cache} cache` : ''}.` : '',
     asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'layers' ? `The experts of the first ${run.moeCpu} layers in RAM, the rest on the graphics card.` : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
     beside.length ? `Loaded beside ${runnersOf.namesOf(beside)}.` : '',
@@ -459,7 +468,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     threads,
     // A runner saved for this model (the speed finder's CUDA 12, CUDA 13 or Vulkan row) is the only one it starts on,
     // when it is installed and this PC can use it.
-    devices: devicesForRun(devicesFor('llama', asked), held && runnerDevice(held)),
+    devices,
     expectedSeconds: expected,
     build: device => ({ ...chatExe(device, held, run), args: (port, key) => chatArgs(path, port, device, threads, false, started, cardFor(device), key), ready, device, timeoutSeconds: 600 }),
     retry: (device, tail) => (TEMPLATE_FAULT.test(tail) ? { ...chatExe(device, held, run), args: (port, key) => chatArgs(path, port, device, threads, true, started, cardFor(device), key), ready, device, timeoutSeconds: 600 } : null),
@@ -469,6 +478,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     started: (device, facts) => {
       const why = started.rpc?.length ? '' : noCardStart(device, facts);
       if (why) noCard.set(device, why);
+      else if (device === 'cuda' && cudaPin) cudaStarted.add(cudaPin);
       return why;
     },
     note: notes.join(' ') || undefined,

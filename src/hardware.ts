@@ -41,6 +41,12 @@ export interface Gpu {
    * says. Which CUDA build suits the card comes from it (src/runtimes.ts cudaOrder).
    */
   cc?: number | null;
+  /**
+   * An NVIDIA card in compute-only mode (TCC: data-centre cards often are on Windows): CUDA uses it, the Vulkan runner
+   * and Windows' graphics readings cannot see it. `smiIndex`: its place in nvidia-smi's list (for nvidia-smi -i).
+   */
+  tcc?: boolean;
+  smiIndex?: number;
 }
 
 export interface HardwareInfo {
@@ -141,7 +147,7 @@ function vendorOf(name: string): Gpu['vendor'] {
  * never counts), holds the true size for every make; it is believed when larger. An NVIDIA card then takes nvidia-smi's
  * figure, else the size in its name. A chip built into the processor (devices.ts builtIn) has no memory of its own.
  */
-export function gpusFrom(cim: string, smi: SmiRow[], caps: (number | null)[]): Gpu[] {
+export function gpusFrom(cim: string, smi: SmiRow[], caps: (number | null)[], modes: string[] = []): Gpu[] {
   const gpus: Gpu[] = [];
   for (const line of cim.split(/\r?\n/)) {
     const [kind, name, adapterRam, registry] = line.trim().split('|');
@@ -157,11 +163,13 @@ export function gpusFrom(cim: string, smi: SmiRow[], caps: (number | null)[]): G
     const known = gpus.find(x => x.vendor === 'nvidia' && !matched.has(x) && (x.name.includes(g.name) || g.name.includes(x.name)));
     if (known) matched.add(known);
     const cc = caps.length === smi.length ? caps[k] : null;
+    const mode = modes.length === smi.length ? { smiIndex: k, ...(modes[k] === 'TCC' ? { tcc: true } : {}) } : {};
     if (known) {
       // "[N/A]" (a TCC or MIG card): what Windows said stands.
       known.total = g.total ?? known.total;
       known.cc = cc;
-    } else gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false, cc });
+      Object.assign(known, mode);
+    } else gpus.push({ name: g.name, vendor: 'nvidia', total: g.total, integrated: false, cc, ...mode });
   }
   // nvidia-smi answered but did not list a card Windows lists (Code 43, a card the driver gave up on): the runners
   // cannot use it either, so it is not a card here (audit C11).
@@ -205,8 +213,9 @@ export async function readHardware(): Promise<HardwareInfo> {
   lastCim = cim;
   const rows = await smi.rows();
   const caps = rows.length ? await smi.caps() : [];
+  const modes = rows.length ? await smi.modes() : [];
   info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
-  info.gpus = gpusFrom(cim, rows, caps);
+  info.gpus = gpusFrom(cim, rows, caps, modes);
   return info;
 }
 
@@ -314,6 +323,16 @@ export class SmiReader {
    * Each NVIDIA card's sm level, in nvidia-smi's order, asked on its own: a driver too old to know compute_cap refuses
    * the whole question, and the memory reading must not go with it. [] when it cannot say.
    */
+  /** Each NVIDIA card's driver mode ('WDDM', 'TCC'), in nvidia-smi's order, asked on its own as caps(); [] when it cannot say. */
+  async modes(): Promise<string[]> {
+    if (!this.at) return [];
+    try {
+      return (await this.ask(this.at, ['--query-gpu=driver_model.current', '--format=csv,noheader'])).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   async caps(): Promise<(number | null)[]> {
     if (!this.at) return [];
     try {
@@ -490,7 +509,7 @@ export class Sampler {
         const rows = await smi.rows();
         if (smi.takeBack()) {
           // nvidia-smi answered late: the cards' true memory, sm level and the driver, read again in place.
-          this.info.gpus.splice(0, Infinity, ...gpusFrom(lastCim, rows, await smi.caps()));
+          this.info.gpus.splice(0, Infinity, ...gpusFrom(lastCim, rows, await smi.caps(), await smi.modes()));
           this.info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
         }
         const all = cardsTogether(rows);
