@@ -4,7 +4,8 @@
 // stored for files that are compressed already), zip64 when a file, the zip or the file count is too big for plain
 // zip, and a check that inflates every file again and compares its size and CRC-32 with what was written. Node only,
 // no packages. A write fault on the zip's own drive is never taken for an unreadable file (it is thrown), and the
-// check compares each file's own header with the zip's list too. Windows' tar still unpacks these zips (Put back).
+// check compares each file's own header (name, CRC, sizes) with the zip's list too, and unpacks no file past its listed
+// size. Windows' tar still unpacks these zips (Put back).
 // Tested in test/zip.test.ts.
 import { createReadStream } from 'node:fs';
 import { open, readdir, readFile, stat } from 'node:fs/promises';
@@ -47,6 +48,9 @@ function dosStamp(ms: number): { time: number; date: number } {
 }
 const u64 = (buf: Buffer, v: number, at: number) => buf.writeBigUInt64LE(BigInt(v), at);
 const abortError = () => Object.assign(new Error('Cancelled.'), { code: 'ABORT_ERR' });
+/** An entry stopped at its listed size: whether that is why, and the fault in words. */
+const tooBig = (e: unknown) => (e as NodeJS.ErrnoException | null)?.code === 'ERR_BUFFER_TOO_LARGE';
+const bigFault = (z: ZipEntry) => `${z.name} unpacks to more than the ${z.size} bytes the zip lists: the zip is damaged.`;
 
 /** Why a file could not be read, in plain words. */
 function whyNot(e: unknown): string {
@@ -169,7 +173,7 @@ export async function writeZip(file: string, items: ZipItem[], o: { onBytes?: (n
       if (!it.dir) {
         const src = createReadStream(it.abs ?? '', { highWaterMark: 1 << 20 });
         try { await new Promise((ok, bad) => { src.once('open', ok); src.once('error', bad); }); } catch (e) { skipped.push({ name: it.name, why: whyNot(e) }); continue; }
-        await put(local);
+        try { await put(local); } catch (e) { src.destroy(); throw e; } // the file being zipped is not left open
         // A fault writing the zip is the zip's (its drive), never the project file's: marked so it is thrown, not
         // listed as a file that could not be read.
         let writeFault: unknown = null;
@@ -331,35 +335,58 @@ export async function checkZip(file: string, expected?: ZipEntry[], o: { onBytes
       const z = list[i];
       const w = expected?.[i];
       if (w && (z.name !== w.name || z.size !== w.size || z.crc !== w.crc)) return { ok: false, fault: `${z.name} in the zip does not match what was written.` };
-      const head = await readAt(z.offset, 30);
+      let head = await readAt(z.offset, 30);
       if (head.length !== 30 || head.readUInt32LE(0) !== 0x04034b50) return { ok: false, fault: `${z.name}: its place in the zip holds something else (damaged).` };
+      const nameLen = head.readUInt16LE(26);
+      const extraLen = head.readUInt16LE(28);
+      const start = z.offset + 30 + nameLen + extraLen;
+      head = await readAt(z.offset, 30 + nameLen + extraLen);
+      if (head.length !== 30 + nameLen + extraLen) return { ok: false, fault: `${z.name} could not be read back from the zip (the zip ends before it does).` };
+      // Its own header is what a streaming unzipper goes by (Windows tar unpacks a file under the name there), so it
+      // must agree with the list: the name (folders too), the CRC and the sizes, zip64 ones included.
+      const disagrees: Checked = { ok: false, fault: `${z.name}: its own header in the zip disagrees with the zip's list (damaged).` };
+      if (head.toString('utf8', 30, 30 + nameLen) !== z.name) return disagrees;
       if (z.name.endsWith('/')) continue;
       // A zip made by streaming (Windows tar, every data backup before this) leaves its header's CRC and sizes at 0 and
       // says so (flag 8): they follow the file instead, and the list holds them.
-      const lcsize = head.readUInt32LE(18);
-      const later = (head.readUInt16LE(6) & 8) !== 0;
-      if (!later && (head.readUInt32LE(14) !== z.crc || (lcsize !== MAX32 && (lcsize !== z.csize || head.readUInt32LE(22) !== z.size)))) {
-        return { ok: false, fault: `${z.name}: its own header in the zip disagrees with the zip's list (damaged).` };
+      if (!(head.readUInt16LE(6) & 8)) {
+        if (head.readUInt32LE(14) !== z.crc) return disagrees;
+        let lcsize = head.readUInt32LE(18);
+        let lsize = head.readUInt32LE(22);
+        if (lcsize === MAX32 || lsize === MAX32) { // both are in its zip64 extra then, size first
+          let found = false;
+          for (let x = 30 + nameLen; x + 4 <= head.length;) {
+            const tag = head.readUInt16LE(x);
+            const len = head.readUInt16LE(x + 2);
+            if (tag === 1 && len >= 16 && x + 20 <= head.length) { lsize = Number(head.readBigUInt64LE(x + 4)); lcsize = Number(head.readBigUInt64LE(x + 12)); found = true; break; }
+            x += 4 + len;
+          }
+          if (!found) return disagrees;
+        }
+        if (lcsize !== z.csize || lsize !== z.size) return disagrees;
       }
-      const start = z.offset + 30 + head.readUInt16LE(26) + head.readUInt16LE(28);
       let crc = 0;
       let size = 0;
       if (z.csize && z.csize < SMALL && z.size < SMALL * 4) {
         try {
           const raw = await readAt(start, z.csize);
           if (raw.length !== z.csize) throw new Error('the zip ends before it does');
-          const data = z.method === 8 ? await inflate(raw) : raw;
+          // Unpacked no further than its listed size: a zip TOMLIN did not write may unpack to far more.
+          const data = z.method === 8 ? await inflate(raw, { maxOutputLength: z.size + 1 }) : raw;
           crc = crc32(data); size = data.length; done += size; onBytes(done);
-        } catch (e) { return { ok: false, fault: `${z.name} could not be read back from the zip (${(e as Error).message}).` }; }
+        } catch (e) { return { ok: false, fault: tooBig(e) ? bigFault(z) : `${z.name} could not be read back from the zip (${(e as Error).message}).` }; }
       } else if (z.csize) {
         const src = createReadStream('', { fd: fh, autoClose: false, start, end: start + z.csize - 1, highWaterMark: 1 << 20 });
-        const sink = new Writable({ write(chunk: Buffer, _enc, cb) { crc = crc32(chunk, crc); size += chunk.length; done += chunk.length; onBytes(done); cb(); } });
+        const sink = new Writable({ write(chunk: Buffer, _enc, cb) {
+          crc = crc32(chunk, crc); size += chunk.length; done += chunk.length; onBytes(done);
+          cb(size > z.size ? Object.assign(new Error('too big'), { code: 'ERR_BUFFER_TOO_LARGE' }) : null);
+        } });
         const steps: (NodeJS.ReadableStream | Duplex | Writable)[] = [src];
         if (z.method === 8) steps.push(zlib.createInflateRaw());
         steps.push(sink);
         try { await (pipeline as (...a: unknown[]) => Promise<void>)(...steps, signal ? { signal } : {}); } catch (e) {
           if (signal?.aborted) throw abortError();
-          return { ok: false, fault: `${z.name} could not be read back from the zip (${(e as Error).message}).` };
+          return { ok: false, fault: tooBig(e) ? bigFault(z) : `${z.name} could not be read back from the zip (${(e as Error).message}).` };
         }
       }
       if (size !== z.size || (crc >>> 0) !== z.crc) return { ok: false, fault: `${z.name} read back ${size !== z.size ? `${size} bytes instead of ${z.size}` : 'with a different CRC-32'}: the zip is damaged.` };
