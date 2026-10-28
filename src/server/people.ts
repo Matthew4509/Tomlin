@@ -155,7 +155,9 @@ function facePeople() {
 async function facesView() {
   // looks: each hire's drawn person (src/look.ts), for those with one; lookOptions: the parts and their colours to draw.
   const looks = Object.fromEntries(staff.list().flatMap(m => { const l = cleanLook(m.look); return l ? [[`staff:${m.id}`, l]] : []; }));
-  return { faces: visibleFaces(await faces.all()), people: facePeople(), looks, lookOptions: LOOK_OPTIONS };
+  // madeUp: each hire with no saved look who did not choose "Show initials instead", with the role their made-up look
+  // comes from (public/look.js fromId: the same look Edit staff > Look shows), drawn as their round picture.
+  return { faces: visibleFaces(await faces.all()), people: facePeople(), looks, madeUp: Object.fromEntries(staff.list().filter(m => !cleanLook(m.look) && !m.initials).map(m => [`staff:${m.id}`, m.role])), lookOptions: LOOK_OPTIONS };
 }
 
 /** The Chats tab's list (newest first), each with whom and how many pictures. */

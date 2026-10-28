@@ -3,6 +3,7 @@
 // never deletes the data when its backup failed; and the smaller guards beside them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -194,19 +195,22 @@ async function homeWithOldCopy() {
 
 test('an import whose backup cannot be made replaces nothing, says why, and is not tried again at every start', { skip: process.platform !== 'win32' }, async () => {
   const w = await homeWithOldCopy();
-  const was = process.env.SystemRoot;
+  const locked = join(w.home.data, 'locked.json');
+  const icacls = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe');
+  const who = process.env.USERNAME ?? '';
   try {
     await keep.prepare(w.home, w.root, '2.0.35');
     await keep.planNext(w.home, { do: 'bring-in', from: w.old });
-    // No tar where Windows keeps it: the backup fails.
-    process.env.SystemRoot = join(w.top, 'no-windows');
+    // A file in the data Windows will not let this account read: the backup fails.
+    writeFileSync(locked, '{}');
+    execFileSync(icacls, [locked, '/deny', `${who}:(R)`], { stdio: 'ignore' });
     const r = await keep.prepare(w.home, w.root, '2.0.35');
     assert.equal(r.state, 'ready');
     assert.equal(readFileSync(join(w.home.data, 'settings.json'), 'utf8'), '{"from":"home"}', 'the data here is as it was');
     assert.match(keep.readVersion(w.home)?.note ?? '', /^Nothing was imported: the backup of your data could not be made/);
     assert.equal(existsSync(join(w.home.home, 'next-start.json')) || readdirSync(w.home.home).some(n => /next/.test(n)), false, 'the plan is gone');
   } finally {
-    process.env.SystemRoot = was;
+    try { execFileSync(icacls, [locked, '/remove:d', who], { stdio: 'ignore' }); } catch { /* not there */ }
     rmSync(w.top, { recursive: true, force: true });
   }
 });
@@ -230,19 +234,23 @@ test('a restore cut off half way: the next start puts the data that was there ba
 
 test('a backup is listed only when it is whole: none left half made, and the folder it is made in goes', { skip: process.platform !== 'win32' }, async () => {
   const w = await homeWithOldCopy();
-  const was = process.env.SystemRoot;
+  // A file Windows will not let this account read (as a locked browser file was): the backup is not made, and says which.
+  const locked = join(w.home.data, 'locked.json');
+  const icacls = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe');
+  const who = process.env.USERNAME ?? '';
   try {
     await keep.prepare(w.home, w.root, '2.0.35');
     const before = (await keep.listBackups(w.home)).length;
-    process.env.SystemRoot = join(w.top, 'no-windows');
-    await assert.rejects(keep.backup(w.home, 'by hand'));
-    process.env.SystemRoot = was;
+    writeFileSync(locked, '{}');
+    execFileSync(icacls, [locked, '/deny', `${who}:(R)`], { stdio: 'ignore' });
+    await assert.rejects(keep.backup(w.home, 'by hand'), /locked\.json/);
+    execFileSync(icacls, [locked, '/remove:d', who], { stdio: 'ignore' });
     assert.equal((await keep.listBackups(w.home)).length, before);
     const name = await keep.backup(w.home, 'by hand');
     assert.ok((await keep.listBackups(w.home)).some(b => b.name === name));
     assert.deepEqual(readdirSync(w.home.backups).filter(n => !n.endsWith('.zip')), [], 'no making folder left');
   } finally {
-    process.env.SystemRoot = was;
+    try { execFileSync(icacls, [locked, '/remove:d', who], { stdio: 'ignore' }); } catch { /* not there */ }
     rmSync(w.top, { recursive: true, force: true });
   }
 });

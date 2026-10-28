@@ -11,9 +11,10 @@ const lists = require('./lists');
 const prompts = require('./prompts');
 const project = require('./project');
 const hosting = require('./hosting');
+const backup = require('./backup');
 
-const GET = { ...system.get, ...lists.get, ...prompts.get, ...hosting.get };
-const POST = { ...system.post, ...lists.post, ...prompts.post, ...hosting.post };
+const GET = { ...system.get, ...lists.get, ...prompts.get, ...hosting.get, ...backup.get };
+const POST = { ...system.post, ...lists.post, ...prompts.post, ...hosting.post, ...backup.post };
 const PGET = { ...project.get, ...hosting.pget };
 const PPOST = { ...project.post, ...hosting.ppost };
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + cfg.PORT, 'localhost:' + cfg.PORT]);

@@ -47,7 +47,7 @@ export function startBridge(): void {
 interface BridgeProject { id: string; dir: string; name: string }
 interface BridgeParts {
   keyOf(dir: string): string;
-  state: { projects: BridgeProject[] };
+  state: { projects: BridgeProject[]; backups: { status(): { finished: number | null } | null } };
   refreshProjects(): BridgeProject[];
   snapshot(p: BridgeProject, force: boolean): Promise<{ ok: boolean; at?: number; error?: string }>;
   snapFile(p: BridgeProject): string;
@@ -68,6 +68,23 @@ function bridgeParts(): BridgeParts | null {
   }
   return parts;
 }
+/**
+ * Why TOMLIN should not stop now: a backup to a drive is running (Projects › Backups), '' when none. Its updates,
+ * restarts and hand-over wait for it, as a backup stopped half way is not one. (Closing the window still stops it:
+ * the Bridge part cancels it and removes the half-written zip.)
+ */
+export function backupRunning(): string {
+  const j = bridgeParts()?.state.backups.status();
+  return j && !j.finished ? 'A backup to your backup drive is running (Projects, Backups). Wait for it to finish, or Cancel it there, then try again.' : '';
+}
+
+/** The project folders on the Projects page (id and name), for the To Do; none before the Bridge part started. */
+export function bridgeProjects(): { id: string; name: string }[] {
+  const b = bridgeParts();
+  if (!b) return [];
+  return (b.state.projects.length ? b.state.projects : b.refreshProjects()).map(p => ({ id: p.id, name: p.name }));
+}
+
 /** The Bridge project in this folder (matched by folder only), or null. */
 function projectAt(b: BridgeParts, dir: string): BridgeProject | null {
   const k = b.keyOf(dir);

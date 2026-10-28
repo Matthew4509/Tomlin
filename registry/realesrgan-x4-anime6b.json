@@ -1,0 +1,20 @@
+{
+  "id": "realesrgan-x4-anime6b",
+  "kind": "helper",
+  "name": "Sharpener for High (Real-ESRGAN x4, anime 6B)",
+  "about": "Makes High pictures twice the size and sharp: the picture model draws at its own size, then this enlarges the picture and TOMLIN fits it to twice the size (or to the size asked for). Used when pictures run on a graphics card: on a CPU it is far too slow, so High there draws at the model's largest size without it. Made for illustrations; on photos it can look a little smooth.",
+  "licence": "BSD-3-Clause (Real-ESRGAN, Xintao Wang)",
+  "quant": "fp32",
+  "minRamGB": 0.5,
+  "minVramGB": 0,
+  "files": [
+    {
+      "role": "upscaler",
+      "repo": "amd/realesrgan-x4plus-anime-6b",
+      "rev": "b14ff5f8ecb5a4b56ce4049a58d0bca1f8814690",
+      "path": "RealESRGAN_x4plus_anime_6B.pth",
+      "bytes": 17938799,
+      "sha256": "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da"
+    }
+  ]
+}

@@ -57,16 +57,30 @@ export const PRESETS: Record<Mode, ModePreset> = {
   },
 };
 
-/** The mode a prompt asks for: icon words mean Icon; cartoon words mean Cartoon; a small size means Icon; photo words
- * mean Blog; anything else Custom. */
-export function detectMode(prompt: string, target: Size | null): { mode: Mode; why: string } {
+/** People in a prompt: Icon is never picked by itself for them (it draws one centred thing and cuts the background). */
+const PEOPLE = /\b(people|persons?|man|men|woman|women|boys?|girls?|child(?:ren)?|kids?|bab(?:y|ies)|couples?|famil(?:y|ies)|friends?|crowds?|twins?|brothers?|sisters?|siblings?|lad(?:y|ies)|guys?|gentlem[ae]n|teens?|teenagers?|adults?|students?|dancers?|bride|groom|mothers?|fathers?|mums?|moms?|dads?|parents?|grandparents?|grandm(?:a|other)|grandf(?:a|ather)|wife|husband|someone|everyone)\b/i;
+const ONE_PERSON = /\b(man|woman|boy|girl|child|kid|baby|lady|guy|person|teen|teenager|adult|student|dancer|bride|groom|mother|father|mum|mom|dad|wife|husband)\b/gi;
+const MANY_PEOPLE = /\b(people|couples?|famil(?:y|ies)|crowds?|groups? of|twins|friends|siblings|parents|grandparents|brothers|sisters)\b/i;
+const COUNTED = /\b(two|three|four|five|six|seven|eight|nine|ten|several|many|a few|[2-9]|1\d)\s+(?:[a-z-]+\s+){0,2}(men|women|people|persons|boys|girls|children|kids|babies|ladies|guys|adults|teens|teenagers|students|dancers|friends|sisters|brothers|mothers|fathers)\b/i;
+
+/** Two or more people asked for ("two women", "a couple", "a man and a woman"): drawn wide, so both fit (src/quality.ts GROUP_SIZE). */
+export function groupAsk(prompt: string): boolean {
+  if (COUNTED.test(prompt) || MANY_PEOPLE.test(prompt)) return true;
+  return (prompt.match(ONE_PERSON) ?? []).length >= 2;
+}
+
+/** The mode a prompt asks for: icon words mean Icon (never when people are asked for); cartoon words mean Cartoon;
+ * photo words mean Blog; anything else Custom. A small size alone no longer means Icon (2.0.65: a "2 people" picture
+ * at 256 came out as one person with no background). */
+export function detectMode(prompt: string, _target: Size | null): { mode: Mode; why: string } {
+  const people = PEOPLE.exec(prompt);
   const icon = /\b(icons?|logos?|favicons?|app ?icons?|emoji|glyph|pictogram|symbol)\b/i.exec(prompt);
-  if (icon) return { mode: 'icon', why: `"${icon[0]}" in the prompt` };
+  if (icon && !people) return { mode: 'icon', why: `"${icon[0]}" in the prompt` };
   const cartoon = /\b(cartoons?|cartoony|comic(?: book| strip)?|anime|manga|cel[- ]shaded|caricature|chibi)\b/i.exec(prompt);
   if (cartoon) return { mode: 'cartoon', why: `"${cartoon[0]}" in the prompt` };
-  if (target && Math.max(target.width, target.height) <= 256) return { mode: 'icon', why: `small size (${target.width}×${target.height})` };
   const photo = /\b(photos?|photographs?|photography|blog( post)?|hero( image)?|header image|realistic|photoreal(istic)?|stock image)\b/i.exec(prompt);
   if (photo) return { mode: 'blog', why: `"${photo[0]}" in the prompt` };
+  if (people && icon) return { mode: 'custom', why: `people in the prompt, so not an icon ("${icon[0]}" is left to the Mode menu)` };
   return { mode: 'custom', why: 'no icon or photo words' };
 }
 

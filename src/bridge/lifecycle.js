@@ -14,6 +14,9 @@ function stopEverything() {
   stopAllProjects();
   Sensors.stopGpu();
   stopCurrent(); // a picture being taken: its hidden Edge goes too
+  // A backup under way (TOMLIN is closing: its restarts and updates wait instead) is cancelled and its half-written zip
+  // removed, so nothing on the drive looks like a backup that is not one.
+  try { require('./state').state.backups.stopNow(); } catch {}
   try { if (JSON.parse(fs.readFileSync(cfg.RUN_FILE, 'utf8')).pid === process.pid) fs.unlinkSync(cfg.RUN_FILE); } catch {}
 }
 function shutdown() {

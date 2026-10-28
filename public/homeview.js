@@ -48,7 +48,8 @@ function pcAskCard(x, key) {
 function recentCard(x, key) {
   const go = el('button', { class: 'btn', type: 'button', text: x.action, 'data-key': key });
   go.addEventListener('click', () => (x.chat ? app.openChat(x.chat) : x.plan ? app.planProject(x.job, x.goal) : app.openJob(x.job)));
-  return el('article', { class: 'home-item k-recent' },
+  // Its name drags onto the To Do (todo.js).
+  return el('article', { class: 'home-item k-recent', draggable: 'true', 'data-todo-project': `job:${x.job}`, 'data-todo-name': x.name, title: `Drag ${x.name} onto the To Do (right panel) to plan it in` },
     el('div', { class: 'home-item-text' },
       el('strong', { text: x.name }),
       el('span', { class: 'hint', text: x.detail }),

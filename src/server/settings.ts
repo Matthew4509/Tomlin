@@ -10,6 +10,7 @@ import * as claude from '../claude.ts';
 import * as keep from '../keep.ts';
 import { clearDamaged, damaged } from '../atomic.ts';
 import { HOME, PORT, ROOT, type Routes, VERSION, chatModels, json, publicSettings, ready, staff, store } from './core.ts';
+import { backupRunning } from './bridge.ts';
 import { askedOf, chatList, cleanRun, images, runOf, threadsOf } from './panes.ts';
 import { setWho, whoId } from './people.ts';
 import { jobRoutes } from './jobs.ts';
@@ -113,6 +114,7 @@ async function keepAction(res: ServerResponse, b: Record<string, unknown>) {
     case 'bring-in': {
       const from = offer?.find(s => s.dir === b.from);
       if (!from) return json(res, 400, { error: 'That copy is not one TOMLIN offered to import. Close this window and open the page again.' });
+      if (backupRunning()) return json(res, 409, { error: backupRunning() });
       await keep.planNext(HOME, { do: 'bring-in', from: from.dir });
       restartSoon();
       return json(res, 200, { restarting: canRestart, said: restartWords });
@@ -130,6 +132,7 @@ async function keepAction(res: ServerResponse, b: Record<string, unknown>) {
     case 'restore': {
       const name = (await keep.listBackups(HOME)).find(x => x.name === b.name)?.name;
       if (!name) return json(res, 400, { error: 'That backup is no longer in the backups folder. Close this window and open it again.' });
+      if (backupRunning()) return json(res, 409, { error: backupRunning() });
       await keep.planNext(HOME, { do: 'restore', name });
       restartSoon();
       return json(res, 200, { restarting: canRestart, said: restartWords });

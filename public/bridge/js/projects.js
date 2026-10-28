@@ -1,4 +1,4 @@
-// The project list: rows and tiles, Stop all, Copy prompt, My order, and the … menus.
+// The project list: rows and tiles, backup ticks (Select all, Run backups), Stop all, Copy prompt, My order, and the … menus.
 'use strict';
 
 // ---- projects list ----
@@ -58,11 +58,25 @@ function runButton(r) {
     icon(0xE768), 'Run local copy', r.commands.length > 1 ? icon(0xE70D) : null);
 }
 
-function renderStopAll() {
-  const run = rows.filter(r => r.running).length, other = new Set(rows.filter(r => !r.running && r.portInUse).map(r => r.portInUse)).size;
-  $('cmd-stopall').hidden = !run && !other;
-  $('stopall-label').textContent = 'Stop all (' + (run + other) + ')';
+// ---- Backups from the list (backups.js): a tick on each project (the backup list, kept), Select all and Run backups ----
+// (Stop all lives in the Running panel.) Select all ticks every project shown, so a search narrows it.
+const isTicked = r => !!(r.backup && r.backup.listed);
+function renderBackupBar(shown) {
+  const n = rows.filter(isTicked).length, on = shown.filter(isTicked).length;
+  const all = $('bk-all');
+  all.checked = !!shown.length && on === shown.length;
+  all.indeterminate = on > 0 && on < shown.length;
+  all.disabled = !shown.length;
+  $('run-backups-label').textContent = n ? 'Run backups (' + n + ')' : 'Run backups';
+  $('cmd-run-backups').disabled = !n;
 }
+function backupTick(r) {
+  return h('input', { type: 'checkbox', class: 'bk-tick', checked: isTicked(r), 'aria-label': 'Back up ' + r.name,
+    title: isTicked(r) ? r.name + ' is ticked: Run backups takes it' : 'Tick to back up ' + r.name + ' to your backup drive',
+    onchange: e => setListed([r.id], e.target.checked) });
+}
+$('bk-all').addEventListener('change', e => setListed(lastList.map(r => r.id), e.target.checked));
+$('cmd-run-backups').addEventListener('click', () => openRun());
 
 // ---- Stop all / stop a port someone else holds ----
 const ownerLine = o => h('div', { class: 'check' }, h('span', { class: 'sev' }, ':' + o.port),
@@ -115,10 +129,10 @@ async function stopPort(port, onStopping) {
 function renderList() {
   const q = $('search').value.trim().toLowerCase();
   renderHiddenToggle();
-  renderStopAll();
   const visible = rows.filter(r => showHidden || !r.hiddenView);
   const list = sorted(visible.filter(r => !q || (r.name + ' ' + r.description + ' ' + r.folder).toLowerCase().includes(q)));
   lastList = list;
+  renderBackupBar(loaded ? list : []);
   const L = $('list');
   L.className = 'list' + (view === 'tiles' ? ' tiles' : '');
   $('list-head').hidden = view === 'tiles';
@@ -145,11 +159,12 @@ function renderList() {
       h('div', { style: 'min-width:0' },
         h('div', { class: 'title' },
           canDrag ? h('span', { class: 'grip', title: 'Drag to move', 'aria-hidden': 'true' }, icon(0xE76F)) : null,
+          backupTick(r),
           h('span', { class: 'nm' }, r.name),
           r.isNew ? h('span', { class: 'badge b-new' }, 'New') : null,
           r.hiddenView ? h('span', { class: 'badge b-off' }, 'Hidden') : null,
           a ? h('button', { class: 'audit-link ' + a.cls, type: 'button', title: 'Last audit ' + a.when, onclick: () => showLastAudit(r) }, a.text) : null,
-          liveChip(r), gitChip(r), nodeChip(r)),
+          backupChip(r), liveChip(r), gitChip(r), nodeChip(r)),
         h('div', { class: 'desc', title: r.description + '\n' + r.dir }, r.description || r.dir)),
       h('div', { class: 'facts' },
         h('div', { class: 'num', title: 'This month: ' + fmtTok(r.tokensMonth) }, tokensCounting() ? 'counting…' : [h('b', null, fmtTok(r.tokens)), view === 'tiles' ? 'tokens' : (r.tokensMonth ? fmtTok(r.tokensMonth) + ' this month' : '')]),
@@ -290,7 +305,10 @@ function openMenu(r, anchor) {
   const items = [];
   if (!r.running && r.portInUse) items.push(menuItem(0xE774, 'Open in browser', 'localhost:' + r.portInUse, () => act('open-browser', r)),
     menuItem(0xE71A, 'Stop what holds port ' + r.portInUse, 'another program', () => stopPort(r.portInUse)), h('hr'));
-  if (inTomlin()) items.push(menuItem(0xE768, 'Start with a hire…', 'its prompt, in TOMLIN', () => startWithHire(promptFor(r), r.name)), h('hr'));
+  if (inTomlin()) items.push(menuItem(0xE768, 'Start with a hire…', 'its prompt, in TOMLIN', () => startWithHire(promptFor(r), r.name)),
+    menuItem(0xE73A, 'Add to To Do…', 'Today, this week or this month', () => todoDialog(r)), h('hr'));
+  const bm = backupMark(r.backup);
+  items.push(menuItem(0xE88E, 'Back up now…', bm ? bm.text.slice(2).toLowerCase() : 'zip it to your backup drive', () => openRun([r.id])), h('hr'));
   items.push(menuItem(0xEA18, 'Scan app (audit)', scanParts(r), () => scan(r)));
   if (r.audit) items.push(menuItem(0xE81C, 'Last audit', auditLabel(r.audit).when, () => showLastAudit(r)));
   items.push(menuItem(0xE909, 'Hosted live…', r.liveUrl ? hostOf(r.liveUrl) : 'add the address', () => liveDialog(r)));

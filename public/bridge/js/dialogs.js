@@ -19,8 +19,8 @@ function closeDialog() { if ($('dlg').open) $('dlg').close(); }
 const cancelBtn = (label = 'Cancel') => h('button', { class: 'btn', type: 'button', onclick: closeDialog }, label);
 $('dlg-form').addEventListener('submit', e => { e.preventDefault(); const a = $('dlg-foot').querySelector('.accent'); if (a && !a.disabled) a.click(); });
 
-function folderDialog({ title, lead, purpose, okLabel, submit }) {
-  const input = h('input', { type: 'text', placeholder: 'C:\\Users\\you\\projects', 'aria-label': 'Folder path', spellcheck: 'false' });
+function folderDialog({ title, lead, purpose, okLabel, submit, placeholder = 'C:\\Users\\you\\projects' }) {
+  const input = h('input', { type: 'text', placeholder, 'aria-label': 'Folder path', spellcheck: 'false' });
   const err = h('div', { class: 'err', role: 'alert' });
   const browse = h('button', { class: 'btn', type: 'button', onclick: async () => {
     browse.disabled = true; err.textContent = '';

@@ -24,8 +24,16 @@ Push live (off until you turn it on), which sends a project to your own web host
 
 ## What TOMLIN backs up, and what it doesn't
 
-TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs. It is not a full backup
-of your PC.
+TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs, and the project folders
+you tick to a drive you choose (a USB drive is best). It is not a full backup of your PC.
+
+**To a drive (Projects, Backups).** Tick a project on the Projects page (or **Select all**), then **Run backups**: it
+shows each project's size, the time it should take and the drive's free space first. Each project becomes one zip in
+a "TOMLIN Backups" folder on the drive, with a .txt beside it saying what is in it, and every file in the zip is read
+back and checked before it counts. The git history (`.git`) goes in; folders a project rebuilds by itself
+(`node_modules` and the like) are left out unless you tick **Full backup**. Backups are only ever added: nothing on
+the drive is deleted to make room. When a drive is full, plug in another and add it. A drive is known by its serial
+number, so a new letter does not matter. To restore: right-click a zip, Extract All.
 
 **Your workspace** is the folder TOMLIN keeps its own work in: every project made with **Lets create a project**, and
 the files your staff write and save. It is inside TOMLIN's data folder unless you chose another one (Set up, **Files
@@ -37,16 +45,18 @@ and `node_modules` folders.
   changed. Every version is kept.
 - Your chats, staff and settings, as a restore point, only when you press **Back up to it now**. The newest 3 are
   kept on each PC.
+- Each project ticked for backup on the Projects page, to your backup drive, when you press **Run backups**. Every
+  zip is kept.
 
 **Not backed up**
 - Anything else on your PC: Documents, Desktop, Pictures, email, other folders.
-- Files over 256 MB inside a ticked project.
-- A project's git history. Only its files go.
+- Files over 256 MB inside a project ticked for your other PCs (the drive zips take them).
+- A project's git history in the copies on your other PCs. Only its files go there (the drive zips keep it).
 - Models. They are copied only to the PCs you send them to.
 
 **Good to know**
-- Backups go only to your own PCs on your home network, never to the cloud. A fire, flood or theft at home can take
-  every copy.
+- Backups go only to your own PCs on your home network and to drives you choose, never to the cloud. A fire, flood or
+  theft at home can take every copy: a USB drive kept somewhere else is the one that survives that.
 - Backups are not locked on the PC that keeps them. Whoever uses that PC can open them.
 
 **For everything else.** These free tools are made by other people. We don't make, check or support them, so read
@@ -89,7 +99,10 @@ about each one and choose for yourself.
 **Projects**
 - **Lets create a project**: a name, a description and a prompt; it is planned in steps and your staff work through
   them, on the PCs that are free. A queue for chats, pictures and project steps.
-- **The Bridge**: your project folders, local copies, audits, backups and prompts in one place.
+- **The Bridge**: your project folders, local copies, audits, backups (to your other PCs, and zips to a drive) and
+  prompts in one place.
+- **To Do** (Home's right panel): Today, This week and This month, each row a project, how long it takes and a note;
+  Today adds up against your day, and weekly or monthly quick checks come in by themselves.
 - **Push live**: send a project to your web host in one press (cPanel, FTPS or SFTP); its address becomes the
   project's live address in the Bridge. Secrets (passwords, keys) stay locked by Windows on this PC and go to one file
   outside the site's web folder; a file with a key or a private detail stops the push; **Go back** puts back the
@@ -207,8 +220,10 @@ rather than misread it.
   glasses, facial hair, headwear (lists in src/look.ts, drawings in public/look.js), with the round picture and the
   person seen from above turning round as you pick. Saved per hire in staff.json (`look`); every pick saves. It is the
   hire's round picture wherever they have no profile photo (a photo still wins: "Take the photo off" is beside it), and
-  the office in Staff overview draws the same person. A hire with no saved look keeps initials; the editor shows a made-up look
-  (the same one each time) until a part is picked or **Use this look** is pressed. **Show initials instead** forgets it.
+  the office in Staff overview draws the same person. A hire with no saved look shows a made-up look (the same one each
+  time, from their id and role) as their round picture too (2.0.65; before, their initials) until a part is picked or
+  **Save look** is pressed. **Show initials instead** is a choice of its own (`initials` in staff.json): the round picture
+  shows the initials until a look is saved again.
 - **The office (Staff overview, 2.0.44):** a tile at the top of Staff overview (Home's right panel and the chat's), drawn
   by public/office.js from Home's staff list. Desks = My PC and each linked PC. What each hire does comes from the server
   (src/home.ts doingOf): Researching (their model reads what it was sent), Thinking, Typing, Drawing, Working on a
@@ -473,13 +488,21 @@ rather than misread it.
   big. **Try each way** loads the model each way, asks for about 80 words each time and keeps the fastest (the way
   before stays unless another is at least 5% faster); a big model takes minutes per way.
 - **Pictures:** write a prompt. A size in it ("120px x 120px", "600x600") becomes the picture's size and is taken
-  out of what the model sees. The model always draws at about 512×512 pixels in that shape, then the picture is
-  resized (Lanczos). The mode is chosen from the prompt, and you can change it:
-  - **Icon** ("icon", "logo", "favicon", or 256 px and under): flat icon words are added, the background is cut
-    away, and the icon is centred on a see-through PNG. Advanced has an option for 16–256 px sizes plus an .ico.
-  - **Blog / photo** ("photo", "blog", "hero", "realistic"): photo words are added and 4 drafts are drawn. Press
-    **Finalise** on one: it is drawn again with the same seed, more steps and the full-quality decoder, then saved as
-    WebP (60–120 KB). If a chat model is connected, it also writes alt text, from the prompt.
+  out of what the model sees. **Draft / Mid / High** beside Draw (2.0.65; kept in the browser) sets how big each model
+  draws, in that shape, before the picture is resized (Lanczos) to the size wanted: Draft is small and gives several to
+  pick from (4 on the fast SD 1.5 models, 2 on the bigger ones; **Full quality** redraws one with the same seed and the
+  full decoder), Mid is the size the model is made for (512 for SD 1.5, 768 for Qwen-Image, 1024 for SDXL), High its
+  largest; with the **Sharpener for High** (a helper download, Real-ESRGAN, 18 MB) and pictures on a graphics card,
+  a High picture is enlarged after it is drawn, to twice its size or the size asked for (on a CPU it is far too slow:
+  a 768 picture had no answer in 30 minutes on a 4-core CPU, so it is not used there). Each button shows its size for the model in use. Two or more
+  people ("two women", "a couple", "a man and a woman") are drawn wide (3:2) when no size is given, so both fit. On the
+  fast models (CFG 1, where "leave out" words are ignored) Mid and High use CFG 1.5 when there is something to leave
+  out. The mode is chosen from the prompt, and you can change it:
+  - **Icon** ("icon", "logo", "favicon"; never by itself when people are asked for, and no longer from a small size
+    alone): flat icon words are added, the background is cut away (said under the picture), and the icon is centred
+    on a see-through PNG. Advanced has an option for 16–256 px sizes plus an .ico.
+  - **Blog / photo** ("photo", "blog", "hero", "realistic"): photo words are added; saved as WebP (60–120 KB). If a
+    chat model is connected, a full-quality picture also gets alt text, from the prompt.
   - **Cartoon** ("cartoon", "comic", "anime", "caricature"): flat colours and clean outlines are added. It looks
     best with DreamShaper 8 (a photo model like Realistic Vision follows it less well); the line under the prompt says
     so when another model is chosen.
@@ -680,7 +703,9 @@ rather than misread it.
 - **2.0.48:** Layout passes 1 and 2: the chat head is a staff card (name and software over the PC, avg speed,
   rename in place, Project beside it); **Enable live stats** in the gear; Copy, Pin and Send to as icons; the top bar
   keeps this PC and shows a linked PC beside it with its model; staff rows "Name | Level" over the software; pressing
-  a hire opens New chat and their recent chats; the Staff window has Look, Staff settings and PC settings tabs, a PC
+  a hire opens New chat and their recent chats; Edit staff is one page (2.0.65; it had three tabs): Who, Works on (PC,
+  models, the speed folded), How they write, Memory, then the tokens folded beside Fire, and the Look in a pop-up from
+  the pencil on their picture; a PC
   card, moves with fit warnings, a compact Look editor with Save, Fire in a pop-up. The office shop (coffee, donuts,
   gym equipment, paid from tokens written). The Move window is a centred pop-up like Fire's. Installer: Task Manager
   and notifications name the program TOMLIN; the tray's "Open the TOMLIN folder" opens the real data folder again;

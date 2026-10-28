@@ -29,6 +29,7 @@ import { thispcGet, thispcPost } from './server/thispc.ts';
 import { jobRoutes, startJobs } from './server/jobs.ts';
 import { owedPost, startOwed } from './server/owed.ts';
 import { handInPicture, placesGet, placesPost } from './server/places.ts';
+import { todoGet, todoPost } from './server/todo.ts';
 import { costsGet, costsPost, pcPhotoFile } from './server/costs.ts';
 import { queueGet, queuePost, startQueue } from './server/queue.ts';
 import { installGet, installPost } from './server/install.ts';
@@ -87,8 +88,8 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet);
-const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost);
+const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, todoGet);
+const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, todoPost);
 
 const server = createServer(async (req, res) => {
   try {

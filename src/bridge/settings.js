@@ -81,10 +81,27 @@ function swapIn(tmp, file) {
   }
 }
 function save(file, s) {
+  saveJson(file, s);
+}
+
+/** Any data file, saved safely: written whole to a temporary file beside it, then swapped in. A save cut short (the PC
+ * turned off, the disk full, a value that cannot be written) leaves the old file exactly as it was. */
+function saveJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+  const tmp = file + '.' + process.pid + '.tmp';
+  try { fs.writeFileSync(tmp, JSON.stringify(value, null, 2)); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
   swapIn(tmp, file);
+}
+/** Any data file, read. Not there: `fallback`. There but unreadable (cut short, edited by hand): copied aside first
+ * (<name>.damaged-<time>.json, once per run), then `fallback`, so the next save can never wipe what was in it unseen. */
+const setAsideOnce = new Set();
+function loadJson(file, fallback) {
+  try { return JSON.parse(noBom(readText(file))); }
+  catch (e) {
+    if (e.code !== 'ENOENT' && !setAsideOnce.has(file)) { setAsideOnce.add(file); setAside(file); }
+    return fallback;
+  }
 }
 
 // A folder the person may add: must exist, be a folder, and not be a whole drive or a Windows system folder
@@ -103,4 +120,4 @@ function checkFolder(p, what) {
   return null;
 }
 
-module.exports = { load, save, swapIn, checkFolder, norm, readText, readData };
+module.exports = { load, save, saveJson, loadJson, swapIn, checkFolder, norm, readText, readData };

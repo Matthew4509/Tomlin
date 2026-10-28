@@ -26,7 +26,7 @@ async function api(path, body) {
     res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   } catch {
     // The browser could not reach TOMLIN at all ("Failed to fetch"): the server is not running.
-    throw new Error('TOMLIN is not answering: its window was closed or it stopped. Start it again (Start TOMLIN.cmd in its folder), then try again.');
+    throw new Error('TOMLIN is not answering: it may be restarting after an update (about half a minute), or it was closed or stopped. If it does not come back, close this window, then open TOMLIN again (Start menu or desktop shortcut; or Start TOMLIN.cmd in its folder if you run it from there), and try again.');
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 423 && path !== '/api/applock') app.appLocked?.();
@@ -390,7 +390,7 @@ function threadsHint(name) {
   if (!h) return;
   const p = panes[name];
   p.threads.max = String(h.threads);
-  p.threadsHint.textContent = `0 = all ${h.cores} cores (${h.threads} threads). Fewer keeps the PC responsive.`;
+  p.threadsHint.textContent = `0 = all ${h.cores} cores (${h.threads} threads).`;
 }
 
 function drawFit(name) {
@@ -815,7 +815,7 @@ async function poll() {
     }
   } catch {
     serverLost = true;
-    $('#loaded').replaceChildren(el('span', { class: 'chip', text: 'TOMLIN is not answering: is its window still open?' }));
+    $('#loaded').replaceChildren(el('span', { class: 'chip', text: 'TOMLIN is not answering (it may be restarting after an update). If it does not come back, close this window and open TOMLIN again.' }));
   } finally {
     polling = false;
   }

@@ -211,6 +211,8 @@ export interface StaffMember {
   tone?: string | null;
   /** How they are drawn (src/look.ts): their round picture when they have no photo, and the person in the office game. */
   look?: Look | null;
+  /** "Show initials instead" (Edit staff > Look): their round picture shows the initials, not a made-up look. */
+  initials?: boolean;
 }
 
 /** Every model a hire may use on this PC, the default first: `model` and the group, without blanks, repeats or other PCs. */
@@ -413,7 +415,7 @@ export class Staff {
     return m;
   }
 
-  async change(id: string, change: { name?: unknown; role?: unknown; level?: unknown; model?: unknown; fallback?: unknown; style?: unknown; group?: unknown; active?: unknown; cover?: unknown; tone?: unknown; look?: unknown }): Promise<StaffMember | null> {
+  async change(id: string, change: { name?: unknown; role?: unknown; level?: unknown; model?: unknown; fallback?: unknown; style?: unknown; group?: unknown; active?: unknown; cover?: unknown; tone?: unknown; look?: unknown; initials?: unknown }): Promise<StaffMember | null> {
     const m = this.get(id);
     if (!m) return null;
     if (typeof change.name === 'string' && change.name.trim()) m.name = change.name.trim().replace(/\s+/g, ' ').slice(0, 30);
@@ -426,6 +428,9 @@ export class Staff {
     if (change.active !== undefined) m.active = typeof change.active === 'string' && change.active ? change.active : null;
     if (change.tone !== undefined) m.tone = TONES.some(t => t.id === change.tone) ? (change.tone as string) : null;
     if (change.look !== undefined) m.look = cleanLook(change.look);
+    // A saved look, or forgetting it, ends "Show initials instead"; only that button (initials: true) sets it.
+    if (change.look !== undefined || change.initials !== undefined) delete m.initials;
+    if (change.initials === true) m.initials = true;
     if (change.cover !== undefined) {
       const c = (change.cover && typeof change.cover === 'object' ? change.cover : {}) as { ref?: unknown; once?: unknown };
       m.cover = typeof c.ref === 'string' && c.ref ? { ref: c.ref, ...(c.once === true ? { once: true } : {}) } : null;

@@ -43,14 +43,15 @@ app.imageNote = text => {
 function updatePlan() {
   clearTimeout(planTimer);
   planTimer = setTimeout(async () => {
-    const q = new URLSearchParams({ prompt: promptBox.value, width: $('#img-w').value, height: $('#img-h').value, model: panes.image.model.value, mode: $('#img-mode').value });
+    const q = new URLSearchParams({ prompt: promptBox.value, width: $('#img-w').value, height: $('#img-h').value, model: panes.image.model.value, mode: $('#img-mode').value, quality: qualityNow() });
     try {
       const p = await api(`/api/images/plan?${q}`);
+      drawQualities(p.qualities);
       if (!promptBox.value.trim()) return void (detectLine.textContent = '');
       const chosen = $('#img-mode').value;
       const mode = chosen === 'auto' ? `${MODE_NAME[p.mode]} (${p.why})` : MODE_NAME[chosen];
       const size = p.target ? `${p.target.width}×${p.target.height}, drawn at ${p.generated.width}×${p.generated.height}` : `${p.generated.width}×${p.generated.height}`;
-      detectLine.textContent = `${mode} · ${size}${p.portrait && !p.size ? ' · square portrait' : ''}${p.size ? ' · size taken out of the prompt' : ''}`;
+      detectLine.textContent = `${mode} · ${size}${p.drafts > 1 ? ` · ${p.drafts} drafts to pick from` : ''}${p.portrait && !p.size ? ' · square portrait' : ''}${p.group ? ' · wide, for the people asked for' : ''}${p.size ? ' · size taken out of the prompt' : ''}`;
       // The model in use is not made for this mode: say which one is (choose it, or download it, in the list above).
       if (p.better) detectLine.append(el('span', { class: 'better', text: ` · ${MODE_NAME[p.mode]} looks best with ${p.better.name}${p.better.installed ? ': choose it in the model list and press Connect' : ': download it from the model list'}` }));
     } catch {
@@ -59,6 +60,23 @@ function updatePlan() {
   }, 250);
 }
 for (const id of ['#img-prompt', '#img-w', '#img-h', '#img-mode']) $(id).addEventListener('input', updatePlan);
+
+// ---- Draft / Mid / High (2.0.65): small and several, the model's own size, its largest. Kept in this browser. ----
+const qualityNow = () => $('input[name="img-quality"]:checked')?.value ?? 'mid';
+{
+  const kept = store('img-quality');
+  const box = kept && document.querySelector(`input[name="img-quality"][value="${kept}"]`);
+  if (box) box.checked = true;
+}
+for (const r of document.querySelectorAll('input[name="img-quality"]')) r.addEventListener('change', () => { store('img-quality', qualityNow()); updatePlan(); });
+/** Each button's size (and a Draft's count) for the model in use. */
+function drawQualities(qs) {
+  for (const s of document.querySelectorAll('[data-quality]')) {
+    const g = qs?.[s.dataset.quality];
+    const out = g?.output ?? g?.generated;
+    s.textContent = g ? `${out.width}×${out.height}${g.count > 1 ? ` · ${g.count}` : ''}${g.output ? ' · sharp' : ''}` : '';
+  }
+}
 panes.image.model.addEventListener('change', updatePlan);
 
 // ---- Generate / cancel ----
@@ -70,6 +88,7 @@ function options() {
     prompt: promptBox.value, negative: $('#img-negative').value, mode: $('#img-mode').value, width: num('#img-w'), height: num('#img-h'), fit: $('#img-fit').value,
     seed: random ? undefined : num('#img-seed'), steps: num('#img-steps'), cfg: num('#img-cfg'), sampler: $('#img-sampler').value || undefined,
     drafts: num('#img-drafts'), ico: $('#img-ico').checked, as: $('#draw-as').value || undefined,
+    quality: $('input[name="img-quality"]:checked')?.value ?? 'mid',
   };
 }
 
@@ -246,6 +265,8 @@ function drawResults(j) {
     }
   }
   if (j.note && !blogDrafts) results.append(el('p', { class: 'hint span-all', text: j.note }));
+  // Said plainly (2.0.65): Icon mode cuts the background away; another Mode keeps it.
+  if (j.results.some(p => p.transparent && p.mode === 'icon')) results.append(el('p', { class: 'hint span-all', text: 'Background cut away (Icon mode). To keep it, choose another Mode under More options and draw again.' }));
 }
 
 // ---- The main photo ----

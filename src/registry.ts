@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fetchChecked, hfUrl } from './download.ts';
 
 export interface RegistryFile {
-  role: 'model' | 'diffusion' | 'llm' | 'vae' | 'taesd' | 'lora' | 'onnx';
+  role: 'model' | 'diffusion' | 'llm' | 'vae' | 'taesd' | 'lora' | 'onnx' | 'upscaler';
   repo?: string;
   rev?: string;
   path?: string;
@@ -33,6 +33,8 @@ export interface RegistryModel {
   minVramGB: number;
   recommendedModes?: string[];
   native?: number;
+  /** The side drawn for Draft, Mid and High (src/quality.ts); left out: from `native`. */
+  quality?: { draft?: number; mid?: number; high?: number };
   files: RegistryFile[];
   args?: string[];
   defaults?: { steps: number; cfg: number; sampler: string; scheduler: string; negative: string };

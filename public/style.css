@@ -211,6 +211,16 @@ button, input, select, textarea { font: inherit; }
 .chat-form textarea { background: var(--field); color: var(--field-ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; width: 100%; }
 .chat-actions, .img-actions, .img-tools { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
 .img-tools { justify-content: space-between; }
+/* Draft / Mid / High beside Draw (images.js, 2.0.65): one segmented control, each with its size under its name. */
+.img-quality { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--field); }
+.img-quality label { position: relative; display: grid; justify-items: center; padding: 4px 12px; cursor: pointer; line-height: 1.15; }
+.img-quality label + label { border-left: 1px solid var(--line); }
+.img-quality input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.img-quality span { font-size: var(--fs-sm); font-weight: 600; }
+.img-quality small { font-size: var(--fs-xs); color: var(--ink-soft); font-variant-numeric: tabular-nums; min-height: 1em; }
+.img-quality label:has(input:checked) { background: var(--accent-soft); }
+.img-quality label:has(input:checked) span { color: var(--accent); }
+.img-quality label:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: -3px; }
 .chat-actions #chat-clear { margin-right: auto; }
 
 /* Images */
@@ -837,11 +847,22 @@ dialog#profile::backdrop { background: rgba(0,0,0,.55); }
 .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 4px; }
 .profile-section { border-top: 1px solid var(--line); padding: 10px 0 4px; }
 .profile-section h3 { margin: 4px 0 8px; }
-/* A profile's two tabs on the right (team.js drawEdit): Staff settings | PC settings. */
-.profile-tabs { display: flex; gap: 4px; margin: 0 0 6px; border-bottom: 1px solid var(--line); }
-.profile-tab { border: 0; border-bottom: 3px solid transparent; margin-bottom: -1px; padding: 8px 14px; background: transparent; color: var(--ink-soft); font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer; }
-.profile-tab[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--accent); }
-.profile-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* Edit staff, one page (team.js drawEdit, 2.0.65): sub-headings under Works on, the speed folded, the foot with the
+   tokens folded beside Fire, and the Look in a pop-up from the pencil (lookPopup). */
+.profile-sub { display: grid; gap: 6px; margin-top: 10px; }
+.profile-sub h4 { margin: 0; font-size: var(--fs-md); }
+.profile-speed-fold { margin-top: 10px; }
+.profile-speed-fold > summary { cursor: pointer; }
+.profile-speed-fold .profile-speed { margin-top: 8px; }
+.profile-foot { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.profile-foot .profile-tokens { flex: 1 1 260px; min-width: 0; }
+.profile-foot .profile-tokens > summary { cursor: pointer; color: var(--ink-soft); }
+.profile-foot .profile-fire { margin: 0; padding: 0; align-self: flex-start; }
+.profile-foot .fire-btn { width: auto; padding: 8px 16px; font-size: var(--fs-md); }
+dialog.look-pop { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); }
+dialog.look-pop::backdrop { background: var(--scrim); }
+dialog.look-pop .dlg-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+dialog.look-pop h2 { margin: 0; font-size: var(--fs-lg); }
 /* Name (with Rename), Role and Level on one line in a profile; they wrap when narrow. */
 .profile-line { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 .profile-line .profile-rename { flex: 2 1 240px; display: flex; gap: 8px; align-items: end; }
@@ -1294,7 +1315,6 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .chat-subject .chat-project { margin-left: 6px; }
 /* "Enable live stats" in the gear (app.js): off, the figures under each answer are hidden; what it read and notes stay. */
 .settings-box .live-stats-row { display: flex; align-items: center; gap: 8px; }
-.settings-box .live-stats-hint { margin: -4px 0 0; }
 /* The chat's gear: wide, two fields a row, and it scrolls inside itself when taller than the window. */
 #pane-chat .settings-box { width: 520px; max-width: calc(100vw - 32px); max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; grid-template-columns: 1fr 1fr; gap: 8px 14px; align-items: start; }
 #pane-chat .settings-box > :not(.field), #pane-chat .settings-box > .model-field { grid-column: 1 / -1; }
@@ -2369,3 +2389,52 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .vend-note { margin: 10px 2px 0; font: 600 12px/1.4 'Segoe UI', system-ui, sans-serif; color: #e5eef5; }
 .vend-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) { .vend-coin.dropping .vend-slot::after, .vend-can.out { animation: none; } }
+
+/* The To Do (todo.js): Home's right panel, third tab. Short rows (project · size · note) in Today / This week / This month */
+.side-panel.todo { padding: 12px 14px 16px; }
+.todo-count { display: inline-grid; margin-left: 6px; min-width: 18px; height: 18px; vertical-align: 1px; }
+.todo-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.todo-head b { font-size: var(--fs-md); }
+.todo-over { color: var(--warn); }
+.todo-meter { display: flex; height: 7px; margin: 8px 0 4px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.todo-meter-done { background: var(--good); }
+.todo-meter-left { background: var(--accent); }
+.todo-zone { margin-top: 12px; border-radius: var(--r-ctl); }
+.todo-zone.is-over { outline: 2px dashed var(--accent); outline-offset: 3px; background: var(--accent-soft); }
+.todo-zone-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.todo-zone-head h3 { margin: 0; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+.todo-zone-head .btn { padding: 2px 8px; color: var(--accent); }
+.todo-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.todo-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; align-items: start; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); }
+.todo-row[draggable="true"] { cursor: grab; }
+.todo-row.is-dragging { opacity: .5; }
+.todo-row.is-check { background: var(--accent-soft); }
+.todo-row input[type="checkbox"] { margin: 3px 0 0; accent-color: var(--accent); }
+.todo-text { min-width: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.todo-note { display: block; color: var(--ink-soft); font-size: var(--fs-xs); }
+.todo-from { display: block; color: var(--warn); font-size: var(--fs-xs); }
+.todo-kind { margin-left: 6px; padding: 0 5px; border-radius: 5px; font-size: var(--fs-xs); white-space: nowrap; background: var(--track); color: var(--ink-soft); }
+.todo-kind.job { color: var(--good); }
+.is-done .todo-text b { text-decoration: line-through; color: var(--ink-soft); }
+.todo-sel { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--field-ink); font: inherit; font-size: var(--fs-xs); padding: 2px 4px; }
+.todo-row .todo-sel { width: 66px; }
+.todo-menu { position: relative; }
+.todo-menu > summary { list-style: none; padding: 0 8px; cursor: pointer; }
+.todo-menu > summary::-webkit-details-marker { display: none; }
+.todo-menu-list { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; min-width: 200px; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); box-shadow: var(--shadow-lg); }
+.todo-menu-list .btn { justify-content: flex-start; text-align: left; border: 0; }
+.todo-menu-list .btn[aria-pressed="true"] { font-weight: 600; }
+.todo-drop { margin: 4px 0 0; padding: 8px; border: 1.5px dashed var(--line); border-radius: var(--r-ctl); color: var(--ink-soft); font-size: var(--fs-xs); text-align: center; }
+.todo-earlier { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.todo-earlier-list { flex: 1 1 100%; }
+.todo-earlier-list summary { cursor: pointer; color: var(--ink-soft); font-size: var(--fs-sm); }
+.todo-hint { margin: 12px 0 0; }
+.todo-dlg-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.todo-dlg-row .field { flex: 1 1 140px; }
+#todo-dlg .field { margin-top: 8px; }
+#todo-dlg .field input, #todo-dlg .todo-sel { font-size: var(--fs-sm); padding: 6px 8px; }
+#todo-dlg .todo-dlg-actions { justify-content: flex-end; margin-top: 14px; }
+.todo-checks { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.todo-check-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); }
+.todo-due { color: var(--warn); font-weight: 600; }
+.todo-fault { color: var(--bad); }

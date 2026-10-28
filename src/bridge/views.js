@@ -56,6 +56,8 @@ async function listView(fresh) {
       live: liveOf(p),
       git: gits[i],
       node: nodes ? nodes.projects[keyOf(p.dir)] || { on: false } : null,
+      // Its zips on a backup drive (backup.js): on the list, the last checked one, changed since, running now.
+      backup: state.backups.rowOf(p),
     };
   });
 }
@@ -144,7 +146,7 @@ function laptopStats() {
     mem, disk, workingFolders: settings.workingFolders, version: cfg.VERSION, dryRun: cfg.DRY, welcomed: !!settings.welcomed,
     home: cfg.HERE, bridgeUp: Math.round((Date.now() - cfg.STARTED) / 1000),
     tokensAt: tokens.at, tokensBusy: tokens.busy, tokensError: tokens.error,
-    liveRev: live.rev, liveBusy: live.busy, liveEvery: everyMin(), rowsRev: rowsRev(),
+    liveRev: live.rev, liveBusy: live.busy, liveEvery: everyMin(), rowsRev: rowsRev(), backupRev: state.backups.revOf(),
     // Linked PCs that take project backups now (inside TOMLIN; null in the tests' stand-alone copy).
     nodes: nodeSummary(),
     // Inside TOMLIN (its Send to card takes Start with a hire), not the tests' stand-alone copy.

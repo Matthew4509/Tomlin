@@ -48,4 +48,32 @@ function startWithHire(text, label) {
   catch { return copyText(text, 'The browser keeps nothing for the next page here, so it was copied instead: paste it into a chat in TOMLIN.'); }
   location.href = '/?start=1';
 }
+// ---- Add to To Do: a project folder goes on the To Do in TOMLIN's Home (its right panel), by its id only. ----
+function todoDialog(r) {
+  const sel = (label, opts, value) => h('select', { class: 'sel', 'aria-label': label }, ...opts.map(([v, t]) => h('option', { value: v, selected: v === value || null }, t)));
+  const zone = sel('When', [['today', 'Today'], ['week', 'This week'], ['month', 'This month']], 'today');
+  const size = sel('How long', [['15', 'Quick (15 min)'], ['60', '1 h'], ['120', '2 h'], ['240', '4 h'], ['480', '8 h']], '60');
+  const every = sel('Quick check', [['off', 'No quick check'], ['week', 'Quick check every week'], ['month', 'Quick check every month']], 'off');
+  const note = h('input', { type: 'text', maxlength: '120', placeholder: 'What to do (optional), e.g. fix the header', 'aria-label': 'Note', autocomplete: 'off' });
+  const err = h('div', { class: 'err', role: 'alert' });
+  const row = (label, input) => h('label', { class: 'pd-row' }, h('span', { class: 'muted' }, label), h('div', { class: 'field' }, input));
+  const ok = h('button', { class: 'btn accent', type: 'button', onclick: async () => {
+    ok.disabled = true; err.textContent = '';
+    try {
+      const res = await fetch('/api/todo/add', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: 'folder:' + r.id, zone: zone.value, size: Number(size.value), note: note.value, ...(every.value !== 'off' ? { every: every.value } : {}) }) });
+      if (toLock(res)) return;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('TOMLIN answered ' + res.status + '.'));
+      closeDialog();
+      info(r.name + ' is on the To Do: ' + zone.selectedOptions[0].textContent + '. It is on TOMLIN\'s Home, in the right panel\'s To Do tab.');
+    } catch (e) { err.textContent = e.message; }
+    ok.disabled = false;
+  } }, 'Add');
+  dialog('Add ' + r.name + ' to the To Do', [
+    h('p', { class: 'muted' }, 'The To Do is on TOMLIN\'s Home, in the right panel: Today, This week and This month. A row stays until you tick it.'),
+    row('When', zone), row('How long', size), row('Note', note), row('Quick check (comes into Today by itself when due, 15 min)', every), err,
+  ], [ok, cancelBtn()]);
+}
+
 const startBtn = (text, label, small) => h('button', { class: 'btn', type: 'button', title: 'Opens TOMLIN\'s Send to card with these words: pick one of your staff, change anything, and send', onclick: () => startWithHire(typeof text === 'function' ? text() : text, label) }, icon(0xE768), small ? 'Start' : 'Start with a hire');

@@ -5,14 +5,14 @@
 
 const fmtSize = b => b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b >= 1048576 ? Math.round(b / 1048576) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 
-// The row's "Local backup" mark (shape + colour, like Git and Live): off, not yet, on with its last date, or out of
+// The row's "Other PCs" mark (copies on your linked PCs; it was "Local backup", beside the drive backups' "Zipped") (shape + colour, like Git and Live): off, not yet, on with its last date, or out of
 // date. Pressed: its git window; when it is on, the backup starts at once there (its progress shows in the window).
 function nodeLabel(n) {
   if (!n) return null;
-  if (!n.on) return { mark: '○', text: 'Local backup: off', cls: 'l-none', say: 'No copy on your other PCs. Press to open its window, then tick "Copy this project to my other PCs".' };
-  if (!n.at) return { mark: '○', text: 'Local backup: not yet', cls: 'l-none', say: 'Ticked to copy to your other PCs, but no copy has been made yet. Press to back it up now.' };
-  if (n.current) return { mark: '●', text: 'Local backup: on · ' + fmtWhen(n.at), cls: 'l-up', say: 'A copy of everything in it is on ' + n.pcName + ' (' + fmtWhen(n.at) + '). Press to back it up again.' };
-  return { mark: '▲', text: 'Local backup: out of date', cls: 'l-unsure', say: 'It changed after its last copy on ' + n.pcName + ' (' + fmtWhen(n.at) + '). Press to back it up now.' };
+  if (!n.on) return { mark: '○', text: 'Other PCs: off', cls: 'l-none', say: 'No copy on your other PCs. Press to open its window, then tick "Copy this project to my other PCs".' };
+  if (!n.at) return { mark: '○', text: 'Other PCs: not yet', cls: 'l-none', say: 'Ticked to copy to your other PCs, but no copy has been made yet. Press to back it up now.' };
+  if (n.current) return { mark: '●', text: 'Other PCs: on · ' + fmtWhen(n.at), cls: 'l-up', say: 'A copy of everything in it is on ' + n.pcName + ' (' + fmtWhen(n.at) + '). Press to back it up again.' };
+  return { mark: '▲', text: 'Other PCs: out of date', cls: 'l-unsure', say: 'It changed after its last copy on ' + n.pcName + ' (' + fmtWhen(n.at) + '). Press to back it up now.' };
 }
 function nodeChip(r) {
   const l = nodeLabel(r.node);
@@ -71,7 +71,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
     for (const pc of pcs.filter(x => x.why)) parts.push(h('p', { class: 'muted node-why' }, '○ ' + pcLabel(pc.name, pc.where) + ': ' + pc.why + '.'));
     parts.push(status);
     box.replaceChildren(...parts);
-    // Opened from "Local backup: off": the tick is the next step.
+    // Opened from "Other PCs: off": the tick is the next step.
     if (opts.backupNow === false) box.querySelector('.tick input')?.focus();
     return;
   }
@@ -131,7 +131,7 @@ async function fillNodeSection(r, box, said, opts = {}) {
   } }, icon(0xE898), 'Back up now');
   parts.push(h('p', { class: 'node-now' }, now), status);
   box.replaceChildren(...parts);
-  // Opened from the row's "Local backup" mark while it is on: the backup starts at once (as if Back up now was pressed).
+  // Opened from the row's "Other PCs" mark while it is on: the backup starts at once (as if Back up now was pressed).
   if (opts.backupNow) { now.focus(); now.click(); }
 }
 

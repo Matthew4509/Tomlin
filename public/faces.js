@@ -3,13 +3,14 @@
 // lines show each person's own photo, or their initials. Uses app.js's helpers (el, api, store) and chats.js's chatUi.
 'use strict';
 
-const faceUi = { faces: {}, looks: {}, pcs: {}, people: [], picture: null, button: null };
+const faceUi = { faces: {}, looks: {}, madeUp: {}, pcs: {}, people: [], picture: null, button: null };
 
 async function loadFaces() {
   try {
     const d = await api('/api/faces');
     faceUi.faces = d.faces;
     faceUi.looks = d.looks ?? {};
+    faceUi.madeUp = d.madeUp ?? {};
     faceUi.people = d.people;
     app.look?.setOptions(d.lookOptions);
     // Each PC's name, make and model and photo, as given in its window (src/pcprofile.ts).
@@ -25,11 +26,14 @@ app.faceOf = who => faceUi.faces[who] ?? null;
 app.lookOf = who => faceUi.looks[who] ?? null;
 /** A PC's details by key ('here' = this PC, else its link id): { name, model, photo } or null. */
 app.pcProfileOf = key => faceUi.pcs[key] ?? null;
-/** Their picture's address: the photo when there is one, else their drawn look, else null (initials). A PC (pc:mine,
- * pc:<id>): its photo, else null ('PC'). */
+/** A hire's look made up from their id and role (2.0.65), when they have no saved look and did not choose initials. */
+const madeUpOf = who => (who.startsWith('staff:') && faceUi.madeUp[who] !== undefined && app.look?.ready() ? app.look.fromId(who.slice(6), faceUi.madeUp[who]) : null);
+/** Their picture's address: the photo when there is one, else their saved look, else the look made up for them, else
+ * null (initials). A PC (pc:mine, pc:<id>): its photo, else null ('PC'). */
 const pictureOf = who => {
   if (who.startsWith('pc:')) return app.pcProfileOf(who === 'pc:mine' ? 'here' : who.slice(3))?.photo ?? null;
-  return app.faceOf(who)?.url ?? (app.lookOf(who) && app.look?.ready() ? app.look.picture(app.lookOf(who)) : null);
+  const look = app.lookOf(who) ?? madeUpOf(who);
+  return app.faceOf(who)?.url ?? (look && app.look?.ready() ? app.look.picture(look) : null);
 };
 
 /** A round avatar: the person's own photo, else their drawn look, else their initials. `extra` (a state dot) goes inside. */
@@ -56,7 +60,7 @@ function drawChatFaces() {
   const person = personOf(who);
   const name = person?.name ?? 'This person';
   const face = app.faceOf(who);
-  // No photo: their drawn look (Staff > Edit Staff > Look), when they have one.
+  // No photo: their drawn look (Edit staff: the pencil on their picture), when they have one.
   const drawn = face ? null : pictureOf(who);
   const avatar = $('#chat-avatar');
   const img = $('.avatar-img', avatar);

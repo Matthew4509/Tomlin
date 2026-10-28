@@ -14,7 +14,12 @@
     "icon",
     "custom"
   ],
-  "native": 512,
+  "native": 1024,
+  "quality": {
+    "draft": 512,
+    "mid": 768,
+    "high": 1024
+  },
   "files": [
     {
       "role": "diffusion",

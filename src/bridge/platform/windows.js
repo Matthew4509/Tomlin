@@ -110,6 +110,13 @@ function runnable(exe, args, cwd) {
   const q = a => (/[\s]/.test(a) || a === '' ? '"' + a + '"' : a);
   return { exe: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', '"' + ['"' + full + '"', ...args.map(q)].join(' ') + '"'], windowsVerbatimArguments: true };
 }
+// Every drive with a letter (backups): [{ letter, serial, label, type, bus, fs, size, free }].
+async function drives() {
+  const r = await powershell('drive-info.ps1', []);
+  let list = [];
+  try { list = JSON.parse(r.out.trim() || '[]'); } catch {}
+  return (Array.isArray(list) ? list : [list]).filter(d => d && /^[A-Z]$/i.test(d.letter || ''));
+}
 function killCommand(pid, name) { return 'taskkill /PID ' + pid + ' /T /F (' + name + ')'; }
 function killTree(pid) {
   try { execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
@@ -117,5 +124,5 @@ function killTree(pid) {
 
 module.exports = {
   NAME, openUrl, findBrowser, pickFolder, onPath, terminalCommand, openTerminal, openFolder, revealFile,
-  portOwners, systemProcessWhy, killCommand, killTree, runnable,
+  portOwners, drives, systemProcessWhy, killCommand, killTree, runnable,
 };

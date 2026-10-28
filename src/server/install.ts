@@ -7,6 +7,7 @@ import { startupDir, startupFileIn } from '../autostart.ts';
 import * as inst from '../installer.ts';
 import { desktopShortcut, makeDesktopShortcut, planRepair, runRepair, windowsDeps } from '../repair.ts';
 import { PORT, ROOT, type Routes, VERSION, json, startupOf } from './core.ts';
+import { backupRunning } from './bridge.ts';
 
 /** The exit code that tells Start TOMLIN.cmd its window may close: the installed program takes over. */
 export const HANDED_OVER = 78;
@@ -67,6 +68,7 @@ export const installPost: Routes = {
     // This copy (started from a folder) ends; the installed program starts the installed copy once the port is free.
     const exe = inst.installExe(VERSION);
     if (!windows || !exe || process.env.TOMLIN_TRAY === '1') return json(res, 409, { error: 'There is no whole installed TOMLIN of this version to start. Press Repair install first.' });
+    if (backupRunning()) return json(res, 409, { error: backupRunning() });
     const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
     const script = `$t = (Get-Date).AddSeconds(60); while ((Get-Date) -lt $t -and (Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 500 }; Start-Process -FilePath ${q(exe)}`;
     spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();

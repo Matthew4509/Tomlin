@@ -13,6 +13,7 @@ function show(page) {
   if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page);
   closeMenu();
   if (base === 'folders') loadFolders();
+  if (base === 'backups') loadBackups();
   if (base === 'audits') renderAudits();
   if (base === 'prompts') { let cat = ''; try { cat = sub ? decodeURIComponent(sub) : ''; } catch {} loadPrompts(cat); } // a mistyped %-escape opens the tiles
   if (base === 'about') { loadGitProgram(); loadImport(); }

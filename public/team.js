@@ -288,8 +288,6 @@ let editId = '';
 let teamMode = 'one';
 // Reached from the Staff menu: Close goes back to the menu (from the menu itself, back to where it was opened from).
 let fromMenu = false;
-// The tab on the right of one person's page: 'look' (Look), 'staff' (Staff settings) or 'pc' (PC settings).
-let settingsTab = 'look';
 // The hire last opened with openProfile: opening someone else (or the window again) starts on their Look.
 let shownId = '';
 function showMode(mode) {
@@ -443,10 +441,10 @@ async function openProfile(id) {
     teamFault(e.message);
   }
   if (!team.data?.staff.some(s => s.id === id)) return;
-  // Another person (or the window opened again): the right side opens on the Look tab (setting their character).
+  // Another person (or the window opened again): their page opens at its top.
   if (!dlg.open || id !== shownId) {
     shownId = id;
-    settingsTab = 'look';
+    $('#staff-edit').scrollTop = 0;
   }
   drawEdit();
   staffMode();
@@ -557,14 +555,14 @@ function drawProfile() {
 
 /** Edit Staff: one hire of this PC, like a profile page on a jobs site, on the right of the Staff window. */
 /** A chat hire's own tone for a letter, article or post (until one is picked, the host's, from the chat's gear). */
-function writingSection(m, section) {
+function writingSection(m, section, { software = true } = {}) {
   const tones = app.models?.tones ?? [];
   if (!tones.length) return null;
   const first = m.name.split(/\s+/)[0];
-  // Software (their first choice, the same list as PC settings > Models) and the tone, side by side.
-  return section('Software and tone',
+  // The tone, with their software beside it unless the page shows it already (Edit staff: under Works on, Models).
+  return section(software ? 'Software and tone' : 'How they write',
     el('div', { class: 'profile-line' },
-      brainChoices(m).length ? modelPick(m, 'model', 'Software', 'None: the model connected here') : null,
+      software && brainChoices(m).length ? modelPick(m, 'model', 'Software', 'None: the model connected here') : null,
       el('label', { class: 'field' }, el('span', { text: 'Tone for writing' }), pick(tones, m.tone ?? app.models.settings?.tone ?? tones[0].id, v => teamAct({ action: 'change', id: m.id, tone: v })))),
     el('p', { class: 'hint', text: m.role === 'default' ? `${first} has the Default role, so is sent no instructions and the tone is not used. It is kept for when you give ${first} a role.` : `Used when you ask ${first} for a letter, article, post or message in a chat.` }));
 }
@@ -580,11 +578,14 @@ function lookSection(m, section) {
   const first = m.name.split(/\s+/)[0];
   const note = el('p', { class: 'hint' });
   const fault = el('p', { class: 'fault', hidden: true });
-  // True once saved (Save look reads it: false keeps "not saved yet" showing).
-  const save = look => {
+  // "Show initials instead" chosen (kept on the hire): the round picture shows the initials, not the made-up look.
+  let initialsOn = !!m.initials;
+  // True once saved (Save look reads it: false keeps "not saved yet" showing). initials: "Show initials instead".
+  const save = (look, initials = false) => {
     lookSaving = lookSaving.then(async () => {
       try {
-        team.data = await api('/api/staff', { action: 'change', id: m.id, look });
+        team.data = await api('/api/staff', { action: 'change', id: m.id, ...(initials ? { look: null, initials: true } : { look }) });
+        initialsOn = initials;
         fault.hidden = true;
         await app.loadFaces?.();
         const fresh = team.data?.staff.find(s => s.id === m.id);
@@ -599,20 +600,21 @@ function lookSection(m, section) {
     });
     return lookSaving;
   };
-  const drop = el('button', { class: 'btn quiet', type: 'button', text: 'Show initials instead', title: `Forget the saved look: ${first}'s round picture shows the initials again (the office game still draws a made-up person)` });
+  const drop = el('button', { class: 'btn quiet', type: 'button', text: 'Show initials instead', title: `${first}'s round picture shows the initials, not a drawn look (the office game still draws a made-up person)` });
   const takePhoto = el('button', { class: 'btn quiet', type: 'button', text: 'Take the photo off', title: 'The picture stays in the gallery' });
   const shown = m.look ?? app.look.fromId(m.id, m.role);
   function says(saved) {
-    drop.hidden = !saved;
+    drop.hidden = initialsOn;
     takePhoto.hidden = !app.faceOf?.(who);
     note.textContent = app.faceOf?.(who)
       ? `${first} has a profile photo, so lists and chats show the photo. The office game shows the saved look.`
-      : saved ? ''
-        : `Nothing saved yet: ${first}'s round picture shows the initials until you press Save look.`;
+      : initialsOn ? `${first}'s round picture shows the initials. Save look shows this look instead.`
+        : saved ? ''
+          : `${first}'s round picture shows this made-up look until you change it. Save look keeps the look you pick.`;
     note.hidden = !note.textContent;
   }
   drop.addEventListener('click', async () => {
-    if (await save(null)) drawEdit();
+    if (await save(null, true)) drawEdit();
   });
   takePhoto.addEventListener('click', async () => {
     try {
@@ -644,7 +646,7 @@ function usageSection(m, section) {
 }
 
 /**
- * The left of one person's page: their picture, name, role and level (a pencil at its top right opens the Look tab),
+ * The left of one person's page: their picture, name, role and level (a pencil at its top right opens the Look pop-up),
  * the PC they work on, then Talk, Mute and Fire.
  */
 function drawPerson(m) {
@@ -662,13 +664,9 @@ function drawPerson(m) {
     else talkTo?.({ ...m, kind: m.kind });
   });
   const initials = m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  // The pencil at the top right of their photo and name: the Look tab on the right.
-  const pencilBtn = el('button', { class: 'person-look-edit', type: 'button', title: `Change how ${first} looks (the Look tab)`, 'aria-label': `Change how ${first} looks`, 'aria-pressed': String(settingsTab === 'look') }, pencil());
-  pencilBtn.addEventListener('click', () => {
-    settingsTab = 'look';
-    drawEdit();
-    $('#staff-edit').scrollTop = 0;
-  });
+  // The pencil at the top right of their photo and name: the Look, in a pop-up of its own (lookPopup).
+  const pencilBtn = el('button', { class: 'person-look-edit', type: 'button', title: `Change how ${first} looks`, 'aria-label': `Change how ${first} looks` }, pencil());
+  pencilBtn.addEventListener('click', () => lookPopup(m));
   $('#staff-person').replaceChildren(
     el('div', { class: 'person-head' },
       el('div', { class: 'person-pic' }, app.avatar ? app.avatar(`staff:${m.id}`, initials) : el('span', { class: 'rail-avatar', text: initials })),
@@ -677,19 +675,37 @@ function drawPerson(m) {
       personFigures(m),
       pencilBtn),
     pcCard(m, now),
-    el('div', { class: 'person-actions' }, use, muteButton(m)),
-    fireSection(m));
+    el('div', { class: 'person-actions' }, use, muteButton(m)));
 }
 
-/** Under their role: the tokens their answers have used in all, and how fast they answer (a picture hire: neither). */
+/** Under their role: how fast they answer (a picture hire: nothing). The tokens are folded at the foot of the page. */
 function personFigures(m) {
   if (m.kind === 'image') return null;
-  const t = m.usage?.tally;
-  const total = t ? t.in + t.cached + t.out : 0;
-  const tokens = total >= 1e6 ? `${(total / 1e6).toLocaleString('en-GB', { maximumFractionDigits: 2 })} M` : total.toLocaleString('en-GB');
   const speed = typeof m.speed === 'number' ? m.speed : m.speed?.expect;
-  return el('p', { class: 'person-figures', title: 'Tokens: read and written in all their answers, on any PC (Staff settings > Tokens). Speed: what their model is expected to write (PC settings > Speed).' },
-    el('span', { text: `${tokens} tokens` }), ' · ', el('span', { text: speed ? app.speedWords(speed, true) : 'speed not measured yet' }));
+  return el('p', { class: 'person-figures', title: 'What their model is expected to write (Works on > Speed).' },
+    el('span', { text: speed ? app.speedWords(speed, true) : 'speed not measured yet' }));
+}
+
+/**
+ * Their Look in a pop-up (2.0.65; it was a tab): the two drawings, the parts and colours, Shuffle, Show initials and Save
+ * look, as lookSection draws them. Closed by Close or Esc; their picture is drawn again when it closes.
+ */
+function lookPopup(m) {
+  const first = m.name.split(/\s+/)[0];
+  const section = (title, ...kids) => el('div', { class: 'look-pop-body' }, ...kids);
+  const close = el('button', { class: 'btn', type: 'button', text: 'Close' });
+  const box = el('dialog', { class: 'look-pop', 'aria-labelledby': 'look-pop-title' },
+    el('div', { class: 'dlg-top' }, el('h2', { id: 'look-pop-title', text: `${first}'s look` }), close),
+    lookSection(m, section) ?? el('p', { class: 'hint', text: 'The looks are still loading. Close this and press the pencil again in a moment.' }));
+  close.addEventListener('click', () => box.close());
+  box.addEventListener('close', () => {
+    box.remove();
+    const fresh = team.data?.staff.find(s => s.id === m.id);
+    if (fresh && editId === m.id) drawPerson(fresh);
+  });
+  document.body.append(box);
+  box.showModal();
+  close.focus();
 }
 
 /** A question in a pop-up over the window: true for `yes`; `no`, Esc or closing it is false. `no` has the focus. */
@@ -751,7 +767,7 @@ const pcState = x => (x.backupsOnly ? 'Backups only' : ACTIVITY_WORD[x.activity]
 
 /**
  * Under a hire's name: "Uses <model> on", then the PC card as the left panel draws it (pressed: that PC's window).
- * Moving them to another PC is on the PC settings tab.
+ * Moving them to another PC is under Works on.
  */
 function pcCard(m, now) {
   const row = homeRowOf(m);
@@ -768,7 +784,7 @@ function pcCard(m, now) {
 }
 
 /**
- * The top of PC settings: each PC, with the software it has for this hire. Moving them is giving them one of that PC's
+ * Works on, first: each PC, with the software it has for this hire. Moving them is giving them one of that PC's
  * models (as dragging them onto a PC in the left panel does).
  */
 function pcPicker(m, section) {
@@ -880,37 +896,46 @@ function drawEdit() {
   levelPick.title = image ? `${level?.name}: ${level?.imageSuggest}` : `${level?.name} means ${level?.size}. ${level?.suggest}`;
   const rolePick = el('label', { class: 'field' }, el('span', { text: 'Role' }), roleSel);
   rolePick.title = role?.hint ?? '';
-  // Three tabs: Look (how they look: the first one shown, and the pencil on their photo), Staff settings (who they are,
-  // their software and tone, what they used, what they remember) and PC settings (the PC they work on, their models,
-  // how fast they answer).
-  const tab = (id, text) => el('button', { class: 'profile-tab', type: 'button', 'aria-pressed': String(settingsTab === id), text, onclick: () => { settingsTab = id; drawEdit(); } });
-  const tabs = el('div', { class: 'profile-tabs', role: 'group', 'aria-label': `${m.name}'s settings` }, tab('look', 'Look'), tab('staff', 'Staff settings'), tab('pc', 'PC settings'));
-  const body = settingsTab === 'look'
-    ? [lookSection(m, section) ?? el('p', { class: 'hint', text: 'The looks are still loading. Press the Look tab again in a moment.' })]
-    : settingsTab === 'pc'
-    ? [
-      // How fast their model answers, first: the figures on the left; the chart and Test speed on the right.
-      image ? null : el('section', { class: 'profile-section profile-speed' }, el('h3', { text: 'Speed' }), app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true }),
-        // The model's own setup: tried several ways and the fastest recommended (on the PC the model is on).
-        m.model ? el('div', { class: 'team-actions' }, app.finderButton(m.model)) : null),
-      pcPicker(m, section),
-      section('Models', modelOptions(m)),
-      SHOW_AUDITION ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),
-        run?.error ? el('p', { class: 'fault', text: run.error }) : run?.result ? auditionView(run.result) : null) : null,
-    ]
-    : [
-      section('Name, role and level', el('div', { class: 'profile-line' }, renameForm(m), rolePick, levelPick), roleAsk),
-      image ? null : writingSection(m, section),
-      image ? null : usageSection(m, section),
-    ];
+  // One page (2.0.65; it was three tabs), in the order it is used: who they are, the PC and software they work on (the
+  // speed folded under one line), how they write, what they remember; then the tokens, folded, beside Fire. The Look is
+  // a pop-up from the pencil on their picture (lookPopup).
+  const sub = (title, ...kids) => el('div', { class: 'profile-sub' }, el('h4', { text: title }), ...kids);
+  const speed = typeof m.speed === 'number' ? m.speed : m.speed?.expect;
+  const body = [
+    section('Who', el('div', { class: 'profile-line' }, renameForm(m), rolePick, levelPick), roleAsk),
+    section('Works on',
+      pcPicker(m, sub),
+      sub('Models', modelOptions(m)),
+      // How fast their model answers: one line, opened for the figures, the chart, Test speed and Find the fastest setup.
+      image ? null : el('details', { class: 'sub profile-speed-fold' },
+        el('summary', { text: `Speed: ${speed ? app.speedWords(speed, true) : 'not measured yet'}` }),
+        el('div', { class: 'profile-speed' }, app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true }),
+          m.model ? el('div', { class: 'team-actions' }, app.finderButton(m.model)) : null))),
+    image ? null : writingSection(m, section, { software: false }),
+    SHOW_AUDITION ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),
+      run?.error ? el('p', { class: 'fault', text: run.error }) : run?.result ? auditionView(run.result) : null) : null,
+  ];
   // Left out parts are skipped (replaceChildren would write a null as the word "null").
-  $('#staff-edit-body').replaceChildren(tabs, ...body.filter(Boolean));
-  if (settingsTab !== 'staff') return;
-  // The hire's notebook, last on Staff settings (it loads after the rest is drawn).
-  const head = $('#staff-edit-body').firstElementChild;
-  // A Default hire reads no notebooks: the lines stay here for when they are given a role.
+  const memory = el('div', { class: 'profile-memory' });
+  $('#staff-edit-body').replaceChildren(...body.filter(Boolean), memory, footer(m));
+  // The hire's notebook, after How they write (it loads after the rest is drawn). A Default hire reads no notebooks:
+  // the lines stay here for when they are given a role.
   const nbHint = `Set a line that you want this staff to remember.${m.role === 'default' ? ` (Read once ${m.name} has a role: the Default role reads no memory.)` : ''}`;
   app.notebookList?.(`staff:${m.id}`, 'Memory', nbHint).then(nb => {
-    if (dlg.open && editId === m.id && settingsTab === 'staff' && head.isConnected) $('#staff-edit-body').append(nb);
+    if (dlg.open && editId === m.id && memory.isConnected) memory.replaceChildren(nb);
   });
+}
+
+/** The foot of their page: the tokens their answers used, folded (rarely needed), and Fire beside them. */
+function footer(m) {
+  const usage = m.kind === 'image' ? null : usageSection(m, (_t, ...kids) => el('div', {}, ...kids));
+  return el('div', { class: 'profile-foot' },
+    usage ? el('details', { class: 'sub profile-tokens' }, el('summary', { text: tokensSummary(m) }), usage) : el('span'),
+    fireSection(m));
+}
+/** "Tokens used: 1,326" (or "none yet"): the folded line at the foot. */
+function tokensSummary(m) {
+  const t = m.usage?.tally;
+  const total = t ? t.in + t.cached + t.out : 0;
+  return `Tokens used: ${total ? (total >= 1e6 ? `${(total / 1e6).toLocaleString('en-GB', { maximumFractionDigits: 2 })} M` : total.toLocaleString('en-GB')) : 'none yet'}`;
 }

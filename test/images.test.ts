@@ -33,9 +33,9 @@ test('the model draws about 512 x 512 worth of pixels in the target shape, sides
   }
 });
 
-test('modes are picked from the prompt and the size', () => {
+test('modes are picked from the prompt (a small size alone no longer means Icon: 2.0.65)', () => {
   assert.equal(detectMode('icon smiley face', { width: 120, height: 120 }).mode, 'icon');
-  assert.equal(detectMode('smiley face', { width: 64, height: 64 }).mode, 'icon');
+  assert.equal(detectMode('smiley face', { width: 64, height: 64 }).mode, 'custom');
   assert.equal(detectMode('company logo, a piano key', null).mode, 'icon');
   assert.equal(detectMode('photo of a grand piano for a blog post', { width: 600, height: 600 }).mode, 'blog');
   assert.equal(detectMode('hero image of a beach', null).mode, 'blog');

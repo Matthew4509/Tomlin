@@ -21,6 +21,7 @@
     <button class="nav-item" data-page="folders"><i class="ic">&#xE8B7;</i><span class="lbl">Folders</span><span class="count" id="n-folders"></span></button>
     <button class="nav-item" data-page="audits"><i class="ic">&#xEA18;</i><span class="lbl">Audits</span></button>
     <button class="nav-item" data-page="prompts"><i class="ic">&#xE8BD;</i><span class="lbl">Prompts</span><span class="count" id="n-prompts"></span></button>
+    <button class="nav-item" data-page="backups"><i class="ic">&#xE88E;</i><span class="lbl">Backups</span></button>
     <section class="pcpanel" id="pcpanel" aria-label="This PC"><div class="pc-head">This PC <span id="pc-host"></span></div><div class="rings" id="pc-rings"></div><div class="pc-facts" id="pc-facts"></div></section>
     <section class="runpanel" id="runpanel" aria-label="Running"></section>
     <section class="runpanel" id="livepanel" aria-label="Live sites"></section>
@@ -53,7 +54,9 @@
           <option value="name">Name</option>
           <option value="running">Running first</option>
         </select>
-        <button class="cmd" id="cmd-stopall" type="button" hidden><i class="ic">&#xE71A;</i><span id="stopall-label">Stop all</span></button>
+        <div class="cmd-sep"></div>
+        <label class="cmd" title="Tick every project shown for backup (untick any you do not want)"><input type="checkbox" id="bk-all" class="bk-tick" aria-label="Select all projects for backup">Select all</label>
+        <button class="cmd" id="cmd-run-backups" type="button" title="Back up every ticked project to your backup drive (it shows the size and time first)"><i class="ic">&#xE896;</i><span id="run-backups-label">Run backups</span></button>
         <button class="cmd" id="cmd-hidden" type="button" aria-pressed="false" hidden><i class="ic">&#xE7B3;</i><span id="hidden-label">Show hidden</span></button>
         <div class="grow"></div>
         <label class="search"><i class="ic">&#xE721;</i><input type="search" id="search" placeholder="Search projects" aria-label="Search projects"></label>
@@ -110,6 +113,39 @@
     </section>
 
     <!-- Help -->
+    <!-- Backups -->
+    <section class="page" id="page-backups" hidden>
+      <div class="page-head"><h1>Backups</h1></div>
+      <p class="lead">Zips of your projects on a drive you choose (a USB drive is best), each read back and checked before it counts. Backups are only ever added: nothing on the drive is deleted to make room.</p>
+      <div class="cmdbar" role="toolbar" aria-label="Backup commands">
+        <button class="cmd" id="cmd-backup-run"><i class="ic">&#xE896;</i>Run backups now…</button>
+        <button class="cmd" id="cmd-backup-add" hidden><i class="ic">&#xE710;</i>Add another drive…</button>
+        <button class="cmd" id="cmd-backup-all" hidden><i class="ic">&#xE73A;</i>Tick all</button>
+        <button class="cmd" id="cmd-backup-none" hidden><i class="ic">&#xE739;</i>Untick all</button>
+        <div class="grow"></div>
+        <span class="lead bk-listed" id="bk-listed"></span>
+      </div>
+      <h2 class="bk-first">Backup drives</h2>
+      <div class="card" id="bk-drives"></div>
+      <p class="lead bk-after">A full drive keeps its backups: plug in another and add it. A drive is known by its serial number, so a new letter (E: one day, F: the next) does not matter. With two plugged in, Run backups now asks which to use.</p>
+      <h2>Projects</h2>
+      <p class="lead">Tick a project to put it on the backup list; Run backups now takes every ticked project.</p>
+      <div class="card" id="bk-projects"></div>
+      <h2>What goes in</h2>
+      <div class="card">
+        <div class="set-row"><div class="txt"><b>Keep</b><span id="bk-keep-note">Only zips TOMLIN made and recorded are ever deleted, and only after a newer one passed its check.</span></div>
+          <select class="sel" id="bk-keep" aria-label="How many backups to keep">
+            <option value="0">Keep every backup (nothing is deleted)</option>
+            <option value="3">Keep the last 3 per project</option>
+            <option value="5">Keep the last 5 per project</option>
+            <option value="10">Keep the last 10 per project</option>
+          </select></div>
+        <div class="set-row"><div class="txt"><b>Full backup</b><span id="bk-what"></span>
+          <label class="tick"><input type="checkbox" id="bk-full">Take the rebuildable folders too (bigger and slower, nothing to rebuild)</label></div></div>
+        <div class="set-row"><div class="txt"><b>On the drive</b><span id="bk-where"></span><span>A file that is locked or in use is listed in the .txt beside the zip; the rest still go in.</span></div></div>
+      </div>
+    </section>
+
     <section class="page help" id="page-help" hidden>
       <div class="page-head"><h1>Help</h1></div>
       <p class="lead">The Bridge is the part of TOMLIN that lists the projects on this PC, starts their local copies, checks them for common faults and keeps an eye on their git backups and live sites. It runs inside TOMLIN, on this PC only.</p>
@@ -155,6 +191,14 @@
         </dl>
         <p>Click a mark for the exact commands to copy into a terminal (<b>…</b> menu › Open terminal here). The <b>Git</b> count in the bar at the bottom lists every project waiting for a save or push.</p>
         <p>When files have changed, <b>See what changed</b> in the project's git window shows every changed file since the last save, line by line (green new, red gone), so you can read what an AI changed before you commit. It only reads: nothing is saved or undone.</p>
+        <h2 id="help-backups">Backups to a drive</h2>
+        <ul>
+          <li><b>Backups</b> (left panel) › <b>Turn on backups…</b>: choose where they go. A USB drive is best, so a copy survives this PC; another drive or a network folder works too. The zips go in a <b>TOMLIN Backups</b> folder there. A drive is known by its serial number, so a new letter (E: one day, F: the next) does not matter.</li>
+          <li>Tick a project (the box before its name, or <b>Select all</b>), then <b>Run backups</b>. It shows each project's size, how long it should take and the drive's free space before it starts, and will not start when it will not fit. <b>…</b> menu › <b>Back up now…</b> backs up one project.</li>
+          <li>Each project becomes one zip, with a .txt beside it saying what is in it. Every file in the zip is read back and checked before it counts. The git history goes in; folders a project rebuilds by itself (node_modules and the like) are left out unless <b>Full backup</b> is ticked on the Backups page.</li>
+          <li>The mark on each row: <b>● Zipped</b> (and when), <b>▲ Changed since zip</b>, <b>✕ Zip backup failed</b> (click it for why). <b>Other PCs</b> beside it is the other kind of backup: copies on your linked PCs.</li>
+          <li>Backups are only ever added: nothing on the drive is deleted to make room (<b>Keep</b> can keep only the last few, off to start). A full drive keeps its backups: plug in another and add it. To restore: right-click a zip › Extract All.</li>
+        </ul>
         <h2 id="help-nodes">Copies on my other PCs</h2>
         <p>Besides git, TOMLIN can keep a copy of a project on your other PCs (the ones linked to it that have <b>Enable backups</b> ticked). Tick <b>Copy this project to my other PCs</b> in its git window: from then on it goes with TOMLIN's backup every 10 minutes when something changed, and only what changed crosses your home network. Each PC keeps the older versions too. In a git repository the copy takes what git keeps (saved files and new ones its <code>.gitignore</code> does not leave out); anywhere else, the whole folder except <code>.git</code> and <code>node_modules</code>. A file over 256 MB is left out and named. <b>Back up now</b> sends it straight away; <b>Bring back</b> puts a PC's newest copy in a new folder (TOMLIN's home, <code>restored projects</code>), never over the project.</p>
         <dl class="help-dl">
@@ -226,6 +270,7 @@
 <script src="js/folders.js"></script>
 <script src="js/prompts.js"></script>
 <script src="js/dialogs.js"></script>
+<script src="js/backups.js"></script>
 <script src="js/git.js"></script>
 <script src="js/nodes.js"></script>
 <script src="js/sm.js"></script>

@@ -1,7 +1,7 @@
 // The image pane: one stable-diffusion.cpp worker (sd-server) per loaded model, kept loaded between pictures, and the
 // picture pipeline around it: size from the prompt, mode presets, drafts with the fast decoder (TAESD) and finals
 // with the full one, resizing, background removal, WebP, .ico, the gallery, and help from the chat model.
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { request, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
@@ -13,8 +13,9 @@ import { pictureOffload } from './devices.ts';
 import type { HardwareInfo, Sampler } from './hardware.ts';
 import { Registry, type RegistryModel } from './registry.ts';
 import { Gallery, type Picture, type Shelf } from './gallery.ts';
-import { generationSize, parseSize, sizeText, type Size } from './sizes.ts';
-import { boosted, detectMode, MODES, PORTRAIT_NEGATIVE, PORTRAIT_SIZE, portraitAsk, PRESETS, slug, type Mode } from './modes.ts';
+import { parseSize, sizeText, type Size } from './sizes.ts';
+import { boosted, detectMode, groupAsk, MODES, PORTRAIT_NEGATIVE, PORTRAIT_SIZE, portraitAsk, PRESETS, slug, type Mode } from './modes.ts';
+import { cfgFor, cleanQuality, draftCount, GROUP_SIZE, QUALITIES, qualitySize, type Quality } from './quality.ts';
 import { centreIcon, fitTo, hasTransparency, iconSet, webp, withAlpha, type Fit } from './imaging.ts';
 import sharp from 'sharp';
 import { subjectMask } from './rembg.ts';
@@ -29,6 +30,8 @@ export interface GenerateOptions {
   prompt: string;
   negative?: string;
   mode?: Mode | 'auto';
+  /** Draft (small, several to pick from), Mid (the model's own size) or High (its largest): src/quality.ts. */
+  quality?: Quality;
   width?: number;
   height?: number;
   fit?: Fit;
@@ -122,6 +125,8 @@ export class Images {
   onKept: ((p: Picture, file: string | null) => Promise<void>) | null = null;
   private deps: ImagesDeps;
   private decoder: Decoder = 'fast';
+  /** The sharpener's folder the picture runner was started with (--hires-upscalers-dir), or '' when it was not there. */
+  private upscalerDir = '';
   private lastConnect: { id: string; asked: Asked; threads: number } | null = null;
   private jobs: Job[] = [];
   private current: Job | null = null;
@@ -217,6 +222,10 @@ export class Images {
     if (device !== 'cpu' && this.overCard(m)) args.push(...OFFLOAD);
     // The LoRA's own folder: a model lent by another folder or copy has its LoRA there, not in this copy's models.
     if (path('lora')) args.push('--lora-model-dir', dirname(path('lora')!));
+    // The sharpener for High, when it is downloaded: the runner finds it in this folder, by its file name (2.0.65).
+    const up = this.upscaler();
+    this.upscalerDir = up ? dirname(up.path) : '';
+    if (up) args.push('--hires-upscalers-dir', this.upscalerDir);
     // Every weight is read at Connect (not on the first picture), so the memory shown is what the model really holds.
     args.push('--eager-load', ...(m.args ?? []), '--listen-ip', '127.0.0.1', '--listen-port', String(port), '-t', String(threads > 0 ? threads : -1));
     return args;
@@ -370,13 +379,17 @@ export class Images {
     const recipe = !base && opts.as && this.recipe ? this.recipe(opts.as) : null;
     const parsed = parseSize(typed);
     const fieldSize = opts.width && opts.height ? { width: Math.round(opts.width), height: Math.round(opts.height) } : null;
-    // "profile picture of …" with no size: a square portrait.
-    const target0 = base ? base.target : parsed.size ?? fieldSize ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : null);
+    // "profile picture of …" with no size: a square portrait; two or more people: wide, so they fit (2.0.65).
+    const target0 = base ? base.target : parsed.size ?? fieldSize ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
+    // A final or a redraw keeps its draft's size; a new picture is drawn at the quality asked for (Mid unless said).
+    const quality: Quality = base ? 'mid' : cleanQuality(opts.quality);
     const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : opts.mode && opts.mode !== 'auto' ? { mode: opts.mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
     const preset = PRESETS[mode];
     const defaults = m.defaults ?? { steps: 20, cfg: 7, sampler: 'euler_a', scheduler: '', negative: '' };
-    const generated = base ? base.generated : generationSize(target0, m.native ?? 512);
-    const target = target0 ?? generated;
+    const generated = base ? base.generated : qualitySize(m, quality, target0);
+    // High with the sharpener: drawn at the model's size, then enlarged; with no size asked for, to twice that.
+    const upscale = !base && quality === 'high' && this.upscalerReady();
+    const target = target0 ?? (upscale ? { width: generated.width * 2, height: generated.height * 2 } : generated);
     let modelPrompt = base ? base.modelPrompt : boosted(parsed.prompt, preset);
     if (!base && mode === 'icon' && m.transparent && m.transparentPrompt) modelPrompt = m.transparentPrompt.replace('{prompt}', boosted(parsed.prompt, { ...preset, boost: preset.boost.replace(', plain white background', '') }));
     if (recipe?.boost && !base) modelPrompt = `${modelPrompt.replace(/[\s,.]+$/, '')}, ${recipe.boost}`;
@@ -385,7 +398,7 @@ export class Images {
     // A final keeps the draft's seed and steps (with few-step models, other steps would draw a different picture);
     // what changes is the decoder (full quality) and the file.
     const steps = base ? base.steps : clampInt(opts.steps, 1, 100) ?? defaults.steps;
-    const count = final || base ? 1 : clampInt(opts.drafts, 1, 4) ?? recipe?.drafts ?? preset.drafts;
+    const count = final || base ? 1 : clampInt(opts.drafts, 1, 4) ?? draftCount(m, quality);
     const seed = base ? base.seed : typeof opts.seed === 'number' && opts.seed >= 0 ? Math.floor(opts.seed) : randomInt(0, 2 ** 31 - 1);
     const job: Job = {
       id: randomBytes(6).toString('hex'), state: 'queued', opts: { ...opts, prompt: typed }, mode, modeWhy: why, target, generated, count, steps, step: 0, image: 0, perStep: null,
@@ -393,12 +406,14 @@ export class Images {
     };
     const plan = {
       modelPrompt, negative, seed, steps, final,
-      cfg: base && !final ? base.cfg : typeof opts.cfg === 'number' && opts.cfg >= 0 && opts.cfg <= 30 ? opts.cfg : defaults.cfg,
+      // The fast models' 1 ignores "leave out" words: 1.5 for Mid and High when there are some (src/quality.ts).
+      cfg: base && !final ? base.cfg : typeof opts.cfg === 'number' && opts.cfg >= 0 && opts.cfg <= 30 ? opts.cfg : cfgFor(m, quality, negative),
       sampler: base && !final ? base.sampler : opts.sampler && /^[\w+]+$/.test(opts.sampler) ? opts.sampler : defaults.sampler,
       scheduler: defaults.scheduler,
       fit: (base?.fit ?? opts.fit ?? 'crop') as Fit,
       ico: !!opts.ico,
-      draft: !final && mode === 'blog',
+      draft: !final && quality === 'draft',
+      upscale,
     };
     job.done = new Promise<void>(resolve => {
       this.jobs.push(job);
@@ -429,10 +444,11 @@ export class Images {
   private async run(job: Job, plan: Plan, m: RegistryModel, mayFallBack: boolean): Promise<void> {
     job.state = 'starting';
     this.used = Date.now();
-    // Finals use the full decoder; drafts the fast one (TAESD), when the model has one.
-    const wantDecoder: Decoder = plan.final || !m.files.some(f => f.role === 'taesd') ? 'full' : 'fast';
+    // Drafts use the fast decoder (TAESD), when the model has one; everything else the full one: Mid and High are
+    // full quality (2.0.65; before, only a Full quality redraw was, and a 1024 Mid picture showed TAESD's faint grid).
+    const wantDecoder: Decoder = (plan.draft && !plan.final) && m.files.some(f => f.role === 'taesd') ? 'fast' : 'full';
     if (wantDecoder !== this.decoder && m.files.some(f => f.role === 'taesd')) {
-      job.note = wantDecoder === 'full' ? 'Switching to the full-quality decoder for the final (the model reloads).' : 'Switching back to the fast decoder for drafts (the model reloads).';
+      job.note = wantDecoder === 'full' ? 'Switching to the full-quality decoder (the model reloads).' : 'Switching back to the fast decoder for drafts (the model reloads).';
       if (!(await this.restart(wantDecoder, wantDecoder === 'full' ? 'Loading the full-quality decoder' : 'Loading the fast decoder'))) return this.fail(job, 'The image model did not load again after switching decoders. Press Connect to try again.');
     }
     // A Cancel just before this loads the model again: this picture waits for it (up to 15 minutes) instead of failing.
@@ -499,7 +515,8 @@ export class Images {
     job.state = 'finishing';
     try {
       for (let i = 0; i < result.images.length; i++) {
-        const png = Buffer.from(result.images[i].b64_json, 'base64');
+        const drawn = Buffer.from(result.images[i].b64_json, 'base64');
+        const png = plan.upscale ? await this.sharpen(job, drawn) : drawn;
         if (job.opts.forPc) {
           // For a linked PC: shaped in memory, never saved here (F7 E2). drawForPc takes it at once.
           const shaped = await this.shape(job, plan, png);
@@ -516,6 +533,47 @@ export class Images {
     // Blog finals get alt text from the chat model when it is connected (nothing loads for it).
     if (plan.final && job.mode === 'blog' && this.deps.chatPane.view.state === 'connected' && this.askChat) {
       for (const p of job.results) await this.altText(p.id).catch(() => undefined);
+    }
+  }
+
+  /** The sharpener (a helper model) when it is downloaded: its file's path and the name the runner knows it by. */
+  private upscaler(): { path: string; name: string } | null {
+    const h = this.registry.get(UPSCALER);
+    const f = h?.files.find(x => x.role === 'upscaler');
+    if (!h || !f || !this.registry.installed(h)) return null;
+    const path = this.registry.filePath(h, f);
+    return { path, name: this.registry.fileName(f).replace(/.[^.]+$/, '') };
+  }
+
+  /**
+   * High can be sharpened: the sharpener is here, the runner was started knowing its folder, and it runs on a graphics
+   * card. On a CPU it is far too slow to use (measured 28 Oct: a 768 picture on a 4-core CPU had no answer after 30
+   * minutes), so High there draws at the model's largest size without it.
+   */
+  private upscalerReady(): boolean {
+    const up = this.upscaler();
+    return !!up && this.upscalerDir === dirname(up.path) && (this.pane.view.device ?? 'cpu') !== 'cpu';
+  }
+
+  /**
+   * One picture enlarged by the sharpener (the runner's own upscale request, 4×); shape() then fits it to the size
+   * wanted. A sharpener that fails leaves the picture as drawn, and says so.
+   */
+  private async sharpen(job: Job, png: Buffer): Promise<Buffer> {
+    const up = this.upscaler();
+    const base = this.pane.worker.base;
+    if (!up || !base) return png;
+    try {
+      // The runner answers when the picture is enlarged: on a CPU that is several minutes, past fetch's own 5-minute
+      // wait for an answer (measured: a 768 picture on a 4-core CPU), so a plain HTTP request with a 30-minute limit.
+      const r = await postLong(`${base}/sdcpp/v1/upscale`, JSON.stringify({ image: png.toString('base64'), upscaler: up.name, repeats: 1, output_format: 'png' }), 30 * 60_000);
+      const j = JSON.parse(r.text) as { images?: Array<{ b64_json?: string }>; error?: { message?: string } | string };
+      const out = j.images?.[0]?.b64_json;
+      if (r.status !== 200 || !out) throw new Error(typeof j.error === 'string' ? j.error : j.error?.message ?? `answer ${r.status}`);
+      return Buffer.from(out, 'base64');
+    } catch (e) {
+      job.note = `Drawn at High, but the sharpener did not run (${(e as Error).message}), so the picture was enlarged plainly.`;
+      return png;
     }
   }
 
@@ -676,12 +734,21 @@ export class Images {
       const parsed = parseSize(url.searchParams.get('prompt') ?? '');
       const w = Number(url.searchParams.get('width'));
       const h = Number(url.searchParams.get('height'));
-      const target = parsed.size ?? (w >= 16 && h >= 16 ? { width: w, height: h } : null) ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : null);
+      const target = parsed.size ?? (w >= 16 && h >= 16 ? { width: w, height: h } : null) ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
       // Connected: the model in use; otherwise the one chosen in the list.
       const m = this.registry.get((this.pane.view.state === 'connected' ? this.pane.view.model : url.searchParams.get('model') || this.pane.view.model) ?? '');
       const chosen = url.searchParams.get('mode');
       const { mode, why } = MODES.includes(chosen as Mode) ? { mode: chosen as Mode, why: 'chosen' } : detectMode(parsed.prompt, target);
-      return send(res, 200, { size: parsed.size, prompt: parsed.prompt, target, generated: generationSize(target, m?.native ?? 512), mode, why, drafts: PRESETS[mode].drafts, portrait: portraitAsk(parsed.prompt), better: this.betterFor(mode, m) }), true;
+      // Each quality's size and how many pictures it draws, for the Draft / Mid / High buttons (2.0.65).
+      const quality = cleanQuality(url.searchParams.get('quality'));
+      const model = m ?? { native: 512 };
+      // High with the sharpener ready: drawn at the model's size, saved at twice it (or the size asked for).
+      const sharp2 = this.upscalerReady();
+      const qualities = Object.fromEntries(QUALITIES.map(q => {
+        const g = qualitySize(model, q, target);
+        return [q, { generated: g, count: draftCount(model, q), output: q === 'high' && sharp2 ? target ?? { width: g.width * 2, height: g.height * 2 } : null }];
+      }));
+      return send(res, 200, { size: parsed.size, prompt: parsed.prompt, target, generated: qualitySize(model, quality, target), quality, qualities, mode, why, drafts: draftCount(model, quality), portrait: portraitAsk(parsed.prompt), group: !parsed.size && groupAsk(parsed.prompt), better: this.betterFor(mode, m) }), true;
     }
     const file = /^\/api\/images\/file\/(.+)$/.exec(p);
     if (file) {
@@ -787,6 +854,24 @@ export class Images {
   }
 }
 
+/** A POST to the local runner that may take minutes to answer (fetch gives up on an answer after 5): its status and text. */
+function postLong(url: string, body: string, ms: number): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, res => {
+      const parts: Buffer[] = [];
+      res.on('data', (c: Buffer) => parts.push(c));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(parts).toString('utf8') }));
+      res.on('error', reject);
+    });
+    req.setTimeout(ms, () => req.destroy(new Error(`no answer in ${Math.round(ms / 60_000)} minutes`)));
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+/** The sharpener for High (registry/realesrgan-x4-anime6b.json). */
+const UPSCALER = 'realesrgan-x4-anime6b';
+
 interface Plan {
   modelPrompt: string;
   negative: string;
@@ -799,6 +884,8 @@ interface Plan {
   ico: boolean;
   final: boolean;
   draft: boolean;
+  /** High with the sharpener: each picture is enlarged after it is drawn (src/quality.ts, registry/realesrgan-x4-anime6b.json). */
+  upscale: boolean;
 }
 
 function clampInt(v: unknown, lo: number, hi: number): number | undefined {
@@ -815,7 +902,7 @@ export function optionsFrom(b: Record<string, unknown>, source: GenerateOptions[
   return {
     prompt: String(b.prompt ?? ''), negative: typeof b.negative === 'string' ? b.negative.slice(0, 1000) : undefined, mode, fit,
     width: num(b.width), height: num(b.height), seed: num(b.seed) ?? null, steps: num(b.steps), cfg: num(b.cfg), sampler: typeof b.sampler === 'string' ? b.sampler : undefined,
-    drafts: num(b.drafts), ico: b.ico === true, source, as: typeof b.as === 'string' && /^[a-z0-9-]{1,40}$/.test(b.as) ? b.as : undefined,
+    drafts: num(b.drafts), ico: b.ico === true, quality: cleanQuality(b.quality), source, as: typeof b.as === 'string' && /^[a-z0-9-]{1,40}$/.test(b.as) ? b.as : undefined,
   };
 }
 

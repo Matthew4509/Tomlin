@@ -21,6 +21,7 @@ import { entriesWhy, testStart, unpackedWhy, zipEntries } from '../newcopy.ts';
 import { latestOf, noRelease, repoOf, type SigCode, sigOf, WARN, zipCheck, type Latest } from '../release.ts';
 import * as update from '../update.ts';
 import { BUILD, ROOT, type Routes, VERSION, json, restartInto } from './core.ts';
+import { backupRunning } from './bridge.ts';
 import { jobRoutes } from './jobs.ts';
 
 /** A TOMLIN zip is about 190 MB; anything past this is not one. */
@@ -239,6 +240,7 @@ export const selfUpdatePost: Routes = {
     if (ready.check.code && b.anyway !== true) return json(res, 409, { error: `This zip is not signed by TOMLIN's maker: ${WARN[ready.check.code]} Press Install anyway only if you trust where it came from.` });
     const serving = jobRoutes.servingNow();
     if (serving.length) return json(res, 409, { error: 'A linked PC is using this one now (an answer or a picture). Wait for it to finish, then press Update now again.' });
+    if (backupRunning()) return json(res, 409, { error: backupRunning() });
     const { dir, version } = ready;
     // Started once as a test before anything changes: a copy that does not come up never takes over.
     busy = true;

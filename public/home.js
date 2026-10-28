@@ -145,9 +145,9 @@ $('#home-side-fold').addEventListener('toggle', e => {
   $('#home-side').classList.toggle('folded', !e.target.open);
   store('home-waiting-open', e.target.open ? '1' : '0');
 });
-// Its two tabs, Waiting for you | Staff overview (the one picked is kept in this browser). A tab never folds the panel:
-// pressed while it is folded to its strip, it opens it on that tab.
-const homeTabs = [$('#tab-waiting'), $('#tab-home-staff')];
+// Its three tabs, Waiting for you | Staff overview | To Do (the one picked is kept in this browser). A tab never folds
+// the panel: pressed while it is folded to its strip, it opens it on that tab.
+const homeTabs = [$('#tab-waiting'), $('#tab-home-staff'), $('#tab-home-todo')];
 function homeTab(tab, focus = false) {
   for (const t of homeTabs) {
     const on = t === tab;
@@ -158,6 +158,13 @@ function homeTab(tab, focus = false) {
   if (focus) tab.focus();
   store('home-side-tab', tab.id);
 }
+/** Opens Home's right panel on a tab by its id (a drag over the To Do tab opens it: todo.js). */
+app.homeTab = id => {
+  const t = homeTabs.find(x => x.id === id);
+  if (!t) return;
+  $('#home-side-fold').open = true;
+  homeTab(t);
+};
 for (const t of homeTabs) {
   t.addEventListener('click', e => {
     e.preventDefault();
@@ -166,7 +173,8 @@ for (const t of homeTabs) {
   });
   t.addEventListener('keydown', e => {
     const i = homeTabs.indexOf(t);
-    const to = e.key === 'ArrowRight' || e.key === 'ArrowLeft' ? homeTabs[(i + 1) % 2] : e.key === 'Home' ? homeTabs[0] : e.key === 'End' ? homeTabs[1] : null;
+    const n = homeTabs.length;
+    const to = e.key === 'ArrowRight' ? homeTabs[(i + 1) % n] : e.key === 'ArrowLeft' ? homeTabs[(i + n - 1) % n] : e.key === 'Home' ? homeTabs[0] : e.key === 'End' ? homeTabs[n - 1] : null;
     if (!to) return;
     e.preventDefault();
     homeTab(to, true);

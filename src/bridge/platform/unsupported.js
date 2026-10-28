@@ -17,6 +17,7 @@ module.exports = {
   openFolder: no,
   revealFile: no,
   portOwners: async () => [],
+  drives: async () => [], // backups then find a drive by its path only
   systemProcessWhy: o => (!o.pid || o.pid <= 1 ? 'it is part of the system' : null),
   killCommand: (pid, name) => 'kill -TERM ' + pid + ' (' + name + ')',
   runnable: (exe, args) => ({ exe, args }),

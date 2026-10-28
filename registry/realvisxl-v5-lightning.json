@@ -1,0 +1,59 @@
+{
+  "id": "realvisxl-v5-lightning",
+  "kind": "image",
+  "name": "RealVisXL V5 Lightning (SDXL, Q4, 1024 px, the middle one)",
+  "about": "Between the fast SD 1.5 models and Qwen-Image: photoreal SDXL from the maker of Realistic Vision, drawing 1024 px pictures in 5 steps. Best on a graphics card with 4 GB or more; on the CPU each picture takes minutes.",
+  "family": "sdxl",
+  "licence": "CreativeML Open RAIL++-M (use limits apply, commercial use allowed); MIT (SDXL VAE fp16 fix, TAESDXL)",
+  "quant": "Q4_K",
+  "minRamGB": 8,
+  "minVramGB": 4,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1024
+  },
+  "files": [
+    {
+      "role": "model",
+      "repo": "off-grid-ai/realvisxl-v5.0-lightning-GGUF",
+      "rev": "91480522810fb0f920f7de5eab984b4eb8569dcf",
+      "path": "realvisxl-v5.0-lightning-Q4_K.gguf",
+      "bytes": 2797755008,
+      "sha256": "2c821ab5b61c572b7085d7951e5247a05688e5f77c64d84724073235cb90875e"
+    },
+    {
+      "role": "vae",
+      "repo": "madebyollin/sdxl-vae-fp16-fix",
+      "rev": "207b116dae70ace3637169f1ddd2434b91b3a8cd",
+      "path": "sdxl.vae.safetensors",
+      "saveAs": "sdxl-vae-fp16-fix.safetensors",
+      "bytes": 334641162,
+      "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1"
+    },
+    {
+      "role": "taesd",
+      "repo": "madebyollin/taesdxl",
+      "rev": "b20258aaef75ef61e659c1e0f14f251cf0ad153e",
+      "path": "diffusion_pytorch_model.safetensors",
+      "saveAs": "taesdxl.safetensors",
+      "bytes": 9793292,
+      "sha256": "ff4824aca94dd6111e0340fa749347fb74101060d9712cb5ef1ca8f1cf17502f"
+    }
+  ],
+  "args": [
+    "--vae-tiling"
+  ],
+  "defaults": {
+    "steps": 5,
+    "cfg": 1.5,
+    "sampler": "euler",
+    "scheduler": "sgm_uniform",
+    "negative": "lowres, blurry, deformed, watermark, text"
+  }
+}

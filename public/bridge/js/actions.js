@@ -5,7 +5,8 @@
 async function load(fresh) {
   try {
     const d = await api('/api/projects' + (fresh === true ? '?fresh=1' : ''));
-    rows = d.projects; stats = d.stats; loaded = true; liveRevSeen = stats.liveRev; rowsRevSeen = stats.rowsRev;
+    rows = d.projects; stats = d.stats; loaded = true; liveRevSeen = stats.liveRev; rowsRevSeen = stats.rowsRev; backupRevSeen = stats.backupRev;
+    if (!$('page-backups').hidden) renderBackups();
     renderList(); renderStatus(); announceDown();
     if (!$('page-audits').hidden) renderAudits();
     if (stats.tokensBusy) setTimeout(load, 4000);
@@ -269,4 +270,3 @@ $('sort').addEventListener('change', () => { pref.set('sort', $('sort').value); 
 $('view-list').addEventListener('click', () => setView('list'));
 $('view-tiles').addEventListener('click', () => setView('tiles'));
 $('cmd-hidden').addEventListener('click', toggleHidden);
-$('cmd-stopall').addEventListener('click', stopAllDialog);

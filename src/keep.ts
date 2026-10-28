@@ -9,12 +9,13 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { writeAtomic } from './atomic.ts';
 import { entriesWhy, unpackedWhy, zipEntries } from './newcopy.ts';
+import { checkZip, listFolder, writeZip } from './zip.ts';
 import { PIN_FILE, pinKey, type RuntimePin } from './runtimes.ts';
 import { CODES_FILE } from './recovery.ts';
 
@@ -183,10 +184,10 @@ export async function writeVersion(home: Home, v: VersionFile): Promise<void> {
 }
 
 const stamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
-/** Left out of every data backup: the Bridge's snapshot browser profile, as tar names it from the data folder. */
-export const SNAP_PROFILE = './bridge/snaps/profile';
+/** Left out of every data backup: the Bridge's snapshot browser profile, as the zip names it from the data folder. */
+export const SNAP_PROFILE = 'bridge/snaps/profile';
 /** Also left out: Push live's connections, secrets and push records (sealed for this Windows account, and they stay in place). */
-export const HOSTING = './bridge/hosting';
+export const HOSTING = 'bridge/hosting';
 /** Never in a restore point sent from here (since 2.0.5x): a brought-back one that carries them was made elsewhere. */
 const NEVER_SENT = ['share.json', 'app-lock.json'];
 /**
@@ -271,7 +272,9 @@ function withoutKeys(text: string): string {
 
 /**
  * Zips data/ into backups/ ("<date> <label>.zip"); the older ones thin out (keptByAge). Returns the file name. The zip is made in a
- * folder of its own and moved in when it is whole, so a backup that failed or was cut off is never listed as one.
+ * folder of its own and moved in when it is whole, so a backup that failed or was cut off is never listed as one. Whole
+ * means written and then read back and checked (every file inflated again, its size and CRC-32 compared: src/zip.ts),
+ * with every file in it: one that could not be read fails the backup and is named.
  * forOtherPc: a restore point to keep on another PC, without this PC's keys to its linked PCs, sharing code and PIN.
  */
 export async function backup(home: Home, label: string, o: { forOtherPc?: boolean } = {}): Promise<string> {
@@ -280,39 +283,43 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
   const making = join(home.backups, MAKING);
   await mkdir(making, { recursive: true });
   const part = join(making, name);
-  const side = join(making, `${name}.side`);
   try {
-    // Windows' own tar makes zip files (-a picks the format from the name); the runner list is about live processes,
-    // and a save's half-written copy (*.tmp) is not data. The Bridge's throwaway browser profile for page snapshots
-    // (src/bridge/snaps.js) is not data either, and Windows can refuse to let it be read (a locked browser file): with
-    // it in, every backup failed ("Permission denied" on its Affiliation Database).
-    const args = ['-a', '-c', '-f', part, '--exclude', 'runners.json', '--exclude', '*.tmp', '--exclude', SNAP_PROFILE, '--exclude', HOSTING];
+    // TOMLIN writes the zip itself (Windows' tar garbled or left out names such as "Résumé.pdf"). The runner list is
+    // about live processes, and a save's half-written copy (*.tmp) is not data. The Bridge's throwaway browser profile
+    // for page snapshots (src/bridge/snaps.js) is not data either, and Windows can refuse to let it be read (a locked
+    // browser file): with it in, every backup failed ("Permission denied" on its Affiliation Database). A link or
+    // junction is not followed (data/ holds none of its own).
+    const top = new Set(o.forOtherPc ? ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE] : []);
+    const { items } = await listFolder(home.data, (rel, dir) => {
+      const last = rel.slice(rel.lastIndexOf('/') + 1);
+      return (!dir && last === 'runners.json') || last.endsWith('.tmp') || rel === SNAP_PROFILE || rel === HOSTING || (!rel.includes('/') && top.has(rel));
+    });
     if (o.forOtherPc) {
-      // Its top-level entries are named one by one (tar's --exclude would also match bridge/settings.json), and
-      // settings.json comes from a folder beside, without the keys.
-      const left = ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE];
-      const top = (await readdir(home.data)).filter(n => !left.includes(n) && !n.endsWith('.tmp'));
-      await mkdir(side, { recursive: true });
-      const extra = [ELSEWHERE_MARK];
+      // settings.json goes in without the keys, and a mark says what was left out.
       const settings = await readFile(join(home.data, 'settings.json'), 'utf8').catch(() => null);
       if (settings !== null) {
+        let without: string;
         try {
-          await writeFile(join(side, 'settings.json'), withoutKeys(settings));
+          without = withoutKeys(settings);
         } catch {
           throw new Error('your settings file could not be read, so no restore point was made to send (it would have carried the keys to your linked PCs)');
         }
-        extra.push('settings.json');
+        items.push({ name: 'settings.json', data: Buffer.from(without) });
       }
-      await writeFile(join(side, ELSEWHERE_MARK), JSON.stringify({ left: ['the keys to the linked PCs (settings.json)', ...NOT_ELSEWHERE] }, null, 1));
-      args.push('-C', home.data, ...top, '-C', side, ...extra);
-    } else args.push('-C', home.data, '.');
-    await run(tar(), args, { windowsHide: true, maxBuffer: 1 << 20 });
+      items.push({ name: ELSEWHERE_MARK, data: Buffer.from(JSON.stringify({ left: ['the keys to the linked PCs (settings.json)', ...NOT_ELSEWHERE] }, null, 1)) });
+    }
+    const made = await writeZip(part, items);
+    if (made.skipped.length) {
+      const s = made.skipped;
+      throw new Error(`${s.length === 1 ? '1 file' : `${s.length} files`} could not be read: ${s.slice(0, 3).map(x => `${x.name} (${x.why})`).join(', ')}${s.length > 3 ? '…' : ''}`);
+    }
+    const checked = await checkZip(part, made.entries);
+    if (!checked.ok) throw new Error(`it did not pass its check when read back: ${checked.fault}`);
     await rename(part, join(home.backups, name));
   } catch (e) {
     await rm(part, { force: true }).catch(() => undefined);
     throw e;
   } finally {
-    await rm(side, { recursive: true, force: true }).catch(() => undefined);
     // Gone once empty (another backup still being made keeps it).
     await rmdir(making).catch(() => undefined);
   }
@@ -350,7 +357,7 @@ async function swapData(home: Home, fresh: string): Promise<void> {
  * old goes, unless the new data brought its own.
  */
 async function carryKept(old: string, data: string): Promise<void> {
-  for (const rel of [HOSTING.split('/').slice(1), ...NOT_ELSEWHERE.map(f => [f])]) {
+  for (const rel of [HOSTING.split('/'), ...NOT_ELSEWHERE.map(f => [f])]) {
     const from = join(old, ...rel);
     const to = join(data, ...rel);
     if (!existsSync(from) || existsSync(to)) continue;
@@ -537,6 +544,9 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   const any = { entries: Infinity, bytes: Infinity };
   const listed = await zipEntries(zip).then(e => entriesWhy(e, any), () => 'that backup could not be read as a zip');
   if (listed) return no(listed);
+  // Then every file in it read back and checked, so a damaged backup is said to be one before anything is unpacked.
+  const checked = await checkZip(zip);
+  if (!checked.ok) return no(`that backup is damaged (${checked.fault.replace(/\.$/, '')})`);
   // Unpacked first: the backup of the data as it is now could push the oldest backup (maybe this one) out of the 5.
   const fresh = `${home.data}.restoring`;
   await rm(fresh, { recursive: true, force: true });

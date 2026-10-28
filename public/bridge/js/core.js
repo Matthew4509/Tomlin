@@ -32,7 +32,7 @@ async function api(path, body) {
   if (body) { opt.method = 'POST'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   let res;
   try { res = await fetch(BASE + path, opt); }
-  catch { setLost(true); throw new Error('TOMLIN is not answering. Start it again; this page reconnects by itself.'); }
+  catch { setLost(true); throw new Error('TOMLIN is not answering. Open TOMLIN again (Start menu or desktop shortcut); this page reconnects by itself.'); }
   if (toLock(res)) throw new Error('TOMLIN is locked: type its PIN.');
   const data = await res.json().catch(() => ({}));
   if (res.status === 403) { location.reload(); throw new Error('TOMLIN was restarted; reloading.'); }
@@ -122,7 +122,7 @@ function renderLost() {
   if (dry) text = 'This test copy stopped. Start it again (node test/bridge/serve.js --dry-run with BRIDGE_PORT=' + location.port + '); this page reconnects by itself.';
   else if (waiting) { text = 'Looking for TOMLIN… This page reconnects by itself.'; act = h('button', { class: 'btn', type: 'button', disabled: true }, 'Looking…'); }
   else if (restartAt) { text = 'It did not answer. Start TOMLIN (its icon on the desktop or by the clock); this page reconnects by itself.'; act = again('Try again'); }
-  else { text = 'TOMLIN stopped answering, so what you see may be out of date. Start it again; this page reconnects by itself.'; act = again('Try now'); }
+  else { text = 'TOMLIN stopped answering, so what you see may be out of date. Open TOMLIN again (Start menu or desktop shortcut); this page reconnects by itself.'; act = again('Try now'); }
   $('lost-text').textContent = text;
   $('lost-act').replaceChildren(...(act ? [act] : []));
   // The uplink joke (Orbital only) reads the bar's words, so it comes after them.

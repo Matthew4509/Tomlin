@@ -11,7 +11,7 @@ function openBrowser(url) {
   return {};
 }
 
-const PICK_TITLES = { working: 'Choose a working folder (a folder that holds projects)', project: 'Choose a project folder to add', bridge: 'Choose your Myia Bridge folder (the one with start-bridge.cmd in it)' };
+const PICK_TITLES = { working: 'Choose a working folder (a folder that holds projects)', project: 'Choose a project folder to add', backup: 'Choose where backups go (a USB drive is best)', bridge: 'Choose your Myia Bridge folder (the one with start-bridge.cmd in it)' };
 function pickFolder(purpose) {
   const title = PICK_TITLES[purpose] || PICK_TITLES.project;
   if (cfg.DRY) return Promise.resolve({ dryRun: 'folder picker: ' + title });

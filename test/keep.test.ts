@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as keep from '../src/keep.ts';
+import { zipEntries } from '../src/newcopy.ts';
 import { PIN_FILE, Runtimes, pinKey, type RuntimePin } from '../src/runtimes.ts';
 
 const PINS = { runtimes: { 'llama-cpu': { parts: [{ sha256: 'a' }] }, 'llama-cuda': { parts: [{ sha256: 'c1' }, { sha256: 'c2' }] } } };
@@ -239,6 +240,54 @@ test('an import from a folder that is not offered does nothing', async () => {
     await keep.prepare(w.home, w.root, '2.0.27');
     const note = await keep.bringIn(w.home, w.root, join(w.top, 'apps', 'other-app'), '2.0.27');
     assert.match(note, /Nothing was imported/);
+  } finally {
+    await rm(w.top, { recursive: true, force: true });
+  }
+});
+
+test('a data backup keeps every file whatever its name (é, ü, 日本: Windows tar left them out), read back and checked, and Put back brings them back', async () => {
+  const w = await world();
+  try {
+    await put(join(w.home.data, 'settings.json'), '{"v":"first"}');
+    await keep.prepare(w.home, w.root, '2.0.27');
+    await put(join(w.home.data, 'docs', 'Résumé.pdf'), 'cv');
+    await put(join(w.home.data, 'files', 'naïve ü', '日本 é.txt'), 'konnichiwa');
+    await put(join(w.home.data, 'runners.json'), '[{"pid":1}]');
+    await put(join(w.home.data, 'chats', 'half.json.tmp'), 'half');
+    const name = await keep.backup(w.home, 'by hand');
+    const listed = (await zipEntries(join(w.home.backups, name))).map(e => e.name);
+    assert.ok(listed.includes('docs/Résumé.pdf'), listed.join(', '));
+    assert.ok(listed.includes('files/naïve ü/日本 é.txt'));
+    assert.ok(!listed.some(n => n.endsWith('runners.json') || n.endsWith('.tmp')), 'live runners and half-saved files stay out');
+    await rm(join(w.home.data, 'docs'), { recursive: true });
+    await rm(join(w.home.data, 'files'), { recursive: true });
+    await keep.planNext(w.home, { do: 'restore', name });
+    await keep.prepare(w.home, w.root, '2.0.27');
+    assert.equal(await readFile(join(w.home.data, 'docs', 'Résumé.pdf'), 'utf8'), 'cv');
+    assert.equal(await readFile(join(w.home.data, 'files', 'naïve ü', '日本 é.txt'), 'utf8'), 'konnichiwa');
+  } finally {
+    await rm(w.top, { recursive: true, force: true });
+  }
+});
+
+test('Put back reads the whole backup first: a damaged one is refused and the data stays as it is', async () => {
+  const w = await world();
+  try {
+    await put(join(w.home.data, 'settings.json'), '{"v":"first"}');
+    await keep.prepare(w.home, w.root, '2.0.27');
+    await put(join(w.home.data, 'notes', 'long.txt'), 'words that deflate well '.repeat(500));
+    const name = await keep.backup(w.home, 'by hand');
+    const zip = join(w.home.backups, name);
+    const buf = await readFile(zip);
+    const at = buf.indexOf(Buffer.from('notes/long.txt'));
+    assert.ok(at > 0);
+    buf[at + 'notes/long.txt'.length + 40] ^= 0xff; // inside its deflated bytes, past the local header
+    await writeFile(zip, buf);
+    await put(join(w.home.data, 'settings.json'), '{"v":"second"}');
+    await keep.planNext(w.home, { do: 'restore', name });
+    await keep.prepare(w.home, w.root, '2.0.27');
+    assert.equal(await readFile(join(w.home.data, 'settings.json'), 'utf8'), '{"v":"second"}');
+    assert.match(keep.readVersion(w.home)?.note ?? '', /Nothing was restored: that backup is damaged/);
   } finally {
     await rm(w.top, { recursive: true, force: true });
   }

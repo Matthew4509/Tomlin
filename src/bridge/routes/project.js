@@ -20,6 +20,8 @@ const nodes = () => hooks.nodeBackup;
 
 // GET ?id=<project id>
 const get = {
+  // Its backups on a drive, newest first (drive, when, size, checked).
+  '/api/backup/history': ({ p }) => ({ name: p.name, backup: state.backups.rowOf(p), history: state.backups.history(p) }),
   '/api/audit': ({ p }) => ({ audit: lastAudit(p.id) }),
   // Review with AI: the prompt to copy (nothing is sent anywhere), and the faults a reviewer reported.
   '/api/review': ({ p }) => reviewPrompt(p),

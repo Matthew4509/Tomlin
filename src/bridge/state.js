@@ -5,7 +5,8 @@ const path = require('path');
 const { Worker } = require('worker_threads');
 const cfg = require('./config');
 const Settings = require('./settings');
-const { listProjects, listProjectsAsync, projectFolders } = require('./projects');
+const { listProjects, listProjectsAsync, projectFolders, keyOf } = require('./projects');
+const Backup = require('./backup');
 
 // Names, live addresses and extra start commands set without writing into any project (README: projects.json).
 const OVERRIDES = path.join(cfg.DATA, 'projects.json');
@@ -15,6 +16,9 @@ const state = {
   projects: [],
   running: new Map(), // id -> { child, pid, port, name, started, log, url }
   tokens: { per: {}, month: {}, at: null, busy: false, error: null },
+  // Backups to a drive (backup.js): its own file, data/bridge/backups.json. Drives come from Windows (platform
+  // drive-info.ps1). Never a backup folder inside TOMLIN's app folder or its home.
+  backups: Backup.create({ dataDir: cfg.DATA, listDrives: () => require('./platform').drives(), keyOf, version: cfg.VERSION, appDir: [cfg.APP, cfg.HERE] }),
 };
 
 function saveSettings() { Settings.save(cfg.SETTINGS_FILE, state.settings); }

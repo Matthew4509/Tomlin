@@ -494,7 +494,7 @@ function mpJobCard() {
   } else if (j.state === 'done') {
     // Done: it stands out (a green box), with a button straight to the staff to give it to.
     box.replaceChildren(el('span', { class: 'mp-done-text', text: `✓ ${j.name} is downloaded and checked. Assign this to a staff, or pick it in a chat.` }),
-      app.seeAllStaff ? el('button', { class: 'btn primary', type: 'button', text: 'Edit staff', title: 'Opens All staff: press Edit beside someone, then PC settings, to give them this model', onclick: () => app.seeAllStaff() }) : null);
+      app.seeAllStaff ? el('button', { class: 'btn primary', type: 'button', text: 'Edit staff', title: 'Opens All staff: press Edit beside someone, then Works on, to give them this model', onclick: () => app.seeAllStaff() }) : null);
   } else {
     box.replaceChildren(el('span', { class: j.state === 'failed' ? 'fault-line' : 'hint', text: j.state === 'stopped' ? `${j.name}: stopped. Download it again to carry on from where it stopped.` : `${j.name}: the download failed. ${j.error}` }));
   }
