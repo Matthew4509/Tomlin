@@ -16,7 +16,7 @@ const check = (name, fn) => { try { fn(); console.log('ok   ' + name); } catch (
 (async () => {
   const cases = loadCases();
   check('every case has an id, a bucket, a title and both copies (or quiet files)', () => {
-    for (const c of cases) assert(c.id && c.title && (c.quiet ? c.files : (c.bad && c.good && /^[RXL]$/.test(c.bucket))), c.id);
+    for (const c of cases) assert(c.id && c.title && (c.quiet ? c.files : (c.bad && c.good && /^[RXLA]$/.test(c.bucket))), c.id);
   });
   check('every case names the faults it was built from', () => { for (const c of cases) assert(Array.isArray(c.examples), c.id); });
   check('the baseline names only cases that exist', () => {

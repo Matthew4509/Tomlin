@@ -200,9 +200,11 @@ export class Store {
   }
 
   private async load(): Promise<Settings> {
-    const s = await this.readJson<Partial<Settings>>('settings.json', {});
+    const raw = await this.readJson<unknown>('settings.json', {});
+    // A file that is not an object (null, a list) holds no settings: it reads as none, so TOMLIN still starts.
+    const s = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Partial<Settings>;
     // Fields this version does not know (written by a newer copy) are carried through, so going back never erases them.
-    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), jobModels: s.jobModels ?? {}, remotes: (s.remotes ?? []).map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), jobModels: s.jobModels ?? {}, remotes: (Array.isArray(s.remotes) ? s.remotes : []).filter(r => r && typeof r === 'object').map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
     return this.cache;
   }
 

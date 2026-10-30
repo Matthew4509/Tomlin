@@ -86,6 +86,70 @@ async function main() {
     assert.strictEqual(r.state, 'down'); assert(/asked twice/.test(r.reason));
     assert.strictEqual(site.log.filter(x => x.path === '/hang').length - before, 2);
   });
+  // A server that sends its headers, then one byte every 100 ms and never finishes: the line is never quiet long
+  // enough for the idle timeout, so only the whole-answer deadline can end it.
+  const drips = new Set();
+  const drip = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.write('<');
+    const t = setInterval(() => res.write('x'), 100); drips.add(t);
+    res.on('close', () => { clearInterval(t); drips.delete(t); });
+  });
+  await new Promise(r => drip.listen(0, '127.0.0.1', r));
+  const dripResolve = u => ({ host: '127.0.0.1', port: u.hostname === 'slow.example' ? drip.address().port : site.port });
+  await check('light: a page that drips past the deadline is unsure ("took too long"), stopped in time, asked once', async () => {
+    let hits = 0; const count = () => hits++; drip.on('request', count);
+    const t0 = Date.now();
+    // (capped here, so a missing deadline fails the test instead of hanging it)
+    const r = await Promise.race([live.checkSite('https://slow.example/', { resolve: dripResolve, retryMs: 10, timeout: 1500, deadlineMs: 500 }),
+      new Promise(res => setTimeout(res, 3000, { state: 'still waiting after 3 s', reason: '' }))]);
+    drip.off('request', count);
+    assert.strictEqual(r.state, 'unsure', r.reason); assert(/took too long/.test(r.reason), r.reason);
+    assert(Date.now() - t0 < 1400, 'took ' + (Date.now() - t0) + ' ms');
+    assert.strictEqual(hits, 1);
+  });
+  await check('the deadline timer is cleared when a request ends normally (nothing left running)', async () => {
+    // watch the 60 s timers made during three normal requests (one with a redirect): each must be cleared at the end
+    const made = [], real = global.setTimeout;
+    global.setTimeout = function (fn, ms, ...a) { const t = real(fn, ms, ...a); if (ms === 60000) made.push(t); return t; };
+    try {
+      await live.get('https://shop.example/', { resolve, deadlineMs: 60000 });
+      await live.get('https://shop.example/away', { resolve, deadlineMs: 60000 });
+      await live.get('https://shop.example/gone', { resolve, deadlineMs: 60000 });
+    } finally { global.setTimeout = real; }
+    assert.strictEqual(made.length, 4, made.length + ' deadline timers');
+    assert(made.every(t => t._destroyed), made.filter(t => !t._destroyed).length + ' deadline timer(s) still pending');
+  });
+  await check('live round: one slow-dripping domain does not hold up another domain', async () => {
+    const done = {}, t0 = Date.now();
+    const items = ['https://slow.example/', 'https://shop.example/'];
+    await live.runByHost(items, u => new URL(u).hostname, async u => {
+      const r = await live.checkSite(u, { resolve: dripResolve, retryMs: 10, timeout: 1500, deadlineMs: 800 });
+      done[new URL(u).hostname] = { at: Date.now() - t0, state: r.state };
+    }, { gapMs: 0 });
+    assert.strictEqual(done['slow.example'].state, 'unsure'); assert.strictEqual(done['shop.example'].state, 'up');
+    assert(done['shop.example'].at < 500, 'the fast domain waited ' + done['shop.example'].at + ' ms');
+  });
+  await check('live round: the same host stays paced and in order; a failing check does not stop the rest', async () => {
+    const started = [], errors = [];
+    await live.runByHost(['a.example/1', 'b.example/1', 'a.example/2', 'a.example/3', 'c.example/1'], x => x.split('/')[0], async x => {
+      started.push({ x, at: Date.now() });
+      if (x === 'b.example/1') throw new Error('boom');
+      await new Promise(r => setTimeout(r, 20));
+    }, { gapMs: 150, parallel: 2, onError: (e, x) => errors.push(x) });
+    const a = started.filter(s => s.x.startsWith('a.'));
+    assert.deepStrictEqual(a.map(s => s.x), ['a.example/1', 'a.example/2', 'a.example/3']);
+    for (let i = 1; i < a.length; i++) assert(a[i].at - a[i - 1].at >= 145, 'same host ' + (a[i].at - a[i - 1].at) + ' ms apart');
+    assert.strictEqual(started.length, 5); assert.deepStrictEqual(errors, ['b.example/1']);
+    // c waited only for b (2 at a time), not for the paced a queue
+    assert(started.find(s => s.x === 'c.example/1').at - started[0].at < 140);
+  });
+  await check('live round: different hosts run at most `parallel` at once', async () => {
+    let now = 0, peak = 0;
+    await live.runByHost(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], x => x, async () => { now++; peak = Math.max(peak, now); await new Promise(r => setTimeout(r, 30)); now--; }, { gapMs: 0, parallel: 4 });
+    assert.strictEqual(peak, 4);
+  });
+  for (const t of drips) clearInterval(t);
+  drip.closeAllConnections(); await new Promise(r => drip.close(r));
   await check('light: sends visitors to another domain = unsure', async () => { const r = await light('/away'); assert.strictEqual(r.state, 'unsure'); assert(/elsewhere\.example/.test(r.reason)); });
   await check('light: a redirect loop is down', async () => assert.strictEqual((await light('/loop')).state, 'down'));
   await check('light: nothing listening is down (refused)', async () => { const r = await live.checkSite('https://closed.example/', { resolve, retryMs: 10 }); assert.strictEqual(r.state, 'down'); assert(r.net); });

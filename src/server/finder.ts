@@ -3,13 +3,14 @@
 // config / Undo. A linked PC asks for the same through the node doors /worker/tune-* (src/jobrun/node.ts), only when
 // this PC's owner ticked "Allow host to test and change model run settings".
 import { freemem } from 'node:os';
-import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readData, updateData } from '../atomic.ts';
 import { cacheBytes, expertWeights, modelShape } from '../gguf.ts';
 import { runFinder, request, timingsOf, type FinderRun } from '../finderrun.ts';
 import { cardsNow, estimateMinutes, finderCards, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
 import { guessersFor, type Listed } from '../runset.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
+import { runnerFetch } from '../engine.ts';
 import { hereKey } from '../speed.ts';
 import { shortBuild } from '../update.ts';
 import type { RunOptions } from '../store.ts';
@@ -151,18 +152,11 @@ let job: { model: string; name: string; size: 'quick' | 'full'; by: string; star
 let answer: AbortController | null = null;
 
 async function saved(): Promise<Record<string, Kept>> {
-  try {
-    const j = JSON.parse(await readFile(FILE, 'utf8'));
-    return j && typeof j === 'object' ? j : {};
-  } catch {
-    return {};
-  }
+  const j = await readData<Record<string, Kept>>(FILE, {});
+  return j && typeof j === 'object' ? j : {};
 }
 async function keep(id: string, k: Kept): Promise<void> {
-  const all = await saved();
-  all[id] = k;
-  await writeFile(`${FILE}.tmp`, JSON.stringify(all, null, 2));
-  await rename(`${FILE}.tmp`, FILE);
+  await updateData<Record<string, Kept>>(FILE, {}, now => ({ ...now, [id]: k }), 2);
 }
 
 const lastView = (k: Kept) => ({ at: k.at, size: k.size, run: k.run, applied: k.applied ?? null });
@@ -223,7 +217,7 @@ export async function start(id: string, size: 'quick' | 'full', contexts: number
         takeChat(ac, p, '', '', 'The speed finder');
         const timer = setTimeout(() => ac.abort(), 15 * 60_000);
         try {
-          const res = await fetch(`${p.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(p.worker.base!) }, body: JSON.stringify(request(kind)), signal: ac.signal });
+          const res = await runnerFetch(`${p.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(p.worker.base!) }, body: JSON.stringify(request(kind)), signal: ac.signal });
           if (!res.ok) throw new Error(`the model answered ${res.status}`);
           return timingsOf(await res.json());
         } finally {

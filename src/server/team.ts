@@ -7,8 +7,8 @@ import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
 import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
-import { staffState as homeState, activityOf, awardBehind, awardPeriods, buy, cleanAwards, cleanBought, doingOf, DOING_WORDS, purseOf, roomsOf, shopView, undoAward, winnerOf, type Award } from '../home.ts';
-import { readData, updateData } from '../atomic.ts';
+import { staffState as homeState, activityOf, awardBehind, awardPeriods, bookAfter, buy, cleanAwards, cleanBook, doingOf, DOING_WORDS, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Award } from '../home.ts';
+import { DamagedFile, readData, updateData, writeAtomic } from '../atomic.ts';
 import * as mute from '../mute.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
@@ -481,6 +481,49 @@ async function imageAudition(member: NonNullable<ReturnType<typeof staff.get>>) 
 // ---- The office's rewards (public/office.js): this month's and this week's tokens written per hire, and the awards ----
 
 const officeFile = () => join(store.dir, 'office.json');
+/** A copy of the last good save, to fall back to when office.json is damaged. */
+const officeCopy = () => `${officeFile()}.bak`;
+/** Said when office.json is damaged and there is no good copy: nothing can be changed, and the file is left as it is. */
+const OFFICE_HURT = 'The office file (office.json) is damaged and there is no good copy of it, so nothing can be bought or awarded for now. It has been left as it is. Put back a backup from before it happened (Settings, Your data and updates), then open the office again.';
+type OfficeRaw = Record<string, unknown>;
+const asOffice = (raw: unknown): OfficeRaw => (raw && typeof raw === 'object' ? raw as OfficeRaw : {});
+const keepOfficeCopy = (kept: unknown) => writeAtomic(officeCopy(), JSON.stringify(kept, null, 1)).catch(e => console.error(`The copy of the office file could not be saved: ${(e as Error).message}`));
+/** Puts the good copy back in place of a damaged file, which is set aside and reported (src/atomic.ts); null with no good copy. */
+async function mendOffice(): Promise<OfficeRaw | null> {
+  const copy = await readData<unknown>(officeCopy(), null, { leave: true }).catch(() => null);
+  if (!copy || typeof copy !== 'object') return null;
+  await readData(officeFile(), {});
+  await writeAtomic(officeFile(), JSON.stringify(copy, null, 1));
+  return asOffice(copy);
+}
+let officeMending: Promise<OfficeRaw | null> | null = null;
+/**
+ * What office.json holds, or null when it is damaged and no good copy can take its place (it then stays where it is).
+ * Requests that find it damaged together share one mend; any that come during the mend wait for it.
+ */
+async function readOffice(): Promise<OfficeRaw | null> {
+  if (officeMending) await officeMending;
+  try {
+    const kept = asOffice(await readData<unknown>(officeFile(), {}, { leave: true }));
+    // A file saved before the copies were kept gets its first one as soon as the office is opened.
+    if (Object.keys(kept).length && !existsSync(officeCopy())) await keepOfficeCopy(kept);
+    return kept;
+  } catch (e) {
+    if (!(e instanceof DamagedFile)) throw e;
+    officeMending ??= mendOffice().finally(() => { officeMending = null; });
+    return officeMending;
+  }
+}
+/** Changes office.json in its turn and copies what was saved; false, with nothing changed, when it is damaged beyond a mend. */
+async function changeOffice(change: (was: OfficeRaw) => OfficeRaw | undefined): Promise<boolean> {
+  if (!await readOffice()) return false;
+  let saved: OfficeRaw | undefined;
+  await updateData<unknown>(officeFile(), {}, raw => (saved = change(asOffice(raw))));
+  if (saved) await keepOfficeCopy(saved);
+  return true;
+}
+/** When this server last sold energy drinks (ms): they are free and not saved, so the limit is kept here. */
+let energySoldAt: number | undefined;
 /** Each hire on the team with the tokens they wrote from `from` to today, most first. */
 function board(from: string, today: string) {
   const names = new Map(staff.list().map(m => [m.id, m.name]));
@@ -491,9 +534,10 @@ function board(from: string, today: string) {
 }
 async function officeView() {
   const p = awardPeriods();
-  const kept = await readData(officeFile(), {});
-  const bought = cleanBought(kept);
-  const awards = cleanAwards(kept);
+  const kept = await readOffice();
+  const book = cleanBook(kept ?? {});
+  const bought = book.bought;
+  const awards = cleanAwards(kept ?? {});
   const monthBoard = board(p.monthFrom, p.today);
   return {
     // `behind`: who leads now when this month's award went to someone else earlier in the month (null otherwise).
@@ -502,9 +546,9 @@ async function officeView() {
     // Tokens each wrote today: the office chat's payday (Thursdays) compares them.
     today: { board: board(p.today, p.today) },
     awards,
-    purse: purseOf(byStaff.totalWritten(), bought),
+    // Damaged with no good copy: said in words, with no purse to show and the rooms left as the page has them.
+    ...(kept ? { purse: purseOf(byStaff.totalWritten(), bought, book.spentEarlier), rooms: roomsOf(bought, book.trophy) } : { purse: null, damaged: OFFICE_HURT }),
     shop: shopView(bought),
-    rooms: roomsOf(bought),
   };
 }
 
@@ -528,32 +572,40 @@ export const teamPost: Routes = {
     if ('tied' in w) return json(res, 400, { error: `${w.tied.map(r => r.name).join(' and ')} have written the same (${w.tied[0].out.toLocaleString('en-GB')} tokens each) in ${p.monthName}, so there is no one winner yet. Award it again once one of them is ahead.` });
     const won = w.won;
     const award: Award = { month: p.month, id: won.id, name: won.name, out: won.out, at: new Date().toISOString() };
-    await updateData(officeFile(), {}, raw => ({ ...(raw && typeof raw === 'object' ? raw : {}), awards: cleanAwards({ awards: [...cleanAwards(raw), award] }) }));
+    if (!await changeOffice(was => ({ ...was, awards: cleanAwards({ awards: [...cleanAwards(was), award] }) }))) return json(res, 400, { error: OFFICE_HURT });
     return json(res, 200, { award, ...(await officeView()) });
   },
   '/api/office/award/undo': async ({ res }) => {
     // Undo award: this month's award is taken off (the frame goes back to the month before's, or empty).
     const p = awardPeriods();
     let undone = null as Award | null;
-    await updateData(officeFile(), {}, raw => {
-      const was = raw && typeof raw === 'object' ? raw : {};
+    const ok = await changeOffice(was => {
       const u = undoAward(cleanAwards(was), p.month);
       if (!u) return undefined;
       undone = u.undone;
       return { ...was, awards: u.awards };
     });
+    if (!ok) return json(res, 400, { error: OFFICE_HURT });
     if (!undone) return json(res, 400, { error: `There is no award for ${p.monthName} to undo. It may have been undone already in another window.` });
     return json(res, 200, { undone, ...(await officeView()) });
   },
   '/api/office/buy': async ({ res, b }) => {
     // The office shop: paid from the team's tokens written (src/home.ts buy says no when short or owned already).
     let said = { error: 'The shop did not answer. Try again.' } as ReturnType<typeof buy>;
-    await updateData(officeFile(), {}, raw => {
-      const was = raw && typeof raw === 'object' ? raw : {};
-      const bought = cleanBought(was);
-      said = buy(b.item, byStaff.totalWritten(), bought);
-      return 'bought' in said ? { ...was, bought: [...bought, said.bought] } : undefined;
+    const ok = await changeOffice(was => {
+      const book = cleanBook(was);
+      // A paid treat needs someone here to have it (the free drinks do not ask: a node's machine works too).
+      if (SHOP.some(i => i.id === b.item && i.room === 'treats' && i.price > 0) && !staff.list().length) {
+        said = { error: 'Nobody is in the office to buy for: hire someone first.' };
+        return undefined;
+      }
+      said = buy(b.item, byStaff.totalWritten(), book.bought, new Date(), { spentEarlier: book.spentEarlier, energyAt: energySoldAt });
+      if (!('bought' in said)) return undefined;
+      if (said.bought.item === 'energy') energySoldAt = Date.now();
+      // Something free leaves nothing to keep: it could only fill the treat list.
+      return said.bought.price ? { ...was, ...bookAfter(book, said.bought) } : undefined;
     });
+    if (!ok) return json(res, 400, { error: OFFICE_HURT });
     if ('error' in said) return json(res, 400, { error: said.error });
     return json(res, 200, { bought: said.bought, ...(await officeView()) });
   },

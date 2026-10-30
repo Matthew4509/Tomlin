@@ -387,25 +387,44 @@ export const SHOP: readonly ShopItem[] = [
 /** One purchase: what, what it cost then, when. */
 export interface Bought { item: ShopId; price: number; at: string }
 /**
- * Purchases as kept (data/office.json, beside the awards): oldest first. Every piece kept (furniture, the gym, deck
- * chairs) stays on the list for good; of the treats, the last 1000.
+ * What the shop keeps in data/office.json. `bought`: oldest first; every piece kept (furniture, the gym, deck chairs)
+ * stays on the list for good; of the treats, the last 1000. `spentEarlier`: what the treats trimmed off the list cost,
+ * so a trim gives nothing back. `trophy`: saved once earned, so a trim cannot take it away.
  */
-export function cleanBought(raw: unknown): Bought[] {
-  const list = Array.isArray((raw as { bought?: unknown })?.bought) ? (raw as { bought: unknown[] }).bought : [];
+export interface OfficeBook { bought: Bought[]; spentEarlier: number; trophy: { at: string } | null }
+/**
+ * The shop's records as read from the file. A file from before `spentEarlier` and `trophy` were kept reads the same as
+ * it did: nothing spent earlier, and the trophy worked out from its list before anything is trimmed from it. Free
+ * treats saved by older versions (energy drinks) are dropped: they cost nothing and only pushed paid treats off the list.
+ */
+export function cleanBook(raw: unknown): OfficeBook {
+  const saved = (raw && typeof raw === 'object' ? raw : {}) as { bought?: unknown; spentEarlier?: unknown; trophy?: { at?: unknown } | null };
+  const list = Array.isArray(saved.bought) ? saved.bought : [];
   const out: Bought[] = [];
   for (const b of list) {
     const r = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
     if (!SHOP.some(i => i.id === r.item)) continue;
     out.push({ item: r.item as ShopId, price: Math.max(0, Math.round(Number(r.price) || 0)), at: String(r.at ?? '').slice(0, 40) });
   }
-  const kept = (b: Bought) => !!SHOP.find(i => i.id === b.item)?.keeps;
-  const treats = out.filter(b => !kept(b));
+  const trophy = typeof saved.trophy?.at === 'string' && saved.trophy.at ? { at: saved.trophy.at.slice(0, 40) } : trophyOf(out);
+  const item = (b: Bought) => SHOP.find(i => i.id === b.item);
+  const free = new Set(out.filter(b => !b.price && item(b)?.price === 0));
+  const treats = out.filter(b => !item(b)?.keeps && !free.has(b));
   const drop = new Set(treats.slice(0, Math.max(0, treats.length - 1000)));
-  return out.filter(b => !drop.has(b));
+  const earlier = Math.max(0, Math.round(Number(saved.spentEarlier)) || 0);
+  return {
+    bought: out.filter(b => !drop.has(b) && !free.has(b)),
+    spentEarlier: [...drop].reduce((n, b) => n + b.price, earlier),
+    trophy,
+  };
 }
-/** The team's purse: every token its hires ever wrote, less what was spent. */
-export function purseOf(earned: number, bought: Bought[]): { earned: number; spent: number; left: number } {
-  const spent = bought.reduce((n, b) => n + b.price, 0);
+/** The records with a purchase added: anything trimmed by it stays paid for, and the purchase can earn the trophy. */
+export const bookAfter = (book: OfficeBook, b: Bought): OfficeBook => cleanBook({ ...book, bought: [...book.bought, b] });
+/** The purchases alone, from what the file holds. */
+export const cleanBought = (raw: unknown): Bought[] => cleanBook(raw).bought;
+/** The team's purse: every token its hires ever wrote, less what was spent (on the list, and on treats trimmed off it). */
+export function purseOf(earned: number, bought: Bought[], spentEarlier = 0): { earned: number; spent: number; left: number } {
+  const spent = bought.reduce((n, b) => n + b.price, spentEarlier);
   const e = Math.max(0, Math.round(earned) || 0);
   return { earned: e, spent, left: Math.max(0, e - spent) };
 }
@@ -420,10 +439,19 @@ export const shopView = (bought: Bought[]) => SHOP.map(i => {
 });
 /** Where a kept piece stands, for "it stays in the lounge". */
 const PLACE: Record<ShopRoom, string> = { treats: 'in the kitchen', desks: 'on the desks', boardroom: 'in the boardroom', lounge: 'in the lounge', beach: 'on the beach' };
-/** Buying `item`: the purchase to keep, or why not (unknown, all bought already, its table first, not enough tokens). */
-export function buy(item: unknown, earned: number, bought: Bought[], now = new Date()): { bought: Bought } | { error: string } {
+/** How long a round of energy drinks lasts; the server sells no second round before then (the page's machine says the same). */
+export const ENERGY_SECONDS = 60;
+/**
+ * Buying `item`: the purchase to keep, or why not (unknown, all bought already, its table first, not enough tokens, the
+ * last energy drinks not worn off). `spentEarlier`: as kept in the records; `energyAt`: when the last round was sold, in ms.
+ */
+export function buy(item: unknown, earned: number, bought: Bought[], now = new Date(), o: { spentEarlier?: number; energyAt?: number } = {}): { bought: Bought } | { error: string } {
   const i = SHOP.find(x => x.id === item);
   if (!i) return { error: 'That is not in the office shop. Pick something from the shop above the office.' };
+  if (i.id === 'energy' && o.energyAt !== undefined) {
+    const wait = Math.ceil(ENERGY_SECONDS - (now.getTime() - o.energyAt) / 1000);
+    if (wait > 0) return { error: `They are still buzzing from the last cans: try again in ${wait} s.` };
+  }
   const have = countOf(bought, i.id);
   if (i.keeps && have >= i.most) {
     if (i.id === 'chairs') return { error: 'The boardroom has all six chairs already: there is no room round the table for more.' };
@@ -432,7 +460,7 @@ export function buy(item: unknown, earned: number, bought: Bought[], now = new D
   }
   const needs = i.needs ? SHOP.find(x => x.id === i.needs) : null;
   if (needs && !countOf(bought, needs.id)) return { error: `Buy ${needs.the} first: the chairs go round it.` };
-  const left = purseOf(earned, bought).left;
+  const left = purseOf(earned, bought, o.spentEarlier).left;
   const n = (x: number) => x.toLocaleString('en-GB');
   if (left < i.price) return { error: `Not enough tokens yet: ${i.the} costs ${n(i.price)} and the team has ${n(left)} to spend. Every token your staff write adds to it, so talk to them and come back.` };
   return { bought: { item: i.id, price: i.price, at: now.toISOString() } };
@@ -442,15 +470,20 @@ export function buy(item: unknown, earned: number, bought: Bought[], now = new D
 export const LOUNGE_SPOTS: Record<string, ShopId> = { nap: 'armchair', library: 'bookcase', chat: 'sofa', tv: 'tv', treadmill: 'gym', weights: 'gym', arcade: 'arcade' };
 /** The treats that count towards the trophy (pizza is free, so it is not kept; energy drinks are not a treat to earn it by). */
 const TREATS: ShopId[] = ['coffee', 'donuts', 'sandwiches', 'icecream', 'cake'];
-/** Everything done: every piece bought as many times as the office holds, and the team treated to each treat once. */
-const allDone = (bought: Bought[]) => SHOP.filter(i => i.keeps).every(i => countOf(bought, i.id) >= i.most) && TREATS.every(id => countOf(bought, id) > 0);
 /**
- * The trophy case (World's Best Boss): earned with the purchase that finished everything, and dated by it; null until
- * then. It is never sold: it comes by itself.
+ * The trophy case (World's Best Boss): earned with the purchase that finished everything (every piece bought as many
+ * times as the office holds, and the team treated to each treat once), and dated by it; null until then. It is never
+ * sold: it comes by itself. One pass down the list; once earned it is saved (OfficeBook), since a trim can shorten the list.
  */
 export function trophyOf(bought: Bought[]): { at: string } | null {
-  if (!allDone(bought)) return null;
-  for (let k = 1; k <= bought.length; k++) if (allDone(bought.slice(0, k))) return { at: bought[k - 1].at };
+  const toGo = new Map<ShopId, number>([...SHOP.filter(i => i.keeps).map(i => [i.id, i.most] as [ShopId, number]), ...TREATS.map(id => [id, 1] as [ShopId, number])]);
+  for (const b of bought) {
+    const n = toGo.get(b.item);
+    if (!n) continue;
+    if (n > 1) toGo.set(b.item, n - 1);
+    else toGo.delete(b.item);
+    if (!toGo.size) return { at: b.at };
+  }
   return null;
 }
 /**
@@ -461,7 +494,7 @@ export function trophyOf(bought: Bought[]): { at: string } | null {
  * or the lounge window while it is empty. `deckchairs`: places on the beach for a break. `volleyball`: the net on the
  * sand, where up to four with nothing to do play.
  */
-export function roomsOf(bought: Bought[]) {
+export function roomsOf(bought: Bought[], trophy = trophyOf(bought)) {
   const has = (id: ShopId) => countOf(bought, id) > 0;
   const lounge = Object.entries(LOUNGE_SPOTS).filter(([, id]) => has(id)).map(([spot]) => spot);
   return {
@@ -469,7 +502,7 @@ export function roomsOf(bought: Bought[]) {
     lounge: { armchair: has('armchair'), bookcase: has('bookcase'), sofa: has('sofa'), tv: has('tv'), gym: has('gym'), arcade: has('arcade') },
     desks: { rocks: has('rocks'), ducks: has('ducks'), cactus: has('cactus') },
     flamingo: has('flamingo'),
-    trophy: trophyOf(bought),
+    trophy,
     rest: ['coffee', 'vending', 'lunch', ...lounge],
     away: lounge.length ? lounge : ['window'],
     deckchairs: Math.min(6, countOf(bought, 'deckchair')),

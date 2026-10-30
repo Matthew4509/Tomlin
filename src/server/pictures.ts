@@ -147,6 +147,8 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
     progress({ text: `${dropped.length ? `Unloaded ${dropped.join(' and ')} to make room. ` : ''}Loading ${name}` });
     if (signal.aborted) return { error: 'Stopped.' };
     if (!(await loadImage(want))) return { error: `${name} did not load on this PC: it is busy with another picture, or too big for the memory free now` };
+    // Stopped while it loaded (that can take minutes): no picture is asked for.
+    if (signal.aborted) return { error: 'Stopped.' };
   }
   const job = await images.generate({ prompt: o.prompt, mode: o.mode && o.mode !== 'auto' ? (o.mode as Mode) : 'auto', width: o.width, height: o.height, drafts: 1, full: true, source: 'api', as: artist?.id });
   if (!('id' in job)) return { error: job.error };
@@ -156,6 +158,8 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
   }, 1000);
   const stop = () => void images.cancel(job.id).catch(() => undefined);
   signal.addEventListener('abort', stop, { once: true });
+  // Stopped while the picture was being asked for: the listener above never hears that one.
+  if (signal.aborted) stop();
   await job.done.finally(() => {
     clearInterval(timer);
     signal.removeEventListener('abort', stop);

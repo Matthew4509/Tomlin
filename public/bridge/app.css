@@ -226,6 +226,7 @@ textarea.prompt-text{display:block;width:100%;min-height:260px;resize:vertical;f
 textarea.prompt-text:focus{outline:0;border-bottom:2px solid var(--accent)}
 textarea.prompt-text[hidden]{display:none}
 textarea.prompt-text.judge-text{min-height:90px;font:inherit;font-size:13px}
+textarea.prompt-text.skill-text{min-height:160px;flex:1;min-width:0}
 dialog.wide{width:min(820px,calc(100vw - 32px))}
 /* Audits › Private details: label, detail, Remove on one line; stacked on a phone */
 .pd-list{margin:8px 0}

@@ -169,9 +169,12 @@ export function done(s: State, id: unknown, on: boolean, today: string): Result 
   return { ok: true, item: it };
 }
 
-export function remove(s: State, id: unknown): Result {
+/** Take a row off. A quick check still to do goes to its next date, or it would come straight back at the next look. */
+export function remove(s: State, id: unknown, today: string = dayOf()): Result {
   const it = findItem(s, id);
   if (!it) return gone();
+  const c = it.kind === 'check' && !it.done && Object.hasOwn(s.checks, it.project) ? s.checks[it.project] : null;
+  if (c && c.next <= today) c.next = nextDate(today, c.every);
   s.items.splice(s.items.indexOf(it), 1);
   return { ok: true };
 }
@@ -310,7 +313,7 @@ export class TodoStore {
   set(id: unknown, o: { size?: unknown; note?: unknown }) { return this.act(s => set(s, id, o)); }
   move(id: unknown, zone: unknown, before: unknown) { return this.act((s, t) => move(s, id, zone, before, t)); }
   done(id: unknown, on: boolean) { return this.act((s, t) => done(s, id, on, t)); }
-  remove(id: unknown) { return this.act(s => remove(s, id)); }
+  remove(id: unknown) { return this.act((s, t) => remove(s, id, t)); }
   setCheck(project: unknown, every: unknown, name: unknown) { return this.act((s, t) => setCheck(s, project, every, name, t)); }
   setSettings(o: { dayHours?: unknown; checksPerDay?: unknown; doneShow?: unknown }) { return this.act(s => setSettings(s, o)); }
 }

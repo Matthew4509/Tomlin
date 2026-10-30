@@ -2,7 +2,7 @@
 // only when the person chose a number of days, and never a kept picture.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -58,6 +58,21 @@ test('a list whose last line was cut off (a crash mid-write) does not swallow th
     await new Gallery(dir).add(next);
     const ids = (await new Gallery(dir).list(0, 60, 'all')).pictures.map(p => p.id).sort();
     assert.deepEqual(ids, ['first', 'next']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('two pictures saved under one name at the same moment keep a file each', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm2-gallery-'));
+  try {
+    const g = new Gallery(dir);
+    await g.save('first.png', Buffer.from('x'));
+    // Big enough that each write is still going when the next save looks for a free name.
+    const rels = await Promise.all(Array.from({ length: 40 }, (_, i) => g.save('same-name.png', Buffer.alloc(2_000_000, i))));
+    assert.equal(new Set(rels).size, 40, rels.join(', '));
+    const first = await Promise.all(rels.map(async rel => (await readFile(join(dir, rel)))[0]));
+    assert.deepEqual(first, Array.from({ length: 40 }, (_, i) => i));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

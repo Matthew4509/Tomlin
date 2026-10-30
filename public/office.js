@@ -778,10 +778,12 @@
   // ---- Pizza or donuts: a delivery comes in by the front door to the kitchen table; the idle gather round it ----
 
   let courier = null;
+  /** Food being paid for right now: the table is taken from the press, so a second press is refused before it is paid for. */
+  let tableHeld = false;
   /** Waiting to be delivered, in turn: {kind: 'pizza'}, {kind: 'donuts'} or {kind: 'folder', who}. */
   const deliveries = [];
   /** Food on the table, or on its way there: one at a time. */
-  const tableBusy = () => world.pizzaOn || deliveries.some(d => FOOD[d.kind]) || !!FOOD[courier?.job.kind];
+  const tableBusy = () => tableHeld || world.pizzaOn || deliveries.some(d => FOOD[d.kind]) || !!FOOD[courier?.job.kind];
   function orderFood(kind) {
     if (tableBusy()) return false;
     deliveries.push({ kind });
@@ -916,6 +918,9 @@
 
   function officeData(d) {
     world.purse = d.purse ?? null;
+    // The saved file is damaged with no good copy: the shop says so instead of showing a purse it cannot read.
+    if (d.damaged && d.damaged !== world.damaged) fullSay(d.damaged);
+    world.damaged = d.damaged ?? '';
     world.shop = d.shop ?? [];
     // What is bought is part of the office: drawn in, walked round, places to sit, rest and think.
     const rooms = d.rooms ?? world.rooms;
@@ -2357,8 +2362,8 @@
   }
   function drawShop() {
     const p = world.purse;
-    purseLine.textContent = p ? `To spend: ${num(p.left)} tokens` : 'To spend: …';
-    purseLine.title = p ? `Gain tokens from work done: ${num(p.earned)} tokens written in all, ${num(p.spent)} spent in the shop. Every token they write adds to it.` : 'Not read yet';
+    purseLine.textContent = p ? `To spend: ${num(p.left)} tokens` : world.damaged ? 'To spend: cannot be read just now' : 'To spend: …';
+    purseLine.title = p ? `Gain tokens from work done: ${num(p.earned)} tokens written in all, ${num(p.spent)} spent in the shop. Every token they write adds to it.` : world.damaged || 'Not read yet';
     const item = id => (id === 'pizza' ? PIZZA_ITEM : world.shop.find(i => i.id === id));
     shopTiles.replaceChildren(...SECTIONS.map(([head, groups]) => el('section', { class: 'office-shop-section' },
       el('h4', { text: head }),
@@ -2375,8 +2380,11 @@
     if (FOOD[item.id] && tableBusy()) return fullSay(`Food is on the table, or on its way: buy ${item.the} once it is eaten.`);
     if (item.id === 'coffee' && (courier?.job.kind === 'coffee' || deliveries.some(d => d.kind === 'coffee'))) return fullSay('A coffee delivery is on its way already: buy another once it has been round.');
     button.disabled = true;
+    const holdsTable = !!FOOD[item.id];
+    if (holdsTable) tableHeld = true;
     try {
       const d = await api('/api/office/buy', { item: item.id });
+      if (holdsTable) tableHeld = false;
       const hadTrophy = !!world.rooms.trophy;
       officeData(d);
       const left = `${num(d.purse?.left)} tokens left to spend.`;
@@ -2402,6 +2410,7 @@
     } catch (e) {
       fullSay(e.message);
     } finally {
+      if (holdsTable) tableHeld = false;
       button.disabled = false;
     }
   }

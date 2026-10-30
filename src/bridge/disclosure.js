@@ -61,25 +61,35 @@ function gitGlobal(key) {
   return value;
 }
 
-// Read from this PC (the git name and email remembered a minute, in memory), never stored. workingFolders: the folders that hold the projects.
-function autoDetails(workingFolders = []) {
+// Windows' stock account and PC names ("User", "Admin", "Owner") and the like name nobody, and are everyday words in
+// code (".user.ini", user:token@, "the user's"): not looked for on their own. The home folder (C:\Users\<name>) is.
+const GENERIC_NAME = /^(user|users|admin|administrator|owner|guest|default|public|home|pc|localhost|desktop|laptop|computer|dev|test)\d*$/i;
+
+// Read from this PC (the git name and email remembered a minute, in memory), never stored. workingFolders: the folders
+// that hold the projects. who: tests only, in place of this PC's { username, hostname, home }.
+function autoDetails(workingFolders = [], who = {}) {
   const out = [];
   const add = (label, value, extra) => { if (value && String(value).length >= 4) out.push({ label, value: String(value), auto: true, ...extra }); };
-  const home = os.homedir();
+  const username = who.username || os.userInfo().username, hostname = who.hostname || os.hostname();
+  const home = who.home || os.homedir();
   // A short name is often a word or a brand as well (a user called "Rose" on a page about a rose garden): it only counts written
   // against a path or an @ (C:/Users/<name>, <name>@host); the home folder above catches the usual place.
   const short = v => String(v || '').length < 6 ? { near: true } : {};
-  add('your user name on this PC', os.userInfo().username, short(os.userInfo().username));
-  add('this PC\'s name', os.hostname(), short(os.hostname()));
+  if (!GENERIC_NAME.test(username)) add('your user name on this PC', username, short(username));
+  if (!GENERIC_NAME.test(hostname)) add('this PC\'s name', hostname, short(hostname));
   add('your home folder', home);
   if (/^[A-Za-z]:\\/.test(home)) add('your home folder', '/' + home[0].toLowerCase() + home.slice(2).replace(/\\/g, '/')); // as Git Bash writes it
   // Your git name is also the copyright holder of what you publish, and often your public code host account: allowed
   // on a copyright line and inside a link (github.com/<name>/<repo> is the address you publish at), nowhere else.
   add('your git name', gitGlobal('user.name'), { allowOn: /\bcopyright\b|\(c\)|©/i, allowInLink: true });
   add('your git email', gitGlobal('user.email'));
+  // A projects folder called "work", "code" or "projects" is an everyday word too: like a short user name, it only
+  // counts written against a path or an @ (the whole folder path above is looked for anywhere).
+  const EVERYDAY = /^(work|code|coding|dev|develop|development|projects?|repos?|repositories|src|source|sites?|websites?|web|apps?|git|github|clients?|documents|files|workspace|home|test|tests|www|builds?|programming)$/i;
   for (const w of workingFolders) {
     add('your projects folder', w);
-    add('your projects folder\'s name', path.basename(w));
+    const name = path.basename(w);
+    add('your projects folder\'s name', name, name.length < 6 || EVERYDAY.test(name) ? { near: true } : {});
   }
   return out;
 }

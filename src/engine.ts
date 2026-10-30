@@ -370,6 +370,28 @@ export const CONTINUE_ASK = 'Your last answer was cut off by its length limit. C
  */
 export const runnerJson = (body: unknown): string => JSON.stringify(body, (_k, v: unknown) => (typeof v === 'string' ? v.toWellFormed() : v));
 
+/**
+ * fetch for a model runner, with no time limit on its reply. Node's fetch gives up when no headers come for 300 s, or
+ * no bytes between two pieces for 300 s, and a runner sends none while it works: llama-server while it reads a prompt
+ * (a progress line once a 2048-token batch, at best), the picture runner until its job is queued. A slow CPU reading a
+ * long prompt went past that and the answer failed. The limit is lifted with the agent Node's own fetch uses (made
+ * with no time limits); on a Node without it, plain fetch. Stop still ends it: that is the request's signal.
+ */
+let patient: object | false | null = null;
+export async function runnerFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (patient === null) {
+    // Node sets up its fetch agent on the first fetch: a data: address costs nothing.
+    await fetch('data:,').catch(() => undefined);
+    const agent = (globalThis as unknown as Record<symbol, { constructor?: new (o: object) => object } | undefined>)[Symbol.for('undici.globalDispatcher.1')];
+    try {
+      patient = agent?.constructor ? new agent.constructor({ headersTimeout: 0, bodyTimeout: 0 }) : false;
+    } catch {
+      patient = false;
+    }
+  }
+  return fetch(url, patient ? ({ ...init, dispatcher: patient } as RequestInit) : init);
+}
+
 export async function streamChat(base: string, model: string, turns: ChatTurn[], onText: (text: string) => void, signal: AbortSignal, maxTokens = MAX_ANSWER, opts: AskOpts = {}): Promise<Streamed> {
   const style = opts.plain ? plainStyle(model, opts.think) : chatStyle(model, opts.think);
   // Its own stop as well as the caller's: working that goes round in circles is stopped here (below).
@@ -384,11 +406,12 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
   const round = opts.round ?? 0;
   const tools = opts.tools ? { tools: opts.tools.defs, tool_choice: round >= opts.tools.rounds ? 'none' : 'auto' } : {};
   try {
-    const res = await fetch(`${base}/v1/chat/completions`, {
+    const res = await runnerFetch(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
-      // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word.
-      body: runnerJson({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, ...(opts.onReading ? { return_progress: true } : {}) }),
+      // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word. Asked
+      // always, not only when it is shown: a line now and then keeps the stream from going quiet on a long prompt.
+      body: runnerJson({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, return_progress: true }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {
@@ -438,7 +461,10 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     let buffer = '';
     const decoder = new TextDecoder();
     try {
-      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      // A line end after the stream, so its last line is read even when the server sent none after it.
+      const body = res.body as unknown as AsyncIterable<Uint8Array>;
+      const stream = (async function* () { yield* body; yield new TextEncoder().encode('\n'); })();
+      for await (const chunk of stream) {
         buffer += decoder.decode(chunk, { stream: true });
         let nl: number;
         while ((nl = buffer.indexOf('\n')) >= 0) {
@@ -527,7 +553,9 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       // The words before the calls ("I will look that up") are not the answer: the next round writes it.
       onText('');
       const ids = asked.map((c, i) => c.id || `call_${round}_${i}`);
-      const said: Record<string, unknown>[] = [{ role: 'assistant', content: visibleText(raw), tool_calls: asked.map((c, i) => ({ id: ids[i], type: 'function', function: { name: c.name, arguments: c.args || '{}' } })) }];
+      // Arguments that are not a JSON object (cut by the length limit, or a small model's broken JSON) are sent back as
+      // {}: llama-server refuses the whole next ask over them (a 500, measured). The tool itself still gets what was written.
+      const said: Record<string, unknown>[] = [{ role: 'assistant', content: visibleText(raw), tool_calls: asked.map((c, i) => ({ id: ids[i], type: 'function', function: { name: c.name, arguments: jsonObject(c.args) ? c.args : '{}' } })) }];
       for (const [i, c] of asked.entries()) {
         opts.tools.onCall?.(c.name, c.args);
         let out: string;
@@ -552,6 +580,16 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
   } finally {
     signal.removeEventListener('abort', stop);
     if (hurry) opts.hurry?.removeEventListener('abort', hurry);
+  }
+}
+
+/** True when `text` is a JSON object (what llama-server takes as a tool call's arguments). */
+function jsonObject(text: string): boolean {
+  try {
+    const v: unknown = JSON.parse(text);
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+  } catch {
+    return false;
   }
 }
 

@@ -10,7 +10,7 @@ import { LOOK_OPTIONS, cleanLook } from '../look.ts';
 import * as mute from '../mute.ts';
 import { cleanTitle, recentEntries, subjectFor, whoKind, type ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
-import { HOME, HOST_NAME, HOST_ON, SECURITY_HEADERS, type Route, type Routes, chatLogs, chats, faces, json, mutes, publicSettings, shortName, staff, staffId, store, workspaceDir } from './core.ts';
+import { HOME, HOST_NAME, HOST_ON, SECURITY_HEADERS, type Route, type Routes, chatLogs, chats, decoded, faces, json, mutes, publicSettings, shortName, staff, staffId, store, workspaceDir } from './core.ts';
 import { chatList, images } from './panes.ts';
 import { chatWork, stopChats } from './answering.ts';
 import { docStore, liveAnswers } from './chat.ts';
@@ -235,8 +235,9 @@ export async function answeringNow() {
 
 /** A profile photo: GET /api/faces/file/<who>. */
 export async function faceFile(face: RegExpExecArray, res: ServerResponse): Promise<void> {
-  const who = decodeURIComponent(face[1]);
-  const file = await faces.path(who);
+  // A broken %-escape names nobody: not found.
+  const who = decoded(face[1]);
+  const file = who === null ? null : await faces.path(who);
   if (!file) return json(res, 404, { error: 'Not found.' });
   const png = await readFile(file).catch(() => null);
   if (!png) return json(res, 404, { error: 'Not found.' });

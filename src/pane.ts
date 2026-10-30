@@ -114,15 +114,21 @@ export class Pane {
         const seconds = Math.round((Date.now() - (this.view.loadStartedAt ?? Date.now())) / 100) / 10;
         // A moment for the last start lines to arrive before they are read.
         await sleep(300);
-        noCard = req.started?.(device, this.worker.facts) ?? '';
-        if (!noCard) {
-          this.connectedRam = ramUsed();
-          this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: notes.join(' ') || null });
-          return this.view;
-        }
-        tail = noCard;
-        await this.worker.end();
+        // Disconnect pressed in that moment: it is ending the runner, so the runner is never said to be connected.
         if (this.view.state !== 'loading') return this.view;
+        // The runner ended in that moment (it answered, then stopped): a failed start, said from its last lines.
+        if (!this.worker.pid) tail = this.worker.tail();
+        else {
+          noCard = req.started?.(device, this.worker.facts) ?? '';
+          if (!noCard) {
+            this.connectedRam = ramUsed();
+            this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: notes.join(' ') || null });
+            return this.view;
+          }
+          tail = noCard;
+          await this.worker.end();
+          if (this.view.state !== 'loading') return this.view;
+        }
       }
       const why = noCard ? `${noCard[0].toUpperCase()}${noCard.slice(1)}.` : req.why(tail);
       if (i < req.devices.length - 1) {

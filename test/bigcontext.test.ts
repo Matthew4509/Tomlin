@@ -162,9 +162,11 @@ test('reading progress: asked for when someone shows it, passed on cleaned, and 
     assert.equal(s.asked[0].return_progress, true);
     assert.deepEqual(seen.map(x => x.done), [1000, 3048, 5000]);
     assert.deepEqual(seen[0], { total: 5000, cached: 1000, done: 1000, ms: 0 });
-    // Nobody shows it (a job step, a title): not asked for.
-    await streamChat(s.base, 'Qwen3.5-0.8B-Q4_K_M.gguf', [{ role: 'user', content: 'hi' }], () => undefined, new AbortController().signal, 64);
-    assert.equal(s.asked[1].return_progress, undefined);
+    // Nobody shows it (a job step, a title): asked for all the same, so a long prompt on a slow CPU never goes quiet
+    // for long enough to be cut (test/slowcpu.test.ts); its lines are read past, and the answer comes as before.
+    const quiet = await streamChat(s.base, 'Qwen3.5-0.8B-Q4_K_M.gguf', [{ role: 'user', content: 'hi' }], () => undefined, new AbortController().signal, 64);
+    assert.equal(s.asked[1].return_progress, true);
+    assert.equal(quiet.text, 'OK');
   } finally {
     await s.close();
   }

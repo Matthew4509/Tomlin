@@ -87,11 +87,19 @@ async function stopBrowser(port) {
     await closeBrowser(port);
     if (await gone(port, 3000)) return;
   }
-  for (let i = 0; i < 3; i++) {
+  // At most 20 s in all, so Quit is never held long.
+  const until = Date.now() + 20000;
+  for (let i = 0; i < 3 && Date.now() < until; i++) {
     const held = await edges();
-    if (!held.length) return;
+    // Nobody found while the port is still held: on a PC under load the lookup can come back empty, so look again.
+    if (!held.length) {
+      if (await gone(port, 1000)) return;
+      continue;
+    }
     for (const o of held) killTree(o.pid);
-    if (await gone(port, 2000)) return;
+    // Windows ends a stopped Edge in its own time: under load its browser held the port 10 to 30 s after taskkill
+    // said it was done (measured), so the port is watched that long, not 2 s, before it is stopped again.
+    if (await gone(port, Math.max(2000, until - Date.now()))) return;
   }
 }
 

@@ -373,7 +373,8 @@ async function projectGet(id: string | null) {
   };
   const [scope, design, meta] = await Promise.all([read('scope.md'), read('design.md'), read('project.json')]);
   if (!scope || !design || !meta) return null;
-  const p = JSON.parse(meta);
+  // A damaged project.json only costs the one-line statement: the scope and design still open.
+  const p = (() => { try { return JSON.parse(meta) ?? {}; } catch { return {}; } })();
   return { id, scope, design, chars: scope.length + design.length, statement: String(p.answers?.statement || p.prompt || p.about || ''), folder: `jobs/${id}` };
 }
 

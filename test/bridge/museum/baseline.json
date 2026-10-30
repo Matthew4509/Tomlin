@@ -1,5 +1,5 @@
 {
- "note": "Classes the scanner catches today, and quiet cases it still flags. test/museum.test.js fails if a caught class is lost; add ids here as phases catch more. Phase T1 baseline: 14 of 131 classes (11%), 35 of 474 faults (7%). Phase T2: 85 of 131 (65%), 253 of 474 faults (53%); one-file rules 81 of 90. Phase T3: 112 of 131 (85%), 398 of 474 faults (84%); cross-file 28 of 28. Phase T4: 119 of 131 (91%), 418 of 474 faults (88%); quiet-book-text fixed. Phase T5: 129 of 131 (98%), 470 of 474 faults (99%); live 13 of 13. Phase T7: 130 of 131 (img-no-dimensions back as Low); money-int-cast left out on purpose (T2).",
+ "note": "Classes the scanner catches today, and quiet cases it still flags. test/museum.test.js fails if a caught class is lost; add ids here as phases catch more. Phase T1 baseline: 14 of 131 classes (11%), 35 of 474 faults (7%). Phase T2: 85 of 131 (65%), 253 of 474 faults (53%); one-file rules 81 of 90. Phase T3: 112 of 131 (85%), 398 of 474 faults (84%); cross-file 28 of 28. Phase T4: 119 of 131 (91%), 418 of 474 faults (88%); quiet-book-text fixed. Phase T5: 129 of 131 (98%), 470 of 474 faults (99%); live 13 of 13. Phase T7: 130 of 131 (img-no-dimensions back as Low); money-int-cast left out on purpose (T2). Bucket A (AI agent files, src/bridge/agents.js): 18 of 18, with 3 must-stay-quiet cases.",
  "caught": [
   "rate-key-xff", "tracker-no-consent", "innerhtml-from-fetch", "secret-key-in-public-js", "privacy-omits-script-host",
   "disc-private-detail", "disc-other-project", "disc-local-path", "disc-name-in-file-name", "disc-commit-email",
@@ -26,7 +26,11 @@
   "immutable-unversioned", "hollow-tests", "disc-owner-quote", "disc-every-line", "disc-older-zip",
   "disc-zip-in-history", "disc-ai-name-in-copy", "disc-prompt-file", "disc-start-here", "live-headers-by-file-type",
   "live-soft-404", "live-folder-listing", "live-package-json", "live-orphan-file", "live-dmarc",
-  "live-no-description", "live-robots-prefix", "live-canonical-404", "live-outdated-library", "img-no-dimensions"
+  "live-no-description", "live-robots-prefix", "live-canonical-404", "live-outdated-library", "img-no-dimensions",
+  "agent-hidden-comment", "agent-hidden-element", "agent-tag-smuggling", "agent-bidi", "agent-override-visible",
+  "agent-exfil-instruction", "agent-hook-download-run", "agent-encoded-exec", "agent-key-file-sent", "agent-env-dump",
+  "agent-drop-box", "agent-unnamed-service", "agent-persistence", "agent-bypass-permissions", "agent-wide-allow",
+  "agent-mcp-unpinned", "agent-encoded-block", "agent-all-mcp-on"
  ],
  "knownFalseFlags": []
 }

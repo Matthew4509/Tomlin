@@ -13,7 +13,7 @@ import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
 import { refreshTray } from './trayfresh.ts';
 import { autostart } from './autostart.ts';
-import { ALREADY_RUNNING, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, hooks, saidError, json, staff, staticFile, store } from './server/core.ts';
+import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store } from './server/core.ts';
 import { settingsGet, settingsPost } from './server/settings.ts';
 import { appLock, appLockAction, appLockOn, appLockView, appOk } from './server/locks.ts';
 import { images, loadModel, openAiChat, panesGet, panesPost, unloadPane } from './server/panes.ts';
@@ -98,7 +98,9 @@ const server = createServer(async (req, res) => {
     if (!HOSTS.has(req.headers.host ?? '')) return json(res, 403, { error: `Open TOMLIN at http://127.0.0.1:${PORT}` });
     const origin = req.headers.origin;
     if (origin && !ORIGINS.has(origin)) return json(res, 403, { error: 'Requests must come from TOMLIN\'s own page or a program on this PC.' });
-    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    // An address that cannot be read (such as //) is the asker's mistake, not a fault here.
+    const url = URL.parse(req.url ?? '/', `http://${req.headers.host}`);
+    if (!url) return json(res, 400, { error: 'That address cannot be read.' });
     const p = url.pathname;
     // The app lock, before anything else: while locked only the page's files and the lock's own door answer.
     // Every reply below is awaited, so a fault in one reaches the catch at the end and is answered, never left waiting.
@@ -123,7 +125,9 @@ const server = createServer(async (req, res) => {
       const face = /^\/api\/faces\/file\/([^/]+)$/.exec(p);
       if (face) return await faceFile(face, res);
       const pcPhoto = /^\/api\/pc\/photo\/([^/]+)$/.exec(p);
-      if (pcPhoto) return await pcPhotoFile(decodeURIComponent(pcPhoto[1]), res);
+      // A broken %-escape names no PC: not found, as any other name that has no photo.
+      const pcKey = pcPhoto ? decoded(pcPhoto[1]) : null;
+      if (pcPhoto) return pcKey === null ? json(res, 404, { error: 'Not found.' }) : await pcPhotoFile(pcKey, res);
       if (await images.get(req, res, url)) return;
       if (!p.startsWith('/api/') && !p.startsWith('/v1/')) return void (await staticFile(res, p));
       return json(res, 404, { error: 'Not found.' });
@@ -149,6 +153,8 @@ const server = createServer(async (req, res) => {
     if (await images.post(req, res, url, b)) return;
     return json(res, 404, { error: 'Not found.' });
   } catch (error) {
+    // A request the asker got wrong (not JSON, too large) is answered with its own status and words, not logged as a fault.
+    if (error instanceof AskError && !res.headersSent) return json(res, error.status, { error: error.message });
     log.error(`${req.method} ${(req.url ?? '').split('?')[0]}`, error);
     if (!res.headersSent) json(res, 500, { error: saidError(error) });
     else res.end();

@@ -52,19 +52,23 @@ function makeMatcher(projects) {
 // Calls fn for each line of a file, read 1 MB at a time: transcripts can be hundreds of MB, and reading one whole
 // kept the Bridge at about 400 MB long after the count finished. A newline byte never sits inside a UTF-8 character,
 // so splitting the bytes on it is safe.
+// A line longer than MAX_LINE (no newline for 16 MB: a damaged or hostile file) is passed over to its end, not kept:
+// kept, it was copied again with every MB read and grew with the file until the worker ran out of memory.
+const MAX_LINE = 16 << 20;
 function eachLine(file, fn) {
   let fd;
   try { fd = fs.openSync(file, 'r'); } catch { return; }
   const buf = Buffer.alloc(1 << 20);
-  let rest = Buffer.alloc(0), n;
+  let rest = Buffer.alloc(0), n, skipping = false;
   try {
     while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
       let chunk = rest.length ? Buffer.concat([rest, buf.subarray(0, n)]) : buf.subarray(0, n);
       let start = 0, nl;
-      while ((nl = chunk.indexOf(10, start)) !== -1) { if (nl > start) fn(chunk.toString('utf8', start, nl)); start = nl + 1; }
+      while ((nl = chunk.indexOf(10, start)) !== -1) { if (!skipping && nl > start) fn(chunk.toString('utf8', start, nl)); skipping = false; start = nl + 1; }
       rest = Buffer.from(chunk.subarray(start));
+      if (rest.length > MAX_LINE) { rest = Buffer.alloc(0); skipping = true; }
     }
-    if (rest.length) fn(rest.toString('utf8'));
+    if (rest.length && !skipping) fn(rest.toString('utf8'));
   } finally { fs.closeSync(fd); }
 }
 

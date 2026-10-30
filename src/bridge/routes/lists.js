@@ -11,6 +11,8 @@ const desktop = require('../desktop');
 
 const has = (list, p) => list.some(x => keyOf(x) === keyOf(p));
 const drop = (list, p) => list.filter(x => keyOf(x) !== keyOf(p));
+// The path the page sent, as text. An empty one names nothing: resolved, it would be the folder TOMLIN runs in.
+const pathOf = v => (typeof v === 'string' ? v.trim() : '');
 
 const get = {
   '/api/projects': async ({ url }) => ({ projects: await listView(url.searchParams.get('fresh') === '1'), stats: laptopStats() }),
@@ -29,13 +31,14 @@ const post = {
     return { ok: true, path: dir, projects: state.projects.filter(p => p.workingFolder && keyOf(p.workingFolder) === keyOf(dir)).length, scan };
   },
   '/api/folders/open': ({ body }) => {
-    const f = state.settings.workingFolders.find(x => keyOf(x) === keyOf(String(body.path || '')));
+    const f = pathOf(body.path) && state.settings.workingFolders.find(x => keyOf(x) === keyOf(pathOf(body.path)));
     if (!f) return { ok: false, error: 'That folder is not on the list any more. Reload the page.' };
     return { ok: true, ...desktop.openFolder(f) };
   },
   '/api/folders/remove': async ({ body }) => {
-    if (!has(state.settings.workingFolders, String(body.path || ''))) return { ok: false, error: 'That folder is not on the list any more. Reload the page.' };
-    state.settings.workingFolders = drop(state.settings.workingFolders, body.path);
+    const p = pathOf(body.path);
+    if (!p || !has(state.settings.workingFolders, p)) return { ok: false, error: 'That folder is not on the list any more. Reload the page.' };
+    state.settings.workingFolders = drop(state.settings.workingFolders, p);
     saveSettings();
     return { ok: true, scan: await scanFolders() };
   },
@@ -68,14 +71,16 @@ const post = {
   },
   // An added project whose folder is gone (it is not on the list, so it has no id): taken off by its path.
   '/api/projects/forget': ({ body }) => {
-    if (!has(state.settings.extraProjects, String(body.path || ''))) return { ok: false, error: 'That project is not on the list any more. Reload the page.' };
-    state.settings.extraProjects = drop(state.settings.extraProjects, body.path);
+    const p = pathOf(body.path);
+    if (!p || !has(state.settings.extraProjects, p)) return { ok: false, error: 'That project is not on the list any more. Reload the page.' };
+    state.settings.extraProjects = drop(state.settings.extraProjects, p);
     saveSettings();
     return { ok: true };
   },
   '/api/projects/show': async ({ body }) => {
-    if (!has(state.settings.hidden, String(body.path || ''))) return { ok: false, error: 'That project is not in the removed list any more. Reload the page.' };
-    state.settings.hidden = drop(state.settings.hidden, body.path);
+    const p = pathOf(body.path);
+    if (!p || !has(state.settings.hidden, p)) return { ok: false, error: 'That project is not in the removed list any more. Reload the page.' };
+    state.settings.hidden = drop(state.settings.hidden, p);
     saveSettings();
     await scanFolders();
     return { ok: true };

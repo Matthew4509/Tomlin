@@ -2,8 +2,8 @@
 // is with, its title, when it was started and last used). A chat is with one person: the manager, one hire
 // ("staff:<id>"); that never changes, so one person's answers are never read by another. Pictures drawn while a chat is open carry its id in the gallery (src/gallery.ts), so each chat keeps its own.
 import { randomBytes } from 'node:crypto';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { removeAtomic } from './atomic.ts';
 import type { ChatLine, Store } from './store.ts';
 import { chatFolder } from './folders.ts';
 
@@ -168,7 +168,11 @@ export class Chats {
   private async index(): Promise<ChatInfo[]> {
     if (this.cache) return this.cache;
     this.reading ??= this.store.readJson<ChatInfo[]>(INDEX, []).then(list => {
-      this.cache ??= Array.isArray(list) ? list.filter(c => c && ID.test(c.id) && typeof c.who === 'string') : [];
+      // An entry missing its title or times (or with ones that are not words) is kept, with them filled in, so sorting
+      // and naming never stop on it.
+      const words = (v: unknown, or: string) => (typeof v === 'string' ? v : or);
+      this.cache ??= Array.isArray(list) ? list.filter(c => c && ID.test(c.id) && typeof c.who === 'string')
+        .map(c => ({ ...c, title: words(c.title, NEW_TITLE), created: words(c.created, ''), updated: words(c.updated, words(c.created, '')) })) : [];
       return this.cache;
     }).finally(() => {
       this.reading = null;
@@ -309,7 +313,8 @@ export class Chats {
     if (i < 0) return false;
     list.splice(i, 1);
     await this.write();
-    await rm(join(this.store.dir, this.file(id)), { force: true });
+    // In the file's turn: a save of it still being written finishes first, then the file goes (it never comes back).
+    await removeAtomic(join(this.store.dir, this.file(id)));
     return true;
   }
 

@@ -441,7 +441,8 @@ export async function unplanned(): Promise<{ id: string; name: string; goal: str
   const out: { id: string; name: string; goal: string; at: string; chat?: string }[] = [];
   for (const id of (await readdir(join(root, 'jobs')).catch(() => [] as string[])).filter(jobs.validId)) {
     if (await stat(join(root, 'jobs', id, 'plan.json')).then(() => true, () => false)) continue;
-    const p = await readFile(join(root, 'jobs', id, 'project.json'), 'utf8').then(t => JSON.parse(t) as Record<string, unknown> & { answers?: { statement?: unknown } }, () => null);
+    // Not there, or damaged: left out of the list, which every other project (and the To Do, the queue, Home) still needs.
+    const p = await readFile(join(root, 'jobs', id, 'project.json'), 'utf8').then(t => JSON.parse(t) as Record<string, unknown> & { answers?: { statement?: unknown } }).catch(() => null);
     if (!p) continue;
     out.push({ id, name: String(p.name ?? ''), goal: String(p.prompt || p.about || p.answers?.statement || ''), at: String(p.created ?? ''), ...(typeof p.chat === 'string' && p.chat ? { chat: p.chat } : {}) });
   }

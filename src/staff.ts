@@ -355,6 +355,15 @@ interface File {
   auditions: Record<string, Audition>;
 }
 
+/** A hire as read from the file: a retired role's new one, and what every page relies on (a name, a list) even if edited by hand. */
+function sound(m: StaffMember): StaffMember {
+  const out = RETIRED[m.role] ? { ...m, role: RETIRED[m.role] } : { ...m };
+  if (typeof out.name !== 'string' || !out.name.trim()) out.name = out.id;
+  if (out.group !== undefined && !Array.isArray(out.group)) out.group = [];
+  for (const k of ['model', 'fallback', 'active'] as const) if (out[k] !== undefined && typeof out[k] !== 'string') out[k] = null;
+  return out;
+}
+
 /** The roster, saved in the data folder as staff.json. Kept in memory, written whole through a temporary file. */
 export class Staff {
   private file: File = { staff: [], auditions: {} };
@@ -369,7 +378,7 @@ export class Staff {
     // Not there yet: no roster. Damaged: set aside and reported (src/atomic.ts), never saved over.
     const f = await readData<Partial<File> | null>(join(dir, 'staff.json'), null);
     if (f && typeof f === 'object') {
-      s.file = { ...f, staff: Array.isArray(f.staff) ? f.staff.filter(m => m && typeof m.id === 'string').map(m => (RETIRED[m.role] ? { ...m, role: RETIRED[m.role] } : m)) : [], auditions: f.auditions ?? {}, gone: Array.isArray(f.gone) ? f.gone.filter(x => typeof x === 'string') : [] };
+      s.file = { ...f, staff: Array.isArray(f.staff) ? f.staff.filter(m => m && typeof m.id === 'string').map(sound) : [], auditions: f.auditions && typeof f.auditions === 'object' ? f.auditions : {}, gone: Array.isArray(f.gone) ? f.gone.filter(x => typeof x === 'string') : [] };
     }
     return s;
   }

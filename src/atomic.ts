@@ -52,6 +52,11 @@ export function writeAtomic(file: string, data: string | Buffer): Promise<void> 
   return inTurn(file, () => writeNow(file, data));
 }
 
+/** Deletes `file` in its turn: after every write of it asked for before, so a save still being written never puts it back. */
+export function removeAtomic(file: string): Promise<void> {
+  return inTurn(file, () => rm(file, { force: true }));
+}
+
 export interface Damaged {
   /** The file as it was named. */
   file: string;
@@ -98,7 +103,8 @@ async function readNow<T>(file: string, fallback: T, leave = false): Promise<T> 
     }
   }
   try {
-    return JSON.parse(text) as T;
+    // A file saved by hand in Notepad or PowerShell can start with a byte-order mark, which JSON.parse refuses: it is skipped.
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as T;
   } catch {
     if (leave) throw new DamagedFile(file);
     await setAside(file);

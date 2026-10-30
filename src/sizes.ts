@@ -28,6 +28,13 @@ export function parseSize(prompt: string): { size: Size | null; prompt: string }
   return { size, prompt: tidy(prompt.slice(0, m.index) + ' ' + prompt.slice(m.index + m[0].length)) };
 }
 
+/** A size from a form or a request: whole pixels, each side MIN to MAX. Anything else is no size, as in a prompt. */
+export function fieldSize(width: unknown, height: unknown): Size | null {
+  const w = Math.round(Number(width));
+  const h = Math.round(Number(height));
+  return w >= MIN && w <= MAX && h >= MIN && h <= MAX ? { width: w, height: h } : null;
+}
+
 function tidy(text: string): string {
   return text.replace(/\s+/g, ' ').replace(/\s+([,.;:])/g, '$1').replace(/([,;:])\s*(?=[,;:.]|$)/g, '').replace(/^[\s,;:.-]+|[\s,;:-]+$/g, '').trim();
 }

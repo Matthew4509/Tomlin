@@ -1,5 +1,6 @@
 // Files: open, edit and save plain text files in one workspace folder the person chooses. Nothing outside the folder is
 // touched, nothing is run, nothing is deleted. The plain functions are tested in test/workspace.test.ts.
+import { realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeAtomic } from './atomic.ts';
@@ -33,6 +34,23 @@ export function cleanPath(input: unknown, mustBeText = true): string | null {
 }
 
 /**
+ * The folder a path really is: a link or junction followed, and a short or device spelling (\\.\C:\..., PROGRA~1) made
+ * plain. The part that is not there yet is kept as typed. A network path is left as it is (asking could hold the
+ * whole server up while a PC that is off does not answer).
+ */
+function realFolder(path: string): string {
+  const full = resolve(path.replace(/^[\\/]{2}[.?][\\/]/, ''));
+  if (full.startsWith('\\\\')) return full;
+  for (let probe = full; ; probe = dirname(probe)) {
+    try {
+      return join(realpathSync.native(probe), relative(probe, full));
+    } catch {
+      if (dirname(probe) === probe) return full;
+    }
+  }
+}
+
+/**
  * A workspace folder the person typed: '' for the default one, the path when it may be used (absolute, not a drive root,
  * not Windows' own folders), null when not. The quotes Windows' "Copy as path" puts round a path are taken off.
  */
@@ -40,8 +58,14 @@ export function cleanFolder(input: unknown): string | null {
   const path = String(input ?? '').trim().replace(/^["“”'](.*)["“”']$/, '$1').trim();
   if (!path) return '';
   const p = path.replace(/\//g, '\\');
-  const ok = isAbsolute(path) && p.split('\\').filter(Boolean).length >= 2 && !/^[a-z]:\\(windows|program files|program files \(x86\)|programdata)(\\|$)/i.test(p) && !/[\0<>"|?*]/.test(path);
-  return ok ? path : null;
+  const parts = p.split('\\').filter(Boolean);
+  // A name ending in a dot or a space (".." among them) is another folder to Windows than it looks, and \\.\ is a device's way of naming one.
+  if (p.startsWith('\\\\.\\') || parts.some(x => /[ .]$/.test(x))) return null;
+  const windows = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)(\\|$)/i;
+  if (!isAbsolute(path) || parts.length < 2 || windows.test(p) || /[\0<>"|?*]/.test(path)) return null;
+  // The same again for where it really leads: a link can lead to the top of a drive or to Windows' own folders.
+  const real = realFolder(path);
+  return windows.test(real) || /^[a-z]:\\?$/i.test(real) ? null : path;
 }
 
 /**
@@ -49,7 +73,7 @@ export function cleanFolder(input: unknown): string | null {
  * job steps must never read the data (your chats) or write over the app's own code there.
  */
 export function overlaps(folder: string, kept: string[]): boolean {
-  const norm = (p: string) => resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+  const norm = (p: string) => realFolder(p).replace(/[\\/]+$/, '').toLowerCase();
   const f = norm(folder);
   return kept.map(norm).some(k => f === k || f.startsWith(k + sep) || k.startsWith(f + sep));
 }

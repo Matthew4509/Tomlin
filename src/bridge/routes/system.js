@@ -69,7 +69,8 @@ const post = {
     const stopped = stopAllProjects();
     const others = [];
     if (body.others && Array.isArray(body.listed)) {
-      const listed = new Set(body.listed.map(x => x.port + ':' + x.pid));
+      // An entry that is not a { port, pid } (a damaged or hand-made request) matches nothing, so stops nothing.
+      const listed = new Set(body.listed.map(x => (x && typeof x === 'object' ? x.port + ':' + x.pid : '')));
       for (const o of await foreignPorts()) if (listed.has(o.port + ':' + o.pid)) others.push(await stopForeign(o));
     }
     return { ok: true, stopped, others };

@@ -203,12 +203,30 @@ export function apiError(res: ServerResponse, status: number, message: string, c
   json(res, status, { error: { message, type: code, code } });
 }
 
+/** A request the asker got wrong (too large, not JSON): the server answers it with this status, not as a fault (500). */
+export class AskError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** A name from the address, %-escapes undone; null when an escape is broken (such as %E0%A4%A), so nothing has that name. */
+export function decoded(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > limit) throw new Error('The request is too large.');
+    if (size > limit) throw new AskError(413, 'The request is too large.');
     chunks.push(c as Buffer);
   }
   if (!chunks.length) return {};
@@ -216,7 +234,7 @@ export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Reco
     const v = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     return v && typeof v === 'object' ? v : {};
   } catch {
-    throw new Error('The request was not valid JSON.');
+    throw new AskError(400, 'The request was not valid JSON.');
   }
 }
 

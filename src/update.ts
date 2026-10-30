@@ -264,6 +264,15 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+/** Removes every file under `dir` that the list (lower-case paths) does not name. */
+async function dropUnlisted(dir: string, rel: string, listed: Set<string>): Promise<void> {
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    const path = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) await dropUnlisted(join(dir, e.name), path, listed);
+    else if (!listed.has(path.toLowerCase())) await rm(join(dir, e.name), { force: true });
+  }
+}
+
 // ---- The node's side ----
 
 export interface UpdateNodeDeps {
@@ -385,8 +394,21 @@ export function updateSide(d: UpdateNodeDeps) {
           if (own.get(f.path) === f.sha) continue;
           const there = join(staging, ...f.path.split('/'));
           if ((await sizeOf(there)) === f.bytes && (await exists(there))) continue;
+          // A part as long as the file was never moved into place (cut off just then, or a scanner held it): it would
+          // be carried on from its end, so nothing is sent and the file never comes. Whole, it takes its place; else it
+          // is from other files of this version, and starts again.
+          const part = partOf(there);
+          let got = await sizeOf(part);
+          if (got && got >= f.bytes) {
+            if (got === f.bytes && (await sha256(part)) === f.sha) {
+              await rename(part, there);
+              continue;
+            }
+            await rm(part, { force: true });
+            got = 0;
+          }
           need.push(k);
-          at.push(Math.min(await sizeOf(partOf(there)), f.bytes));
+          at.push(got);
         }
         const total = files.reduce((n, f) => n + f.bytes, 0);
         const full = roomWhy(total, await room(dirname(d.root)), `"${d.pcName()}"`);
@@ -442,6 +464,9 @@ export function updateSide(d: UpdateNodeDeps) {
             return no(409, `${f.path} is not as it was sent: start the update again.`);
           }
         }
+        // What an earlier try at this version left and this list does not name stays out of the new copy (it would be
+        // another build than the one sent).
+        await dropUnlisted(c.staging, '', new Set(c.files.map(f => f.path.toLowerCase())));
         const said = await versionIn(c.staging);
         if (said !== c.version) return no(400, `the files that came in say TOMLIN ${said || '(no version)'}, not ${c.version} as sent, so they were not used. The sending PC's folder changed after its TOMLIN started: close TOMLIN there, start it again, then update again.`);
         // Its own Node.js, when the update brings none: the new copy must still start without one installed.
@@ -462,7 +487,12 @@ export function updateSide(d: UpdateNodeDeps) {
         const version = c.version;
         current = null;
         starting = { version, fromName: who.name };
-        await d.done(final, version, who.name, here);
+        try {
+          await d.done(final, version, who.name, here);
+        } catch (e) {
+          starting = null; // nothing is starting: this PC's screen does not go on saying so
+          throw e;
+        }
         return { status: 200, json: { done: true, folder: basename(final) } };
       }
       case '/worker/update-drop': {

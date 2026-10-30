@@ -1,7 +1,6 @@
 // Past pictures and how each was made, in data/images/: the files by month, and gallery.jsonl with one line per
 // picture (prompt, seed, sizes, mode, model, time). Only names this file wrote can be served back.
 import { appendFile, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Size } from './sizes.ts';
 import type { Mode } from './modes.ts';
@@ -183,19 +182,19 @@ export class Gallery {
     return (await this.all()).find(p => p.id === id);
   }
 
-  /** A folder for this month's files, and a relative name inside it. */
-  async place(name: string): Promise<{ rel: string; full: string }> {
+  /** Writes a new file in this month's folder and gives its relative name. A name already taken gets -2, -3 and so on: the write itself refuses a taken name, so two saves at once never share a file. */
+  async save(name: string, data: Buffer): Promise<string> {
     const month = new Date().toISOString().slice(0, 7);
     await mkdir(join(this.dir, month), { recursive: true });
-    let rel = `${month}/${name}`;
-    for (let n = 2; existsSync(join(this.dir, rel)); n++) rel = `${month}/${name.replace(/(\.[a-z]+)$/i, `-${n}$1`)}`;
-    return { rel, full: join(this.dir, rel) };
-  }
-
-  async save(name: string, data: Buffer): Promise<string> {
-    const { rel, full } = await this.place(name);
-    await writeFile(full, data);
-    return rel;
+    for (let n = 1; ; n++) {
+      const rel = `${month}/${n === 1 ? name : name.replace(/(\.[a-z]+)?$/i, `-${n}$1`)}`;
+      try {
+        await writeFile(join(this.dir, rel), data, { flag: 'wx' });
+        return rel;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
+    }
   }
 
   async add(p: Picture): Promise<void> {

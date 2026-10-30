@@ -12,9 +12,10 @@ const prompts = require('./prompts');
 const project = require('./project');
 const hosting = require('./hosting');
 const backup = require('./backup');
+const skills = require('./skills');
 
-const GET = { ...system.get, ...lists.get, ...prompts.get, ...hosting.get, ...backup.get };
-const POST = { ...system.post, ...lists.post, ...prompts.post, ...hosting.post, ...backup.post };
+const GET = { ...system.get, ...lists.get, ...prompts.get, ...hosting.get, ...backup.get, ...skills.get };
+const POST = { ...system.post, ...lists.post, ...prompts.post, ...hosting.post, ...backup.post, ...skills.post };
 const PGET = { ...project.get, ...hosting.pget };
 const PPOST = { ...project.post, ...hosting.ppost };
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + cfg.PORT, 'localhost:' + cfg.PORT]);
@@ -42,8 +43,8 @@ async function handle(req, res) {
     }
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
 
-    // A pasted report-back table can be long; everything else is small.
-    ctx.body = await readBody(req, url.pathname.startsWith('/api/prompts/') ? prompts.BODY_LIMIT : url.pathname === '/api/audit/import' ? 200000 : url.pathname === '/api/hosting/secrets' ? 400000 : 10000);
+    // A pasted report-back table or skill can be long; everything else is small.
+    ctx.body = await readBody(req, url.pathname.startsWith('/api/prompts/') ? prompts.BODY_LIMIT : url.pathname === '/api/skill-check' ? skills.BODY_LIMIT : url.pathname === '/api/audit/import' ? 200000 : url.pathname === '/api/hosting/secrets' ? 400000 : 10000);
     if (POST[url.pathname]) return await reply(res, POST[url.pathname](ctx));
     if (PPOST[url.pathname]) {
       const p = findProject(ctx.body.id);

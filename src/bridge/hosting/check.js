@@ -81,7 +81,8 @@ function walk(dir, missed = []) {
     for (const e of ents) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) { if (e.name !== '.git' && e.name !== 'node_modules') go(p, depth + 1); }
-      else if (e.isFile()) out.push(path.relative(dir, p).replace(/\\/g, '/'));
+      // A link (or junction) is listed but never walked into: the check names it as left out.
+      else if (e.isFile() || e.isSymbolicLink()) out.push(path.relative(dir, p).replace(/\\/g, '/'));
     }
   };
   go(dir, 0);
@@ -101,13 +102,19 @@ async function candidates(projectDir, folder, missed) {
   let n = 0;
   for (const rel of new Set(list.map(f => f.rel.replace(/\\/g, '/')))) {
     if (++n % 200 === 0) await new Promise(r => setImmediate(r));
-    try { if (fs.statSync(path.join(folder, rel)).isFile()) rels.push(rel); } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') rels.push(rel); }
+    try { const st = fs.lstatSync(path.join(folder, rel)); if (st.isFile() || st.isSymbolicLink()) rels.push(rel); } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') rels.push(rel); }
   }
   // Also the files git leaves out, so they are shown as left out with that reason, never dropped without a word. What
   // that walk could not see matters only when they are sent too (the tick), so it is kept for the check to decide.
   const known = new Set(rels.map(x => x.toLowerCase()));
   const ignoredMissed = [];
-  return { rels, ignored: walk(folder, ignoredMissed).filter(rel => !known.has(rel.toLowerCase())), ignoredMissed };
+  const others = walk(folder, ignoredMissed).filter(rel => !known.has(rel.toLowerCase()));
+  // A link the walk found is no .gitignore matter: it goes to the check, which names it as a link.
+  const seen = new Map();
+  const links = others.filter(rel => throughLink(folder, rel, seen));
+  const notLinks = new Set(others);
+  for (const rel of links) notLinks.delete(rel);
+  return { rels: [...rels, ...links], ignored: [...notLinks], ignoredMissed };
 }
 
 /**
@@ -117,6 +124,19 @@ async function candidates(projectDir, folder, missed) {
  *         details: [{ label, value }] (private details), otherDetails: from disclosure.autoDetails }
  * -> { files: [{ rel, size, sha }], left: [{ rel, why }], findings: [{ rule, rel, line, what, key, canIgnore }], bytes }
  */
+// Is this file, or a folder on the way to it, a link or junction? Git can still list a file whose folder has since been
+// swapped for a junction, so looking at the file alone is not enough. `seen` saves asking about one folder many times.
+function throughLink(folder, rel, seen) {
+  let at = folder;
+  for (const part of rel.split('/')) {
+    at = path.join(at, part);
+    let link = seen.get(at);
+    if (link === undefined) { try { link = fs.lstatSync(at).isSymbolicLink(); } catch { link = false; } seen.set(at, link); }
+    if (link) return true;
+  }
+  return false;
+}
+
 async function checkFolder(opts) {
   const folder = opts.folder;
   const missed = [];
@@ -143,6 +163,7 @@ async function checkFolder(opts) {
   let bytes = 0;
   if (rels.length >= MAX_FILES || cut) findings.push({ rule: 'COUNT', rel: '(more files)', line: 0, what: 'the folder has more than ' + MAX_FILES.toLocaleString('en') + ' files, the most TOMLIN looks at, so the list to send is not complete: pick a smaller upload folder in Set up', key: '', canIgnore: false });
   let done = 0;
+  const linkSeen = new Map();
   for (const rel of rels) {
     // A moment for everything else between files: a big site (WordPress, 20,000 files) held the server's one thread
     // for 13 s in one go, and every chat and linked PC with it.
@@ -152,6 +173,8 @@ async function checkFolder(opts) {
     const soft = SOFT.find(([k, re]) => re.test(rel) && !send.has(k));
     if (soft) { left.push({ rel, why: soft[2], soft: soft[0] }); continue; }
     const abs = path.join(folder, rel);
+    // A link can point anywhere on this PC, so what it points at is never sent.
+    if (throughLink(folder, rel, linkSeen)) { left.push({ rel, why: 'is a link to somewhere else on this PC (links are not followed): put the file itself in the upload folder to send it' }); continue; }
     // Gone since the list was made: not sent (as if deleted). There but not readable: a stop, never a silent drop (a
     // file TOMLIN sent before that is missing from the list would be removed from the server).
     let st; try { st = fs.statSync(abs); } catch (e) {

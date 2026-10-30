@@ -1,7 +1,7 @@
 // The scanner's benchmark: how many kinds of real fault it finds. test/museum/ holds one small made-up project per
 // fault class, each written twice: "bad" with the fault, "good" with it fixed. A class counts as caught when the scan
 // flags the bad copy at the faulty place AND stays quiet on the good one at the same place.
-//   node tools/benchmark.js              recall per bucket (R one-file rule, X across files, L live site) and per class
+//   node tools/benchmark.js              recall per bucket (R one-file rule, X across files, L live site, A AI agent files) and per class
 //   node tools/benchmark.js --missed     also list every class it misses
 //   node tools/benchmark.js --json out.json      save the result (ids caught, noisy, missed) to compare later
 //   node tools/benchmark.js --only <id>  run one class and print every finding on both copies
@@ -33,7 +33,7 @@ function loadCases() {
   for (const c of out) {
     if (!c.id || ids.has(c.id)) throw new Error('museum: missing or repeated id ' + c.id + ' in ' + c.from);
     if (c.quiet) { if (!c.files) throw new Error('museum: quiet case ' + c.id + ' needs its files'); ids.add(c.id); continue; }
-    if (!/^[RXL]$/.test(c.bucket)) throw new Error('museum: ' + c.id + ' has no bucket R, X or L');
+    if (!/^[RXLA]$/.test(c.bucket)) throw new Error('museum: ' + c.id + ' has no bucket R, X, L or A');
     if (!c.bad || !c.good) throw new Error('museum: ' + c.id + ' needs a bad and a good copy');
     ids.add(c.id);
   }
@@ -133,7 +133,7 @@ function report(results, showMissed) {
   lines.push('Bucket                        classes caught      real faults they stand for');
   const quiet = results.filter(r => r.quiet);
   results = results.filter(r => !r.quiet);
-  for (const [b, name] of [['R', 'R  one-file rule'], ['X', 'X  across files / compare'], ['L', 'L  live site']]) {
+  for (const [b, name] of [['R', 'R  one-file rule'], ['X', 'X  across files / compare'], ['L', 'L  live site'], ['A', 'A  AI agent files']]) {
     const rs = results.filter(r => r.c.bucket === b);
     const k = rs.filter(r => r.caught).length, f = rs.reduce((s, r) => s + (r.c.faults || 1), 0), fk = rs.filter(r => r.caught).reduce((s, r) => s + (r.c.faults || 1), 0);
     all.n += rs.length; all.k += k; all.f += f; all.fk += fk;

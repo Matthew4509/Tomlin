@@ -138,6 +138,8 @@ const ppost = {
   '/api/hosting/ignore': gated(idle(({ p, body }) => {
     const key = String(body.key || '');
     if (!/^(KEY|ASSIGN|PRIVATE|PATH|NAME|BIG)\|/.test(key)) return { ok: false, error: 'That finding cannot be set aside.' };
+    // A project with nowhere to push yet has no findings to set aside (an old page, or Set up was removed meanwhile).
+    if (!store.site(p.dir)) return { ok: false, error: 'Set up where ' + p.name + ' goes first (Push live, Set up).' };
     store.updateSite(p.dir, x => { const set = new Set(x.ignore || []); if (body.on === false) set.delete(key); else set.add(key); return { ...x, ignore: [...set] }; });
     return { ok: true };
   })),

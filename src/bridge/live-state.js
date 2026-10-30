@@ -1,12 +1,13 @@
-// Hosted live: is each project's live address up? One plain GET per site, one site at a time, when the Bridge starts
-// and every 5, 10 or 15 minutes, as chosen in the Live sites panel (15 to start with), and on "Check now". Two addresses on the same domain are asked 10 s apart. The last answer
-// per project is kept in <data>/live.json.
+// Hosted live: is each project's live address up? One plain GET per site when the Bridge starts and every 5, 10 or 15
+// minutes, as chosen in the Live sites panel (15 to start with), and on "Check now". Different domains are asked at
+// the same time (up to 4 at once), so one slow site does not hold up the rest; two addresses on the same domain are
+// asked one after the other, 10 s apart. The last answer per project is kept in <data>/live.json.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const cfg = require('./config');
 const { keyOf } = require('./projects');
-const { checkSite, isLocalHost } = require('./live');
+const { checkSite, isLocalHost, runByHost } = require('./live');
 const { state, refreshProjects, saveSettings } = require('./state');
 
 const EVERY_CHOICES = [5, 10, 15];
@@ -47,14 +48,9 @@ async function checkAllLive() {
   live.busy = true; live.rev++;
   try {
     const list = refreshProjects().filter(p => p.liveUrl);
-    const lastAt = new Map();
-    for (const p of list) {
-      let host = ''; try { host = new URL(p.liveUrl).hostname.replace(/^www\./, ''); } catch { continue; }
-      const wait = (lastAt.get(host) || 0) + (cfg.DEMO ? 0 : 10000) - Date.now();
-      if (wait > 0) await new Promise(r => setTimeout(r, wait));
-      lastAt.set(host, Date.now());
-      await checkLive(p);
-    }
+    // One queue per domain (paced 10 s apart, as before); up to 4 domains are asked at the same time.
+    await runByHost(list, p => new URL(p.liveUrl).hostname.replace(/^www\./, ''), checkLive,
+      { gapMs: cfg.DEMO ? 0 : 10000, parallel: 4, onError: (e, p) => console.error('Live check of ' + p.liveUrl + ' failed: ' + ((e && e.message) || e)) });
     // Every site failing before any answer, on two or more domains, points at this PC's connection, not the sites.
     const results = list.map(liveOf).filter(Boolean);
     if (new Set(list.map(p => { try { return new URL(p.liveUrl).hostname; } catch { return ''; } })).size >= 2 && results.length && results.every(r => r.net)) {

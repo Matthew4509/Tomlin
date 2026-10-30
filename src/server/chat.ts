@@ -282,15 +282,34 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // A Default hire: asked with the model's own settings, and the answer is kept as it came.
   const plain = isPlain(member);
   const tidy = (text: string) => (member && !plain ? cleanAnswer(text) : text);
-  stopChats(a => a.chatId === openId);
-  // The answer stopped here saves what it had written first (up to 10 s), so lines never land out of order, and this
-  // turn reads the chat as it is after it.
-  for (let i = 0; i < 100 && chatAnswering(openId); i++) await new Promise(r => setTimeout(r, 100));
-  const history = await store.chat(file);
+  // One turn at a time starts in a chat: two sends at the same moment (two windows) each found nothing answering yet,
+  // so both answered from the same history and their lines landed mixed. The later one now waits here until the
+  // earlier one has started, then stops it as any later message does.
+  const earlier = starting.get(openId);
+  let started = () => {};
+  const ours = new Promise<void>(r => (started = r));
+  const turn = (earlier ?? Promise.resolve()).then(() => ours);
+  starting.set(openId, turn);
+  await earlier;
+  const history = await (async () => {
+    try {
+      stopChats(a => a.chatId === openId);
+      // The answer stopped here saves what it had written first (up to 10 s), so lines never land out of order, and this
+      // turn reads the chat as it is after it.
+      for (let i = 0; i < 100 && chatAnswering(openId); i++) await new Promise(r => setTimeout(r, 100));
+      return await store.chat(file);
+    } catch (error) {
+      started();
+      if (starting.get(openId) === turn) starting.delete(openId);
+      throw error;
+    }
+  })();
   // Emptied or deleted while this answer is written (Clear, Delete): nothing of it is saved into the chat after that.
   const mark = store.chatMark(file);
   const ac = new AbortController();
   startAnswer(ac, openId, who);
+  started();
+  if (starting.get(openId) === turn) starting.delete(openId);
   // However it ends (done, fault, Stop), the answer leaves the list when it ends; a closed or reloaded page does not end it.
   live.once('close', () => endAnswer(ac));
   workOn(live, who, openId, mode === 'message' ? 'answer' : mode);
@@ -621,6 +640,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
 
 /** Whether a model here can call tools: its chat format says so (llama-server /props), asked once per runner start. */
 const toolsSaid = new Map<string, boolean>();
+
+/** Each chat's turn that is starting (answerTurnBody): the next turn in that chat waits for it to start. */
+const starting = new Map<string, Promise<void>>();
 async function toolsWhy(runner: Pane): Promise<string> {
   const base = runner.worker.base;
   const name = runner.view.modelName || 'This model';

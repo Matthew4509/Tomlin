@@ -13,8 +13,8 @@ import { pictureOffload } from './devices.ts';
 import type { HardwareInfo, Sampler } from './hardware.ts';
 import { Registry, type RegistryModel } from './registry.ts';
 import { Gallery, type Picture, type Shelf } from './gallery.ts';
-import { parseSize, sizeText, type Size } from './sizes.ts';
-import { boosted, detectMode, groupAsk, MODES, PORTRAIT_NEGATIVE, PORTRAIT_SIZE, portraitAsk, PRESETS, slug, type Mode } from './modes.ts';
+import { fieldSize, parseSize, sizeText, type Size } from './sizes.ts';
+import { boosted, detectMode, forModel, groupAsk, MODES, PORTRAIT_NEGATIVE, PORTRAIT_SIZE, portraitAsk, PRESETS, slug, type Mode } from './modes.ts';
 import { cfgFor, cleanQuality, draftCount, GROUP_SIZE, QUALITIES, qualitySize, type Quality } from './quality.ts';
 import { centreIcon, fitTo, hasTransparency, iconSet, webp, withAlpha, type Fit } from './imaging.ts';
 import sharp from 'sharp';
@@ -296,7 +296,8 @@ export class Images {
 
   private onRunnerLine(line: string): void {
     const job = this.current;
-    if (!job) return;
+    // The runner's last lines can come after Cancel: they never put the picture back to drawing.
+    if (!job || job.state === 'cancelled') return;
     const img = /generating image: (\d+)\/(\d+)/.exec(line);
     if (img) {
       job.image = Number(img[1]);
@@ -360,7 +361,9 @@ export class Images {
   /** Checks and queues a request; returns the job (its `done` settles when the pictures are saved or it fails). */
   async generate(opts: GenerateOptions): Promise<Job | { error: string; status: number }> {
     if (this.pane.view.state !== 'connected' && !this.restarting) return { error: 'The picture model is not loaded. Press Connect beside it (in an artist\'s chat) first; nothing loads by itself.', status: 409 };
-    const m = this.registry.get(this.pane.view.model ?? '')!;
+    // Between the old runner ending and the new one asked for (just after a Cancel), the pane names no model for a moment.
+    const m = this.registry.get(this.pane.view.model ?? this.lastConnect?.id ?? '');
+    if (!m) return { error: 'The picture model is loading again. Try again in a moment.', status: 409 };
     let base: Picture | undefined;
     if (opts.finalOf || opts.again) {
       base = await this.gallery.get((opts.finalOf ?? opts.again)!);
@@ -378,12 +381,14 @@ export class Images {
 
     const recipe = !base && opts.as && this.recipe ? this.recipe(opts.as) : null;
     const parsed = parseSize(typed);
-    const fieldSize = opts.width && opts.height ? { width: Math.round(opts.width), height: Math.round(opts.height) } : null;
+    // Only a size, or only where it will be used: the model would be given no words at all.
+    if (!base && !forModel(parsed.prompt)) return { error: 'Type a prompt first: what should the picture show? A size alone is not enough.', status: 400 };
+    const asked = fieldSize(opts.width, opts.height);
     // "profile picture of …" with no size: a square portrait; two or more people: wide, so they fit (2.0.65).
-    const target0 = base ? base.target : parsed.size ?? fieldSize ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
+    const target0 = base ? base.target : parsed.size ?? asked ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
     // A final or a redraw keeps its draft's size; a new picture is drawn at the quality asked for (Mid unless said).
     const quality: Quality = base ? 'mid' : cleanQuality(opts.quality);
-    const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : opts.mode && opts.mode !== 'auto' ? { mode: opts.mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
+    const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : opts.mode && MODES.includes(opts.mode as Mode) ? { mode: opts.mode as Mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
     const preset = PRESETS[mode];
     const defaults = m.defaults ?? { steps: 20, cfg: 7, sampler: 'euler_a', scheduler: '', negative: '' };
     const generated = base ? base.generated : qualitySize(m, quality, target0);
@@ -435,6 +440,9 @@ export class Images {
     job.startedAt = Date.now();
     try {
       await this.run(job, plan, m, true);
+    } catch (error) {
+      // Not only the runner: loading the model again can fail (the settings cannot be saved). The picture says so.
+      this.fail(job, `The picture could not be started: ${(error as Error).message}`);
     } finally {
       this.current = null;
       this.used = Date.now();
@@ -494,6 +502,8 @@ export class Images {
         if (mayFallBack && this.pane.view.asked === 'auto' && device !== 'cpu') return this.fallBack(job, plan, m, tail);
         return this.fail(job, `The image runner stopped while drawing. ${whyImage(tail)}`);
       }
+      // No status: the runner answering now does not know this job (it was started again), so it will never finish.
+      if (typeof st?.status !== 'string') return this.fail(job, 'The image runner was started again while it drew, and no longer knows this picture. Draw it again.');
       if (st.status === 'completed') {
         result = st.result ?? null;
         break;
@@ -515,7 +525,9 @@ export class Images {
     job.state = 'finishing';
     try {
       for (let i = 0; i < result.images.length; i++) {
-        const drawn = Buffer.from(result.images[i].b64_json, 'base64');
+        const drawn = Buffer.from(result.images[i].b64_json ?? '', 'base64');
+        // What cannot be read as a picture is a failed picture, never an empty or broken file in the gallery.
+        if (!(await isPicture(drawn))) throw new Error('the image runner sent back something that is not a picture.');
         const png = plan.upscale ? await this.sharpen(job, drawn) : drawn;
         if (job.opts.forPc) {
           // For a linked PC: shaped in memory, never saved here (F7 E2). drawForPc takes it at once.
@@ -732,9 +744,7 @@ export class Images {
     if (p === '/api/images/plan') {
       // What a prompt will do, for the hint under the prompt box (no model needed).
       const parsed = parseSize(url.searchParams.get('prompt') ?? '');
-      const w = Number(url.searchParams.get('width'));
-      const h = Number(url.searchParams.get('height'));
-      const target = parsed.size ?? (w >= 16 && h >= 16 ? { width: w, height: h } : null) ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
+      const target = parsed.size ?? fieldSize(url.searchParams.get('width'), url.searchParams.get('height')) ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
       // Connected: the model in use; otherwise the one chosen in the list.
       const m = this.registry.get((this.pane.view.state === 'connected' ? this.pane.view.model : url.searchParams.get('model') || this.pane.view.model) ?? '');
       const chosen = url.searchParams.get('mode');
@@ -752,7 +762,13 @@ export class Images {
     }
     const file = /^\/api\/images\/file\/(.+)$/.exec(p);
     if (file) {
-      const rel = decodeURIComponent(file[1]);
+      // A broken %-escape names no file: not found.
+      let rel: string;
+      try {
+        rel = decodeURIComponent(file[1]);
+      } catch {
+        return send(res, 404, { error: 'Not found.' }), true;
+      }
       const full = await this.gallery.file(rel);
       if (!full) return send(res, 404, { error: 'Not found.' }), true;
       const type = { '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon' }[extname(rel).toLowerCase()] ?? 'application/octet-stream';
@@ -904,6 +920,16 @@ export function optionsFrom(b: Record<string, unknown>, source: GenerateOptions[
     width: num(b.width), height: num(b.height), seed: num(b.seed) ?? null, steps: num(b.steps), cfg: num(b.cfg), sampler: typeof b.sampler === 'string' ? b.sampler : undefined,
     drafts: num(b.drafts), ico: b.ico === true, quality: cleanQuality(b.quality), source, as: typeof b.as === 'string' && /^[a-z0-9-]{1,40}$/.test(b.as) ? b.as : undefined,
   };
+}
+
+/** Whether these bytes can be read as a picture. */
+async function isPicture(data: Buffer): Promise<boolean> {
+  try {
+    await sharp(data).metadata();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** A model's one-line answer without quotes, labels or a trailing explanation. */

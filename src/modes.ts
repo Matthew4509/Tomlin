@@ -124,9 +124,10 @@ export function boosted(prompt: string, preset: ModePreset): string {
   return extra ? `${words.replace(/[\s,.]+$/, '')}, ${extra}` : words;
 }
 
-/** A file name from the prompt: up to six plain words, joined by hyphens ("reading-chair-sunlit-room"). */
+/** A file name from the prompt: up to six plain words, joined by hyphens ("reading-chair-sunlit-room"), at most 60
+ * characters (a pasted address is one very long word, and Windows refuses a name past 255). */
 export function slug(prompt: string): string {
   const stop = new Set(['a', 'an', 'the', 'of', 'for', 'in', 'on', 'at', 'to', 'and', 'with', 'icon', 'photo', 'image', 'picture', 'blog', 'post', 'px', 'by']);
   const words = prompt.toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(w => w && !stop.has(w) && !/^\d+$/.test(w));
-  return words.slice(0, 6).join('-') || 'picture';
+  return words.slice(0, 6).join('-').slice(0, 60).replace(/-+$/, '') || 'picture';
 }

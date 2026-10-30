@@ -15,7 +15,7 @@ import { noCardStart } from '../runnerpush.ts';
 import { chatArgs, TEMPLATE_FAULT, whyItFailed } from '../llama.ts';
 import { Pane } from '../pane.ts';
 import * as runnersOf from '../runners.ts';
-import { readings, runnerJson, streamChat } from '../engine.ts';
+import { readings, runnerFetch, runnerJson, streamChat } from '../engine.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
@@ -25,7 +25,7 @@ import { cleanRunWith, devicesForRun, guessersFor } from '../runset.ts';
 import { cleanFoldWait } from '../layers.ts';
 import { DEFAULT_RUN, type RunOptions, type Settings } from '../store.ts';
 import { shortBuild } from '../update.ts';
-import { BUILD, GB, HOME, ROOT, type Routes, VERSION, apiError, body, cachedCopies, chatModels, gbText, hardware, hidden, json, publicSettings, runtimes, sampler, shortName, store } from './core.ts';
+import { BUILD, GB, HOME, ROOT, type Routes, VERSION, apiError, body, cachedCopies, chatModels, decoded, gbText, hardware, hidden, json, publicSettings, runtimes, sampler, shortName, store } from './core.ts';
 import { answeringBusy, endAnswer, stopOn, takeChat } from './answering.ts';
 import { whoList } from './people.ts';
 import { paneJob } from './pictures.ts';
@@ -609,7 +609,7 @@ export async function openAiChat(req: IncomingMessage, res: ServerResponse): Pro
   takeChat(ac, runner, '', '', 'A program asking through /v1');
   res.once('close', () => ac.abort());
   try {
-    const upstream = await fetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(runner.worker.base) }, body: runnerJson(b), signal: ac.signal });
+    const upstream = await runnerFetch(`${runner.worker.base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...runnerHeaders(runner.worker.base) }, body: runnerJson(b), signal: ac.signal });
     res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
     // Passed through as it comes; its end is kept to read llama.cpp's timings, so the answer counts on this PC (src/meter.ts).
     const dec = new TextDecoder();
@@ -651,10 +651,11 @@ export const askedOf = (v: unknown): Asked => (v === 'gpu' || v === 'cpu' ? v : 
 
 /** Load or unload one model: POST /api/models/<id>/load or /unload. */
 export async function loadModel(load: RegExpExecArray, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const id = decodeURIComponent(load[1]);
+  // A broken %-escape names no model (said as it was sent).
+  const id = decoded(load[1]);
   const b = await body(req);
-  const pane = images.has(id) ? 'image' : chatModels.path(id) ? 'chat' : null;
-  if (!pane) return json(res, 404, { error: `There is no model ${id}.` });
+  const pane = id === null ? null : images.has(id) ? 'image' : chatModels.path(id) ? 'chat' : null;
+  if (!pane || id === null) return json(res, 404, { error: `There is no model ${id ?? load[1]}.` });
   // A chat model is in the runner that holds it (two or more chat models can be loaded at once).
   const held = pane === 'chat' ? runnerFor(id) : panes.image.view.model === id ? panes.image : null;
   if (load[2] === 'unload') {

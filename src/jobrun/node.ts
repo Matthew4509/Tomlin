@@ -676,10 +676,14 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (req.headers.origin) return workerJson(res, 403, { error: 'Web pages cannot use this worker.' });
     const p = new URL(req.url ?? '/', 'http://worker').pathname;
     if (req.method === 'POST' && p === '/worker/pair') {
-      const locked = guard.lockedFor(ip);
-      if (locked) return workerJson(res, 429, { error: `Too many wrong PINs from this PC. Try again in ${locked} minute${locked > 1 ? 's' : ''}.` });
-      const paused = guard.pausedFor();
-      if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network).` });
+      const tooMany = () => {
+        const locked = guard.lockedFor(ip);
+        if (locked) return workerJson(res, 429, { error: `Too many wrong PINs from this PC. Try again in ${locked} minute${locked > 1 ? 's' : ''}.` }), true;
+        const paused = guard.pausedFor();
+        if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network).` }), true;
+        return false;
+      };
+      if (tooMany()) return;
       const b = await d.body(req, 4096);
       // F7 E1: only the encrypted link. A main PC from before it is told to update.
       if (Number(b.v) !== link.LINK_VERSION || typeof b.pub !== 'string') return workerJson(res, 426, { error: 'this PC now uses an encrypted link. Update TOMLIN on this main PC, then link again.' });
@@ -687,10 +691,13 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
       if (!shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
+      // Looked at again now the body is here, and the try counted before the check, so tries sent side by side (each
+      // holding its body back until all are in) cannot all slip under the wrong-try limit; a right one clears the count.
+      if (tooMany()) return;
+      guard.wrong(ip);
       const token = share.newToken();
       const got = link.nodeAnswer(await nodePairKey(), b, { id: shareState.id, name: shareState.name }, token);
       if (!got) {
-        guard.wrong(ip);
         return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network.' : 'wrong setup code. Type the code shown on that PC under Network (8 letters and numbers).' });
       }
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a

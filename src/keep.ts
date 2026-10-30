@@ -176,7 +176,8 @@ export const SHIPPED = new Set(['llama-cpu', 'llama-vulkan', 'sd-cpu', 'sd-vulka
 
 export function readVersion(home: Home): VersionFile | null {
   const v = readJson<VersionFile>(join(home.data, VERSION_FILE));
-  return v && typeof v.data === 'number' ? v : null;
+  // No app version in it (cut, or edited by hand) reads as an unknown older one: it never stops the start.
+  return v && typeof v.data === 'number' ? { ...v, app: typeof v.app === 'string' ? v.app : '' } : null;
 }
 
 export async function writeVersion(home: Home, v: VersionFile): Promise<void> {
@@ -325,7 +326,8 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
   }
   const all = await listBackups(home);
   const kept = keptByAge(all);
-  for (const old of all) if (!kept.has(old.name)) await rm(join(home.backups, old.name), { force: true });
+  // One open in another program goes at a later backup: the backup just made is good either way.
+  for (const old of all) if (!kept.has(old.name)) await rm(join(home.backups, old.name), { force: true }).catch(() => undefined);
   return name;
 }
 
@@ -337,6 +339,28 @@ const MAKING = '.making';
 /** Why a backup could not be made, in plain words for the note. */
 const backupFault = (e: unknown) => `the backup of your data could not be made (${((e as Error).message || String(e)).split('\n')[0].slice(0, 200)}). Check there is free space on the drive, then try again`;
 
+/** A move that a virus scanner or a closing program holding a file for a moment would refuse: tried for about 5 s. */
+async function moveSure(from: string, to: string): Promise<void> {
+  for (let i = 1; ; i++) {
+    try {
+      return await rename(from, to);
+    } catch (e) {
+      if (i >= 15 || !['EPERM', 'EBUSY', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      await new Promise(r => setTimeout(r, 40 * i));
+    }
+  }
+}
+
+/** Moves on from data.old: what stays in place goes into data/, then it is removed. A fault waits for the next start (settleSwap). */
+async function clearOld(old: string, data: string): Promise<void> {
+  try {
+    await carryKept(old, data);
+    await rm(old, { recursive: true, force: true });
+  } catch (e) {
+    console.error(`${old} could not be cleared yet, so the next start tries again: ${(e as Error).message}`);
+  }
+}
+
 /**
  * Puts `fresh` (a whole new data folder beside it) in place of data/ by renames only: data/ becomes data.old, fresh
  * becomes data/, then data.old goes. Cut off at any point (Quit, a power cut), the next start finishes or undoes it
@@ -345,10 +369,10 @@ const backupFault = (e: unknown) => `the backup of your data could not be made (
 async function swapData(home: Home, fresh: string): Promise<void> {
   const old = `${home.data}.old`;
   await rm(old, { recursive: true, force: true });
-  if (existsSync(home.data)) await rename(home.data, old);
-  await rename(fresh, home.data);
-  await carryKept(old, home.data);
-  await rm(old, { recursive: true, force: true });
+  if (existsSync(home.data)) await moveSure(home.data, old);
+  await moveSure(fresh, home.data);
+  // The new data is in place from here: a fault clearing the old is no fault of the restore or import.
+  await clearOld(old, home.data);
 }
 
 /**
@@ -432,13 +456,16 @@ export async function recordBrought(dir: string, name: string): Promise<void> {
 async function settleSwap(home: Home): Promise<void> {
   const old = `${home.data}.old`;
   if (existsSync(old)) {
-    if (existsSync(home.data)) {
-      await carryKept(old, home.data);
-      await rm(old, { recursive: true, force: true });
-    } else await rename(old, home.data);
+    if (!existsSync(home.data)) await moveSure(old, home.data);
+    else if (existsSync(join(old, 'settings.json')) && !existsSync(join(home.data, 'settings.json'))) {
+      // data/ was made again with nothing of the person's in it while their data waited here (the move back failed, or
+      // a start came between the two moves): this is the data, and what was made meanwhile is set aside, not deleted.
+      await moveSure(home.data, `${home.data}.aside ${stamp()}`);
+      await moveSure(old, home.data);
+    } else await clearOld(old, home.data);
   }
-  for (const half of [`${home.data}.restoring`, `${home.data}.importing`]) await rm(half, { recursive: true, force: true });
-  await rm(join(home.backups, MAKING), { recursive: true, force: true });
+  // Only leftovers: one that cannot go yet never stops the start.
+  for (const half of [`${home.data}.restoring`, `${home.data}.importing`, join(home.backups, MAKING)]) await rm(half, { recursive: true, force: true }).catch(() => undefined);
 }
 
 /** Asks for an import or a restore at the next start (nothing has a file open then). */

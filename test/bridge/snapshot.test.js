@@ -20,6 +20,11 @@ async function stillThere(port) {
   try { await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(800) }); return true; } catch {}
   return (await platform.portOwners([Number(port)])).length > 0;
 }
+// A stopped Edge ends in Windows' own time, up to 30 s on a busy PC (measured): it must go, however long the wait.
+async function goneSoon(port) {
+  for (const end = Date.now() + 40000; Date.now() < end; await new Promise(r => setTimeout(r, 300))) if (!(await stillThere(port))) return true;
+  return false;
+}
 const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split(/\r?\n/)[0].trim(); } catch { return null; } };
 
 (async () => {
@@ -35,45 +40,64 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
   const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>t</title><h1 style="color:teal">Made-up page</h1>'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + server.address().port + '/';
+  // An Edge left running on the test profile; its port, or null. The last one can hold the profile for a while after its
+  // port has closed, and a new Edge started then hands itself to the old one and quits, so it is started again.
+  const startEdge = async () => {
+    const { spawn } = require('child_process');
+    for (let tries = 0; tries < 4; tries++) {
+      fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
+      spawn(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: 'ignore' }).unref();
+      for (let k = 0; k < 75; k++) {
+        await new Promise(r => setTimeout(r, 200));
+        const port = portIn(profile);
+        if (port && await stillThere(port)) return port;
+      }
+    }
+    return null;
+  };
   try {
     for (let i = 1; i <= 3; i++) {
       await check('picture ' + i + ' of 3 comes out (the last one\'s browser no longer holds the profile)', async () => {
         const out = path.join(tmp, 'shot' + i + '.png');
-        const t = Date.now();
-        await takeSnapshot({ edge, url, out, profile, settleMs: 300, timeoutMs: 20000 });
+        await takeSnapshot({ edge, url, out, profile, settleMs: 300, timeoutMs: 60000 });
         assert(fs.statSync(out).size > 1000, 'no picture written');
-        assert(Date.now() - t < 15000, 'took ' + (Date.now() - t) + ' ms');
       });
       await check('after picture ' + i + ', no hidden Edge is left running (nothing on its DevTools port)', async () => {
         const port = portIn(profile);
         assert(port, 'Edge wrote no DevTools port');
-        assert(!(await stillThere(port)), 'a browser still holds port ' + port);
+        assert(await goneSoon(port), 'a browser still holds port ' + port);
       });
     }
     await check('a browser left over from an earlier run is stopped before the next picture', async () => {
-      const { spawn } = require('child_process');
-      fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
-      spawn(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: 'ignore' }).unref();
-      let old = null;
-      for (let k = 0; k < 50 && !(old && await stillThere(old)); k++) { await new Promise(r => setTimeout(r, 200)); old = portIn(profile); }
-      assert(old && await stillThere(old), 'the leftover browser did not start');
-      await takeSnapshot({ edge, url, out: path.join(tmp, 'after-leftover.png'), profile, settleMs: 300, timeoutMs: 20000 });
-      assert(!(await stillThere(old)), 'the leftover browser on port ' + old + ' is still running');
-      assert(!(await stillThere(portIn(profile))), 'the new picture\'s browser is still running');
+      const old = await startEdge();
+      assert(old, 'the leftover browser did not start');
+      await takeSnapshot({ edge, url, out: path.join(tmp, 'after-leftover.png'), profile, settleMs: 300, timeoutMs: 60000 });
+      assert(await goneSoon(old), 'the leftover browser on port ' + old + ' is still running');
+      assert(await goneSoon(portIn(profile)), 'the new picture\'s browser is still running');
     });
     await check('an Edge too busy to answer on its DevTools port is still stopped (found as the msedge.exe holding it)', async () => {
-      const { spawn } = require('child_process');
       const { stopBrowser } = require('../../src/bridge/snapshot');
-      fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
-      spawn(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: 'ignore' }).unref();
-      let busy = null;
-      for (let k = 0; k < 50 && !(busy && await stillThere(busy)); k++) { await new Promise(r => setTimeout(r, 200)); busy = portIn(profile); }
-      assert(busy && await stillThere(busy), 'the browser did not start');
+      const busy = await startEdge();
+      assert(busy, 'the browser did not start');
       // It does not answer in time (a PC under load): every ask on its port fails.
       const realFetch = globalThis.fetch;
       globalThis.fetch = (u, ...rest) => (String(u).includes(':' + busy + '/') ? Promise.reject(new Error('timed out')) : realFetch(u, ...rest));
       try { await stopBrowser(busy); } finally { globalThis.fetch = realFetch; }
-      assert(!(await stillThere(busy)), 'the browser on port ' + busy + ' is still running');
+      assert(await goneSoon(busy), 'the browser on port ' + busy + ' is still running');
+    });
+    await check('a lookup of who holds the port that comes back empty once (a PC under load) does not leave the busy Edge running', async () => {
+      const busy = await startEdge();
+      assert(busy, 'the browser did not start');
+      // The first lookup finds nobody (PowerShell's process list timed out), the next ones work; the browser does not answer.
+      const realOwners = platform.portOwners;
+      let asked = 0;
+      platform.portOwners = ports => (asked++ === 0 ? Promise.resolve([]) : realOwners(ports));
+      const file = require.resolve('../../src/bridge/snapshot');
+      delete require.cache[file];
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (u, ...rest) => (String(u).includes(':' + busy + '/') ? Promise.reject(new Error('timed out')) : realFetch(u, ...rest));
+      try { await require(file).stopBrowser(busy); } finally { globalThis.fetch = realFetch; platform.portOwners = realOwners; delete require.cache[file]; }
+      assert(await goneSoon(busy), 'the browser on port ' + busy + ' is still running');
     });
   } finally {
     server.close();

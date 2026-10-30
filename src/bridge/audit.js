@@ -14,6 +14,7 @@ const { fingerprint, applyJudged } = require('./judged');
 const { findRoots } = require('./roots');
 const { RULES_MORE, locationFromRequestVar, newRun } = require('./rules-more');
 const { crossAudit, CROSS_RULES } = require('./cross');
+const { agentAudit, RULE: AGENT_RULES } = require('./agents');
 
 // Build output and release copies are skipped: a fault in the source would otherwise be counted once per copy
 // (one real project showed 15 findings from 9 real lines, the rest in _build/deploy copies).
@@ -666,6 +667,10 @@ async function runAudit(dir, url, opts = {}) {
   const roots = opts.root === false ? { left: [], app: null, notes: [] } : findRoots(dir, { include: opts.include });
   const skip = [...(opts.skip || []), ...roots.left.map(l => l.rel)];
   const code = codeAudit(dir, skip, { ownHost, judged: opts.judged });
+  // The AI agent files (lib/agents.js): hidden instructions, hooks, skills' scripts, permissions, MCP servers.
+  const agents = agentAudit(dir, skip);
+  code.findings.push(...agents.findings);
+  code.notes.push(...agents.notes);
   code.notes.unshift(...roots.notes);
   // opts.disclosure: { details, others, own } (lib/disclosure.js). What publishing would give away about the maker.
   if (opts.disclosure) {
@@ -698,7 +703,7 @@ async function runAudit(dir, url, opts = {}) {
     liveReached: local ? local.reached : null,
     compare: cmp ? cmp.report : null,
     notes: [...(opts.notes || []), ...j.notes, ...code.notes, ...(local ? local.notes : []), ...(cmp ? cmp.notes : [])],
-    rules: RULES.length + EXPOSED.length + CROSS_RULES.length + 2 + (opts.disclosure ? Object.keys(DISC_RULES).length + 1 : 0) + (url ? PROBES.length + 7 : 0) + (opts.liveUrl ? 30 : 0),
+    rules: RULES.length + EXPOSED.length + CROSS_RULES.length + Object.keys(AGENT_RULES).length + 2 + (opts.disclosure ? Object.keys(DISC_RULES).length + 1 : 0) + (url ? PROBES.length + 7 : 0) + (opts.liveUrl ? 30 : 0),
     filesScanned: code.filesScanned,
     disclosure: !!opts.disclosure, // the disclosure pass ran (private details, other projects' names, AI trail, local paths)
     filesTruncated: code.truncated,

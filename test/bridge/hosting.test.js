@@ -475,6 +475,12 @@ async function main() {
     await sleep(200);
     assert.strictEqual(r(ENVP, 'seen.txt'), 'the-local-one');
     await api('/api/stop', { id: ep.id });
+    // A stopped program lets go of its port in Windows' own time (a moment longer on a busy PC).
+    for (let i = 0; i < 100; i++) {
+      const held = await new Promise(res => { const c = net.connect(p2, '127.0.0.1'); c.once('connect', () => { c.destroy(); res(true); }); c.once('error', () => res(false)); });
+      if (!held) break;
+      await sleep(200);
+    }
     // Two presses of Start while the secrets are still being opened (Windows can take a moment): one copy, not two.
     const secrets = require('../../src/bridge/hosting/secrets');
     const realValues = secrets.values;

@@ -401,7 +401,11 @@ export const queuePost: Routes = {
   },
   '/api/queue/clear': async ({ res, b }) => {
     // Finished lines (and, with all, every line still waiting); what runs now is left running.
-    await change(q => { q.items = q.items.filter(x => x.state === 'running' || (x.state === 'waiting' && b.all !== true)); });
+    // A finished picture a waiting project is still to carry on from stays too: its step is marked done from it.
+    await change(q => {
+      const needed = new Set(q.items.filter(x => x.state === 'waiting' && x.waitFor).map(x => x.waitFor));
+      q.items = q.items.filter(x => x.state === 'running' || (b.all !== true && (x.state === 'waiting' || needed.has(x.id))));
+    });
     return json(res, 200, await view());
   },
   '/api/queue/seen': async ({ res, b }) => {

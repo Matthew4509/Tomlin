@@ -66,6 +66,8 @@ function parseLiveUrl(text, opts = {}) {
 // ---------- one GET ----------
 // o.resolve(u) -> { host, port } sends the request to another place (the demo's made-up sites, tests) while the
 // page still thinks it is at u. Returns { status, headers, body, ms, cert, error }. Bodies over maxBytes are cut.
+// o.timeout is how long the line may stay silent; o.deadlineMs (30 s) is how long the whole answer may take, so a
+// server that sends a byte every few seconds cannot hold the check open for hours (error code DEADLINE).
 function requestOnce(url, o = {}) {
   return new Promise(resolve => {
     let u;
@@ -81,8 +83,10 @@ function requestOnce(url, o = {}) {
       return resolve({ error: { code: 'BLOCKED', message: u.hostname + ' is this PC or a private network, which the Bridge does not check' } });
     if (target) { lib = http; opts.hostname = target.host; opts.port = target.port; opts.headers.Host = u.host; delete opts.servername; }
     else if (!o.allowLocal && !LOCAL_HOST.test(u.hostname)) opts.lookup = publicLookup;
-    let settled = false;
-    const done = v => { if (!settled) { settled = true; resolve({ ms: Date.now() - t0, ...v }); } };
+    let settled = false, deadline = null;
+    // Every way out (answer, cut, error, redirect answer, deadline) comes through here, so the deadline timer is
+    // always cleared and never fires late or keeps the process alive.
+    const done = v => { if (!settled) { settled = true; clearTimeout(deadline); resolve({ ms: Date.now() - t0, ...v }); } };
     const req = lib.request(opts, res => {
       let cert = null;
       try {
@@ -112,6 +116,12 @@ function requestOnce(url, o = {}) {
     });
     req.on('timeout', () => { req.destroy(Object.assign(new Error('timed out'), { code: 'TIMEOUT' })); });
     req.on('error', e => done({ error: { code: e.code || 'ERROR', message: e.message } }));
+    const limit = o.deadlineMs || 30000;
+    deadline = setTimeout(() => {
+      done({ error: { code: 'DEADLINE', message: 'took too long to answer (over ' + Math.round(limit / 1000) + ' s)' } });
+      req.destroy();
+    }, limit);
+    deadline.unref();
     req.end();
   });
 }
@@ -172,6 +182,8 @@ function judge(url, r, o = {}) {
     if (c === 'ENOTFOUND') return out('down', 'The name ' + host + ' was not found (DNS). The domain may have expired, or its DNS records changed.', { net: true });
     if (c === 'EAI_AGAIN') return out('unsure', 'Could not look up ' + host + ': this PC may be offline, or its DNS is not answering.', { net: true });
     if (c === 'ECONNREFUSED') return out('down', 'The server refused the connection: nothing is serving the site.', { net: true });
+    // Bytes kept coming, but too slowly to make a page in time: the server is there, so amber, not red.
+    if (c === 'DEADLINE') return out('unsure', 'Up, but it took too long to answer: the page was still arriving after ' + Math.round((o.deadlineMs || 30000) / 1000) + ' seconds, so the check stopped.');
     if (c === 'TIMEOUT' || c === 'ETIMEDOUT') return out('down', 'No answer within ' + Math.round((o.timeout || 10000) / 1000) + ' seconds (asked twice).', { net: true });
     if (c === 'ECONNRESET' || c === 'EPIPE') return out('down', 'The connection was cut before the page arrived (asked twice).', { net: true });
     if (c === 'CERT_HAS_EXPIRED') return out('down', 'Its security certificate has expired: visitors see a warning page instead of the site.');
@@ -204,7 +216,8 @@ function judge(url, r, o = {}) {
   return out('up', 'Up: answered ' + s + ' in ' + secs + (r.cert ? '; certificate good for ' + r.cert.days + ' days' : '') + '.');
 }
 
-// One site: one GET (redirects followed); a timeout or cut connection is asked once more, 5 s later.
+// One site: one GET (redirects followed); a timeout or cut connection is asked once more, 5 s later (an answer that
+// took past the deadline is not asked again: it would only hold the check up as long once more).
 async function checkSite(url, o = {}) {
   let host = ''; try { host = new URL(url).hostname; } catch {}
   o = { publicOnly: !o.resolve && !o.allowLocal && !isLocalHost(host), ...o };
@@ -686,4 +699,33 @@ function robotsDisallow(text) {
 
 const isLocalHost = h => LOCAL_HOST.test(String(h || ''));
 
-module.exports = { parseLiveUrl, isLocalHost, isPrivateIp, checkSite, judge, get, pageRefs, looksBlocked, headerFindings, compareLive, siteOf, isOwn, LIVE_PROBES, OBFUSCATED, titleOf, oldLibraries, robotsDisallow };
+// ---------- many sites ----------
+// run(item) for every item: items on the same host one after another, each started at least gapMs (10 s) after the
+// one before it there began (the pacing protects people's sites); different hosts at the same time, at most
+// `parallel` (4) hosts at once, so one slow site never holds up the others. An item whose run throws is passed to
+// o.onError and the rest carry on. Resolves when every item is done.
+async function runByHost(items, hostOf, run, o = {}) {
+  const gap = o.gapMs == null ? 10000 : o.gapMs;
+  const groups = new Map();
+  for (const it of items) {
+    let h = ''; try { h = hostOf(it); } catch {}
+    if (!h) continue;
+    if (!groups.has(h)) groups.set(h, []);
+    groups.get(h).push(it);
+  }
+  const queue = [...groups.values()];
+  const worker = async () => {
+    for (let g = queue.shift(); g; g = queue.shift()) {
+      let last = 0;
+      for (const it of g) {
+        const wait = last + gap - Date.now();
+        if (last && wait > 0) await sleep(wait);
+        last = Date.now();
+        try { await run(it); } catch (e) { if (o.onError) o.onError(e, it); }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, o.parallel || 4), queue.length) }, worker));
+}
+
+module.exports = { parseLiveUrl, isLocalHost, runByHost, isPrivateIp, checkSite, judge, get, pageRefs, looksBlocked, headerFindings, compareLive, siteOf, isOwn, LIVE_PROBES, OBFUSCATED, titleOf, oldLibraries, robotsDisallow };
