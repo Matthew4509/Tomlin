@@ -63,6 +63,8 @@ export interface Damaged {
   /** The name it was set aside under, beside it. */
   keptAs: string;
   at: string;
+  /** A good copy has taken its place, so nothing was started without (see `markMended`). */
+  mended?: boolean;
 }
 
 const damagedNow: Damaged[] = [];
@@ -70,6 +72,8 @@ const damagedNow: Damaged[] = [];
 /** The files found damaged since the start (or since `clearDamaged`), for the page to say once. */
 export const damaged = (): Damaged[] => [...damagedNow];
 export const clearDamaged = (): void => void damagedNow.splice(0);
+/** A good copy of `file` has been put back in its place: the page says so, not that it is gone. */
+export const markMended = (file: string): void => { for (const d of damagedNow) if (d.file === file) d.mended = true; };
 
 /** Sets a damaged file aside (renamed beside itself), so nothing is ever saved over it. */
 async function setAside(file: string): Promise<void> {
@@ -124,10 +128,11 @@ export function readData<T>(file: string, fallback: T, o: { leave?: boolean } = 
 /**
  * Reads, changes and writes a JSON file in one turn, so a change made meanwhile by another caller is never lost.
  * `change` gets what is there now (or `fallback`) and gives back what to save; undefined saves nothing.
+ * `leave`: a damaged file stays where it is and DamagedFile is thrown, with `change` not run (the caller has a good copy to mend it from).
  */
-export function updateData<T>(file: string, fallback: T, change: (now: T) => T | undefined | Promise<T | undefined>, space = 1): Promise<T> {
+export function updateData<T>(file: string, fallback: T, change: (now: T) => T | undefined | Promise<T | undefined>, space = 1, o: { leave?: boolean } = {}): Promise<T> {
   return inTurn(file, async () => {
-    const now = await readNow(file, fallback);
+    const now = await readNow(file, fallback, o.leave === true);
     const next = await change(now);
     if (next === undefined) return now;
     await writeNow(file, JSON.stringify(next, null, space));

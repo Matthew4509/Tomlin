@@ -47,6 +47,9 @@ export function blogSlug(title: string): string {
   return words.slice(0, 6).join('-') || 'post';
 }
 
+/** The text without its front matter. It ends at a `---` on its own line: a title can hold `---` too. */
+export const withoutFrontMatter = (text: string): string => text.replace(/^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)??---[ \t]*(?:\r?\n\s*|$)/, '');
+
 /** The markdown file: front matter, title, the picture when there is one, then the post. */
 export function blogFile(title: string, body: string, opts: { picture?: string; alt?: string; date?: Date } = {}): string {
   const date = (opts.date ?? new Date()).toISOString().slice(0, 10);

@@ -11,7 +11,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import zlib from 'node:zlib';
-import { checkZip, listFolder, listZip, writeZip, type ZipItem } from '../src/zip.ts';
+import { checkZip, listFolder, listZip, unpackZip, writeZip, type ZipItem } from '../src/zip.ts';
 import { zipEntries } from '../src/newcopy.ts';
 
 const made: string[] = [];
@@ -27,6 +27,66 @@ const put = (file: string, body: string | Buffer) => {
   writeFileSync(file, body);
 };
 const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+
+test('unpackZip brings back names exactly (both accent forms), empty files and folders, big and stored files', async () => {
+  const d = tmp();
+  const zip = join(d, 'a.zip');
+  const big = randomBytes(6 << 20);
+  const marks = 'e\u0301.txt';
+  const letter = '\u00e9.txt';
+  await writeZip(zip, [
+    { name: 'empty folder/', dir: true },
+    { name: marks, data: Buffer.from('marks') },
+    { name: letter, data: Buffer.from('one letter') },
+    { name: 'empty.txt', data: Buffer.alloc(0) },
+    { name: 'deep/er/big.bin', data: big },
+    { name: 'kept.png', data: Buffer.from('stored as it is') },
+  ]);
+  const out = join(d, 'out');
+  mkdirSync(out);
+  await unpackZip(zip, out);
+  assert.equal(readFileSync(join(out, marks), 'utf8'), 'marks');
+  assert.equal(readFileSync(join(out, letter), 'utf8'), 'one letter');
+  assert.equal(statSync(join(out, 'empty.txt')).size, 0);
+  assert.ok(statSync(join(out, 'empty folder')).isDirectory());
+  assert.ok(readFileSync(join(out, 'deep', 'er', 'big.bin')).equals(big));
+  assert.equal(readFileSync(join(out, 'kept.png'), 'utf8'), 'stored as it is');
+});
+
+test('unpackZip opens a zip made by Windows tar (every data backup before TOMLIN wrote its own), with its "./" entry', { skip: process.platform !== 'win32' && 'Windows tar' }, async () => {
+  const d = tmp();
+  const src = join(d, 'src');
+  put(join(src, 'chats', 'c1.json'), '["hello"]');
+  put(join(src, 'big.bin'), randomBytes(5 << 20));
+  put(join(src, 'empty.txt'), '');
+  mkdirSync(join(src, 'empty folder'));
+  const zip = join(d, 'made-by-tar.zip');
+  execFileSync(tar, ['-a', '-c', '-f', zip, '-C', src, '.']);
+  assert.ok((await listZip(zip)).some(z => z.name === './'), 'tar lists the folder itself');
+  const out = join(d, 'out');
+  mkdirSync(out);
+  await unpackZip(zip, out);
+  assert.equal(readFileSync(join(out, 'chats', 'c1.json'), 'utf8'), '["hello"]');
+  assert.ok(readFileSync(join(out, 'big.bin')).equals(readFileSync(join(src, 'big.bin'))));
+  assert.equal(statSync(join(out, 'empty.txt')).size, 0);
+  assert.ok(statSync(join(out, 'empty folder')).isDirectory());
+});
+
+test('unpackZip puts nothing outside its folder, and stops at a changed byte', async () => {
+  const d = tmp();
+  const climbing = join(d, 'climb.zip');
+  await writeZip(climbing, [{ name: '../outside.txt', data: Buffer.from('out') }]);
+  const out = join(d, 'out');
+  mkdirSync(out);
+  await assert.rejects(unpackZip(climbing, out), /outside its folder/);
+  assert.deepEqual(readdirSync(d).sort(), ['climb.zip', 'out']);
+  const zip = join(d, 'a.zip');
+  await writeZip(zip, [{ name: 'kept.png', data: Buffer.from('stored as it is') }]);
+  const bytes = readFileSync(zip);
+  bytes[bytes.indexOf('stored')] ^= 1;
+  writeFileSync(zip, bytes);
+  await assert.rejects(unpackZip(zip, out), /CRC-32/);
+});
 
 /** A made-up folder: names with é, ü and 日本, an empty folder, a big file (streamed) and an already-compressed one. */
 function tree() {

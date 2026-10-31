@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as carry from '../src/carry.ts';
 import { alive } from '../src/hardware.ts';
-import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
+import { createServer } from 'node:net';
+import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, reachRpc, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
 import { chatArgs, maxFault, whyItFailed } from '../src/llama.ts';
 
 const ALL = { pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true };
@@ -18,6 +19,28 @@ const SRC = pathToFileURL(join(import.meta.dirname, '..', 'src', 'maxlend.ts')).
 /** A stand-in for ggml-rpc-server: a plain echo server on the port it is given. */
 const standIn = (port: number) => spawn(process.execPath, ['-e', `require('net').createServer(s => s.pipe(s)).listen(${port}, '127.0.0.1')`], { stdio: 'ignore', windowsHide: true });
 const PROGRAM: RpcProgram = { exe: 'ggml-rpc-server.exe', device: 'cpu', threads: 0 };
+
+test('the RPC server refusing for a moment is tried again; nothing there, or nobody waiting, gives up', async () => {
+  const server = createServer(s => s.on('error', () => undefined));
+  const port = await new Promise<number>(r => server.listen(0, '127.0.0.1', () => r((server.address() as { port: number }).port)));
+  await new Promise(r => server.close(r));
+  try {
+    // Refused at first (a server busy with the last connection), then it takes the next one.
+    const late = setTimeout(() => server.listen(port, '127.0.0.1'), 150);
+    const rpc = await reachRpc(port, () => false, 50);
+    clearTimeout(late);
+    assert.ok(rpc, 'reached once it listens');
+    rpc.destroy();
+  } finally {
+    await new Promise(r => server.close(r));
+  }
+  // Nothing listening: every try is refused, and it says so rather than hang.
+  assert.equal(await reachRpc(port, () => false, 1), null);
+  // The asker has gone: not one try.
+  let tries = 0;
+  assert.equal(await reachRpc(port, () => (tries++, true)), null);
+  assert.equal(tries, 1);
+});
 
 test('the Max mode tick is its own, and Allow all covers it', () => {
   assert.equal(carry.cleanAllow({ lend: 'yes' }).lend, false);

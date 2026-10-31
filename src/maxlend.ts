@@ -8,7 +8,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir, statfs } from 'node:fs/promises';
-import { connect, createServer } from 'node:net';
+import { connect, createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import type { Allow } from './carry.ts';
@@ -216,6 +216,24 @@ const answers = (port: number) => new Promise<boolean>(resolve => {
   });
   s.once('error', () => resolve(false));
 });
+
+/**
+ * A connection to the RPC server, or null. A server busy with the last connection can refuse the next one for a moment,
+ * which a loaded PC showed as "did not answer" with the server running: tried for about 5 s, until `gone` says nobody waits.
+ */
+export async function reachRpc(port: number, gone: () => boolean = () => false, gapMs = 200): Promise<Socket | null> {
+  for (let t = 0; t < 25 && !gone(); t++) {
+    const s = connect(port, '127.0.0.1');
+    const ok = await new Promise<boolean>(r => {
+      s.once('connect', () => r(true));
+      s.once('error', () => r(false));
+    });
+    if (ok) return s;
+    s.destroy();
+    await new Promise(r => setTimeout(r, gapMs));
+  }
+  return null;
+}
 
 /** How the last loan ended, for this PC's Network page. */
 export interface LoanEnd {

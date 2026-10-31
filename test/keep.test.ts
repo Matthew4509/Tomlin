@@ -254,11 +254,16 @@ test('a data backup keeps every file whatever its name (é, ü, 日本: Windows 
     await put(join(w.home.data, 'files', 'naïve ü', '日本 é.txt'), 'konnichiwa');
     await put(join(w.home.data, 'runners.json'), '[{"pid":1}]');
     await put(join(w.home.data, 'chats', 'half.json.tmp'), 'half');
+    // The person's own, in the workspace: kept whatever they are called, and so is a folder or a deeper runners.json.
+    await put(join(w.home.data, 'workspace', 'draft.tmp'), 'mine');
+    await put(join(w.home.data, 'workspace', 'site', 'runners.json'), '{"team":"mine"}');
+    await put(join(w.home.data, 'files', 'old.tmp', 'inside.txt'), 'mine too');
     const name = await keep.backup(w.home, 'by hand');
     const listed = (await zipEntries(join(w.home.backups, name))).map(e => e.name);
     assert.ok(listed.includes('docs/Résumé.pdf'), listed.join(', '));
     assert.ok(listed.includes('files/naïve ü/日本 é.txt'));
-    assert.ok(!listed.some(n => n.endsWith('runners.json') || n.endsWith('.tmp')), 'live runners and half-saved files stay out');
+    assert.ok(!listed.includes('runners.json') && !listed.includes('chats/half.json.tmp'), 'live runners and half-saved files stay out');
+    for (const mine of ['workspace/draft.tmp', 'workspace/site/runners.json', 'files/old.tmp/inside.txt']) assert.ok(listed.includes(mine), mine);
     await rm(join(w.home.data, 'docs'), { recursive: true });
     await rm(join(w.home.data, 'files'), { recursive: true });
     await keep.planNext(w.home, { do: 'restore', name });

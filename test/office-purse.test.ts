@@ -262,6 +262,9 @@ test('the server: a damaged office.json falls back to the last good save; the da
   assert.deepEqual(now.purse, good.purse);
   assert.equal(setAsideNow().length, aside + 1);
   assert.equal(saved().bought.length, 2, 'the good save is back under its own name');
+  const { note } = await (await fetch(`${base}/api/keep`)).json() as { note: string };
+  assert.match(note, /put it back from its last good save: office\.json/);
+  assert.doesNotMatch(note, /started without it/);
   assert.equal((await post('/api/office/buy', { item: 'ducks' })).status, 200);
   assert.equal(saved().bought.length, 3);
 });

@@ -19,7 +19,7 @@ Push live (off until you turn it on), which sends a project to your own web host
 - **As is, no warranty.** You use it at your own risk.
   Nobody is responsible for lost data, a PC that is slowed down, or what a model writes or draws.
 - **Your own PCs only.** It is made for your own PCs on your own home network. Keep your own backups.
-- **Models are not ours.** You download each model yourself; each has its own licence and its own limits. Check them.
+- **Models are not ours.** You download each model yourself from Hugging Face (huggingface.co), where their makers publish them; each has its own licence and its own limits. Check them on the model's page there.
 - **Windows.** Made for 64-bit Windows (tested on Windows 11). The zip carries its own Node.js.
 
 ## What TOMLIN backs up, and what it doesn't

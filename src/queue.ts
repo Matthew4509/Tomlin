@@ -153,10 +153,14 @@ export function move(q: Queue, itemId: string, dir: -1 | 1): boolean {
   return false;
 }
 
-/** Room for `n` more: the oldest finished lines go first. False when the list is full of work still to do. */
+/**
+ * Room for `n` more: the oldest finished lines go first, but not one a line still to do waits for (its picture is
+ * wanted yet). False when the list is full of work still to do.
+ */
 export function makeRoom(q: Queue, n: number): boolean {
+  const wanted = new Set(q.items.filter(x => !isFinished(x)).map(x => x.waitFor));
   while (q.items.length + n > MAX_ITEMS) {
-    const i = q.items.findIndex(isFinished);
+    const i = q.items.findIndex(x => isFinished(x) && !wanted.has(x.id));
     if (i < 0) return false;
     q.items.splice(i, 1);
   }

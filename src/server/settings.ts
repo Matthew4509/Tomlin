@@ -62,12 +62,15 @@ async function claudeView() {
 function damagedNote(): string {
   const list = damaged();
   if (!list.length) return '';
-  const names = list.map(x => `${x.file.slice(HOME.data.length + 1).replace(/\\/g, '/')} (kept as ${x.keptAs}, beside it)`);
+  const names = (some: typeof list) => some.map(x => `${x.file.slice(HOME.data.length + 1).replace(/\\/g, '/')} (kept as ${x.keptAs}, beside it)`).join('; ');
+  const lost = list.filter(x => !x.mended);
+  const mended = list.filter(x => x.mended);
   return [
-    `Some of your data could not be read, so TOMLIN started without it: ${names.join('; ')}.`,
+    lost.length ? `Some of your data could not be read, so TOMLIN started without it: ${names(lost)}.` : '',
+    mended.length ? `Some of your data could not be read, so TOMLIN put it back from its last good save: ${names(mended)}.` : '',
     'This happens when the PC loses power while a file is being saved. Nothing was saved over the damaged file.',
-    'To get it back, put back a backup from before it happened (Settings, Your data and updates), or send the kept file to someone who helps.',
-  ].join('\n');
+    lost.length ? 'To get it back, put back a backup from before it happened (Settings, Your data and updates), or send the kept file to someone who helps.' : '',
+  ].filter(Boolean).join('\n');
 }
 
 async function keepView() {

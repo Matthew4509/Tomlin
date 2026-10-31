@@ -1,7 +1,6 @@
 // Max mode, this PC's side as a node (src/maxlend.ts says what lending is): the door a linked PC opens a sealed
 // stream on (an HTTP Upgrade on the worker port, POST-free: the sealed request rides in a header), and the loan.
 import type { IncomingMessage } from 'node:http';
-import { connect, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
@@ -78,13 +77,9 @@ export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
     } catch (e) {
       return refuse(socket, 409, `"${shareState.name}" cannot lend now: ${(e as Error).message}.`);
     }
-    const rpc: Socket = connect(port, '127.0.0.1');
-    const ok = await new Promise<boolean>(r => {
-      rpc.once('connect', () => r(true));
-      rpc.once('error', () => r(false));
-    });
-    if (!ok || socket.destroyed) {
-      rpc.destroy();
+    const rpc = await maxlend.reachRpc(port, () => socket.destroyed);
+    if (!rpc || socket.destroyed) {
+      rpc?.destroy();
       return refuse(socket, 503, `"${shareState.name}" started lending, but its RPC server did not answer.`);
     }
     const nodeNonce = newNonce();

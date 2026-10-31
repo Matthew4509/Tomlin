@@ -1,10 +1,10 @@
 // Backup, restore, the zip and the update's switch-over, attacked: what a person could lose, or a start that never comes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -65,7 +65,7 @@ test('Put back brings back every file whatever its name: emoji, %, &, #, quotes,
   });
 });
 
-test('Put back keeps a name written with separate accent marks (as a Mac writes them) as it was', { todo: 'Windows tar turns it into the one-letter form, and two files differing only so become one' }, async () => {
+test('Put back keeps a name written with separate accent marks (as a Mac writes them) as it was', async () => {
   await inHome(async home => {
     await put(join(home.data, 'files', 'é.txt'), 'marks');
     await put(join(home.data, 'files', 'é.txt'), 'one letter');
@@ -196,6 +196,66 @@ test('a restore whose old folder cannot be cleared at once says it was restored,
     // The records are not thrown away, and the next start is not stopped by them.
     assert.equal(await readFile(join(`${home.data}.old`, 'bridge', 'hosting', 'secret.bin'), 'utf8'), 'sealed');
     assert.equal((await keep.prepare(home, join(dir, 'app'), '2.0.0')).state, 'ready');
+  });
+});
+
+test('an older backup made by Windows tar still comes back, accented names and all', { skip: !windows && 'Windows tar' }, async () => {
+  await inHome(async (home, dir) => {
+    const src = join(dir, 'old-backup');
+    await put(join(src, 'settings.json'), '{"when":"tar"}');
+    await put(join(src, 'files', 'na\u00efve', 'R\u00e9sum\u00e9.txt'), 'accented');
+    await put(join(src, 'files', '\u65e5\u672c.txt'), 'no such letters in the code page');
+    await mkdir(home.backups, { recursive: true });
+    execFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', join(home.backups, 'old.zip'), '-C', src, '.'], { stdio: 'pipe' });
+    await put(join(home.data, 'settings.json'), '{"when":"new"}');
+    const said = await keep.restore(home, 'old.zip', '2.0.0');
+    assert.match(said, /^Restored/, said);
+    assert.equal(await readFile(join(home.data, 'settings.json'), 'utf8'), '{"when":"tar"}');
+    // As tar has always brought them back: the names its code page holds as they were (which those are depends on the PC).
+    assert.equal(filesUnder(join(home.data, 'files')).length, 2);
+  });
+});
+
+test('Put back brings each file back with its own date', async () => {
+  await inHome(async home => {
+    const file = join(home.data, 'files', 'old.txt');
+    await put(file, 'old');
+    await put(join(home.data, 'settings.json'), '{}');
+    const then = new Date('2021-03-04T05:06:08');
+    await utimes(file, then, then);
+    const said = await keep.restore(home, await keep.backup(home, 'dates'), '2.0.0');
+    assert.match(said, /^Restored/, said);
+    assert.equal(statSync(file).mtime.getTime(), then.getTime());
+  });
+});
+
+test('a restore that cannot save its note afterwards still says it was restored, with the data in place', async () => {
+  await inHome(async home => {
+    // A folder named as the version file: the backup holds it, so saving the note after the swap has to fail.
+    await put(join(home.data, 'settings.json'), '{"when":"old"}');
+    await put(join(home.data, 'version.json', 'x.txt'), 'in the way');
+    const name = await keep.backup(home, 'point');
+    await put(join(home.data, 'settings.json'), '{"when":"new"}');
+    const said = await keep.restore(home, name, '2.0.0');
+    assert.match(said, /^Restored/, said);
+    assert.equal(await readFile(join(home.data, 'settings.json'), 'utf8'), '{"when":"old"}');
+  });
+});
+
+test('an import that cannot copy the models-folder setting afterwards still says it was imported, and says what it missed', async () => {
+  await inHome(async (home, dir) => {
+    const old = join(dir, 'old');
+    await put(join(old, 'package.json'), '{"name":"tomlin","version":"2.0.1"}');
+    await put(join(old, 'data', 'settings.json'), '{"when":"imported"}');
+    await put(join(old, 'data', 'chats', 'index.json'), '[{"id":"a"}]');
+    // A folder under the setting's file name: the copy after the swap has to fail.
+    await mkdir(join(old, 'models-folder.txt'));
+    const root = join(dir, 'app');
+    await mkdir(root, { recursive: true });
+    const said = await keep.bringIn(home, root, old, '2.0.0');
+    assert.match(said, /^Imported/, said);
+    assert.match(said, /other models folder could not be copied/);
+    assert.equal(await readFile(join(home.data, 'settings.json'), 'utf8'), '{"when":"imported"}');
   });
 });
 

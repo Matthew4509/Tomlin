@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanFolder, cleanPath, inside, list, read, save } from '../src/workspace.ts';
-import { blogAsk, blogFile, blogSlug, blogSystem, splitPost } from '../src/blog.ts';
+import { blogAsk, blogFile, blogSlug, blogSystem, splitPost, withoutFrontMatter } from '../src/blog.ts';
 
 test('only plain relative text-file paths are accepted', () => {
   assert.equal(cleanPath('notes.md'), 'notes.md');
@@ -63,6 +63,17 @@ test('the blog ask has limits, the post splits into title and body, the file has
   const f = blogFile('Tuning', 'Body text.', { picture: 'tuning.webp', alt: 'A piano', date: new Date('2026-10-03T12:00:00Z') });
   assert.match(f, /^---\ntitle: "Tuning"\ndate: 2026-10-03\nimage: "tuning.webp"\n---\n\n# Tuning\n\n!\[A piano\]\(tuning.webp\)\n\nBody text.\n$/);
   assert.doesNotMatch(blogFile('T', 'B'), /image:/);
+});
+
+test('front matter ends at a --- on its own line: a title holding --- leaves nothing of it in the post', () => {
+  const f = blogFile('Before --- after', 'Body text.', { date: new Date('2026-10-03T12:00:00Z') });
+  assert.equal(withoutFrontMatter(f), '# Before --- after\n\nBody text.\n');
+  assert.equal(withoutFrontMatter(f.replace(/\n/g, '\r\n')), '# Before --- after\r\n\r\nBody text.\r\n');
+  assert.equal(withoutFrontMatter('---\n---\n\nBody.'), 'Body.');
+  assert.equal(withoutFrontMatter('---\ntitle: "only"\n---'), '');
+  // No front matter: a line of --- in the post stays, and so does one at the top with no closing line.
+  assert.equal(withoutFrontMatter('Body.\n\n---\n\nMore.'), 'Body.\n\n---\n\nMore.');
+  assert.equal(withoutFrontMatter('---\n\nBody.'), '---\n\nBody.');
 });
 
 test('a folder typed or pasted from Windows is accepted with or without its quotes; drive roots and Windows folders are not', () => {

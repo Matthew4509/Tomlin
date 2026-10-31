@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
 import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
 import { staffState as homeState, activityOf, awardBehind, awardPeriods, bookAfter, buy, cleanAwards, cleanBook, doingOf, DOING_WORDS, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Award } from '../home.ts';
-import { DamagedFile, readData, updateData, writeAtomic } from '../atomic.ts';
+import { DamagedFile, markMended, readData, updateData, writeAtomic } from '../atomic.ts';
 import * as mute from '../mute.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
@@ -16,7 +16,7 @@ import { hereKey, pcKey, TEST_PROMPT, TEST_TOKENS, type Summary as SpeedSummary 
 import { HOST_ON, type Routes, byStaff, chats, faces, faultWords, hidden, json, mutes, notifier, pcProfiles, publicSettings, shortName, speeds, staff, staffId, store } from './core.ts';
 import { shownName } from '../pcprofile.ts';
 import { chat, chatList, chatPlace, connectChat, images, lastUsed, main, runnerFor, runners } from './panes.ts';
-import { answerPhases, answeringBusy, endAnswer, lastWorked, reserve, stopOn, takeChat } from './answering.ts';
+import { answerPhases, answeringBusy, endAnswer, lastWorked, reserve, stopChats, stopOn, takeChat } from './answering.ts';
 import { answeringNow, offHost, setWho, whoList } from './people.ts';
 import { jobRoutes } from './jobs.ts';
 import { officeFeed } from './notices.ts';
@@ -494,6 +494,7 @@ async function mendOffice(): Promise<OfficeRaw | null> {
   if (!copy || typeof copy !== 'object') return null;
   await readData(officeFile(), {});
   await writeAtomic(officeFile(), JSON.stringify(copy, null, 1));
+  markMended(officeFile());
   return asOffice(copy);
 }
 let officeMending: Promise<OfficeRaw | null> | null = null;
@@ -516,11 +517,20 @@ async function readOffice(): Promise<OfficeRaw | null> {
 }
 /** Changes office.json in its turn and copies what was saved; false, with nothing changed, when it is damaged beyond a mend. */
 async function changeOffice(change: (was: OfficeRaw) => OfficeRaw | undefined): Promise<boolean> {
-  if (!await readOffice()) return false;
-  let saved: OfficeRaw | undefined;
-  await updateData<unknown>(officeFile(), {}, raw => (saved = change(asOffice(raw))));
-  if (saved) await keepOfficeCopy(saved);
-  return true;
+  // Twice: a file damaged between the check and the save is mended like any other, never set aside for an empty one.
+  for (let i = 0; i < 2; i++) {
+    if (!await readOffice()) return false;
+    let saved: OfficeRaw | undefined;
+    try {
+      await updateData<unknown>(officeFile(), {}, raw => (saved = change(asOffice(raw))), 1, { leave: true });
+    } catch (e) {
+      if (e instanceof DamagedFile) continue;
+      throw e;
+    }
+    if (saved) await keepOfficeCopy(saved);
+    return true;
+  }
+  return false;
 }
 /** When this server last sold energy drinks (ms): they are free and not saved, so the limit is kept here. */
 let energySoldAt: number | undefined;
@@ -668,11 +678,22 @@ export const teamPost: Routes = {
           await holder.disconnect();
         }
       } else if (b.action === 'fire') {
+        const was = staff.get(String(b.id));
         if (!(await staff.fire(String(b.id)))) return json(res, 404, { error: 'There is no such person on the team.' });
         // Someone hired later with the same name starts without this one's photo.
         await faces.clear(`staff:${String(b.id)}`);
         if ((await store.settings()).who === 'staff:' + b.id) await setWho('standard');
         if ((await store.settings()).imageAs === b.id) await store.saveSettings({ imageAs: '' });
+        // Their answer ends with them, and their chat model is unloaded when nobody else runs on it. A stopped answer
+        // takes a moment to let go of its runner; one still busy then (someone else's) keeps the model loaded.
+        stopChats(a => a.who === `staff:${String(b.id)}`);
+        const left = was && !roleOf(was.role).kind ? modelLeft(was, { model: null }, staff.list().filter(o => !roleOf(o.role).kind)) : null;
+        const holder = left === (await store.settings()).hostModel ? null : runnerFor(left);
+        for (let i = 0; i < 20 && holder && answeringBusy(holder); i++) await new Promise(r => setTimeout(r, 100));
+        if (holder?.view.state === 'connected' && !answeringBusy(holder)) {
+          console.log(`Unloading ${left}: ${was!.name} left the team and nobody else runs on it.`);
+          await holder.disconnect();
+        }
       } else return json(res, 400, { error: 'Unknown staff action.' });
     } catch (error) {
       return json(res, 400, { error: faultWords(error) });

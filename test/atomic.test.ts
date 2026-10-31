@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeAtomic } from '../src/atomic.ts';
+import { DamagedFile, updateData, writeAtomic } from '../src/atomic.ts';
 import { Store } from '../src/store.ts';
 
 test('fifty writes to one file at once: the last one wins, whole, with no copies left behind', async () => {
@@ -13,6 +13,21 @@ test('fifty writes to one file at once: the last one wins, whole, with no copies
     await Promise.all(Array.from({ length: 50 }, (_, i) => writeAtomic(file, JSON.stringify({ i, pad: 'x'.repeat(5000 + i) }))));
     assert.equal(JSON.parse(await readFile(file, 'utf8')).i, 49);
     assert.deepEqual(await readdir(dir), ['a.json']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an update told to leave a damaged file throws, changes nothing and sets nothing aside', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-atomic-'));
+  try {
+    const file = join(dir, 'c.json');
+    await writeAtomic(file, '{ "half');
+    let ran = false;
+    await assert.rejects(updateData<unknown>(file, {}, () => { ran = true; return { a: 1 }; }, 1, { leave: true }), DamagedFile);
+    assert.equal(ran, false);
+    assert.equal(await readFile(file, 'utf8'), '{ "half');
+    assert.deepEqual(await readdir(dir), ['c.json']);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

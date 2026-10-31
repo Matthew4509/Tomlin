@@ -69,6 +69,19 @@ test('a full list drops the oldest finished lines, and refuses when all are stil
   assert.equal(Q.makeRoom(list, 2), false);
 });
 
+test('a full list keeps a finished line that a line still to do waits for, and drops the next oldest instead', () => {
+  const needed = item({ state: 'done' });
+  const spare = item({ state: 'done' });
+  const waiting = item({ waitFor: needed.id });
+  const list = q([needed, spare, waiting, ...Array.from({ length: Q.MAX_ITEMS - 3 }, () => item())]);
+  assert.equal(Q.makeRoom(list, 1), true);
+  assert.ok(list.items.includes(needed));
+  assert.ok(!list.items.includes(spare));
+  // Only the needed one is left finished: it is not dropped for room, so the list is full.
+  assert.equal(Q.makeRoom(list, 2), false);
+  assert.ok(list.items.includes(needed));
+});
+
 test('read from disk: unknown kinds dropped, bad fields left out; running goes back in line after a restart', () => {
   const got = Q.cleanQueue({ paused: true, items: [{ id: 'a', kind: 'picture', state: 'running', title: 'x', added: at, project: 'p1', width: 99999, lanes: ['pc:w', 'evil lane'] }, { id: 'b', kind: 'rocket' }, null] });
   assert.equal(got.paused, true);

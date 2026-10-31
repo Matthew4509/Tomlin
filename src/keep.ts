@@ -15,7 +15,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { writeAtomic } from './atomic.ts';
 import { entriesWhy, unpackedWhy, zipEntries } from './newcopy.ts';
-import { checkZip, listFolder, writeZip } from './zip.ts';
+import { allUtf8Names, checkZip, listFolder, unpackZip, writeZip } from './zip.ts';
 import { PIN_FILE, pinKey, type RuntimePin } from './runtimes.ts';
 import { CODES_FILE } from './recovery.ts';
 
@@ -285,15 +285,15 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
   await mkdir(making, { recursive: true });
   const part = join(making, name);
   try {
-    // TOMLIN writes the zip itself (Windows' tar garbled or left out names such as "Résumé.pdf"). The runner list is
-    // about live processes, and a save's half-written copy (*.tmp) is not data. The Bridge's throwaway browser profile
+    // TOMLIN writes the zip itself (Windows' tar garbled or left out names such as "Résumé.pdf"). The runner list (at
+    // the top of data/) is about live processes, and a save's half-written copy (*.tmp) is not data, but a file in the
+    // workspace is the person's own, whatever it is called. The Bridge's throwaway browser profile
     // for page snapshots (src/bridge/snaps.js) is not data either, and Windows can refuse to let it be read (a locked
     // browser file): with it in, every backup failed ("Permission denied" on its Affiliation Database). A link or
     // junction is not followed (data/ holds none of its own).
     const top = new Set(o.forOtherPc ? ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE] : []);
     const { items } = await listFolder(home.data, (rel, dir) => {
-      const last = rel.slice(rel.lastIndexOf('/') + 1);
-      return (!dir && last === 'runners.json') || last.endsWith('.tmp') || rel === SNAP_PROFILE || rel === HOSTING || (!rel.includes('/') && top.has(rel));
+      return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || (!rel.includes('/') && top.has(rel));
     });
     if (o.forOtherPc) {
       // settings.json goes in without the keys, and a mark says what was left out.
@@ -340,7 +340,7 @@ const MAKING = '.making';
 const backupFault = (e: unknown) => `the backup of your data could not be made (${((e as Error).message || String(e)).split('\n')[0].slice(0, 200)}). Check there is free space on the drive, then try again`;
 
 /** A move that a virus scanner or a closing program holding a file for a moment would refuse: tried for about 5 s. */
-async function moveSure(from: string, to: string): Promise<void> {
+export async function moveSure(from: string, to: string): Promise<void> {
   for (let i = 1; ; i++) {
     try {
       return await rename(from, to);
@@ -509,6 +509,9 @@ async function moveFiles(from: string, to: string, tally: { files: number; bytes
 
 const gbText = (n: number) => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
 
+/** After the swap the new data is in place, so a fault saving the note is never told as "your data is as it was". */
+const saveNote = (home: Home, v: VersionFile) => writeVersion(home, v).catch(e => console.error(`The note about your data could not be saved: ${(e as Error).message}`));
+
 /**
  * Imports `from`'s data (copied; its own folder is left as it was) and moves its models and downloaded runners into
  * the home. The home's data/ is replaced. Returns the plain-words note.
@@ -527,7 +530,7 @@ export async function bringIn(home: Home, root: string, from: string, appVersion
   }
   const fresh = `${home.data}.importing`;
   await rm(fresh, { recursive: true, force: true });
-  await cp(join(src.dir, 'data'), fresh, { recursive: true, filter: p => basename(p) !== 'runners.json' });
+  await cp(join(src.dir, 'data'), fresh, { recursive: true, filter: p => resolve(p) !== resolve(src.dir, 'data', 'runners.json') });
   await swapData(home, fresh);
   const tally = { files: 0, bytes: 0, left: 0 };
   for (const part of ['chat', 'image']) await moveFiles(join(src.dir, 'models', part), join(home.models, part), tally);
@@ -546,7 +549,8 @@ export async function bringIn(home: Home, root: string, from: string, appVersion
       tally.left++;
     }
   }
-  if (!existsSync(home.modelsFile) && existsSync(join(src.dir, 'models-folder.txt'))) await cp(join(src.dir, 'models-folder.txt'), home.modelsFile);
+  let modelsFolderLost = false;
+  if (!existsSync(home.modelsFile) && existsSync(join(src.dir, 'models-folder.txt'))) await cp(join(src.dir, 'models-folder.txt'), home.modelsFile).catch(() => { modelsFolderLost = true; });
   const repointed = startup ? await startup.repoint(src.dir).catch(() => false) : false;
   const same = resolve(src.dir).toLowerCase() === resolve(root).toLowerCase();
   const what = same ? 'this folder' : `TOMLIN ${src.version} (${src.dir})`;
@@ -556,8 +560,9 @@ export async function bringIn(home: Home, root: string, from: string, appVersion
     tally.files || runners ? `Moved ${tally.files} model file${tally.files === 1 ? '' : 's'} (${gbText(tally.bytes)})${runners ? ` and ${runners} graphics-card runner${runners === 1 ? '' : 's'}` : ''} into ${home.home}, so nothing is downloaded again.` : '',
     tally.left ? `${tally.left} file${tally.left === 1 ? '' : 's'} stayed where ${tally.left === 1 ? 'it was' : 'they were'} (another drive, or in use): TOMLIN still uses ${tally.left === 1 ? 'it' : 'them'} from there while that folder is kept.` : '',
     repointed ? 'Starting with Windows now starts this copy.' : '',
+    modelsFolderLost ? 'The setting for your other models folder could not be copied: if you use one, choose it again.' : '',
   ].filter(Boolean).join(' ');
-  await writeVersion(home, { data: DATA_VERSION, app: appVersion, note });
+  await saveNote(home, { data: DATA_VERSION, app: appVersion, note });
   return note;
 }
 
@@ -579,10 +584,12 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   await rm(fresh, { recursive: true, force: true });
   await mkdir(fresh, { recursive: true });
   try {
-    await run(tar(), ['-x', '-f', zip, '-C', fresh], { windowsHide: true, maxBuffer: 1 << 20 });
+    // TOMLIN's own zip is opened by TOMLIN, every name exact; an older one made by tar has its names in the PC's code page, which tar reads.
+    if (await allUtf8Names(zip)) await unpackZip(zip, fresh);
+    else await run(tar(), ['-x', '-f', zip, '-C', fresh], { windowsHide: true, maxBuffer: 1 << 20 });
   } catch (e) {
     await rm(fresh, { recursive: true, force: true });
-    return no(`that backup could not be opened (${((e as Error).message || '').split('\n').pop()?.trim().slice(0, 160) || 'tar refused it'})`);
+    return no(`that backup could not be opened (${((e as Error).message || '').split('\n').pop()?.trim().slice(0, 160) || 'it would not unpack'})`);
   }
   const opened = await unpackedWhy(fresh, null, any);
   if (opened) {
@@ -613,7 +620,7 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   await swapData(home, fresh);
   const v = readVersion(home);
   const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no web search key, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network).' : ''}`;
-  await writeVersion(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
+  await saveNote(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
   return note;
 }
 

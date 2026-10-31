@@ -5,11 +5,13 @@
 // zip, and a check that inflates every file again and compares its size and CRC-32 with what was written. Node only,
 // no packages. A write fault on the zip's own drive is never taken for an unreadable file (it is thrown), and the
 // check compares each file's own header (name, CRC, sizes) with the zip's list too, and unpacks no file past its listed
-// size. Windows' tar still unpacks these zips (Put back).
+// size. Put back unpacks them here too (unpackZip): Windows' tar rewrites names with separate accent marks into the
+// one-letter form, and two files differing only that way would become one. An older backup made by tar is still opened
+// by tar: its names are in the PC's own code page, not marked as UTF-8 (allUtf8Names).
 // Tested in test/zip.test.ts.
-import { createReadStream } from 'node:fs';
-import { open, readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, open, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import { Transform, Writable, type Duplex } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
@@ -244,7 +246,7 @@ export async function writeZip(file: string, items: ZipItem[], o: { onBytes?: (n
 }
 
 /** The zip's own list, from its central directory, with where each entry starts. Throws on a zip cut short or not a zip. */
-export async function listZip(file: string): Promise<(ZipEntry & { offset: number })[]> {
+export async function listZip(file: string): Promise<(ZipEntry & { offset: number; mtimeMs: number; utf8: boolean })[]> {
   const fh = await open(file, 'r');
   try {
     const { size: total } = await fh.stat();
@@ -269,7 +271,7 @@ export async function listZip(file: string): Promise<(ZipEntry & { offset: numbe
     if (cdStart + cdSize > total) throw new Error('its file list points past its end (cut short)');
     const cd = Buffer.alloc(cdSize);
     await fh.read(cd, 0, cdSize, cdStart);
-    const out: (ZipEntry & { offset: number })[] = [];
+    const out: (ZipEntry & { offset: number; mtimeMs: number; utf8: boolean })[] = [];
     for (let p = 0, k = 0; k < n; k++) {
       if (p + 46 > cd.length || cd.readUInt32LE(p) !== 0x02014b50) throw new Error(`its file list is damaged at entry ${k + 1}`);
       const nameLen = cd.readUInt16LE(p + 28);
@@ -290,7 +292,10 @@ export async function listZip(file: string): Promise<(ZipEntry & { offset: numbe
         }
         x += 4 + len;
       }
-      out.push({ name, size, csize, crc: cd.readUInt32LE(p + 16), method: cd.readUInt16LE(p + 10), offset });
+      const time = cd.readUInt16LE(p + 12);
+      const date = cd.readUInt16LE(p + 14);
+      const mtimeMs = new Date(1980 + (date >> 9), ((date >> 5) & 15) - 1, date & 31, time >> 11, (time >> 5) & 63, (time & 31) * 2).getTime();
+      out.push({ name, size, csize, crc: cd.readUInt32LE(p + 16), method: cd.readUInt16LE(p + 10), offset, mtimeMs, utf8: (cd.readUInt16LE(p + 8) & 0x0800) !== 0 });
       p += 46 + nameLen + extraLen + commentLen;
     }
     return out;
@@ -396,4 +401,54 @@ export async function checkZip(file: string, expected?: ZipEntry[], o: { onBytes
     await fh.close();
   }
   return { ok: true, files, bytes: done };
+}
+
+/** Every name in the zip is marked as UTF-8, as writeZip marks them: unpackZip reads those names exactly. */
+export const allUtf8Names = async (file: string): Promise<boolean> => (await listZip(file)).every(z => z.utf8);
+
+/**
+ * Opens a zip into the folder `dir`, each file under the exact name in the zip's list, with its time. No file lands
+ * outside `dir`, and each is unpacked no further than its listed size and has its CRC-32 compared again. Throws on any
+ * fault, leaving what was unpacked so far: the caller removes `dir`.
+ */
+export async function unpackZip(file: string, dir: string): Promise<void> {
+  const list = await listZip(file);
+  const root = resolve(dir);
+  const fh = await open(file, 'r');
+  try {
+    for (const z of list) {
+      const to = resolve(root, z.name);
+      // Windows' tar lists the folder itself first, as "./" (every data backup it made has one).
+      if (z.name.endsWith('/') && to === root) continue;
+      if (!to.startsWith(root + sep) || (process.platform === 'win32' && /[\\:]/.test(z.name))) throw new Error(`${z.name} could land outside its folder`);
+      if (z.name.endsWith('/')) {
+        await mkdir(to, { recursive: true });
+        continue;
+      }
+      if (z.method !== 0 && z.method !== 8) throw new Error(`${z.name} is packed in a way TOMLIN does not read`);
+      await mkdir(dirname(to), { recursive: true });
+      if (!z.csize) {
+        if (z.size) throw new Error(`${z.name} is listed with no bytes in the zip`);
+        await writeFile(to, '');
+      } else {
+        const head = Buffer.alloc(30);
+        await fh.read(head, 0, 30, z.offset);
+        const start = z.offset + 30 + head.readUInt16LE(26) + head.readUInt16LE(28);
+        let crc = 0;
+        let size = 0;
+        const counted = new Transform({ transform(chunk: Buffer, _enc, cb) {
+          crc = crc32(chunk, crc); size += chunk.length;
+          cb(size > z.size ? Object.assign(new Error('too big'), { code: 'ERR_BUFFER_TOO_LARGE' }) : null, chunk);
+        } });
+        const steps: (NodeJS.ReadableStream | Duplex | NodeJS.WritableStream)[] = [createReadStream('', { fd: fh, autoClose: false, start, end: start + z.csize - 1, highWaterMark: 1 << 20 })];
+        if (z.method === 8) steps.push(zlib.createInflateRaw());
+        steps.push(counted, createWriteStream(to));
+        try { await (pipeline as (...a: unknown[]) => Promise<void>)(...steps); } catch (e) { throw tooBig(e) ? new Error(bigFault(z)) : e; }
+        if (size !== z.size || (crc >>> 0) !== z.crc) throw new Error(`${z.name} read back ${size !== z.size ? `${size} bytes instead of ${z.size}` : 'with a different CRC-32'}: the zip is damaged.`);
+      }
+      await utimes(to, new Date(z.mtimeMs), new Date(z.mtimeMs)).catch(() => undefined);
+    }
+  } finally {
+    await fh.close();
+  }
 }

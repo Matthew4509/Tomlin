@@ -8,7 +8,7 @@ import { cleanPrompt } from '../chatpic.ts';
 import { toneOf } from '../persona.ts';
 import { nowModel, sizeB, roleOf, drawsFor, type StaffMember } from '../staff.ts';
 import * as ws from '../workspace.ts';
-import { blogAsk, blogSystem, splitPost, blogSlug, blogFile, BLOG_PICTURE_SYSTEM } from '../blog.ts';
+import { blogAsk, blogSystem, splitPost, blogSlug, blogFile, withoutFrontMatter, BLOG_PICTURE_SYSTEM } from '../blog.ts';
 import * as project from '../project.ts';
 import { jobId, validId, cleanProjectFolder, cleanTeam, folderStamp, type Team } from '../jobs.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
@@ -131,7 +131,7 @@ async function blogOpening(path: unknown) {
   if ('error' in file) return { error: file.error, root, file: null, name: '', opening: '' };
   const title = /^title:\s*(".*")\s*$/m.exec(file.text)?.[1];
   const name = title ? (JSON.parse(title) as string) : file.path;
-  const opening = file.text.replace(/^---[\s\S]*?---\s*/, '').replace(/^#.*\n/, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim().slice(0, 900);
+  const opening = withoutFrontMatter(file.text).replace(/^#.*\n/, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim().slice(0, 900);
   return { error: '', root, file, name, opening };
 }
 
@@ -188,7 +188,7 @@ async function blogPicture(b: Record<string, unknown>) {
   const base = picRel.split('/').pop()!;
   // Read again: the post may have been changed in Files while the picture was drawn (minutes), and that change stays.
   const again = await blogOpening(b.path);
-  const body = (again.file?.text ?? file.text).replace(/^---[\s\S]*?---\s*/, '').replace(/^#.*\n+/, '').replace(/^!\[[^\]]*\]\([^)]*\)\s*/, '');
+  const body = withoutFrontMatter(again.file?.text ?? file.text).replace(/^#.*\n+/, '').replace(/^!\[[^\]]*\]\([^)]*\)\s*/, '');
   const text = blogFile(name, body.trim(), { picture: base, alt: pic.altText ?? name });
   const saved = await ws.save(root, file.path, text);
   return 'error' in saved ? { status: 400, body: saved } : { status: 200, body: { path: file.path, picture: picRel, prompt } };

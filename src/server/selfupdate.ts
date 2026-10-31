@@ -9,7 +9,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -17,6 +17,7 @@ import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { freeBytes, roomWhy } from '../carry.ts';
 import { missingFiles } from '../installer.ts';
+import { moveSure } from '../keep.ts';
 import { entriesWhy, testStart, unpackedWhy, zipEntries } from '../newcopy.ts';
 import { latestOf, noRelease, repoOf, type SigCode, sigOf, WARN, zipCheck, type Latest } from '../release.ts';
 import * as update from '../update.ts';
@@ -254,7 +255,12 @@ export const selfUpdatePost: Routes = {
     git = null;
     for (const d of ['models/chat', 'models/image/loras']) await mkdir(join(dir, ...d.split('/')), { recursive: true });
     const final = await update.newFolder(PARENT, version);
-    await rename(dir, final);
+    // A virus scanner can still hold a file it has just looked at: tried again for a few seconds before it gives up.
+    try {
+      await moveSure(dir, final);
+    } catch (e) {
+      return json(res, 409, { error: `TOMLIN ${version} could not be moved into place (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}): a program may still be reading it. Nothing was changed, and this copy goes on as it is. Wait a minute, then press Update now again.` });
+    }
     ready = null;
     await rm(STAGING, { recursive: true, force: true }).catch(() => undefined);
     json(res, 200, { folder: basename(final), version });
