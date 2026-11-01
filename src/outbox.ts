@@ -113,6 +113,8 @@ export class Outbox {
       if (!last) send('error', { text: 'it stopped before it finished.' });
       try {
         if (!r.stopped) await this.keep(owner, rid, lock, kept!);
+        // Stop came while it was being written: nothing of it is kept.
+        if (r.stopped) await this.take(owner, rid);
       } catch {
         // The disk refused: the answer is still sent to whoever follows it.
       } finally {

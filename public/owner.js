@@ -96,7 +96,7 @@ app.ownerRows = (p, bring) => {
           if (!list.length) return void (said.textContent = `No restore points are kept on "${p.name}" under that name yet.`);
           const newest = [...list].sort((a, b) => b.name.localeCompare(a.name))[0];
           await bring(newest);
-          said.textContent = 'Once it is here: Settings, Your data and updates, then Put back beside it. Your projects: Bring projects back.';
+          said.textContent = 'Once it is here: Settings, Data and lock, then Put back beside it. Your projects: Bring projects back.';
         } catch (err) {
           said.textContent = err.message;
           e.target.disabled = false;

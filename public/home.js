@@ -26,15 +26,14 @@ const PICTURE_RUNNING = ['queued', 'starting', 'drawing', 'decoding', 'finishing
 // ---- Which view: Home, the chat and image panes, or (phone only) the list ----
 
 function setView(view) {
-  // Leaving a Set up page (Staff, Jobs, Files): its window closes with it.
+  // Leaving a Settings page shown from a window (Staff, Jobs, Files): its window closes with it.
   if (asPage.dlg?.open && asPage.view !== view) asPage.dlg.close();
   const was = homeUi.view;
   homeUi.view = view;
   shell.dataset.view = view;
   if (view !== 'rail' && !PAGE_VIEWS.includes(view)) store('view', view);
   if (view === 'home') $('#home').scrollTop = 0;
-  // The Set up menu stays in the left panel on every page it opens, open, with this page marked (style.css).
-  if (SETUP_VIEWS.includes(view)) $('#rail-setup-fold').open = true;
+  // The Settings menu stays in the left panel on every page it opens, with this page marked (style.css).
   for (const b of document.querySelectorAll('[data-setup]')) {
     if (b.dataset.setup === view) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
@@ -47,7 +46,7 @@ function setView(view) {
 app.showPanes = () => setView('chat');
 
 /** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
-const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', help: '#help' };
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', data: '#settings-data', colours: '#settings-colours', help: '#help' };
 /** Off for the first view at start: the page opens where it was, focus left alone. */
 let pageFocus = false;
 /**
@@ -69,16 +68,16 @@ function focusPage(view) {
 /** A page's name as the left panel says it ("Settings", "Models"), for a Close that says where it goes back to. */
 const viewName = view => (view === 'home' ? 'Home' : view === 'chat' ? 'the chat' : document.querySelector(`[data-setup="${view}"]`)?.textContent.split(':')[0].trim() || 'Settings');
 
-// ---- Set up's pages: Staff, Jobs and Files open as pages beside the Set up menu, not as windows over it ----
+// ---- Settings' pages: Staff, Jobs and Files open as pages beside the Settings menu, not as windows over it ----
 
-/** The pages the Set up menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files'];
+/** The pages the Settings menu stays beside, and the ones a window is shown in. */
+const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings' };
 
 /**
- * Shows a window (Staff, Jobs, Files) as the page `view`, in the main part of the screen with the Set up menu on the
+ * Shows a window (Staff, Jobs, Files) as the page `view`, in the main part of the screen with the Settings menu on the
  * left. Its Close goes back to the page it was opened from; windows opened from inside it still open over it.
  */
 function showAsPage(dlg, view) {
@@ -122,9 +121,9 @@ app.showAsPage = showAsPage;
 for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('click', () => setView('rail'));
 $('#rail-home').addEventListener('click', () => setView('home'));
 $('#rail-home-row').addEventListener('click', () => setView('home'));
-// The Set up menu is the whole left panel on its pages: Home at its top goes back.
+// The Settings menu is the whole left panel on its pages: TOMLIN - HOME at its top goes back.
 $('#rail-setup-home').addEventListener('click', () => setView('home'));
-// Under Projects: the Staff menu (Hire staff, Manage staff) as the Staff page, the Set up menu open beside it.
+// Under Projects: the Staff menu (Hire staff, Manage staff) as the Staff page, the Settings menu beside it.
 $('#rail-staff-row').addEventListener('click', () => app.openStaffMenu());
 phone.addEventListener('change', e => {
   if (!e.matches && homeUi.view === 'rail') setView(store('view') === 'chat' ? 'chat' : 'home');
@@ -135,9 +134,6 @@ pageFocus = true;
 // The staff list under "Staff" starts open; folding it is kept in this browser.
 $('#rail-staff-fold').open = store('staff-open') !== '0';
 $('#rail-staff-fold').addEventListener('toggle', e => store('staff-open', e.target.open ? '1' : '0'));
-// The Set up menu never folds: it is the whole left panel on the pages it opens, so its heading is only a heading.
-$('#rail-setup-fold').open = true;
-$('#rail-setup-fold > summary').addEventListener('click', e => e.preventDefault());
 // Home's "Waiting for you" panel folds to a strip (it keeps the number); folding it is kept in this browser.
 $('#home-side-fold').open = store('home-waiting-open') !== '0';
 $('#home-side').classList.toggle('folded', !$('#home-side-fold').open);
@@ -508,7 +504,26 @@ const moveDlg = $('#desk-move');
 async function deskMove(s, pc, pcName) {
   try {
     team.data = await api('/api/staff');
+    // A PC just linked, or slow to answer, has no list here yet: it is asked again before anything is said about it.
+    if (pc && !deskModels(s, pc).length) {
+      $('#desk-move-title').textContent = `Move ${s.name} to ${pcName}`;
+      $('#desk-move-line').textContent = `Asking ${pcName} what models it has…`;
+      $('#desk-move-row').hidden = true;
+      $('#desk-move-go').hidden = true;
+      $('#desk-move-big').hidden = true;
+      $('#desk-move-fault').hidden = true;
+      $('#desk-move-send').replaceChildren();
+      moveDlg.dataset.id = s.id;
+      if (!moveDlg.open) moveDlg.showModal();
+      for (let i = 0; i < 4 && !deskModels(s, pc).length; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        if (!moveDlg.open) return;
+        team.data = await api('/api/staff');
+      }
+      if (!moveDlg.open) return;
+    }
   } catch (err) {
+    if (moveDlg.open) moveDlg.close();
     return sayHere($('#home-ask-say'), err.message);
   }
   const models = deskModels(s, pc);
@@ -540,9 +555,11 @@ async function deskMove(s, pc, pcName) {
   const ram = mem?.ram ? `${pcName} has ${gb(mem.ram)} of RAM${mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : ''}` : '';
   if (models.length && !fits.length) line.textContent = `None of the models on ${pcName} fits its memory${ram ? ` (${ram}, 3 GB of it kept for Windows)` : ''}. Send a smaller model there first, or move ${s.name} to a PC with more memory.`;
   else if (same && wontFit(same)) line.textContent = `${pcName} has ${s.modelName}, but it needs about ${gb(same.need)} and ${ram || 'that PC has less'}. Pick a smaller model ${s.name} runs on there.`;
-  else if (same) line.textContent = `${pcName} has ${s.modelName}: ${s.name} keeps the same software there.`;
+  else if (same) line.textContent = `${pcName} has ${s.modelName}${same.ramFit === 'ok' ? ', and it fits' : same.ramFit === 'tight' ? ', but it is a tight fit' : ''}: ${s.name} keeps the same software there.`;
   else if (models.length) line.textContent = `${pcName} does not have ${s.modelName || 'their model'}. Pick the software ${s.name} runs on there${pc && own ? ', or send a copy of theirs first' : ''}.`;
-  else line.textContent = pc ? "The staff can't log in to this machine, go to the machine, and check its permissions." : `This PC has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet.`;
+  else if (!pc) line.textContent = `This PC has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet.`;
+  else line.textContent = team.data?.pcs?.find(p => p.id === pc)?.ok ? `${pcName} has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet. Send one there from Models.` : `${pcName} is not answering just now. Check it is on, then try again.`;
+  if (pc && !models.length) box.append(el('button', { class: 'btn', type: 'button', text: 'Try again', onclick: () => deskMove(s, pc, pcName) }));
   // Their model is on this PC and the target is a node: a copy can go there first (the node must allow it).
   if (pc && own && !same) box.append(el('button', { class: 'btn', type: 'button', text: `Send ${s.modelName} to ${pcName}`, onclick: async e => {
     e.target.disabled = true;
@@ -558,7 +575,7 @@ async function deskMove(s, pc, pcName) {
   } }));
   if (!pc && !models.length) box.append(el('button', { class: 'btn', type: 'button', text: 'Get models', onclick: () => { moveDlg.close(); app.openModels(); } }));
   moveDlg.dataset.id = s.id;
-  moveDlg.showModal();
+  if (!moveDlg.open) moveDlg.showModal();
 }
 $('#desk-move-cancel').addEventListener('click', () => moveDlg.close());
 $('#desk-move-go').addEventListener('click', async () => {
@@ -1107,7 +1124,7 @@ $('#node-scan').addEventListener('click', async () => {
       : `None found.${looked} On the other PC, press Check under "Can other PCs reach this one?": it names what is in the way there. The Link helper below tests it from here.`;
     if (!found.length) openLinkHelp();
     box.replaceChildren(...found.map(f => {
-      const code = el('input', { type: 'text', maxlength: '9', autocomplete: 'off', placeholder: 'ABCD-EFGH', required: '', 'aria-label': `Setup code of ${f.name}` });
+      const code = el('input', { type: 'text', maxlength: '9', autocomplete: 'off', placeholder: 'ABCD-EFGH', required: '', 'data-setup-code': '', 'aria-label': `Setup code of ${f.name}` });
       // The link PIN box shows when that PC asks for one: at the scan, or when linking says so (turned on since).
       const pin = el('input', { type: 'text', inputmode: 'numeric', maxlength: '6', autocomplete: 'off', placeholder: '6 digits', 'aria-label': `Link PIN of ${f.name}` });
       const pinBox = el('label', { class: 'field', hidden: !f.pin }, el('span', { text: 'Its link PIN (shown on that PC; never its app lock PIN)' }), pin);
@@ -1149,7 +1166,7 @@ app.openPcs = async () => {
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
-/** Update this install, on This PC: models and updates (opened by Update TOMLIN in the Set up menu, Settings and the My PC window). */
+/** Update this install, on This PC: models and updates (opened by Updates under Settings and by the My PC window). */
 app.openUpdateInstall = async () => {
   openThisPc();
   await new Promise(r => setTimeout(r, 100));
@@ -1332,7 +1349,7 @@ function openNodes() {
   refreshNodes();
   refreshOthers();
 }
-/** This PC: models and updates (the Set up menu; Settings' Update this install). */
+/** This PC: models and updates (under Settings; also where Updates opens). */
 function openThisPc() {
   setView('thispc');
   homeUi.drawn.models = homeUi.drawn.team = null;
@@ -1436,7 +1453,7 @@ function gitSay(...kids) {
 /**
  * Check git, pressed (`btn`): GitHub's newest TOMLIN, said through `say(...nodes)`, with a Download button when it is
  * newer than this PC (`download(version, button)` takes it). One function for both places it is pressed: Update this
- * install on This PC: models and updates, and the head of Settings (2.0.63).
+ * install on This PC: models and updates (2.0.63).
  */
 async function checkGit(btn, say, download) {
   btn.disabled = true;
@@ -1460,33 +1477,6 @@ $('#node-install-git').addEventListener('click', e => {
   checkGit(e.currentTarget, gitSay, getGit);
 });
 
-/**
- * The first block of Settings (2.0.63: the update was hard to find): which TOMLIN this PC runs, Check git
- * right there, and Update this install. A download found here is followed on Update this install (its bar, then
- * Update now, are there), so the page opens on it first.
- */
-app.updateBox = () => {
-  const line = el('p', { class: 'hint', role: 'status', text: 'Reading…' });
-  const said = el('div', { hidden: true });
-  const say = (...kids) => {
-    said.hidden = !kids.length;
-    said.replaceChildren(...kids);
-  };
-  const check = el('button', { class: 'btn primary', type: 'button', text: 'Check git', hidden: true });
-  check.addEventListener('click', () => checkGit(check, say, (version, button) => {
-    app.openUpdateInstall();
-    getGit(version, button);
-  }));
-  const open = el('button', { class: 'btn quiet', type: 'button', text: 'Update this install', onclick: () => app.openUpdateInstall() });
-  const box = el('div', { class: 'notify-box' }, el('h3', { text: 'TOMLIN' }), line, said, el('div', { class: 'team-actions' }, check, open));
-  api('/api/install/zip').then(v => {
-    line.textContent = `This PC runs TOMLIN ${v.version}${v.build ? ` (build ${v.build})` : ''}. ${v.restarts ? 'Check git asks GitHub for a newer one; Update this install also takes a zip you already have.' : 'It was not started by its installed program or Start TOMLIN.cmd, so it cannot update itself from here: close it, unzip the new version and run Install TOMLIN.cmd there.'}`;
-    check.hidden = !v.restarts || !v.repo;
-  }, err => {
-    line.textContent = err.message;
-  });
-  return box;
-};
 async function getGit(version, button) {
   button.disabled = true;
   try {

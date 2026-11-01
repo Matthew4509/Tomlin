@@ -364,7 +364,7 @@
 
   /**
    * Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). `page`: as the Staff page, with
-   * the Set up menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`).
+   * the Settings menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`).
    */
   app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false } = {}) => {
     try {

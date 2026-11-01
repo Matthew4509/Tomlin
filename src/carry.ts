@@ -611,6 +611,12 @@ export function nodeSide(d: NodeDeps) {
           if (!path || !git.isId(x.id)) return no(400, 'a file of the backup was not named as one, so the backup was refused.');
           files.push({ path, id: x.id });
         }
+        // Two at one path (Windows does not tell capitals apart): one would be lost without a word.
+        const paths = new Set<string>();
+        for (const f of files) {
+          if (paths.has(f.path.toLowerCase())) return no(400, `the backup named two files at one path (${f.path}), so it was refused. Update TOMLIN on the PC sending it, then back up again.`);
+          paths.add(f.path.toLowerCase());
+        }
         const repo = projectsRepo(d.keptRoot, who.key);
         try {
           const c = await git.commitFiles(repo, files, typeof b.message === 'string' ? b.message.slice(0, 300) : 'Backup');

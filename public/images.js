@@ -136,7 +136,7 @@ async function loadThenDraw() {
   }
   const m = (app.models?.image ?? []).find(x => x.id === p.model.value && x.installed !== false);
   if (!m) {
-    showFault(fault, 'No picture model is picked, so nothing can draw. Pick one in the list beside Connect (above), or get one under Set up, Models: add or remove.');
+    showFault(fault, 'No picture model is picked, so nothing can draw. Pick one in the list beside Connect (above), or get one under Settings, Models.');
     return false;
   }
   const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';
@@ -641,7 +641,7 @@ app.onStatus.push(s => {
 
 // ---- Models (download, licence, fit) ----
 
-// The Models page (public/models.js) opens from Settings' Set up menu (Models: add or remove), not the top bar.
+// The Models page (public/models.js) opens from the Settings menu (Models), not the top bar.
 
 // ---- "Draw as": the picture specialist (a hire with a picture role) whose way of working shapes each picture ----
 

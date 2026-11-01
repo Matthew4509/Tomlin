@@ -160,6 +160,8 @@ test('a file changed on the way is not kept; a commit naming a file not sent is 
   assert.deepEqual((await node.ask('/worker/git-have', { ids: [git.blobId(data)] })).missing, [git.blobId(data)]);
   await assert.rejects(node.ask('/worker/git-commit', { files: [{ path: 'a.md', id: git.blobId(data) }] }), /missing here/);
   await assert.rejects(node.ask('/worker/git-commit', { files: [{ path: '../a.md', id: git.blobId(data) }] }), /not named as one/);
+  // Two files at one path: one would be lost without a word, so the whole backup is refused.
+  await assert.rejects(node.ask('/worker/git-commit', { files: [{ path: 'Bridge projects/Client -/a.md', id: git.blobId(data) }, { path: 'Bridge projects/client -/A.md', id: git.blobId(data) }] }), /two files at one path/);
   await node.put(git.blobId(data), data);
   await node.ask('/worker/git-commit', { files: [{ path: 'a.md', id: git.blobId(data) }] });
   node.setAllow({ pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false });

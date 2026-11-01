@@ -434,7 +434,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   const state = app.status?.panes.chat.state;
   if (state === 'loading' || state === 'unloading') return app.chatNote(`The chat model is ${state === 'loading' ? 'still loading' : 'unloading'}: send again once it says Connected.`);
   const m = (app.models?.chat ?? []).find(x => x.id === p.model.value && x.installed !== false);
-  if (!m) return app.chatNote('No chat model is on this PC yet, so nobody can answer. Get one under Set up, Models: add or remove, then press Connect beside it.');
+  if (!m) return app.chatNote('No chat model is on this PC yet, so nobody can answer. Get one under Settings, Models, then press Connect beside it.');
   const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';
   // Send in the Send to card was the ask (it said a model loads first), unless the model does not fit: that is asked.
   if (!(card.asked && !tight) && !(await askHere($('#chat-ask'), `No model is loaded for this chat yet (nothing loads by itself).${tight} Load ${m.name} and send your message?`, `Load ${m.name} and send`, 'Not now', !!tight))) return;

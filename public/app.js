@@ -86,6 +86,25 @@ function askPick(box, text, choices, no = 'Cancel') {
 /** "Sam", "Sam and Ana", "Sam, Ana and Lee". */
 const listNames = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '');
 
+/**
+ * A setup code as it is typed, like a Windows key: capitals, and the dash comes by itself, so the fifth character is in
+ * the second group. `deleting`: no dash is added back, or Backspace could never get past it.
+ */
+function shapeCode(text, deleting = false) {
+  const c = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  return c.length > 4 || (c.length === 4 && !deleting) ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
+}
+document.addEventListener('input', e => {
+  const box = e.target;
+  if (!box.matches?.('[data-setup-code]')) return;
+  // The cursor stays after the same character, wherever in the code it was.
+  const before = box.value.slice(0, box.selectionStart).replace(/[^A-Za-z0-9]/g, '').length;
+  const atEnd = box.selectionStart === box.value.length;
+  box.value = shapeCode(box.value, String(e.inputType).startsWith('delete'));
+  const at = atEnd ? box.value.length : before + (before > 4 ? 1 : 0);
+  box.setSelectionRange(at, at);
+});
+
 /** A message on the page with a Close button, in place of alert(). */
 function sayHere(box, text) {
   box.classList.add('page-ask');
@@ -739,7 +758,7 @@ for (const name of ['chat', 'image']) {
         if (!p.model.value) {
           const none = ![...p.model.options].some(o => o.value && !o.disabled);
           showFault(p.said, none
-            ? `No ${name === 'chat' ? 'chat' : 'picture'} model is on this PC yet, so there is nothing to connect. Get one under Set up, Models: add or remove (in the left panel); it shows in the list beside Connect once it is downloaded.`
+            ? `No ${name === 'chat' ? 'chat' : 'picture'} model is on this PC yet, so there is nothing to connect. Get one under Settings, Models; it shows in the list beside Connect once it is downloaded.`
             : 'Pick a model in the list beside Connect first, then press Connect.');
           return;
         }
@@ -947,7 +966,7 @@ function codeSaveLabel() {
   const name = $('#code-save-name').value.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   const there = codeSaving.files.has(name);
   $('#code-save-go').textContent = there ? `Replace ${name.split('/').pop()}` : 'Save';
-  $('#code-save-where').textContent = `${there ? `${name} is already there: it is kept as ${name}.bak, then replaced. ` : ''}It goes in the Files folder${codeSaving.folder ? `, ${codeSaving.folder}` : ''}. To use another folder: Set up, Files and blog writer (in the left panel).`;
+  $('#code-save-where').textContent = `${there ? `${name} is already there: it is kept as ${name}.bak, then replaced. ` : ''}It goes in the Files folder${codeSaving.folder ? `, ${codeSaving.folder}` : ''}. To use another folder: Settings, Files and blog writer.`;
 }
 async function openCodeSave(code, name) {
   codeSaving.code = code;
@@ -976,7 +995,7 @@ $('#code-save-form').addEventListener('submit', async e => {
   try {
     const r = await api('/api/files/save', { path: $('#code-save-name').value.trim(), text: codeSaving.code, create: true });
     codeDlg.close();
-    app.chatNote(`Saved ${r.path}${codeSaving.folder ? ` in ${codeSaving.folder}` : ''}.${r.created ? '' : ` The earlier version is kept as ${r.path}.bak.`} Open it under Set up, Files and blog writer (in the left panel).`);
+    app.chatNote(`Saved ${r.path}${codeSaving.folder ? ` in ${codeSaving.folder}` : ''}.${r.created ? '' : ` The earlier version is kept as ${r.path}.bak.`} Open it under Settings, Files and blog writer.`);
   } catch (err) {
     codeSaveFault(err.message);
   }

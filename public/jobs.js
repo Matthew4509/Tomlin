@@ -326,7 +326,7 @@ function drawTeam(view) {
   const staff = jobUi.setup?.staff ?? [];
   const team = view.team;
   staffPick($('#job-pm'), 'job-pm', team.pm, staff, { value: '', label: 'Default', title: 'The strongest worker available' }, v => saveTeam({ pm: v }));
-  $('#job-pm-line').textContent = `Plans it: ${view.doers?.pm ?? ''}${staff.length ? '' : ' Hire staff (Set up, Staff: hire and edit) to pick who leads it.'}`;
+  $('#job-pm-line').textContent = `Plans it: ${view.doers?.pm ?? ''}${staff.length ? '' : ' Hire staff (Settings, Hire staff) to pick who leads it.'}`;
   const rows = ROLE_SEATS.map(([seat, label]) => {
     const now = team[seat];
     const assigned = now !== 'default' && now !== 'none';
@@ -586,7 +586,7 @@ function pictureStepButton(step, n) {
   const people = typeof chatUi === 'undefined' ? [] : chatUi.people.filter(p => p.kind === 'image');
   const artist = people.find(p => (step.role === 'designer' ? /designer/i : /artist/i).test(p.role)) ?? people[0];
   const note = $('#job-note');
-  if (!artist) return note.append(' Nobody draws yet: hire an artist under Set up, Staff: hire and edit.');
+  if (!artist) return note.append(' Nobody draws yet: hire an artist under Settings, Hire staff.');
   note.append(' ', el('button', { class: 'btn', type: 'button', text: `Draw it in ${artist.name}'s chat`, onclick: async () => {
     try {
       $('#jobs').close();

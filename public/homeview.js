@@ -128,7 +128,7 @@ function workingCards() {
   return out;
 }
 
-/** Big set-up cards while the basics are missing; afterwards they live as the rail's Set up links. */
+/** Big set-up cards while the basics are missing; afterwards they live under Settings. */
 function setupCards() {
   const u = homeUi.data.setup;
   const box = $('#home-setup');
@@ -267,7 +267,7 @@ app.onStatus.push(() => {
   if (homeUi.data && homeUi.view === 'home') drawHome();
 });
 
-// ---- Set-up links and the job box ----
+// ---- The Settings menu, its tiles and the job box ----
 
 for (const b of document.querySelectorAll('[data-setup]')) {
   b.addEventListener('click', () => {
@@ -279,9 +279,16 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     else if (b.dataset.setup === 'update') app.openUpdateInstall?.();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();
     else if (b.dataset.setup === 'files') $('#files-open').click();
+    else if (b.dataset.setup === 'data') app.openDataLock?.();
+    else if (b.dataset.setup === 'colours') app.openColours?.();
     else app.openPcs();
   });
 }
+// Settings' tiles are the submenu's own lines, so the two always match: a tile does what its line does.
+$('#settings-tiles').replaceChildren(...[...document.querySelectorAll('#rail-settings-sub [data-setup]')].map(b => el('button', { class: 'settings-tile', type: 'button', onclick: () => b.click() },
+  el('span', { class: 'settings-tile-icon' }, b.querySelector('svg').cloneNode(true)),
+  el('strong', { text: b.textContent.trim() }),
+  el('span', { class: 'hint', text: b.dataset.about }))));
 // Hiring, letting go, pairing a PC or sharing this one changes the lists: redraw when those windows close.
 for (const id of ['#team', '#jobs']) $(id)?.addEventListener('close', () => {
   refresh();

@@ -93,6 +93,7 @@ export class Notifier {
   private seq = 0;
   private frontAt = 0;
   private lastText = new Map<string, number>();
+  private turn: Promise<unknown> = Promise.resolve();
   /** Where a click goes: http://127.0.0.1:<port>/ */
   base = '';
 
@@ -107,10 +108,16 @@ export class Notifier {
     return this.cache;
   }
 
-  async save(change: Partial<NotifySettings>): Promise<NotifySettings> {
-    this.cache = clean({ ...(await this.settings()), ...change });
-    await writeAtomic(join(this.dir, 'notify.json'), JSON.stringify(this.cache, null, 1));
-    return this.cache;
+  /** Changes run one after another, each seeing the one before; shown only once written, so a failed one never looks saved. */
+  save(change: Partial<NotifySettings>): Promise<NotifySettings> {
+    const run = this.turn.then(async () => {
+      const next = clean({ ...(await this.settings()), ...change });
+      await writeAtomic(join(this.dir, 'notify.json'), JSON.stringify(next, null, 1));
+      this.cache = next;
+      return next;
+    });
+    this.turn = run.catch(() => undefined);
+    return run;
   }
 
   /** The page asks for Home every few seconds and says whether it is in front. */

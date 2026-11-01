@@ -1,4 +1,4 @@
-// Settings: the Set up menu on the left stays there on every page it opens (it used to give way to
+// Settings: its menu on the left stays there on every page it opens (it used to give way to
 // the chat list on Models, Nodes and Link another PC, so he went back to Settings for the next one), and Staff, Jobs
 // and Files open as pages beside it, not as windows over it. Read from the page's own files (checked in the browser on
 // a scratch copy: each item, Close back to where it was opened from, phone width, night).
@@ -8,15 +8,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 
 const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
 
-test('the Set up menu stays in the left panel on every page it opens, with that page marked', () => {
+test('the Settings menu stays in the left panel on every page it opens, with that page marked', () => {
   const css = read('style.css');
-  for (const view of ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files']) {
-    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
+  for (const view of ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours']) {
+    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="data"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
     assert.ok(css.includes(`:not([data-view="${view}"])`), `${view}: the menu is not hidden there`);
   }
   assert.match(css, /\.rail-links \.link\[aria-current="page"\]/);
   const home = read('home.js');
-  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files'\];/);
+  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'\];/);
   assert.match(home, /b\.setAttribute\('aria-current', 'page'\)/);
   // Settings itself is in the menu, so every page is one press from every other.
   assert.match(read('index.html'), /data-setup="settings"/);
@@ -39,9 +39,9 @@ test('Staff, Jobs and Files open as pages, not windows over the page', () => {
 
 test('the empty-state hints name the Hire staff button that is on screen, not a menu path that no longer exists', () => {
   const pages = ['app.js', 'homeview.js', 'index.html'].map(read).join('\n');
-  // The Set up menu has "Staff: hire and edit", not "Staff": the old four-step path sent people looking for nothing.
+  // The old four-step path sent people looking for nothing.
   assert.doesNotMatch(pages, /Set up, Staff, Hire staff/);
-  // Set up is the left panel's own menu, beside Settings, not inside it: no line sends people to "Settings, Set up".
+  // No line sends people to the old "Settings, Set up".
   for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(n => /\.(js|html)$/.test(n))) assert.doesNotMatch(read(f), /Settings, Set up/, f);
   assert.match(read('app.js'), /NOBODY_YET = '[^']*press Hire staff/);
   assert.match(read('homeview.js'), /'Hire someone first: press Hire staff[^']*'/);

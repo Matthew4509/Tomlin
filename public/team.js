@@ -504,7 +504,7 @@ function drawHost(said0 = '') {
   const save = el('button', { class: 'btn', type: 'button', text: 'Use this model' });
   save.addEventListener('click', async () => {
     if (!sel.value) {
-      note.textContent = list.length ? 'Pick a model in the list first.' : 'Get a chat model first: Set up, Models: add or remove.';
+      note.textContent = list.length ? 'Pick a model in the list first.' : 'Get a chat model first: Settings, Models.';
       return;
     }
     try {

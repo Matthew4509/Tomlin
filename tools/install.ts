@@ -249,7 +249,7 @@ async function install() {
   // update): not asked again, so Windows does not ask for permission at every update.
   const ruleThere = !has('--no-firewall') && process.platform === 'win32' && (await firewallRules()) > 0;
   if (ruleThere) say('The firewall rule that lets your other PCs link to this one is already there.');
-  else if (await ask('Will other PCs link to this one (it lends its models as a node)? Add the Windows firewall rule for that now? It lets in PCs on your home network only, and nothing answers until "Enable this PC as a node" is ticked (Windows asks you to allow it).', true, 'firewall')) {
+  else if (await ask('Is this a worker PC that your other PCs will use? If so, add the firewall rule now, so they can reach it. Windows will ask you to allow it. Only PCs on your home network get in.', true, 'firewall')) {
     let port = 8741;
     try {
       port = Number(JSON.parse(await readFile(join(resolveHome().data, 'share.json'), 'utf8')).port) || 8741;
@@ -329,7 +329,7 @@ const RULE_NAMES = [RULE_NAME, ...OLD_RULE_NAMES];
 const firewallRules = () => powershell(inst.firewallRuleCountScript(...RULE_NAMES)).then(r => Number(r.stdout.trim()) || 0, () => 0);
 
 /**
- * Uninstall: the firewall rule install added for a node ("Will other PCs link to this one?") is offered for removal the
+ * Uninstall: the firewall rule install added for a node ("Is this a worker PC ...?") is offered for removal the
  * same way (Windows asks first). Optional, and never stops the uninstall; with no keyboard (--yes, a script) it is kept
  * unless --firewall says to remove it, so a script never brings up Windows' question by itself.
  */

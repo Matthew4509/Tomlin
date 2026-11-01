@@ -601,43 +601,30 @@ async function backupSet(): Promise<BackupSet> {
 }
 
 /** The set's files with their git ids (those unchanged since the last time from the kept list). */
-async function hashed(set: BackupSet, signal: AbortSignal): Promise<(git.WorkFile & { id: string })[]> {
-  const kept = await d.store.readJson<Record<string, { bytes: number; mtime: number; id: string }>>(HASH_FILE, {});
-  const now: Record<string, { bytes: number; mtime: number; id: string }> = {};
-  const out: (git.WorkFile & { id: string })[] = [];
-  for (const f of set.files) {
-    if (signal.aborted) throw new Error('Stopped.');
-    const k = kept[f.path];
-    let id = k && k.bytes === f.bytes && k.mtime === f.mtime ? k.id : '';
-    if (!id) {
-      try {
-        id = (await git.blobIdOfFile(f.full)).id;
-      } catch {
-        continue; // gone, or open in another program: it goes in the next backup
-      }
-    }
-    now[f.path] = { bytes: f.bytes, mtime: f.mtime, id };
-    out.push({ ...f, id });
-  }
-  await d.store.writeJson(HASH_FILE, now);
-  return out;
+async function hashed(set: BackupSet, signal: AbortSignal) {
+  const kept = await d.store.readJson<Record<string, pb.HashKept>>(HASH_FILE, {});
+  const got = await pb.hashFiles(set.files, kept, git.blobIdOfFile, signal);
+  await d.store.writeJson(HASH_FILE, got.now);
+  return got;
 }
 
 /** Backs up the workspace and the ticked Bridge projects to one linked PC: only the files it does not have cross, then one commit there. */
 async function sendProjects(r: Remote, progress: (p: Partial<Pick<carry.Transfer, 'done' | 'bytes'>>) => void, signal: AbortSignal): Promise<string> {
   const w = wireFor(r);
   const set = await backupSet();
-  const { more, sig } = set;
-  const files = await hashed(set, signal);
-  const ids = [...new Set(files.map(f => f.id))];
+  const { more } = set;
+  const { out, unread } = await hashed(set, signal);
+  const ids = [...new Set(out.map(f => f.id))];
   const missing = new Set<string>();
   for (let k = 0; k < ids.length; k += carry.MAX_IDS) {
     if (signal.aborted) throw new Error('Stopped.');
     const v = await w.ask('/worker/git-have', { ids: ids.slice(k, k + carry.MAX_IDS) });
     for (const id of Array.isArray(v.missing) ? v.missing : []) if (git.isId(id)) missing.add(id);
   }
+  // A file that cannot be read now and whose last good copy this PC does not have: it cannot go in this backup.
+  const files = out.filter(f => !(unread.includes(f.path) && missing.has(f.id)));
   // One file for each id the node lacks (two files with the same contents cross once).
-  const send = [...new Map(files.filter(f => missing.has(f.id)).map(f => [f.id, f])).values()];
+  const send =[...new Map(files.filter(f => missing.has(f.id)).map(f => [f.id, f])).values()];
   const bytes = send.reduce((n, f) => n + f.bytes, 0);
   let done = 0;
   progress({ done, bytes });
@@ -660,10 +647,10 @@ async function sendProjects(r: Remote, progress: (p: Partial<Pick<carry.Transfer
   const when = new Date().toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
   const c = await w.ask('/worker/git-commit', { files: files.map(f => ({ path: f.path, id: f.id })), message: `Projects backed up ${when}: ${files.length} file${files.length === 1 ? '' : 's'}` });
   if (!git.isId(c.id)) throw new Error(`"${r.name}" did not say it kept the backup`);
-  const parts = Object.fromEntries(Object.entries(set.parts).map(([k, v]) => [k, { name: v.name, sig: v.sig, files: v.files, bytes: v.bytes }]));
-  await d.store.updateJson<Record<string, ProjectsDone>>(DONE_FILE, {}, all => ({ ...all, [r.id]: { at: Date.now(), commit: c.id as string, files: files.length, bytes: files.reduce((n, f) => n + f.bytes, 0), sig, parts } }));
+  const finished = pb.doneSignatures({ sig: set.sig, parts: Object.fromEntries(Object.entries(set.parts).map(([k, v]) => [k, { name: v.name, sig: v.sig, files: v.files, bytes: v.bytes }])) }, unread);
+  await d.store.updateJson<Record<string, ProjectsDone>>(DONE_FILE, {}, all => ({ ...all, [r.id]: { at: Date.now(), commit: c.id as string, files: files.length, bytes: files.reduce((n, f) => n + f.bytes, 0), sig: finished.sig, parts: finished.parts } }));
   bridgeCache = null;
-  const left = more ? ` Only the first ${files.length.toLocaleString('en')} files were taken (a backup holds at most that many).` : '';
+  const left = `${more ? ` Only the first ${files.length.toLocaleString('en')} files were taken (a backup holds at most that many).` : ''}${pb.unreadWords(unread)}`;
   if (c.same === true) return `Nothing changed since the last backup on "${r.name}".${left}`;
   return `Backed up ${files.length} file${files.length === 1 ? '' : 's'} to "${r.name}" (${send.length ? `${bytes >= 2 ** 20 ? GBs(bytes) : `${Math.max(1, Math.round(bytes / 1024))} KB`} sent` : 'nothing new to send'}).${left}`;
 }

@@ -48,7 +48,7 @@ test('the new names are there: the page, its button, the shared models, the Mode
   const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
   assert.match(html, /<h2 id="nodes-title">Network<\/h2>/);
   assert.match(html, /<h2 id="net-title">Models on my other PCs<\/h2>/);
-  assert.match(html, />Models: add or remove</);
+  assert.match(html, /<\/svg>Models<\/button>/);
   assert.match(html, /Smallest size \(billions\)/);
   const homeview = readFileSync(join(ROOT, 'public', 'homeview.js'), 'utf8');
   assert.match(homeview, /'Connect a PC \(optional\)'/);

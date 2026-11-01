@@ -460,7 +460,7 @@ dialog#code-save::backdrop { background: rgba(0,0,0,.55); }
 /* Shell: the rail on the left, then Home or the two panes */
 .shell { flex: 1; display: flex; min-height: 0; }
 .shell > .panes { flex: 1; min-width: 0; }
-.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="help"]) > #help { display: none; }
+.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="data"]) > #settings-data, .shell:not([data-view="colours"]) > #settings-colours, .shell:not([data-view="help"]) > #help { display: none; }
 .back { display: none; }
 .rail { flex: 0 0 248px; min-width: 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 8px 16px; display: flex; flex-direction: column; gap: 2px; }
 .rail-head { font-size: var(--fs-md); margin: 14px 8px 4px; }
@@ -1101,10 +1101,9 @@ h1, h2, h3 { letter-spacing: -.01em; }
 .rail-links .link svg { flex: none; color: var(--ink-soft); }
 /* Set up sits at the foot of the left panel and stays in view while the rest scrolls; folded, it is one line. */
 .rail-setup { position: sticky; bottom: -16px; z-index: 2; margin: auto -10px -16px; padding: 0 10px 12px; background: var(--rail); border-top: 1px solid var(--line); }
-.rail-setup > summary.rail-head { margin-top: 10px; }
-.rail-setup > summary { cursor: default; list-style: none; }
-.rail-setup > summary::-webkit-details-marker { display: none; }
-/* On a phone the page scrolls, not the panel, so Set up keeps to the foot of the screen. */
+.rail-setup { padding-top: 6px; }
+.rail-links .link.rail-top { font-weight: 700; letter-spacing: .02em; }
+/* On a phone the page scrolls, not the panel, so these two lines keep to the foot of the screen. */
 @media (max-width: 760px) {
   .rail { overflow: visible; }
   .rail-setup { bottom: 0; margin-left: -8px; margin-right: -8px; padding: 0 8px 12px; }
@@ -1537,7 +1536,7 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 /* Settings in the top bar: a gear with its word; at phone width the word is read out but not shown */
 .settings-open { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) { .settings-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
-#settings .notify-box + .notify-box, #settings > .help-body > div + div { margin-top: 4px; }
+#settings-data .notify-box + .notify-box, #settings-data > .help-body > div + div { margin-top: 4px; }
 /* A question asked on the page (askHere in app.js), in place of a browser pop-up */
 .page-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0; border: 1px solid var(--bad); background: var(--bad-bg); border-radius: var(--r-ctl); font-size: var(--fs-md); color: var(--ink); }
 .page-ask[hidden] { display: none; }
@@ -1980,17 +1979,17 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 @media (prefers-reduced-motion: reduce) { .upd-steps .upd-now .upd-mark { animation: none; } }
 .upd-steps .p-track { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .upd-steps .p-fill { height: 100%; width: 0; background: var(--accent); transition: width .5s; }
-/* Settings (the top bar's button) puts the Set up menu at the top of the left panel, alone: no PCs, staff or chats.
-   It stays there on every page it opens (Models, Nodes, Staff, Jobs, Files), with the page open marked, so the next
-   one is one press away. Every other page leaves Set up out of the left panel. */
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > :not(#rail-setup-fold) { display: none; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail > .rail-setup > summary.rail-head { margin-top: 4px; }
-.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > .rail > #rail-setup-fold { display: none; }
+/* Settings puts its menu at the top of the left panel, alone: no PCs, staff or chats. It stays there on every page it
+   opens, with the page open marked, so the next one is one press away. Every other page shows only TOMLIN - HOME and
+   Settings, at the foot of the panel: the submenu opens on Settings. */
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="data"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="data"], [data-view="colours"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="data"], [data-view="colours"]) > .rail #rail-settings-sub { padding-left: 14px; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="data"]):not([data-view="colours"]) > .rail #rail-settings-sub { display: none; }
 .rail-links .link[aria-current="page"] { background: var(--hover); font-weight: 600; }
 .rail-links .link[aria-current="page"] svg { color: var(--ink); }
 /* On a phone the menu sits above the page */
-@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"]) > .rail { display: flex; } }
+@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="data"], [data-view="colours"]) > .rail { display: flex; } }
 /* Staff, Jobs and Files as pages (home.js showAsPage): the window's own box, backdrop and height let go */
 .shell:not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > #setup-page { display: none; }
 #setup-page > dialog.as-page { position: static; display: block; inset: auto; width: 100%; max-width: 1240px; height: auto; max-height: none; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: inherit; overflow: visible; }
@@ -2438,3 +2437,12 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .todo-check-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); }
 .todo-due { color: var(--warn); font-weight: 600; }
 .todo-fault { color: var(--bad); }
+/* Settings: tiles, three across, so the last row is the low-priority three */
+.settings-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 980px; }
+.settings-tile { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 2px 12px; align-content: start; padding: 14px; text-align: left; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+.settings-tile:hover { background: var(--hover); border-color: var(--accent); }
+.settings-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-tile-icon { grid-row: span 2; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.settings-tile strong { font-weight: 600; }
+@media (max-width: 1000px) { .settings-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .settings-tiles { grid-template-columns: minmax(0, 1fr); } }

@@ -11,38 +11,25 @@ import { noRelease } from '../src/release.ts';
 const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 const page = (f: string) => read(`public/${f}`);
 
-test('the Set up menu has Update TOMLIN of its own, right under This PC: models and updates, opening Update this install', () => {
+test('the Settings menu has Updates of its own, after This PC, opening Update this install', () => {
   const html = page('index.html');
   const thispc = html.indexOf('data-setup="thispc"');
   const update = html.indexOf('data-setup="update"');
-  assert.ok(thispc > 0 && update > thispc, 'an Update TOMLIN entry after This PC: models and updates');
-  assert.match(html.slice(update, update + 600), /Update TOMLIN<\/button>/);
+  assert.ok(thispc > 0 && update > thispc, 'an Updates entry after This PC');
+  assert.match(html.slice(update, update + 900), /Updates<\/button>/);
   // One press from the menu: the same opener Settings' button uses (home.js app.openUpdateInstall).
   assert.match(page('homeview.js'), /b\.dataset\.setup === 'update'\) app\.openUpdateInstall\?\.\(\)/);
   assert.match(page('home.js'), /app\.openUpdateInstall = async \(\) => \{/);
   // The page it opens is This PC: models and updates, so that menu entry is the one marked there (SETUP_VIEWS unchanged).
-  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files'\];/);
+  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'\];/);
 });
 
-test('Settings starts with which TOMLIN this PC runs, Check git working right there, and Update this install', () => {
+test('Update this install has Check git, one function for it, and a download followed on its own page', () => {
   const html = page('index.html');
-  const settings = html.slice(html.indexOf('id="settings"'), html.indexOf('id="setup-page"'));
-  const head = settings.indexOf('<div id="settings-update"></div>');
-  assert.ok(head > 0, 'the update block is in the Settings page');
-  assert.ok(head < settings.indexOf('<fieldset class="colours-pick"'), 'it comes before Colours (the first block)');
-  assert.ok(head < settings.indexOf('<div id="settings-keep"></div>'), 'and before Your data and updates');
-  assert.match(page('mute.js'), /\$\('#settings-update'\)\.replaceChildren\(app\.updateBox\?\.\(\) \?\? ''\);/);
+  assert.ok(html.includes('id="node-install-git"'), 'Check git is on the page Updates opens');
   const home = page('home.js');
-  const box = home.slice(home.indexOf('app.updateBox = '), home.indexOf('app.updateBox = ') + 3000);
-  assert.match(box, /This PC runs TOMLIN \$\{/);
-  assert.match(box, /text: 'Check git'/);
-  assert.match(box, /text: 'Update this install'/);
-  // One Check git for both places: the Settings block and the This PC page call the same function.
   assert.match(home, /async function checkGit\(btn, say, download\)/);
-  assert.match(box, /checkGit\(/);
   assert.match(home, /\$\('#node-install-git'\)\.addEventListener\('click', e => \{\n[^\n]*\n\s*checkGit\(e\.currentTarget, gitSay, getGit\);/);
-  // A download found from Settings is followed on the Update this install page (its bar and Update now are there).
-  assert.match(box, /app\.openUpdateInstall\(\);\s*\n?\s*getGit\(/);
 });
 
 test('the My PC window has Update TOMLIN beside its version line', () => {
@@ -66,9 +53,8 @@ test('with no release on GitHub, Check git says what to do instead (Check zip, o
 test('Help and the README name the new ways in', () => {
   const html = page('index.html');
   const help = html.slice(html.indexOf('id="help-copies"'), html.indexOf('id="help-git"'));
-  assert.match(help, /<b>Update TOMLIN<\/b>/);
-  assert.match(help, /the Set up menu/);
-  assert.match(help, /the top of Settings/);
+  assert.match(help, /<b>Updates<\/b>/);
+  assert.match(help, /under Settings/);
   assert.match(help, /My PC window/);
-  assert.match(read('README.md'), /\*\*Update TOMLIN\*\* \(the Set up menu; also at the top of Settings and in the My PC window\)/);
+  assert.match(read('README.md'), /\*\*Updates\*\* \(under Settings; also Update TOMLIN in the My PC window\)/);
 });

@@ -99,9 +99,9 @@ async function openMute(key, label) {
     key === 'all' || key.startsWith('room:')
       ? el('label', { class: 'check' }, stuck, ` Still tell me when a job is stuck waiting for me (a step stopped on a fault, or the tests failed)${key === 'all' ? '' : ': one setting for every job room, not only this one'}`)
       : null,
-    key === 'all' ? el('p', { class: 'hint' }, 'Sounds and Windows notifications: ', el('button', { class: 'link', type: 'button', text: 'Settings', onclick: () => {
+    key === 'all' ? el('p', { class: 'hint' }, 'Sounds and Windows notifications: ', el('button', { class: 'link', type: 'button', text: 'Settings, Data and lock', onclick: () => {
       muteDlg.close();
-      openSettings();
+      openDataLock();
     } }), '.') : null,
     el('div', { class: 'team-actions' }, el('button', { class: 'btn quiet', type: 'button', text: 'Close', onclick: () => muteDlg.close() }))));
   muteDlg.showModal();
@@ -141,23 +141,32 @@ function drawMuteBar() {
 }
 app.drawMuteBar = drawMuteBar;
 
-// ---- Settings (top bar): notifications, app lock, your data and updates ----
+// ---- Settings (the top bar and the left panel): tiles, each opening its page ----
 
-/** Opens the Settings page (like Models, a page, not a window), each part drawn fresh from what the server says now. */
-function openSettings() {
-  $('#settings-update').replaceChildren(app.updateBox?.() ?? '');
-  $('#settings-web').replaceChildren(app.webSearchBox?.() ?? '');
-  $('#settings-notify').replaceChildren(app.notifyBox?.() ?? '');
-  $('#settings-lock').replaceChildren(app.appLockBox?.() ?? '');
-  $('#settings-keep').replaceChildren(app.keepBox?.() ?? '');
-  // A window open over the page would cover it (the bell's own window has a Settings link).
+/** Opens a Settings page (like Models, a page, not a window), from wherever: a window open over it would cover it. */
+function showSettingsPage(view, page) {
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
-  setView('settings');
-  // The left panel is the Set up menu here (style.css): open, whatever it was folded to before.
-  $('#rail-setup-fold').open = true;
-  $('#settings').scrollTop = 0;
+  setView(view);
+  $(page).scrollTop = 0;
 }
+
+/** The tile screen (homeview.js makes the tiles from the left panel's submenu). */
+function openSettings() {
+  showSettingsPage('settings', '#settings');
+}
+
+/** Data and lock: your data, the app lock, alerts and web search, each drawn fresh from what the server says now. */
+function openDataLock() {
+  $('#settings-keep').replaceChildren(app.keepBox?.() ?? '');
+  $('#settings-lock').replaceChildren(app.appLockBox?.() ?? '');
+  $('#settings-notify').replaceChildren(app.notifyBox?.() ?? '');
+  $('#settings-web').replaceChildren(app.webSearchBox?.() ?? '');
+  showSettingsPage('data', '#settings-data');
+}
+
 app.openSettings = openSettings;
+app.openDataLock = openDataLock;
+app.openColours = () => showSettingsPage('colours', '#settings-colours');
 $('#settings-open').addEventListener('click', () => openSettings());
 
 /** Redraws everything that shows a mute: the rows (which redraw the bar). */
