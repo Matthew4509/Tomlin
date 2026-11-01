@@ -36,6 +36,8 @@ async function loadFiles() {
 function dirty() {
   return fileState.path && fileEditor.value !== fileState.saved;
 }
+// Text typed and not saved stays through the app lock (lock.js): the file's, and a blog draft's.
+app.workHere.push(() => !!dirty() || (!$('#blog-edit').hidden && !!$('#blog-body').value.trim() && $('#blog-saved').hidden));
 
 async function openFile(path) {
   if (dirty() && !(await askHere($('#file-ask-box'), `${fileState.path} has changes you have not saved. Open another file and lose them?`, 'Open it, lose the changes', 'Stay here'))) return;

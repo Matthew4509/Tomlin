@@ -232,9 +232,10 @@ function push(p, opts = {}) {
       if (Object.keys(live).length && !s.secretsDir) throw new Error('This site has Live secrets but no folder above its web folder to keep them in. Pick a web folder inside the account (like public_html) in Set up.');
 
       // What changed since the last push.
-      const last = opts.all ? {} : (s.lastSent || {});
+      const last = s.lastSent || {};
       const now = Object.fromEntries(c.files.map(f => [f.rel, f.sha]));
-      const send = c.files.filter(f => last[f.rel] !== f.sha);
+      const send = c.files.filter(f => opts.all || last[f.rel] !== f.sha);
+      // Send every file still takes off what was sent before and is gone from the folder here.
       const gone = Object.keys(last).filter(rel => !(rel in now));
       job.plan = { send: send.length, same: c.files.length - send.length, remove: gone.length, bytes: send.reduce((a, f) => a + f.size, 0) };
       // sftp reads [ and ] in a name as a pattern: "team[1].jpg" could copy or remove team1.jpg instead.
@@ -401,8 +402,11 @@ function goBack(p) {
       }
       store.updateSite(p.dir, x => {
         for (const o of x.pushes || []) if (o.id === last.id) { o.undone = true; o.undoneAt = new Date().toISOString(); }
-        // The server now holds the files from before that push: the next push sends everything again, to be sure.
-        x.lastSent = null;
+        // The server now holds the files from before that push: the next push sends everything again, to be sure (no
+        // file matches an empty mark), and still knows which files are there, so one deleted here comes off the server.
+        const added = new Set(manifest.added);
+        const there = [...Object.keys(x.lastSent || {}).filter(rel => !added.has(rel)), ...manifest.backedUp.map(b => b.rel)];
+        x.lastSent = there.length ? Object.fromEntries(there.map(rel => [rel, ''])) : null;
         return x;
       });
       // Go back puts back FILES only: the Live secrets file and a database stay as the newest push left them.

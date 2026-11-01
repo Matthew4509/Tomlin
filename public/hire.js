@@ -170,7 +170,7 @@
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
     const p = hs.pc ? d().pcs.find(x => x.id === hs.pc) : null;
     const empty = q && offered(hs.pc).length ? [el('p', { class: 'hint', text: `No ${thing} on ${pcName(hs.pc)} match "${hs.q.trim()}".` })]
-      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} shares no ${thing} with this PC. On that PC, open Network and tick the models other PCs may use.` })]
+      : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} has no ${thing} yet. Send one there from Models, or pick another PC.` })]
       : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => { dlg.close(); app.openModels(kind() === 'image' ? 'image' : 'chat'); } }), '.')];
     // The model kept when it is still offered; else the one loaded now on this PC; else the first on the list.
     if (!list.some(c => c.id === hs.model)) {
@@ -421,6 +421,10 @@
     hs.level = e.target.value;
     hs.levelPicked = true;
     drawLevel();
+  });
+  // The search is inside the form: Enter there only filters, it never presses Hire.
+  $('#hs-search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') e.preventDefault();
   });
   $('#hs-search').addEventListener('input', e => {
     hs.q = e.target.value;

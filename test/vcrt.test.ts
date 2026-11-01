@@ -3,7 +3,7 @@
 // helpers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -102,10 +102,26 @@ test("the installer's helpers: Microsoft's signature only, the redistributable's
   assert.match(s, /-ArgumentList '\/install','\/passive' -Verb RunAs -Wait -PassThru; \$p\.ExitCode$/);
 });
 
-test("a signature check on this copy's own Node.js: valid, but not Microsoft's, so it would not be run", { skip: !onWindows }, () => {
-  const said = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', inst.signatureScript(join(root, 'runtime', 'node', 'node.exe'))], { encoding: 'utf8' }).trim();
-  assert.match(said, /^Valid\|/);
+/** No status came back, and PowerShell itself says it could not load its signature module: nothing was checked. */
+const moduleWouldNotLoad = (said: string, stderr: string) => said.replace('|', '').trim() === '' && /Microsoft\.PowerShell\.Security.*could not be loaded/s.test(stderr);
+
+test("a signature check on this copy's own Node.js: valid, but not Microsoft's, so it would not be run", { skip: !onWindows }, t => {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', inst.signatureScript(join(root, 'runtime', 'node', 'node.exe'))], { encoding: 'utf8' });
+  const said = r.stdout.trim();
+  // This PowerShell cannot check any signature here: not a wrong signature, and the installer refuses either way (below).
+  if (moduleWouldNotLoad(said, r.stderr)) return t.skip('PowerShell could not load Microsoft.PowerShell.Security here, so no signature was read');
+  assert.match(said, /^Valid\|/, `PowerShell said: ${r.stderr}`);
   assert.equal(inst.signedByMicrosoft(said), false);
+});
+
+test('a signature that could not be read is told from a wrong one, and neither would be run', () => {
+  const stderr = "Get-AuthenticodeSignature : The 'Get-AuthenticodeSignature' command was found in the module \n'Microsoft.PowerShell.Security', but the module could not be loaded. For more information, run 'Import-Module \nMicrosoft.PowerShell.Security'.";
+  assert.equal(moduleWouldNotLoad('|', stderr), true);
+  assert.equal(moduleWouldNotLoad('', stderr), true);
+  assert.equal(moduleWouldNotLoad('NotSigned|', ''), false);
+  assert.equal(moduleWouldNotLoad('HashMismatch|Microsoft Corporation', stderr), false, 'a real answer is never excused');
+  assert.equal(moduleWouldNotLoad('|', 'some other fault'), false, 'any other fault still fails the test');
+  for (const said of ['|', '', 'NotSigned|', 'HashMismatch|Microsoft Corporation']) assert.equal(inst.signedByMicrosoft(said), false, said);
 });
 
 test('the installer offers the runtime when it is missing (dry run), and skips it on --no-vcrt', { skip: !onWindows }, () => {

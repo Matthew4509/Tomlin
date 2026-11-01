@@ -2,7 +2,7 @@
 // plan file and the workspace files are the memory, not the chat, so a long job never depends on one long conversation.
 // This file holds the plain functions (plan format, prompts, reading a worker's answer); the plain functions are tested in
 // test/jobs.test.ts. Nothing here runs code or touches the disk: the server saves the plan as jobs/<id>/plan.json.
-import { keptFromModels, RESERVED, SPECIALISTS, stamp } from './folders.ts';
+import { firstWords, keptFromModels, RESERVED, SPECIALISTS, stamp } from './folders.ts';
 import { cleanPath } from './workspace.ts';
 
 export const ROLE_IDS = ['coder', 'writer', 'artist', 'designer'] as const;
@@ -123,6 +123,15 @@ export function cleanProjectFolder(input: unknown): string | null {
 
 /** The default project folder: the date and time, "2026-10-07-1116" (src/folders.ts). */
 export const folderStamp = stamp;
+
+/**
+ * The folder for a project when none is typed: its name in plain words ("Harbour: Bakery/2?" is "Harbour Bakery 2"), or
+ * the date and time when the name has no words or is one a project cannot take ("jobs", "CON").
+ */
+export function projectFolderFrom(name: unknown, now = new Date()): string {
+  const text = String(name ?? '');
+  return (/[\p{L}\p{N}]/u.test(text) ? cleanProjectFolder(firstWords(text)) : null) ?? stamp(now);
+}
 
 const oneLine = (s: unknown, max: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -495,6 +504,14 @@ function indexesOf(text: string, find: string): number[] {
   return out;
 }
 
+/** The SUMMARY line that ends a file block with no END line: the last one in capitals, near the end of the block. */
+function closingSummary(chunk: string): RegExpExecArray | null {
+  const last = [...chunk.matchAll(/^\s*\**SUMMARY\**\s*:/gm)].at(-1);
+  if (!last) return null;
+  const after = chunk.slice(last.index + last[0].length).split('\n').slice(1).filter(l => l.trim());
+  return after.length <= 2 ? last : null;
+}
+
 /** The files and summary in a worker's answer. Only the step's own files are accepted. With one allowed file and one code fence, the fence is that file. */
 export function parseResult(answer: string, allowed: string[], edit: string[] = []): Result {
   const blocks = edit.length ? parseEdits(answer, edit) : null;
@@ -509,7 +526,8 @@ export function parseResult(answer: string, allowed: string[], edit: string[] = 
     } else if (!dropped.includes(rawPath.trim())) dropped.push(rawPath.trim());
   };
   // A block runs from its FILE line to its END line; small models sometimes leave the END line out, so the next FILE
-  // line, a SUMMARY line or the end of the answer also closes it.
+  // line, the closing SUMMARY line or the end of the answer also closes it. "Summary:" in the file's own words never
+  // does: only the form the worker was told to end with, in capitals, with at most two lines after it.
   const head = /^\s*=+\s*FILE:\s*(.+?)\s*=*\s*$/gm;
   const heads = [...text.matchAll(head)];
   let rest = text;
@@ -517,7 +535,7 @@ export function parseResult(answer: string, allowed: string[], edit: string[] = 
     const start = m.index! + m[0].length;
     const stop = k + 1 < heads.length ? heads[k + 1].index! : text.length;
     const chunk = text.slice(start, stop);
-    const end = /^\s*=+\s*END(?: FILE)?\s*=*\s*$|^\s*\**SUMMARY\**\s*:/im.exec(chunk);
+    const end = /^\s*=+\s*END(?: FILE)?\s*=*\s*$/im.exec(chunk) ?? closingSummary(chunk);
     add(m[1], stripFence(end ? chunk.slice(0, end.index) : chunk));
     rest = rest.replace(text.slice(m.index!, end ? start + end.index + (/^\s*=/.test(end[0]) ? end[0].length : 0) : stop), '\n');
   });

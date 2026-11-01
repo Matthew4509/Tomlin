@@ -184,8 +184,15 @@ async function runProject(it: QItem, signal: AbortSignal, st: { stage: string })
     const pic = find(now, it.waitFor);
     const n = pic?.step ?? 0;
     if (pic?.state !== 'done') return { state: 'needs', waitFor: undefined, error: `Step ${n + 1}'s picture ${pic?.state === 'cancelled' ? 'was cancelled' : `did not come out${pic?.error ? ` (${pic.error.replace(/\.$/, '')})` : ''}`}. Draw it in an artist's chat and press Mark done in the job, then add the project to the queue again.` };
-    const marked = await jobRoutes.changeJob({ id: it.project, action: 'mark', n, status: 'done', summary: `${pic.result ?? 'Drawn by the queue.'}${pic.handed && !pic.handed.startsWith('Not ') ? ` ${pic.handed}` : ''}` });
-    if (marked.status !== 200) return { state: 'failed', waitFor: undefined, error: `Step ${n + 1}'s picture came back, but the step could not be marked done: ${String((marked.body as { error?: unknown }).error ?? marked.status)}` };
+    // Already done: the project is running again after a Stop, a restart or a busy PC, and this was seen to the first time.
+    const job = await jobRoutes.loadJob(it.project);
+    if (!job || job.steps[n]?.status === 'todo') {
+      const marked = await jobRoutes.changeJob({ id: it.project, action: 'mark', n, status: 'done', summary: `${pic.result ?? 'Drawn by the queue.'}${pic.handed && !pic.handed.startsWith('Not ') ? ` ${pic.handed}` : ''}` });
+      if (marked.status !== 200) return { state: 'failed', waitFor: undefined, error: `Step ${n + 1}'s picture came back, but the step could not be marked done: ${String((marked.body as { error?: unknown }).error ?? marked.status)}` };
+    }
+    // Off the saved line too: this project no longer waits for that picture, whatever happens to it next.
+    const id = it.id;
+    await change(q => { const x = find(q, id); if (x) x.waitFor = undefined; });
     it = { ...it, waitFor: undefined };
   }
   // Saved on Home with no plan yet: planned first (with nobody to read the plan, it runs as made; his review comes after).

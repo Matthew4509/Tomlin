@@ -195,7 +195,7 @@ async function hideJob() {
   const hide = !job.hidden;
   jobFault(null);
   try {
-    showJob(await api('/api/jobs/change', { id: job.id, action: 'hide', hidden: hide }));
+    showJob(await api('/api/jobs/change', { id: job.id, action: 'hide', hidden: hide }), true);
     $('#job-note').textContent = hide ? 'Hidden from the lists. Its folder and files stay in the workspace; it is under Hidden jobs in All jobs, where Show it again puts it back.' : 'Shown in the lists again.';
     await loadJobs();
     if (typeof refresh === 'function') refresh();
@@ -314,7 +314,7 @@ async function saveTeam(change) {
   said.textContent = 'Saving…';
   try {
     const view = await api('/api/jobs/change', { id: job.id, action: 'team', team: { ...jobUi.view.team, ...change } });
-    showJob(view);
+    showJob(view, true);
     said.textContent = 'Saved.';
   } catch (e) {
     said.textContent = '';
@@ -370,7 +370,7 @@ $('#job-web').addEventListener('change', async e => {
   if (!job) return;
   const said = $('#job-team-said');
   try {
-    showJob(await api('/api/jobs/change', { id: job.id, action: 'web', on: e.target.checked }));
+    showJob(await api('/api/jobs/change', { id: job.id, action: 'web', on: e.target.checked }), true);
     said.textContent = e.target.checked ? 'Web is on for this job: its steps may search the web and read pages.' : 'Web is off for this job.';
   } catch (err) {
     e.target.checked = !e.target.checked;
@@ -489,13 +489,17 @@ $('#preview-reload').addEventListener('click', () => previewPoll(true));
 $('#preview-page').addEventListener('change', () => previewPoll(true));
 jobsDlg.addEventListener('close', () => previewShow(false));
 
-/** Draws a job from the server's view: {job, team, doers, cards, swaps, swapSeconds, names, scopeChecks}. */
-function showJob(view) {
+/**
+ * Draws a job from the server's view: {job, team, doers, cards, swaps, swapSeconds, names, scopeChecks}. `keepEdits`:
+ * this change is not to the plan (the team, Web, hiding it, tests), so steps edited and not saved yet stay as typed.
+ */
+function showJob(view, keepEdits = false) {
   const job = view.job;
   const same = jobUi.job?.id === job.id;
+  const keep = keepEdits && same && jobUi.edited;
   jobUi.view = view;
   jobUi.job = job;
-  jobUi.edited = false;
+  jobUi.edited = keep;
   $('#job-goal-line').textContent = job.name || job.goal;
   const done = job.steps.filter(s => s.status !== 'todo').length;
   const next = job.steps.findIndex(s => s.status === 'todo');
@@ -511,13 +515,13 @@ function showJob(view) {
   drawJobHanded(job);
   drawJobUsage(job);
   drawNav(job);
-  $('#job-steps').replaceChildren(...job.steps.map(stepItem));
-  $('#job-save').disabled = true;
+  if (!keep) $('#job-steps').replaceChildren(...job.steps.map(stepItem));
+  $('#job-save').disabled = !keep;
   const run = $('#job-run');
   const picture = next >= 0 && PICTURE_ROLES.has(job.steps[next].role);
-  run.disabled = next < 0 || picture || !!jobUi.result;
+  run.disabled = next < 0 || picture || !!jobUi.result || keep;
   run.textContent = next < 0 ? 'All steps finished' : picture ? `Step ${next + 1} is a picture` : `Run step ${next + 1}`;
-  $('#job-note').textContent = picture ? `Step ${next + 1} is a picture: draw it in an artist's chat from its brief, then press Mark done.` : '';
+  $('#job-note').textContent = keep ? 'Save the plan changes before running a step.' : picture ? `Step ${next + 1} is a picture: draw it in an artist's chat from its brief, then press Mark done.` : '';
   if (picture) pictureStepButton(job.steps[next], next);
   drawTests(job.tests);
   $('#job-hide').textContent = job.hidden ? 'Show it again' : 'Hide this job';
@@ -604,14 +608,28 @@ function editedSteps() {
   }));
 }
 
+// A running job ends with its stream, and edits to a plan live only here: the lock keeps this page rather than restart it.
+app.workHere.push(() => !!jobUi.running || jobUi.edited);
+// Back from the lock: anything that finished behind it (its calls were refused) is read again.
+app.keptThroughLock = async () => {
+  if (!jobUi.job || jobUi.running) return;
+  jobFault(null);
+  const view = await api(`/api/jobs/get?id=${encodeURIComponent(jobUi.job.id)}`).catch(() => null);
+  if (view) showJob(view, true);
+  loadJobs().catch(() => undefined);
+};
+
+/** A change to the job; true only when it was made (not when the person chose to save their edits first, or it failed). */
 async function change(body) {
   jobFault(null);
-  if (body.action !== 'edit' && jobUi.edited && !(await askHere($('#job-plan-ask'), 'This plan has changes you have not saved. Carry on and lose them?', 'Carry on, lose the changes', 'Stop: I will save them first'))) return;
+  if (body.action !== 'edit' && jobUi.edited && !(await askHere($('#job-plan-ask'), 'This plan has changes you have not saved. Carry on and lose them?', 'Carry on, lose the changes', 'Stop: I will save them first'))) return false;
   try {
     showJob(await api('/api/jobs/change', { id: jobUi.job.id, ...body }));
     await loadJobs();
+    return true;
   } catch (e) {
     jobFault(e.message, e.data);
+    return false;
   }
 }
 
@@ -691,9 +709,11 @@ async function runStep() {
     jobFault(err.message, err.data);
   } finally {
     out.hidden = true;
+    // A re-run that failed: what came back before is still waiting, so its Save and Throw away are shown again.
+    $('#job-result').hidden = !jobUi.result;
     stage(null);
     busyButtons(false);
-    showJob(jobUi.view);
+    showJob(jobUi.view, true);
   }
 }
 $('#job-run').addEventListener('click', runStep);
@@ -746,14 +766,13 @@ $('#job-accept').addEventListener('click', async () => {
   if (!r) return;
   const failing = (r.problems ?? []).length;
   if (failing && !(await askHere($('#job-accept-ask'), `${failing} check${failing > 1 ? 's' : ''} failed on this answer (listed above). Save it anyway?`, 'Save it anyway', 'Do not save'))) return;
-  await change({ action: 'accept', n: r.n, files: resultFiles(), summary: $('#job-summary').value });
-  if (!$('#jobs-fault').hidden) return;
+  if (!(await change({ action: 'accept', n: r.n, files: resultFiles(), summary: $('#job-summary').value }))) return;
   jobUi.result = null;
   $('#job-result').hidden = true;
   // Said where the press was: what was saved, and what comes next.
   const saved = (r.files ?? []).map(f => f.path);
   const next = jobUi.job?.steps.findIndex(s => s.status === 'todo') ?? -1;
-  showJob(jobUi.view);
+  showJob(jobUi.view, true);
   $('#job-note').textContent = `Saved${saved.length ? ` ${saved.join(', ')}` : ''}: step ${r.n + 1} is done.${next >= 0 ? ` Step ${next + 1} is next.` : ' Every step is done.'}`;
   if (typeof loadFiles === 'function') loadFiles().catch(() => undefined);
 });
@@ -774,7 +793,7 @@ $('#job-ask-review').addEventListener('click', async () => {
   } finally {
     stage(null);
     busyButtons(false);
-    showJob(jobUi.view);
+    showJob(jobUi.view, true);
   }
 });
 
@@ -784,7 +803,7 @@ $('#job-discard').addEventListener('click', async () => {
   $('#job-result').hidden = true;
   if (had && jobUi.job) await api('/api/jobs/change', { id: jobUi.job.id, action: 'discard' }).catch(e => jobFault(e.message));
   // The step can run again now; the note says what happened.
-  if (jobUi.view) showJob(jobUi.view);
+  if (jobUi.view) showJob(jobUi.view, true);
   if (had) $('#job-note').textContent = `Thrown away. Run step ${had.n + 1} again when you are ready.`;
 });
 
@@ -876,13 +895,13 @@ $('#job-test-run').addEventListener('click', async () => {
   $('#job-test-out').replaceChildren(el('p', { class: 'hint', text: `Running ${label}…` }));
   try {
     const r = await api('/api/jobs/test', { id: jobUi.job.id, test: $('#job-test-cmd').value });
-    showJob(r);
+    showJob(r, true);
   } catch (e) {
     $('#job-test-out').replaceChildren();
     jobFault(e.message, e.data);
   } finally {
     busyButtons(false);
-    showJob(jobUi.view);
+    showJob(jobUi.view, true);
   }
 });
 
@@ -902,7 +921,7 @@ $('#job-final').addEventListener('click', async () => {
   } finally {
     stage(null);
     busyButtons(false);
-    showJob(jobUi.view);
+    showJob(jobUi.view, true);
   }
 });
 

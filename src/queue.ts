@@ -155,15 +155,15 @@ export function move(q: Queue, itemId: string, dir: -1 | 1): boolean {
 
 /**
  * Room for `n` more: the oldest finished lines go first, but not one a line still to do waits for (its picture is
- * wanted yet). False when the list is full of work still to do.
+ * wanted yet). False when the list is full of work still to do, with nothing dropped: a batch refused costs no history.
  */
 export function makeRoom(q: Queue, n: number): boolean {
   const wanted = new Set(q.items.filter(x => !isFinished(x)).map(x => x.waitFor));
-  while (q.items.length + n > MAX_ITEMS) {
-    const i = q.items.findIndex(x => isFinished(x) && !wanted.has(x.id));
-    if (i < 0) return false;
-    q.items.splice(i, 1);
-  }
+  const over = q.items.length + n - MAX_ITEMS;
+  if (over <= 0) return true;
+  const drop = q.items.filter(x => isFinished(x) && !wanted.has(x.id)).slice(0, over);
+  if (drop.length < over) return false;
+  q.items = q.items.filter(x => !drop.includes(x));
   return true;
 }
 
@@ -248,12 +248,13 @@ export function forNow(error: string): boolean {
 }
 
 /** The parts of a chat line the queue reads when a message runs again (src/store.ts ChatLine). */
-interface SaidLine { role: string; content: string; at: string; from?: string; queued?: string; waiting?: unknown; stopped?: boolean }
+interface SaidLine { role: string; content: string; at: string; from?: string; queued?: string; waiting?: unknown; stopped?: boolean; failed?: boolean }
 
 /**
  * A queued chat message running again (TOMLIN was closed while it ran, or Stop then Resume): 'done' when the message
  * is in the chat with a whole answer after it (or one still owed by a linked PC); otherwise the lines to take out so it
- * is sent again in its place: the message itself and the empty or stopped answers after it.
+ * is sent again in its place: the message itself and the empty, stopped or failed answers after it (a fault's line is
+ * in the chat as words, but it is not an answer).
  * The message is found by its queue item's id (qid), so two queued items with the same words are two messages; a line
  * from before the id was kept is found by its words, sent at or after since. Only the answers up to the next message
  * count: an answer to something typed after it is not its answer.
@@ -264,8 +265,8 @@ export function runAgain(lines: SaidLine[], message: string, since: string, qid 
   if (had < 0) return [];
   const next = lines.findIndex((l, k) => k > had && l.role === 'user');
   const after = lines.slice(had + 1, next < 0 ? lines.length : next);
-  if (after.some(l => l.role === 'assistant' && !l.stopped && (l.content.trim() || l.waiting))) return 'done';
-  return [had, ...after.flatMap((l, k) => (l.role === 'assistant' && (l.stopped || !l.content.trim()) ? [had + 1 + k] : []))];
+  if (after.some(l => l.role === 'assistant' && !l.stopped && !l.failed && (l.content.trim() || l.waiting))) return 'done';
+  return [had, ...after.flatMap((l, k) => (l.role === 'assistant' && (l.stopped || l.failed || !l.content.trim()) ? [had + 1 + k] : []))];
 }
 
 /**

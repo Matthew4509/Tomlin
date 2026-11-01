@@ -61,10 +61,16 @@ async function generateInto(a, b, said, draw) {
   draw();
 }
 
-/** The lock screen over everything (every other part of the page is hidden, open windows are closed). */
-function showAppLock(view) {
+/**
+ * Each part of the page says here whether it holds what a page starting again would lose: a job running on its stream
+ * (that ends the job), or text typed and not saved. With any of it, a lock hides the page instead of starting it again.
+ */
+app.workHere = [];
+
+/** The lock screen over everything (every other part of the page is hidden, open windows are closed). `keepPages`: a page shown in the app stays open behind it, hidden. */
+function showAppLock(view, keepPages = false) {
   app.lockShown = true;
-  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  for (const d of document.querySelectorAll('dialog[open]')) if (!keepPages || !d.classList.contains('as-page')) d.close();
   document.body.classList.add('app-locked');
   $('#applock').hidden = false;
   const wait = view?.waitMinutes ?? 0;
@@ -177,11 +183,37 @@ app.appLocked = () => {
   // The first lock's codes are on screen (the lock shut at once): they stay until one is typed back.
   if (app.lockShown || appLockUi.showingCodes) return;
   if (appLockUi.booted && appLockUi.view?.open) {
+    if (app.workHere.some(held => held())) return void lockKeepingWork();
     app.keepDraft?.();
     location.reload();
   }
   else showAppLock(appLockUi.view);
 };
+
+/** Locked with work on this page: the server is shut as always and everything is hidden, but the page does not start again. */
+async function lockKeepingWork() {
+  app.lockShown = true;
+  const windows = [...document.querySelectorAll('dialog[open]')].filter(d => !d.classList.contains('as-page'));
+  appLockUi.kept = { windows };
+  const v = await api('/api/applock').catch(() => null);
+  appLockUi.view = v ?? { ...appLockUi.view, open: false };
+  showAppLock(appLockUi.view, true);
+}
+
+/** The lock opened again: a page kept through it carries on where it was; otherwise it starts again, as it does on opening. */
+async function appLockOpened() {
+  const kept = appLockUi.kept;
+  if (!kept) return location.reload();
+  appLockUi.kept = null;
+  app.lockShown = false;
+  document.body.classList.remove('app-locked');
+  $('#applock').hidden = true;
+  for (const box of [$('#applock-open-pin'), $('#applock-code'), $('#applock-new1'), $('#applock-new2')]) box.value = '';
+  appLockUi.view = await api('/api/applock').catch(() => appLockUi.view);
+  drawPadlock();
+  for (const d of kept.windows) if (!d.open) d.showModal();
+  app.keptThroughLock?.();
+}
 
 function drawPadlock() {
   const v = appLockUi.view;
@@ -207,11 +239,13 @@ async function appLockBoot() {
 
 $('#applock-btn').addEventListener('click', async () => {
   if (!appLockUi.view?.on) return openAppLockNew();
-  app.keepDraft?.();
+  const keep = app.workHere.some(held => held());
+  if (!keep) app.keepDraft?.();
   try {
     await api('/api/applock', { action: 'lock' });
   } finally {
-    location.reload();
+    if (keep) await lockKeepingWork();
+    else location.reload();
   }
 });
 
@@ -288,7 +322,7 @@ $('#applock-form').addEventListener('submit', async e => {
   $('#applock-open').disabled = true;
   try {
     await api('/api/applock', { action: 'unlock', pin: $('#applock-open-pin').value });
-    location.reload();
+    await appLockOpened();
   } catch (err) {
     fault.textContent = err.message;
     fault.hidden = false;
@@ -332,7 +366,7 @@ $('#applock-recover').addEventListener('submit', async e => {
   $('#applock-recover-go').disabled = true;
   try {
     await api('/api/applock', { action: 'recover', code: $('#applock-code').value, kind: recoverKind(), pin: $('#applock-new1').value, pin2: $('#applock-new2').value });
-    location.reload();
+    await appLockOpened();
   } catch (err) {
     fault.textContent = err.message;
     fault.hidden = false;

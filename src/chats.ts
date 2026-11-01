@@ -257,7 +257,8 @@ export class Chats {
     const c = await this.create(from.who, at);
     const base = from.title.replace(/ \(carried on(?: \d+)?\)$/, '');
     const n = (await this.index()).filter(x => x.title.startsWith(`${base} (carried on`)).length;
-    Object.assign(c, { title: `${base} (carried on${n ? ` ${n + 1}` : ''})`, named: true, opening, from: from.id });
+    // It stays where the old chat was: in its project (Save and picture hand-ins go there), with its Think and Web.
+    Object.assign(c, { title: `${base} (carried on${n ? ` ${n + 1}` : ''})`, named: true, opening, from: from.id, ...(from.project ? { project: from.project } : {}), ...(from.think ? { think: true } : {}), ...(from.web ? { web: true } : {}) });
     await this.write();
     return c;
   }

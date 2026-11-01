@@ -196,6 +196,8 @@ export interface StaffMember {
   model?: string | null;
   /** The brain used when the preferred one cannot answer now (same form). */
   fallback?: string | null;
+  /** Their places on linked PCs released for now: put back when that PC is linked again. */
+  parked?: Parked[];
   /** Picture hires: the style asked for when the words name none ("cartoon", "photo", "icon"; brains.ts). */
   style?: string | null;
   /** Related models on this PC this hire may also use (a designer with an icon model and a logo model). The default is `model`. */
@@ -355,9 +357,47 @@ interface File {
   auditions: Record<string, Audition>;
 }
 
+/** A hire's models when a linked PC was released: what they were, and `left`, what the release moved them to. */
+export interface Parked {
+  pc: string;
+  model: string | null;
+  fallback: string | null;
+  left: string | null;
+}
+
+const refOrNull = (x: unknown) => x === null || typeof x === 'string';
+
+/** Only the sound places, from whatever was given or read. */
+export function parkedOnly(input: unknown): Parked[] {
+  return (Array.isArray(input) ? input : []).filter((p): p is Parked => !!p && typeof p === 'object' && typeof p.pc === 'string' && refOrNull(p.model) && refOrNull(p.fallback) && refOrNull(p.left));
+}
+
+/**
+ * A linked PC is released (or, `forGood`, removed): a hire on it moves to their second model, or has none until one is
+ * picked. Released, their place is remembered. The change to make, or null when they were not on it.
+ */
+export function whenReleased(m: Pick<StaffMember, 'model' | 'fallback' | 'parked'>, pc: string, onIt: (ref?: string | null) => boolean, forGood = false): { model: string | null; fallback: null; parked: Parked[] } | null {
+  if (!onIt(m.model) && !onIt(m.fallback)) return null;
+  const model = onIt(m.model) ? (onIt(m.fallback) ? null : m.fallback ?? null) : m.model ?? null;
+  const others = (m.parked ?? []).filter(p => p.pc !== pc);
+  return { model, fallback: null, parked: forGood ? others : [...others, { pc, model: m.model ?? null, fallback: m.fallback ?? null, left: model }] };
+}
+
+/**
+ * That PC is linked again: a hire goes back to the models they had, unless a model has been picked for them since (that
+ * choice stays). The change to make, or null when they had no place there.
+ */
+export function restored(m: Pick<StaffMember, 'model' | 'fallback' | 'parked'>, pc: string): { model?: string | null; fallback?: string | null; parked: Parked[] } | null {
+  const place = m.parked?.find(p => p.pc === pc);
+  if (!place) return null;
+  const parked = m.parked!.filter(p => p !== place);
+  return !m.model || m.model === place.left ? { model: place.model, fallback: place.fallback, parked } : { parked };
+}
+
 /** A hire as read from the file: a retired role's new one, and what every page relies on (a name, a list) even if edited by hand. */
 function sound(m: StaffMember): StaffMember {
   const out = RETIRED[m.role] ? { ...m, role: RETIRED[m.role] } : { ...m };
+  if (out.parked !== undefined) out.parked = parkedOnly(out.parked);
   if (typeof out.name !== 'string' || !out.name.trim()) out.name = out.id;
   if (out.group !== undefined && !Array.isArray(out.group)) out.group = [];
   for (const k of ['model', 'fallback', 'active'] as const) if (out[k] !== undefined && typeof out[k] !== 'string') out[k] = null;
@@ -424,7 +464,7 @@ export class Staff {
     return m;
   }
 
-  async change(id: string, change: { name?: unknown; role?: unknown; level?: unknown; model?: unknown; fallback?: unknown; style?: unknown; group?: unknown; active?: unknown; cover?: unknown; tone?: unknown; look?: unknown; initials?: unknown }): Promise<StaffMember | null> {
+  async change(id: string, change: { name?: unknown; role?: unknown; level?: unknown; model?: unknown; fallback?: unknown; parked?: unknown; style?: unknown; group?: unknown; active?: unknown; cover?: unknown; tone?: unknown; look?: unknown; initials?: unknown }): Promise<StaffMember | null> {
     const m = this.get(id);
     if (!m) return null;
     if (typeof change.name === 'string' && change.name.trim()) m.name = change.name.trim().replace(/\s+/g, ' ').slice(0, 30);
@@ -432,6 +472,7 @@ export class Staff {
     if (change.level !== undefined) m.level = levelOf(change.level).id;
     if (change.model !== undefined) m.model = typeof change.model === 'string' && change.model ? change.model : null;
     if (change.fallback !== undefined) m.fallback = typeof change.fallback === 'string' && change.fallback ? change.fallback : null;
+    if (change.parked !== undefined) m.parked = parkedOnly(change.parked);
     if (change.style !== undefined) m.style = change.style === 'cartoon' || change.style === 'photo' || change.style === 'icon' ? change.style : null;
     if (change.group !== undefined) m.group = Array.isArray(change.group) ? [...new Set(change.group.filter((x): x is string => typeof x === 'string' && !!x && !x.startsWith('remote:')))].slice(0, 12) : [];
     if (change.active !== undefined) m.active = typeof change.active === 'string' && change.active ? change.active : null;

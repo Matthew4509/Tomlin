@@ -77,3 +77,40 @@ test('two pictures saved under one name at the same moment keep a file each', as
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a damaged line in the list is skipped and said: search and the other pictures still work', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tomlin-gallery-'));
+  try {
+    const good = pic('good', '2026-10-01T10:00:00.000Z');
+    const lines = [
+      good,
+      { ...pic('no-prompt', '2026-10-01T11:00:00.000Z'), prompt: null },
+      { ...pic('number-prompt', '2026-10-01T11:00:00.000Z'), prompt: 5 },
+      { ...pic('no-file', '2026-10-01T11:00:00.000Z'), output: undefined },
+      { ...pic('no-date', '2026-10-01T11:00:00.000Z'), at: 7 },
+      { id: 'only-a-change', kept: true },
+      { id: 5, prompt: 'a number for an id' },
+      null, 'a string', [1, 2],
+      { id: 'good', altText: 'a later change to a good picture' },
+    ];
+    await writeFile(join(dir, 'gallery.jsonl'), `${lines.map(l => JSON.stringify(l)).join('\n')}\n{"id":"half`);
+    const warned: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void warned.push(a.join(' '));
+    try {
+      const g = new Gallery(dir);
+      assert.deepEqual((await g.all()).map(p => p.id), ['good']);
+      assert.equal((await g.get('good'))!.altText, 'a later change to a good picture');
+      assert.deepEqual((await g.list(0, 60, 'all', 'piano')).pictures.map(p => p.id), ['good']);
+      assert.equal(await g.get('no-prompt'), undefined);
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(warned.length, 1, warned.join('; '));
+    assert.match(warned[0], /9 damaged lines? .*skipped/);
+    // Nothing is thrown away: the file still holds them, for someone to mend by hand.
+    assert.match(await readFile(join(dir, 'gallery.jsonl'), 'utf8'), /no-prompt/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

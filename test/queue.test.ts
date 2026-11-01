@@ -69,6 +69,19 @@ test('a full list drops the oldest finished lines, and refuses when all are stil
   assert.equal(Q.makeRoom(list, 2), false);
 });
 
+test('a batch the queue cannot take leaves it exactly as it was: no finished line is dropped for nothing', () => {
+  const list = q([item({ state: 'done' }), ...Array.from({ length: Q.MAX_ITEMS - 1 }, () => item())]);
+  const before = JSON.stringify(list);
+  assert.equal(Q.makeRoom(list, 2), false);
+  assert.equal(JSON.stringify(list), before);
+  // A batch that fits drops only as many as it needs, oldest first.
+  const two = q([item({ state: 'done' }), item({ state: 'done' }), ...Array.from({ length: Q.MAX_ITEMS - 2 }, () => item())]);
+  const newer = two.items[1].id;
+  assert.equal(Q.makeRoom(two, 1), true);
+  assert.equal(two.items.length, Q.MAX_ITEMS - 1);
+  assert.equal(two.items[0].id, newer);
+});
+
 test('a full list keeps a finished line that a line still to do waits for, and drops the next oldest instead', () => {
   const needed = item({ state: 'done' });
   const spare = item({ state: 'done' });
@@ -161,6 +174,7 @@ test('a queued chat message run again: done with a whole answer; sent again afte
   assert.equal(Q.runAgain([before, ask, { role: 'assistant', content: 'The intro.', at: '2026-10-10T10:02:00.000Z' }], 'Write the intro', since), 'done');
   assert.equal(Q.runAgain([before, ask, { role: 'assistant', content: '', at: '2026-10-10T10:02:00.000Z', waiting: { rid: 'r1' } }], 'Write the intro', since), 'done', 'owed by a linked PC: it comes by itself');
   // Stop (the queue's Pause) part way, then Resume: the half answer is not the answer.
+  assert.deepEqual(Q.runAgain([before, ask, { role: 'assistant', content: 'The runner stopped.', at: '2026-10-10T10:02:00.000Z', failed: true }], 'Write the intro', since), [1, 2], 'a fault\'s line is not an answer');
   assert.deepEqual(Q.runAgain([before, ask, { role: 'assistant', content: 'The in', at: '2026-10-10T10:02:00.000Z', stopped: true }], 'Write the intro', since), [1, 2]);
   assert.deepEqual(Q.runAgain([before, ask, { role: 'assistant', content: ' ', at: '2026-10-10T10:02:00.000Z' }], 'Write the intro', since), [1, 2]);
   assert.deepEqual(Q.runAgain([before, ask], 'Write the intro', since), [1], 'closed before any answer');

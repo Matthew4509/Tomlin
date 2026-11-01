@@ -5,6 +5,8 @@
 
 const form = $('#img-form');
 const promptBox = $('#img-prompt');
+// A prompt typed and not drawn yet stays through the app lock (lock.js).
+app.workHere.push(() => !!promptBox.value.trim());
 const goBtn = $('#img-go');
 const cancelBtn = $('#img-cancel');
 const progress = $('#img-progress');

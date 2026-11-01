@@ -129,8 +129,8 @@ $('#rail-staff-row').addEventListener('click', () => app.openStaffMenu());
 phone.addEventListener('change', e => {
   if (!e.matches && homeUi.view === 'rail') setView(store('view') === 'chat' ? 'chat' : 'home');
 });
-// The chat is where the page starts (the Chats tab beside it lists the chats); Home opens first only when it was left open.
-setView(phone.matches ? 'rail' : store('view') === 'home' ? 'home' : 'chat');
+// The page starts where it was left. A brand-new install has no chat to come back to: Home, with its setup steps, opens first.
+setView(phone.matches ? 'rail' : store('view') === 'chat' ? 'chat' : 'home');
 pageFocus = true;
 // The staff list under "Staff" starts open; folding it is kept in this browser.
 $('#rail-staff-fold').open = store('staff-open') !== '0';
@@ -1258,12 +1258,23 @@ function drawOthers(pcs) {
             })))),
           p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network, Sharing permissions).` }) : null,
           el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Hire staff on it', 'data-key': `hire:${p.id}`, title: `Opens Hire staff with ${p.name} picked: then choose one of its models`, onclick: () => app.openHire?.({ pc: p.id }) })))
-        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet. On that PC, Network, tick the models other PCs may use.' })) : null,
+        : el('span', { class: 'hint', text: 'Lets this PC use: no models yet, as that PC has none. Send one there from Models.' })) : null,
       // How fast its loaded model answers for this PC (its answers here are timed; Test speed runs the example prompt there).
       p.ok && p.model && !away && !p.backupsOnly ? el('span', { class: 'hint' }, p.speed?.expect ? `Speed: ${app.speedWords(p.speed.expect)} (${p.speed.basis === 'answers' ? `the average of ${p.speed.average.n} answers` : 'tested'}) · ` : 'Speed: not measured yet · ', app.speedLink(`remote:${p.id}`, msg => sayHere($('#node-others-ask'), msg), refreshOthers)) : null,
       el('div', { class: 'team-actions' }, back, el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => {
-        if (!(await askHere($('#node-others-ask'), `Stop using "${p.name}"? To use it again you will need its setup code.`, `Stop using ${p.name}`, 'Keep it linked'))) return;
-        await api('/api/remotes', { action: 'remove', id: p.id }).catch(() => undefined);
+        const box = $('#node-others-ask');
+        try {
+          const { hires } = await api('/api/remotes', { action: 'on-it', id: p.id });
+          const again = 'To use it again you will need its setup code.';
+          // With hires on it there is something to keep or forget; with none, stopping is all there is.
+          const choice = hires.length
+            ? await askPick(box, `Stop using "${p.name}"? ${listNames(hires)} ${hires.length > 1 ? 'work' : 'works'} on it, and would move to their second model, or have none until you pick one. Release for now puts them back on it when you link it again; Remove for good does not. ${again}`, [{ label: 'Release for now', value: 'release' }, { label: 'Remove for good', value: 'good', danger: true }], 'Keep it linked')
+            : (await askHere(box, `Stop using "${p.name}"? ${again}`, `Stop using ${p.name}`, 'Keep it linked')) && 'good';
+          if (!choice) return;
+          await api('/api/remotes', { action: 'remove', id: p.id, ...(choice === 'good' ? { forGood: true } : {}) });
+        } catch (err) {
+          sayHere(box, err.message);
+        }
         refreshOthers();
         refreshPcs();
       } })));
@@ -1563,6 +1574,9 @@ $('#node-install-file').addEventListener('change', async e => {
   x.send(file);
 });
 
+/** What the last Update all could not start: stays through every refresh, until the next press. */
+let updateAllFaults = '';
+
 /** The linked PCs this one can update now (behind it, and nothing stopping it), on the Update all button. */
 function drawUpdateAll(pcs) {
   const can = pcs.filter(p => p.ok && p.update && !p.update.why);
@@ -1573,19 +1587,22 @@ function drawUpdateAll(pcs) {
   b.textContent = can.length ? `Update all linked PCs (${can.length})` : 'Update all linked PCs';
   b.onclick = async () => {
     b.disabled = true;
+    updateAllFaults = '';
     const failed = [];
     // Each PC asks its own PIN (audit X2); Cancel skips that one.
     for (const p of can) {
       const r = await updatePcWithPin(p).catch(err => void failed.push(`"${p.name}": ${err.message}`));
       if (r === null) failed.push(`"${p.name}": its PIN was not typed.`);
     }
-    $('#node-update-all-line').textContent = failed.length ? `Not started on ${failed.join(' ')}` : '';
+    updateAllFaults = failed.length ? `Not started on ${failed.join(' ')}` : '';
+    $('#node-update-all-line').textContent = updateAllFaults;
     // The updates under way show in Models on my other PCs, each with its own line.
     if (failed.length < can.length) app.openNet?.();
     refreshOthers();
   };
-  $('#node-update-all-line').textContent = stuck.length ? `Behind but not updatable from here now: ${stuck.map(p => `"${p.name}"`).join(', ')} (${stuck.length === 1 ? 'its tile says' : 'their tiles say'} why).`
+  const state = stuck.length ? `Behind but not updatable from here now: ${stuck.map(p => `"${p.name}"`).join(', ')} (${stuck.length === 1 ? 'its tile says' : 'their tiles say'} why).`
     : can.length ? '' : pcs.length ? `Every linked PC that answers runs this version${off ? ` (${off} not answering now)` : ''}.` : 'No linked PCs yet.';
+  $('#node-update-all-line').textContent = [updateAllFaults, state].filter(Boolean).join(' ');
 }
 app.openNodes = openNodes;
 setInterval(refreshOthers, 30_000);

@@ -7,7 +7,7 @@ import { roleOf } from '../staff.ts';
 import type { Picture } from '../gallery.ts';
 import { type Routes, chats, json, shortName, staff, store } from './core.ts';
 import { images, runners, runnerUsed } from './panes.ts';
-import { optionsFrom } from '../images.ts';
+import { optionsFrom, promptWhy } from '../images.ts';
 import { answeringBusy, imageSpecialist } from './answering.ts';
 import { isArtistWho } from './people.ts';
 import { jobRoutes } from './jobs.ts';
@@ -49,8 +49,10 @@ export function paneJob() {
 
 /** Starts a picture on the artist's PC for the Images pane; it comes back into the gallery here. */
 async function startAway(away: { r: Remote; model?: string; name: string }, b: Record<string, unknown>, chat: string): Promise<{ status: number; body: unknown }> {
-  const prompt = String(b.prompt ?? '').trim().slice(0, 1000);
+  const prompt = String(b.prompt ?? '').trim();
   if (!prompt) return { status: 400, body: { error: 'Type a prompt first: what should the picture show?' } };
+  const tooLong = promptWhy(prompt);
+  if (tooLong) return { status: 400, body: { error: tooLong } };
   // The Images window follows one picture drawn on another PC at a time; the queue runs one on each PC at once.
   if (awayJob && AWAY_RUNNING.includes(awayJob.state)) {
     const busyName = (await store.settings()).remotes.find(x => x.id === awayJob?.pc)?.name ?? 'another PC';

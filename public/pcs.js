@@ -41,6 +41,8 @@
     p.textContent = text;
     p.hidden = !text;
     p.classList.toggle('fault-line', fault);
+    // It sits below the window's fold: a Save with nothing to see looks dead.
+    if (text) p.scrollIntoView({ block: 'nearest' });
   }
 
   async function load(id) {
@@ -306,7 +308,7 @@
       el('button', { class: 'btn quiet', type: 'button', text: 'Previous', disabled: list.page === 0, onclick: () => { list.page--; drawList(v); } }),
       ...nums.flatMap((n, i) => (i && n - nums[i - 1] > 1 ? [el('span', { class: 'hint', text: '…' }), go(n)] : [go(n)])),
       el('button', { class: 'btn quiet', type: 'button', text: 'Next', disabled: list.page >= pages - 1, onclick: () => { list.page++; drawList(v); } })) : null;
-    const none = !v.models.length ? (v.here ? 'No models on this PC yet. Models shows which ones fit.' : v.online ? `${v.name} lets this PC use none of its models yet. On that PC, Network, tick the models other PCs may use.` : `${v.name} has not said which models it shares: it is off or not answering.`)
+    const none = !v.models.length ? (v.here ? 'No models on this PC yet. Models shows which ones fit.' : v.online ? `${v.name} has no models yet. Send one there from Models.` : `${v.name} has not said which models it shares: it is off or not answering.`)
       : q ? `No ${list.cat === 'all' ? '' : `${CAT_WORD[list.cat].toLowerCase()} `}models match "${list.q.trim()}".` : `No ${CAT_WORD[list.cat].toLowerCase()} models.`;
     listBox.replaceChildren(
       rows.length ? el('ul', { class: 'pc-models' }, ...rows.map(x => modelRow(v, x))) : el('p', { class: 'hint', text: none }),

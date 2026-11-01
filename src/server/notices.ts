@@ -85,12 +85,12 @@ export const noticesPost: Routes = {
   },
   '/api/notes': async ({ res, b }) => {
     // {scratch}: the scratch pad's words; {add, subject?}: a new snippet; {remove: id}; {restore: snippet, at}: Undo of a delete.
-    const n = await noteStore.get();
-    const r = 'scratch' in b ? notes.setScratch(n, b.scratch, b.was) : 'add' in b ? notes.addSnippet(n, b.add, new Date(), b.subject) : 'remove' in b ? notes.removeSnippet(n, b.remove) : 'restore' in b ? notes.restoreSnippet(n, b.restore, b.at) : null;
-    if (!r) return json(res, 400, { error: 'Unknown notes action: reload the page (it may be older than TOMLIN) and try again.' });
+    const how = 'scratch' in b ? (n: notes.Notes) => notes.setScratch(n, b.scratch, b.was) : 'add' in b ? (n: notes.Notes) => notes.addSnippet(n, b.add, new Date(), b.subject) : 'remove' in b ? (n: notes.Notes) => notes.removeSnippet(n, b.remove) : 'restore' in b ? (n: notes.Notes) => notes.restoreSnippet(n, b.restore, b.at) : null;
+    if (!how) return json(res, 400, { error: 'Unknown notes action: reload the page (it may be older than TOMLIN) and try again.' });
+    const { result: r, saved } = await noteStore.change(how);
     // A clash (another window saved the scratch pad meanwhile) sends back what is saved, for the window to offer.
-    if (!r.ok) return json(res, r.clash ? 409 : 400, { error: r.error, ...(r.clash ? { notes: n } : {}) });
-    return json(res, 200, { ...(await noteStore.save(r.notes)), id: r.id ?? null });
+    if (!r.ok) return json(res, r.clash ? 409 : 400, { error: r.error, ...(r.clash ? { notes: saved } : {}) });
+    return json(res, 200, { ...saved, id: r.id ?? null });
   },
   '/api/notify': async ({ res, b }) => json(res, 200, await notifier.save(b as Partial<notify.NotifySettings>)),
   '/api/notify/test': async ({ res }) => {

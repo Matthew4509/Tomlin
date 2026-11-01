@@ -60,6 +60,8 @@ async function setListed(ids, on) {
 // ---- the page ----
 async function loadBackups() {
   try { backupView = await bk('/api/backup'); renderBackups(); } catch (e) { info(e.message, true); }
+  // Fresh on each visit, for the projects made in TOMLIN (it draws this page again when it has them).
+  loadHomeProjects();
 }
 function renderBackups() {
   const v = backupView;
@@ -95,8 +97,10 @@ function renderBackups() {
       h('button', { class: 'btn', type: 'button', onclick: () => openRun([r.id]) }, 'Back up now…'));
   };
   const shown = rows.filter(r => !r.hiddenView);
+  drawHomeProjects($('bk-home-projects'), async () => { await load(); await loadBackups(); });
+  const made = !$('bk-home-projects').hidden;
   $('bk-projects').replaceChildren(...(shown.length ? shown.map(projRow)
-    : [h('div', { class: 'set-row' }, h('div', { class: 'txt' }, h('b', null, 'No projects yet'), h('span', null, 'Add a working folder on the Folders page.')))]));
+    : [h('div', { class: 'set-row' }, h('div', { class: 'txt' }, h('b', null, made ? 'No projects on the list yet' : 'No projects yet'), h('span', null, (made ? 'Add one from Made in TOMLIN below, or a' : 'Add a') + ' working folder on the Folders page.')))]));
   const ticked = shown.filter(r => r.backup && r.backup.listed).length;
   $('cmd-backup-all').hidden = !shown.length || ticked === shown.length;
   $('cmd-backup-none').hidden = !ticked;

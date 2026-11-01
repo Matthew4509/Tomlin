@@ -126,9 +126,51 @@ async function stopPort(port, onStopping) {
   if (!onStopping) await load();
 }
 
+// ---- Projects made in TOMLIN (Lets create a project on Home, or Jobs): this page lists folders, so they are shown above
+// the list, with Open, and Add to this list for the scan, the backups and Push live. ----
+let homeProjects = null;
+async function loadHomeProjects() {
+  if (!inTomlin()) return;
+  try {
+    const [jobs, setup] = await Promise.all(['/api/jobs', '/api/projects/setup'].map(u => fetch(u).then(r => (r.ok ? r.json() : null))));
+    if (!jobs || !setup) return;
+    homeProjects = {
+      workspace: setup.workspace,
+      list: [...jobs.jobs.filter(j => !j.hidden).map(j => ({ job: j.id, name: j.name || j.goal, folder: j.folder })), ...jobs.unplanned.map(u => ({ chat: u.chat, name: u.name || u.goal, folder: u.folder }))],
+    };
+    renderHomeProjects();
+    if (!$('page-backups').hidden) renderBackups();
+    if (!rows.length) renderList();
+  } catch { /* not answering (locked, restarting): the list below is still right */ }
+}
+function homeProjectDir(x) { return x.folder ? homeProjects.workspace.replace(/[\\/]+$/, '') + '\\' + x.folder.replace(/\//g, '\\') : ''; }
+function renderHomeProjects() {
+  drawHomeProjects($('home-projects'), load);
+}
+/** The projects made in TOMLIN that are not on the list yet, in `box`; `after` runs once one has been added. */
+function drawHomeProjects(box, after) {
+  const list = (homeProjects ? homeProjects.list : []).filter(x => !rows.some(r => r.dir.toLowerCase() === homeProjectDir(x).toLowerCase()));
+  box.hidden = !list.length;
+  box.replaceChildren(...(list.length ? [h('h3', null, 'Made in TOMLIN'), ...list.map(x => {
+    const dir = homeProjectDir(x);
+    return h('div', { class: 'home-project' },
+      h('div', { class: 'txt' }, h('b', null, x.name), h('span', { class: 'muted' }, dir || 'in the workspace folder')),
+      dir ? h('button', { class: 'btn', type: 'button', title: 'Puts this folder on the Projects list, for the scan, backups and Push live', onclick: async () => {
+        try {
+          const r = await api('/api/projects/add', { path: dir });
+          if (!r.ok) return info(r.error, true);
+          info(r.name + ' added to the list.');
+          await after();
+        } catch (e) { info(e.message, true); }
+      } }, 'Add to this list') : null,
+      h('button', { class: 'btn', type: 'button', onclick: () => { location.href = x.chat ? '/?chat=' + encodeURIComponent(x.chat) : x.job ? '/?room=' + encodeURIComponent(x.job) : '/'; } }, 'Open'));
+  })] : []));
+}
+
 function renderList() {
   const q = $('search').value.trim().toLowerCase();
   renderHiddenToggle();
+  renderHomeProjects();
   const visible = rows.filter(r => showHidden || !r.hiddenView);
   const list = sorted(visible.filter(r => !q || (r.name + ' ' + r.description + ' ' + r.folder).toLowerCase().includes(q)));
   lastList = list;
@@ -138,7 +180,7 @@ function renderList() {
   $('list-head').hidden = view === 'tiles';
   if (!loaded) return L.replaceChildren(h('div', { class: 'empty' }, 'Loading projects…'));
   if (!rows.length) {
-    return L.replaceChildren(h('div', { class: 'empty' }, 'No projects yet. ',
+    return L.replaceChildren(h('div', { class: 'empty' }, homeProjects && homeProjects.list.length ? 'No folders on this list yet. ' : 'No projects yet. ',
       h('button', { class: 'btn accent', type: 'button', onclick: () => addFolderDialog() }, 'Add a working folder'), ' ',
       h('button', { class: 'btn', type: 'button', onclick: () => addProjectDialog() }, 'Add one project'),
       // TOMLIN has no Welcome window: the empty list is where a first-time person starts, so the prompt is offered here.

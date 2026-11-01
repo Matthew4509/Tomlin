@@ -10,7 +10,7 @@ import { nowModel, sizeB, roleOf, drawsFor, type StaffMember } from '../staff.ts
 import * as ws from '../workspace.ts';
 import { blogAsk, blogSystem, splitPost, blogSlug, blogFile, withoutFrontMatter, BLOG_PICTURE_SYSTEM } from '../blog.ts';
 import * as project from '../project.ts';
-import { jobId, validId, cleanProjectFolder, cleanTeam, folderStamp, type Team } from '../jobs.ts';
+import { jobId, validId, cleanProjectFolder, cleanTeam, folderStamp, projectFolderFrom, type Team } from '../jobs.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import { HOME, ROOT, type Routes, SECURITY_HEADERS, chatModels, chats, json, shortName, staff, staffId, store, workspaceDir } from './core.ts';
 import { chat, chatList, contextBytes, fit, images, lastUsed, main, runOf } from './panes.ts';
@@ -246,15 +246,42 @@ async function savedProjects() {
 const chatHireIds = () => staff.list().filter(m => !roleOf(m.role).kind).map(m => m.id);
 
 /**
- * Home's name, folder and project manager, cleaned: the folder is made inside the workspace (the date and time when it
- * is left empty). An error in words when the folder cannot be one.
+ * A new folder of this project's own, `base` or "base 2", "base 3"...: making it is what claims the name, so two projects
+ * at the same moment cannot share one. A name already there, or a link leading out of the workspace, is passed over.
+ */
+async function newFolder(root: string, base: string): Promise<string> {
+  for (let n = 1; n < 1000; n++) {
+    const name = n === 1 ? base : `${base} ${n}`;
+    const full = await ws.inside(root, name, false);
+    if (!full) continue;
+    try {
+      await mkdir(full);
+      return name;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+  throw new Error(`no free name for ${base}`);
+}
+
+/**
+ * Home's name, folder and project manager, cleaned: the folder is made inside the workspace, never through a link that
+ * leads out of it. Left empty, it is a new one named after the project (the date and time when the name cannot be one);
+ * one the person typed may already be there, for projects they share a folder on purpose. An error in words when the
+ * folder cannot be one. Call it after everything else that can refuse: a refused project leaves no folder behind.
  */
 async function projectPlace(b: Record<string, unknown>): Promise<{ folder: string; team: Team } | { error: string }> {
   const typed = String(b.folder ?? '').trim();
-  const folder = typed ? cleanProjectFolder(typed) : folderStamp();
+  let folder = typed ? cleanProjectFolder(typed) : projectFolderFrom(b.name);
   if (!folder) return { error: 'Use a plain folder name for the project, such as 2026-10-07-1116 or tip-calculator (no : * ? " < > |, and not "jobs", "chats" or "notes": those folders are kept for the plans, quick chats and notes). It is made inside the workspace folder; to work somewhere else, change the workspace folder in Files.' };
   try {
-    await mkdir(join(await workspaceDir(), ...folder.split('/')), { recursive: true });
+    const root = await workspaceDir();
+    await mkdir(root, { recursive: true });
+    if (typed) {
+      const full = await ws.inside(root, folder, false);
+      if (!full) return { error: 'That project folder leads outside the workspace folder (it goes through a link to somewhere else), so nothing was made. Type another name, or leave it empty.' };
+      await mkdir(full, { recursive: true });
+    } else folder = await newFolder(root, folder);
   } catch (err) {
     return { error: `The project folder could not be made in the workspace folder (${(err as NodeJS.ErrnoException).code ?? 'Windows would not make it'}). Check the workspace folder in Files, then try again.` };
   }
@@ -274,13 +301,16 @@ async function projectCreate(b: Record<string, unknown>): Promise<{ status: numb
   if (go && b.pm && (!picked || roleOf(picked.role).kind)) return { status: 400, body: { error: 'That hire is not on the staff any more (or only draws). Pick another under Staff, or Default, then press Lets go! again.' } };
   const hire = go ? picked ?? (await jobRoutes.strongestHire()) : null;
   if (go && !hire) return { status: 409, body: { error: 'Nobody can take the prompt now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
+  // {fromChat: true}: "+ New project…" in a chat's project list, a name alone (never with Lets go!, which sends a prompt).
+  const nameOnly = b.fromChat === true && !go;
+  const words = project.cleanQuick(b, '', nameOnly);
+  if ('error' in words) return { status: 400, body: words };
+  const verdict = checkMessage([words.name, words.about, words.prompt].join('\n'), { recent: [] });
+  if (!verdict.ok) return { status: 400, body: { error: REFUSAL[verdict.reason] } };
   const place = await projectPlace(b);
   if ('error' in place) return { status: 400, body: place };
-  // {fromChat: true}: "+ New project…" in a chat's project list, a name alone (never with Lets go!, which sends a prompt).
-  const q = project.cleanQuick(b, place.folder, b.fromChat === true && !go);
+  const q = project.cleanQuick(b, place.folder, nameOnly);
   if ('error' in q) return { status: 400, body: q };
-  const verdict = checkMessage([q.name, q.about, q.prompt].join('\n'), { recent: [] });
-  if (!verdict.ok) return { status: 400, body: { error: REFUSAL[verdict.reason] } };
   // A mini description that wishes for what nobody can promise goes on the Scope card as a hope, not as the statement.
   const hope = q.about && project.wishLine(q.about) ? q.about : null;
   const wish = project.wishLine(q.about, q.prompt);

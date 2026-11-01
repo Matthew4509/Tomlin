@@ -279,11 +279,20 @@ function withoutKeys(text: string): string {
  * forOtherPc: a restore point to keep on another PC, without this PC's keys to its linked PCs, sharing code and PIN.
  */
 export async function backup(home: Home, label: string, o: { forOtherPc?: boolean } = {}): Promise<string> {
+  return (await backupSaying(home, label, o)).name;
+}
+
+/** In a backup that left out links: which ones (taken out again when it is put back). */
+export const LINKS_NOTE = 'left-out-links.json';
+
+/** The same as `backup`, and `links`: the links and junctions in data/, which are not followed, so what they lead to is not in the zip. */
+export async function backupSaying(home: Home, label: string, o: { forOtherPc?: boolean } = {}): Promise<{ name: string; links: string[] }> {
   await mkdir(home.backups, { recursive: true });
   const name = `${stamp()} ${label.replace(/[^\w .()-]+/g, '-')}.zip`;
   const making = join(home.backups, MAKING);
   await mkdir(making, { recursive: true });
   const part = join(making, name);
+  let leftOut: string[] = [];
   try {
     // TOMLIN writes the zip itself (Windows' tar garbled or left out names such as "Résumé.pdf"). The runner list (at
     // the top of data/) is about live processes, and a save's half-written copy (*.tmp) is not data, but a file in the
@@ -292,9 +301,11 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
     // browser file): with it in, every backup failed ("Permission denied" on its Affiliation Database). A link or
     // junction is not followed (data/ holds none of its own).
     const top = new Set(o.forOtherPc ? ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE] : []);
-    const { items } = await listFolder(home.data, (rel, dir) => {
+    const { items, links } = await listFolder(home.data, (rel, dir) => {
       return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || (!rel.includes('/') && top.has(rel));
     });
+    leftOut = links;
+    if (links.length) items.push({ name: LINKS_NOTE, data: Buffer.from(JSON.stringify({ links }, null, 1)) });
     if (o.forOtherPc) {
       // settings.json goes in without the keys, and a mark says what was left out.
       const settings = await readFile(join(home.data, 'settings.json'), 'utf8').catch(() => null);
@@ -328,7 +339,7 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
   const kept = keptByAge(all);
   // One open in another program goes at a later backup: the backup just made is good either way.
   for (const old of all) if (!kept.has(old.name)) await rm(join(home.backups, old.name), { force: true }).catch(() => undefined);
-  return name;
+  return { name, links: leftOut };
 }
 
 export type Next = { do: 'bring-in'; from: string } | { do: 'restore'; name: string };
@@ -609,6 +620,7 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
     await keysFromHere(fresh, home.data);
     await rm(join(fresh, ELSEWHERE_MARK), { force: true });
   }
+  await rm(join(fresh, LINKS_NOTE), { force: true });
   // The data as it is now is kept first; without that copy nothing is replaced.
   let kept: string;
   try {

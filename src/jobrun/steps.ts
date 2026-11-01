@@ -1,7 +1,7 @@
 // One step: sized to its worker, run with checks and retries, saved, and read by the reviewer.
 import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, webWords, type ToolUse } from '../webtools.ts';
 import { createHash } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import * as jobs from '../jobs.ts';
 import type { Job } from '../jobs.ts';
 import * as ws from '../workspace.ts';
@@ -21,6 +21,35 @@ import { addEvent, jobRoot, left, loadEvents, packetFront, saveHandoff, saveJob,
 import type { Brain, StepResult } from '../jobrun.ts';
 
 // ---- One step ----
+
+/** Whether a file is on the disk, whatever kind or size: a read that fails does not mean it is not there. */
+async function thereOnDisk(root: string, rel: string): Promise<boolean> {
+  const full = await ws.inside(root, rel, false);
+  return !!full && stat(full).then(s => s.isFile(), () => false);
+}
+
+/**
+ * A step planned with no files, whose answer is real work: never thrown away with only its summary kept. New files it
+ * names in FILE blocks become the step's files (an existing one is never written over this way), and any other words
+ * go into "step-<n> answer.md" in the project, so saving the step keeps them.
+ */
+async function adoptAnswer(raw: string, parsed: jobs.Result, step: jobs.Step, i: number, root: string): Promise<jobs.Result> {
+  const fresh: string[] = [];
+  for (const name of parsed.dropped) {
+    const path = ws.cleanPath(name.replace(/^[`'"\s]+|[`'"\s]+$/g, ''));
+    if (path && !fresh.includes(path) && (await ws.inside(root, path)) && !(await thereOnDisk(root, path))) fresh.push(path);
+  }
+  const got = fresh.length ? jobs.parseResult(raw, fresh) : parsed;
+  step.files = fresh;
+  if (fresh.length && !got.dropped.length) return got;
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const words = raw.replace(/\r/g, '').replace(/^.*SUMMARY\**\s*:.*$/gim, '').trim();
+  if (!flat(words) || flat(words) === flat(got.summary)) return got;
+  let path = `step-${i + 1} answer.md`;
+  for (let n = 2; await thereOnDisk(root, path); n++) path = `step-${i + 1} answer ${n}.md`;
+  step.files = [...fresh, path];
+  return { ...got, files: [...got.files, { path, text: `${words}\n` }] };
+}
 
 /** One step, with the room told: who it was given to, which of his notes went with the brief, and what came back. */
 export async function doStep(job: Job, i: number, send: Send, signal: AbortSignal): Promise<{ result: StepResult } | { error: string }> {
@@ -74,6 +103,8 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   let size = 0;
   for (const f of step.files) {
     const r = await ws.read(root, f);
+    // There but not readable here (over 1 MB): "does not exist yet" would have the worker write a new file over it.
+    if ('error' in r && (await thereOnDisk(root, f))) return { error: `Step ${i + 1} names ${f}, which is there but cannot be used by a step: ${r.error} Nothing was changed. Take it out of the step's files, or make the file smaller.` };
     texts[f] = 'error' in r ? null : r.text;
     size += texts[f]?.length ?? 0;
   }
@@ -109,6 +140,7 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   let checks: CheckResult[] = [];
   let problems: string[] = [];
   let tries = 0;
+  const planned = step.files;
   for (let attempt = 0; attempt < 3; attempt++) {
     tries = attempt + 1;
     if (attempt) send('stage', { text: `Check failed: ${problems[0]} Asking the ${role} to fix it (try ${attempt + 1} of 3).` });
@@ -120,7 +152,9 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
       if (lostOf(e)) return { error: `${(e as Error).message} Press Run step ${i + 1} again once that PC is back: its finished work is collected, not done again.` };
       return { error: (e as Error).message };
     }
+    if (!planned.length) step.files = [];
     parsed = jobs.parseResult(raw, step.files, edit);
+    if (!planned.length) parsed = await adoptAnswer(raw, parsed, step, i, root);
     // Edit blocks become whole files here, by code; a block that does not match one place is refused.
     const editProblems: string[] = [];
     for (const f of edit) {
@@ -143,6 +177,8 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     if (!problems.length) break;
     user = `${first}\n\n${jobs.fixMessage(problems, step.files, edit)}`;
   }
+  // The files a step with none planned ended up with go on the plan, so saving it (now or by hand later) may write them.
+  if (!planned.length && step.files.length) await saveJob(job);
   const warnings = jobs.crossCheck(await webFiles(root, parsed.files));
   return { result: { ...parsed, raw, checks, problems, warnings, base: Object.fromEntries(step.files.map(f => [f, textHash(texts[f] ?? null)])), exists: Object.fromEntries(step.files.map(f => [f, texts[f] != null])), tries, worker: brain.label, ...(web.length ? { web } : {}) } };
 }
@@ -168,6 +204,8 @@ export async function acceptStep(job: Job, i: number, files: { path?: unknown; t
     if (!(await ws.inside(root, path))) return { status: 400, error: `${path}: that is not a file this step can save inside the project.` };
     if (Buffer.byteLength(String(f.text)) > ws.MAX_BYTES) return { status: 400, error: `${path}: that is over 1 MB, too big to save here. Nothing was saved.` };
     const now = await ws.read(root, path);
+    // There but not readable (over 1 MB): saved over, it could not even be put back if a later file failed.
+    if ('error' in now && (await thereOnDisk(root, path))) return { status: 409, error: `${path} is there but cannot be used by a step: ${now.error} Nothing was saved.` };
     const text = 'error' in now ? null : now.text;
     // Changed since the step read it (an editor, a chat, another step): saving would lose that change.
     if (base && path in base && base[path] !== textHash(text)) return { status: 409, error: `${path} has changed since this step was written, so saving would lose that change. Nothing was saved. Run the step again so it starts from the file as it is now.` };

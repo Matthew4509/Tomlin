@@ -632,9 +632,11 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // How full the chat is now (with this answer): the page offers a handoff from 75% (not in a layered chat).
   const marked = await chats.mark(openId, facts());
   // Lets go! on Home: the first answer is also kept as a file in the project (a stopped one is not).
-  const kept = mode === 'message' && marked?.saveAnswer && !(ac.signal.aborted && !looped) ? await keepFirstAnswer(marked, message, shown) : '';
-  const said = [note, kept ? `Also saved as ${kept.replace(/\//g, '\\')} in the workspace folder${cut ? ' (as far as it got: the rest, after Continue, is in this chat only)' : ''}.` : ''].filter(Boolean).join(' ');
-  send('done', { text: shown, perSecond, ran, cut, sources, thought, ...(tools.length ? { tools } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said });
+  const kept = mode === 'message' && marked?.saveAnswer && !(ac.signal.aborted && !looped) ? await keepFirstAnswer(marked, message, shown) : null;
+  const unsaved = !!kept && 'error' in kept;
+  const keptSaid = !kept ? '' : 'error' in kept ? `This answer is in the chat, but its file could not be saved in the project folder (${kept.error}).` : `Also saved as ${kept.path.replace(/\//g, '\\')} in the workspace folder${cut ? ' (as far as it got: the rest, after Continue, is in this chat only)' : ''}.`;
+  const said = [note, keptSaid].filter(Boolean).join(' ');
+  send('done', { text: shown, perSecond, ran, cut, sources, thought, ...(tools.length ? { tools } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said, ...(unsaved ? { unsaved } : {}) });
   res.end();
 }
 

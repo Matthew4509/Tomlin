@@ -569,13 +569,15 @@ app.onBrain = ran => {
   app.onChat(chatUi.open);
 };
 // After a message: the chat may have just been made (and named), and it moves to the top of the list.
-// `id`: the chat sent to, read by its id; `from`: the chat on screen when it was sent ('' = not made yet). Shown only
-// while this window is still there: a chat opened meanwhile (or in another window) is not taken away.
-app.afterSend = async (id = app.chatId ?? '', from = id) => {
+// `id`: the chat sent to, read by its id; `from`: the chat on screen when it was sent ('' = not made yet), and `who`: the
+// person it was with. Shown only while this window is still there: a chat opened meanwhile (or in another window) is not
+// taken away, and that includes another person's chat not made yet.
+app.afterSend = async (id = app.chatId ?? '', from = id, who = '') => {
   await loadChats();
   if (!id) return;
   const r = await api(`/api/chat?id=${encodeURIComponent(id)}`).catch(() => null);
-  if (r?.chat && [from, id].includes(app.chatId ?? '')) app.onChat(r.chat);
+  const now = app.chatId ?? '';
+  if (r?.chat && (now === id || (now === from && (from || !who || who === app.chatWho?.())))) app.onChat(r.chat);
 };
 
 /**

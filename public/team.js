@@ -813,7 +813,7 @@ function pcPicker(m, section) {
     if (here) body = el('p', { class: 'hint', text: `${first} works here now.` });
     else if (x.backupsOnly) body = el('p', { class: 'hint', text: 'Set to Backups only: it takes no staff.' });
     else if (shut) body = el('p', { class: 'hint', text: x.activity === 'owner' ? 'Its owner is using it just now: try again later.' : 'It is not answering just now: switch it on, then try again.' });
-    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It shares no ${m.kind === 'image' ? 'picture' : 'chat'} models with this PC: tick them on that PC (Network), or send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
+    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet: send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
     else {
       const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
       // Each model there says whether it fits there; one too big for that PC cannot be picked.

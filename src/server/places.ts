@@ -36,20 +36,21 @@ export async function moveChatFiles(c: ChatInfo): Promise<string> {
   const to = await saveToOf(c);
   if (!from || !to || c.project === undefined) return '';
   const root = await workspaceDir();
-  const all = await ws.list(root);
-  const files = all.map(f => f.path).filter(p => p.startsWith(`${from}/`));
-  if (!files.length) return '';
-  const plan = folders.moves(files, from, to.dir, new Set(all.map(f => f.path)), to.stamped ? folders.stampOf(from.split('/').pop()!) ?? '' : '');
+  // This chat's folder itself: the browsing list stops at 500 files across the workspace and shows only text files.
+  const under = await ws.filesUnder(root, from).catch(() => null);
+  if (!under || (!under.files.length && !under.links.length)) return '';
+  const plan = folders.moves(under.files, from, to.dir, new Set(), to.stamped ? folders.stampOf(from.split('/').pop()!) ?? '' : '');
   let moved = 0;
+  const stuck = [...under.links];
   for (const m of plan.move) {
-    const a = await ws.inside(root, m.from);
-    const b = await ws.inside(root, m.to);
+    const a = await ws.inside(root, m.from, false);
+    const b = await ws.inside(root, m.to, false);
     if (!a || !b) {
-      plan.stay.push(m.from);
+      stuck.push(m.from);
       continue;
     }
-    // Looked at on the disk just before the move: the list above stops at 500 files, and Windows' rename writes
-    // over a file of that name (in any case of letters) without a word.
+    // Looked at on the disk just before the move: Windows' rename writes over a file of that name (in any case of
+    // letters) without a word.
     if (existsSync(b)) {
       plan.stay.push(m.from);
       continue;
@@ -59,18 +60,20 @@ export async function moveChatFiles(c: ChatInfo): Promise<string> {
       await rename(a, b);
       moved++;
     } catch {
-      plan.stay.push(m.from);
+      stuck.push(m.from);
     }
   }
-  // The chat's own folder goes when it is empty (rmdir never removes a folder with something in it).
-  if (!plan.stay.length) {
-    const dir = await ws.inside(root, `${from}/x.txt`);
+  // The chat's own folder goes when it is empty, its emptied sub-folders first (rmdir never removes a folder with something in it).
+  for (const rel of [...under.folders].reverse().concat(from)) {
+    const dir = await ws.inside(root, `${rel}/x`, false);
     if (dir) await rmdir(dirname(dir)).catch(() => undefined);
   }
   const where = (to.dir || 'the workspace folder').replace(/\//g, '\\');
+  const here = from.replace(/\//g, '\\');
   return [
     moved ? `${moved} file${moved === 1 ? '' : 's'} from this chat moved into ${where}.` : '',
-    plan.stay.length ? `${plan.stay.length === 1 ? `${plan.stay[0].split('/').pop()} stayed` : `${plan.stay.length} files stayed`} in ${from.replace(/\//g, '\\')}: ${plan.stay.length === 1 ? 'a file of that name is' : 'files of those names are'} already in the project.` : '',
+    plan.stay.length ? `${plan.stay.length === 1 ? `${plan.stay[0].split('/').pop()} stayed` : `${plan.stay.length} files stayed`} in ${here}: ${plan.stay.length === 1 ? 'a file of that name is' : 'files of those names are'} already in the project.` : '',
+    stuck.length ? `${stuck.length === 1 ? `${stuck[0].split('/').pop()} could` : `${stuck.length} items could`} not be moved and stayed in ${here}${stuck.length === 1 ? '' : ` (${stuck.slice(0, 3).map(s => s.split('/').pop()).join(', ')}${stuck.length > 3 ? '…' : ''})`}: move ${stuck.length === 1 ? 'it' : 'them'} by hand if the project needs ${stuck.length === 1 ? 'it' : 'them'}.` : '',
   ].filter(Boolean).join(' ');
 }
 
@@ -113,22 +116,29 @@ export async function handInTo(project: string, prompt: string, file: string | n
 /**
  * The first answer of a chat started by Lets go! on Home, kept as a file where Save puts this chat's work (the project
  * folder, or a writer's specialists\writer), named with the date and time and the prompt's first words; never over
- * another file. Its workspace path, or '' when it was not kept (the answer is in the chat either way).
+ * another file. Its workspace path, or why not (the answer is in the chat either way); null when no file is wanted.
+ * The mark goes first, whatever happens to the file: the next answer is another answer, and is never saved as the first
+ * (the page holds this one's words, for Save the file again).
  */
-export async function keepFirstAnswer(c: ChatInfo, prompt: string, text: string): Promise<string> {
-  if (!c.saveAnswer || !c.project || !text.trim()) return '';
+export async function keepFirstAnswer(c: ChatInfo, prompt: string, text: string): Promise<{ path: string } | { error: string } | null> {
+  if (!c.saveAnswer || !c.project || !text.trim()) return null;
   await chats.mark(c.id, { saveAnswer: undefined });
+  return saveAnswer(c, prompt, text);
+}
+
+/** One answer as a file, as keepFirstAnswer says. */
+async function saveAnswer(c: ChatInfo, prompt: string, text: string): Promise<{ path: string } | { error: string }> {
   try {
     const to = await saveToOf(c);
-    if (!to) return '';
+    if (!to) return { error: 'that project is not in this workspace any more' };
     const root = await workspaceDir();
     const first = folders.answerPath(to.dir, prompt);
     let rel = first;
     for (let n = 2; await ws.read(root, rel).then(r => !('error' in r)); n++) rel = first.replace(/\.md$/, ` ${n}.md`);
     const r = await ws.save(root, rel, `${text.trim()}\n`);
-    return 'error' in r ? '' : r.path;
-  } catch {
-    return '';
+    return 'error' in r ? { error: r.error } : { path: r.path };
+  } catch (e) {
+    return { error: (e as Error).message };
   }
 }
 
@@ -145,6 +155,15 @@ export const placesGet: Routes = {
 };
 
 export const placesPost: Routes = {
+  '/api/chats/keep-answer': async ({ res, b }) => {
+    // {id, prompt, text}: Save the file again, for a first answer whose file could not be saved.
+    const c = await chats.get(String(b.id ?? '')).catch(() => null);
+    if (!c) return json(res, 404, { error: 'That chat is not here any more.' });
+    const text = typeof b.text === 'string' ? b.text : '';
+    if (!c.project || !text.trim()) return json(res, 400, { error: 'There is nothing to save for this chat: the answer is in the chat.' });
+    const r = await saveAnswer(c, String(b.prompt ?? ''), text);
+    return 'error' in r ? json(res, 400, { error: `The file was not saved: ${r.error}. Check the project's folder in Files, then try again.` }) : json(res, 200, r);
+  },
   '/api/notes/save': async ({ res, b }) => {
     // {text, project}: a note from the right panel saved as a file: notes\<stamp> <words>.md, or the project's admin notes.
     const text = typeof b.text === 'string' ? b.text.replace(/\r\n?/g, '\n').trim() : '';

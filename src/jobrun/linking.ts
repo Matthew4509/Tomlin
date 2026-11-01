@@ -7,6 +7,7 @@ import * as link from '../link.ts';
 import * as brains from '../brains.ts';
 import * as linkhelp from '../linkhelp.ts';
 import * as netfacts from '../netfacts.ts';
+import { restored, whenReleased } from '../staff.ts';
 import { d } from './shared.ts';
 import type { Remote } from '../store.ts';
 import { hello, seen, workerPost } from './links.ts';
@@ -88,6 +89,11 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const same = now.find(r => r.id === id);
     const made: Remote = { ...(same?.backupsOnly ? { backupsOnly: true } : {}), ...(same?.models ? { models: same.models } : {}), id, name, url, token: done.token, key: link.keysText(done.keys) };
     await d.store.saveSettings({ remotes: [...others, made] });
+    // A PC released for now, back: its hires go back on it.
+    for (const m of d.staff.list()) {
+      const back = restored(m, id);
+      if (back) await d.staff.change(m.id, back);
+    }
     // Asked at once, so the people who work there show straight away.
     await hello((await d.store.settings()).remotes.find(r => r.id === made.id)!, 4000).catch(() => undefined);
     // Another PC (another id) already linked under this name: linked all the same, and said, so two cards called
@@ -149,16 +155,19 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
       }
     }
     await hello((await d.store.settings()).remotes.find(x => x.id === id)!, 4000).catch(() => undefined);
-  } else if (b.action === 'remove') {
+  } else if (b.action === 'on-it' || b.action === 'remove') {
     const id = String(b.id ?? '');
-    await d.store.saveSettings({ remotes: s.remotes.filter(r => r.id !== id) });
-    if (Object.values(s.jobModels).includes(`remote:${id}`)) await d.store.saveSettings({ jobModels: Object.fromEntries(Object.entries(s.jobModels).map(([k, v]) => [k, v === `remote:${id}` ? '' : v])) });
-    // A hire whose brain was on that PC (what it had loaded, or one of its shared models) no longer points at it.
+    if (!s.remotes.some(r => r.id === id)) return { status: 404, body: { error: 'That PC is no longer linked.' } };
     const gone = (ref: string | null | undefined) => { const x = brains.parseRef(ref); return x.kind === 'remote' && x.pc === id; };
+    if (b.action === 'on-it') return { status: 200, body: { hires: d.staff.list().filter(m => gone(m.model) || gone(m.fallback)).map(m => m.name) } };
+    // A hire whose brain was on that PC (what it had loaded, or one of its shared models) no longer points at it. Done
+    // first: a removal that fails part-way leaves the PC linked, so pressing Remove again finishes it.
     for (const m of d.staff.list()) {
-      if (gone(m.model)) await d.staff.change(m.id, { model: gone(m.fallback) ? null : m.fallback ?? null, fallback: null });
-      else if (gone(m.fallback)) await d.staff.change(m.id, { fallback: null });
+      const change = whenReleased(m, id, gone, b.forGood === true);
+      if (change) await d.staff.change(m.id, change);
     }
+    if (Object.values(s.jobModels).includes(`remote:${id}`)) await d.store.saveSettings({ jobModels: Object.fromEntries(Object.entries(s.jobModels).map(([k, v]) => [k, v === `remote:${id}` ? '' : v])) });
+    await d.store.saveSettings({ remotes: (await d.store.settings()).remotes.filter(r => r.id !== id) });
     seen.delete(id);
   } else return { status: 400, body: { error: 'Unknown worker action.' } };
   return { status: 200, body: await setup() };

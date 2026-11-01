@@ -130,6 +130,8 @@ export class Images {
   private lastConnect: { id: string; asked: Asked; threads: number } | null = null;
   private jobs: Job[] = [];
   private current: Job | null = null;
+  /** Ends what the current picture is asking the runner (Cancel). */
+  private asking: AbortController | null = null;
   private used = 0;
   private restarting = false;
 
@@ -367,7 +369,8 @@ export class Images {
     let base: Picture | undefined;
     if (opts.finalOf || opts.again) {
       base = await this.gallery.get((opts.finalOf ?? opts.again)!);
-      if (!base) return { error: 'That picture is not in the gallery any more.', status: 404 };
+      // Deleted (its files are gone) or from the private chat (never served again): as good as not there.
+      if (!base || base.removed || base.private) return { error: 'That picture is not in the gallery any more.', status: 404 };
     }
     // A final or a redraw stays in the draft's chat; a new picture goes into the chat its asker names (never the server's
     // open chat: that is whichever window opened one last).
@@ -375,7 +378,8 @@ export class Images {
     opts = { ...opts, chat: chatId || undefined };
     const typed = (base?.prompt ?? opts.prompt ?? '').trim();
     if (!typed) return { error: 'Type a prompt first: what should the picture show?', status: 400 };
-    if (typed.length > 2000) return { error: 'That prompt is too long (over 2,000 characters). Shorten it.', status: 400 };
+    const tooLong = promptWhy(typed);
+    if (tooLong) return { error: tooLong, status: 400 };
     const verdict = checkMessage(typed, { recent: [] });
     if (!verdict.ok) return { error: REFUSAL[verdict.reason].replace('Change the subject and carry on.', 'Change the prompt.').replace('Make someone up instead and carry on.', 'Describe a made-up person instead.'), status: 422 };
 
@@ -437,6 +441,7 @@ export class Images {
     if (job.state === 'cancelled') return;
     this.current = job;
     this.lastJob = job;
+    this.asking = new AbortController();
     job.startedAt = Date.now();
     try {
       await this.run(job, plan, m, true);
@@ -445,11 +450,16 @@ export class Images {
       this.fail(job, `The picture could not be started: ${(error as Error).message}`);
     } finally {
       this.current = null;
+      this.asking = null;
       this.used = Date.now();
     }
   }
 
   private async run(job: Job, plan: Plan, m: RegistryModel, mayFallBack: boolean): Promise<void> {
+    // After each wait below: a Cancel during it stays a Cancel, whatever the wait brought back. (Moving to the CPU comes back here.)
+    const cancelled = () => (job.state as string) === 'cancelled';
+    if (cancelled()) return;
+    const signal = this.asking?.signal;
     job.state = 'starting';
     this.used = Date.now();
     // Drafts use the fast decoder (TAESD), when the model has one; everything else the full one: Mid and High are
@@ -460,7 +470,6 @@ export class Images {
       if (!(await this.restart(wantDecoder, wantDecoder === 'full' ? 'Loading the full-quality decoder' : 'Loading the fast decoder'))) return this.fail(job, 'The image model did not load again after switching decoders. Press Connect to try again.');
     }
     // A Cancel just before this loads the model again: this picture waits for it (up to 15 minutes) instead of failing.
-    const cancelled = () => (job.state as string) === 'cancelled';
     for (const t0 = Date.now(); (this.restarting || this.pane.view.state === 'loading') && !cancelled() && Date.now() - t0 < 15 * 60_000;) await sleep(300);
     if (cancelled()) return;
     const base = this.pane.worker.base;
@@ -475,13 +484,14 @@ export class Images {
     const t0 = Date.now();
     let sdJob: string;
     try {
-      const r = await fetch(`${base}/sdcpp/v1/img_gen`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await fetch(`${base}/sdcpp/v1/img_gen`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
       const j = await r.json() as { id?: string; error?: { message?: string } | string };
       if (!r.ok || !j.id) return this.fail(job, `The image runner refused the request: ${typeof j.error === 'string' ? j.error : j.error?.message ?? r.status}.`);
       sdJob = j.id;
     } catch (error) {
       return this.fail(job, `The image runner did not answer: ${(error as Error).message}.`);
     }
+    if (cancelled()) return;
     job.state = 'drawing';
     job.image = 1;
     // Cancel (and the progress lines) change the state while this loop waits: read as it is at each look.
@@ -494,7 +504,7 @@ export class Images {
       if (stateNow() === 'decoding' && !decodeStart) decodeStart = Date.now();
       let st: { status: string; result?: { images: Array<{ b64_json: string }> }; error?: { message?: string } };
       try {
-        st = await (await fetch(`${this.pane.worker.base ?? base}/sdcpp/v1/jobs/${sdJob}`)).json();
+        st = await (await fetch(`${this.pane.worker.base ?? base}/sdcpp/v1/jobs/${sdJob}`, { signal })).json();
       } catch {
         // The runner went away (it ran out of memory, or Cancel restarted it).
         if (stateNow() === 'cancelled') return;
@@ -502,6 +512,7 @@ export class Images {
         if (mayFallBack && this.pane.view.asked === 'auto' && device !== 'cpu') return this.fallBack(job, plan, m, tail);
         return this.fail(job, `The image runner stopped while drawing. ${whyImage(tail)}`);
       }
+      if (stateNow() === 'cancelled') return;
       // No status: the runner answering now does not know this job (it was started again), so it will never finish.
       if (typeof st?.status !== 'string') return this.fail(job, 'The image runner was started again while it drew, and no longer knows this picture. Draw it again.');
       if (st.status === 'completed') {
@@ -521,6 +532,7 @@ export class Images {
       // A speed note that cannot be saved is not worth losing the picture over.
       await this.deps.store.saveSettings({ timings: { [this.timingKey()]: { perStep: job.perStep, decode } } }).catch(() => undefined);
     }
+    if (cancelled()) return;
     if (!result?.images?.length) return this.fail(job, 'The image runner finished but sent no picture back.');
     job.state = 'finishing';
     try {
@@ -528,7 +540,8 @@ export class Images {
         const drawn = Buffer.from(result.images[i].b64_json ?? '', 'base64');
         // What cannot be read as a picture is a failed picture, never an empty or broken file in the gallery.
         if (!(await isPicture(drawn))) throw new Error('the image runner sent back something that is not a picture.');
-        const png = plan.upscale ? await this.sharpen(job, drawn) : drawn;
+        const png = plan.upscale ? await this.sharpen(job, drawn, signal) : drawn;
+        if (cancelled()) return;
         if (job.opts.forPc) {
           // For a linked PC: shaped in memory, never saved here (F7 E2). drawForPc takes it at once.
           const shaped = await this.shape(job, plan, png);
@@ -540,6 +553,7 @@ export class Images {
     } catch (error) {
       return this.fail(job, `The picture was drawn but could not be finished: ${(error as Error).message}`);
     }
+    if (cancelled()) return;
     job.state = 'done';
     job.etaSeconds = 0;
     // Blog finals get alt text from the chat model when it is connected (nothing loads for it).
@@ -571,20 +585,20 @@ export class Images {
    * One picture enlarged by the sharpener (the runner's own upscale request, 4×); shape() then fits it to the size
    * wanted. A sharpener that fails leaves the picture as drawn, and says so.
    */
-  private async sharpen(job: Job, png: Buffer): Promise<Buffer> {
+  private async sharpen(job: Job, png: Buffer, signal?: AbortSignal): Promise<Buffer> {
     const up = this.upscaler();
     const base = this.pane.worker.base;
     if (!up || !base) return png;
     try {
       // The runner answers when the picture is enlarged: on a CPU that is several minutes, past fetch's own 5-minute
       // wait for an answer (measured: a 768 picture on a 4-core CPU), so a plain HTTP request with a 30-minute limit.
-      const r = await postLong(`${base}/sdcpp/v1/upscale`, JSON.stringify({ image: png.toString('base64'), upscaler: up.name, repeats: 1, output_format: 'png' }), 30 * 60_000);
+      const r = await postLong(`${base}/sdcpp/v1/upscale`, JSON.stringify({ image: png.toString('base64'), upscaler: up.name, repeats: 1, output_format: 'png' }), 30 * 60_000, signal);
       const j = JSON.parse(r.text) as { images?: Array<{ b64_json?: string }>; error?: { message?: string } | string };
       const out = j.images?.[0]?.b64_json;
       if (r.status !== 200 || !out) throw new Error(typeof j.error === 'string' ? j.error : j.error?.message ?? `answer ${r.status}`);
       return Buffer.from(out, 'base64');
     } catch (e) {
-      job.note = `Drawn at High, but the sharpener did not run (${(e as Error).message}), so the picture was enlarged plainly.`;
+      if (!signal?.aborted) job.note = `Drawn at High, but the sharpener did not run (${(e as Error).message}), so the picture was enlarged plainly.`;
       return png;
     }
   }
@@ -691,6 +705,8 @@ export class Images {
     if (!job) return { restarted: false };
     job.state = 'cancelled';
     job.error = null;
+    // A request the runner is holding ends now: the app is free at once, even if the runner never answers.
+    this.asking?.abort();
     if (o.restart === false) {
       job.note = 'Cancelled: the picture model was unloaded.';
       return { restarted: false };
@@ -791,11 +807,10 @@ export class Images {
         return send(res, 202, { id: r.id, job: this.jobView() }), true;
       }
       case '/api/images/keep': {
-        const p = await this.gallery.get(String(b.id ?? ''));
-        if (!p || p.removed) return send(res, 404, { error: 'That picture is not in the gallery any more.' }), true;
-        const kept = await this.gallery.update(p.id, { kept: b.kept !== false });
-        if (b.kept !== false && !p.kept) void this.onKept?.(p, await this.gallery.file(p.output));
-        return send(res, 200, kept), true;
+        const r = await this.gallery.keep(String(b.id ?? ''), b.kept !== false);
+        if (!r) return send(res, 404, { error: 'That picture is not in the gallery any more.' }), true;
+        if (r.fromDraft) void this.onKept?.(r.picture, await this.gallery.file(r.picture.output));
+        return send(res, 200, r.picture), true;
       }
       case '/api/images/delete': {
         // {ids}: the pictures picked; or {chat, which: 'recent' | 'all'}: a chat's pictures from today, or all of them.
@@ -871,9 +886,9 @@ export class Images {
 }
 
 /** A POST to the local runner that may take minutes to answer (fetch gives up on an answer after 5): its status and text. */
-function postLong(url: string, body: string, ms: number): Promise<{ status: number; text: string }> {
+function postLong(url: string, body: string, ms: number, signal?: AbortSignal): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
-    const req = request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, res => {
+    const req = request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }, signal }, res => {
       const parts: Buffer[] = [];
       res.on('data', (c: Buffer) => parts.push(c));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(parts).toString('utf8') }));
@@ -911,6 +926,9 @@ function clampInt(v: unknown, lo: number, hi: number): number | undefined {
 }
 
 /** A picture asked for, from a request body (the page's Generate is src/server/pictures.ts, which names its chat). */
+/** Why a prompt cannot be drawn for its length, here or on another PC (null when it can): one limit, refused in words, never cut. */
+export const promptWhy = (prompt: string): string | null => (prompt.length > 2000 ? 'That prompt is too long (over 2,000 characters). Shorten it.' : null);
+
 export function optionsFrom(b: Record<string, unknown>, source: GenerateOptions['source']): GenerateOptions {
   const mode = MODES.includes(b.mode as Mode) ? (b.mode as Mode) : 'auto';
   const fit = ['crop', 'pad', 'stretch'].includes(String(b.fit)) ? (b.fit as Fit) : 'crop';

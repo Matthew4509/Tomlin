@@ -90,22 +90,49 @@ export function restoreSnippet(n: Notes, raw: unknown, at: unknown): Change {
 /** The file, read once and written whole through a temporary file. */
 export class NotesStore {
   private cache: Notes | null = null;
+  private loading: Promise<Notes> | null = null;
+  private turn: Promise<unknown> = Promise.resolve();
   private file: string;
   constructor(dir: string) {
     this.file = join(dir, 'notes.json');
   }
 
   async get(): Promise<Notes> {
-    if (!this.cache) {
+    if (this.cache) return this.cache;
+    // Everyone asking while it is being read shares one read, so a late read never replaces a save made meanwhile.
+    this.loading ??= (async () => {
       // Not there: empty. Damaged: set aside and reported (src/atomic.ts), never saved over.
       this.cache = clean(await readData<unknown>(this.file, { scratch: '', snippets: [] }));
-    }
-    return this.cache;
+      return this.cache;
+    })().finally(() => { this.loading = null; });
+    return this.loading;
   }
 
-  async save(n: Notes): Promise<Notes> {
-    this.cache = clean(n);
-    await writeAtomic(this.file, JSON.stringify(this.cache, null, 1));
-    return this.cache;
+  /** On the disk first, then in memory: a save that failed is never shown as saved. */
+  private async write(n: Notes): Promise<Notes> {
+    const next = clean(n);
+    await writeAtomic(this.file, JSON.stringify(next, null, 1));
+    this.cache = next;
+    return next;
+  }
+
+  /** Runs after every change asked for before, so each one looks at what the last one saved. */
+  private inOrder<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.turn.then(job);
+    this.turn = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Works out a change from what is saved now and saves it. `saved`: the notes afterwards (as they were, when refused). */
+  change(how: (n: Notes) => Change): Promise<{ result: Change; saved: Notes }> {
+    return this.inOrder(async () => {
+      const now = await this.get();
+      const result = how(now);
+      return { result, saved: result.ok ? await this.write(result.notes) : now };
+    });
+  }
+
+  save(n: Notes): Promise<Notes> {
+    return this.inOrder(() => this.write(n));
   }
 }

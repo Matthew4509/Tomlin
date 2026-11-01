@@ -128,6 +128,11 @@ span.df-add{color:var(--ok)} span.df-del{color:var(--bad)} .df-lines span.df-add
 .live-sum{color:var(--muted);font-size:12px;margin:-2px 0 4px}
 .notes{margin-top:10px;font-size:12px;color:var(--muted)} .notes summary{cursor:pointer} .notes li{margin:3px 0;overflow-wrap:anywhere}
 .empty{color:var(--muted);padding:40px 16px;text-align:center;background:var(--card);border:1px dashed var(--line2);border-radius:8px}
+.home-projects{margin-bottom:12px;padding:10px 12px;background:var(--card);border:1px solid var(--line2);border-radius:8px}
+.home-projects h3{margin:0 0 6px;font-size:13px;color:var(--ink)}
+.home-project{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line2)}
+.home-project .txt{flex:1;min-width:0;display:flex;flex-direction:column}
+.home-project .txt span{overflow-wrap:anywhere;font-size:12px}
 
 /* List / Tiles switch (a segmented control, one click) */
 .seg{display:inline-flex;border:1px solid var(--line2);border-radius:4px;overflow:hidden;background:var(--card)}

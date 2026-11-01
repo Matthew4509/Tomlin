@@ -101,6 +101,33 @@ export async function inside(root: string, rel: unknown, mustBeText = true): Pro
   }
 }
 
+/**
+ * Every file in one folder of the workspace, whatever its kind, with no limit on how many (unlike `list`, which is for
+ * browsing): its sub-folders, deepest last, and the links in it, which are not followed. Null when it is not a folder here.
+ */
+export async function filesUnder(root: string, rel: string): Promise<{ files: string[]; folders: string[]; links: string[] } | null> {
+  const top = await inside(root, `${rel}/x`, false);
+  if (!top) return null;
+  const out = { files: [] as string[], folders: [] as string[], links: [] as string[] };
+  const walk = async (dir: string, name: string): Promise<void> => {
+    for (const d of await readdir(dir, { withFileTypes: true })) {
+      const path = `${name}/${d.name}`;
+      if (d.isSymbolicLink()) out.links.push(path);
+      else if (d.isDirectory()) {
+        out.folders.push(path);
+        await walk(join(dir, d.name), path);
+      } else if (d.isFile()) out.files.push(path);
+    }
+  };
+  try {
+    await walk(dirname(top), rel);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT' && !out.files.length && !out.folders.length) return null;
+    throw e;
+  }
+  return out;
+}
+
 /** The text files in the workspace, newest first. */
 export async function list(root: string): Promise<Entry[]> {
   const out: Entry[] = [];

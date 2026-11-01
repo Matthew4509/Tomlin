@@ -65,6 +65,27 @@ function askHere(box, text, yes, no = 'Cancel', danger = true) {
   });
 }
 
+/** askHere with more than one way to say yes: `choices` are {label, value, danger}. The value picked, or null for `no`. */
+function askPick(box, text, choices, no = 'Cancel') {
+  return new Promise(done => {
+    const end = value => {
+      box.replaceChildren();
+      box.hidden = true;
+      done(value);
+    };
+    const buttons = choices.map(c => el('button', { class: `btn ${c.danger ? 'danger' : 'primary'}`, type: 'button', text: c.label, onclick: () => end(c.value) }));
+    app.askFor?.(box, () => end(null));
+    box.classList.add('page-ask');
+    box.setAttribute('role', 'alert');
+    box.replaceChildren(el('span', { text }), ...buttons, el('button', { class: 'btn quiet', type: 'button', text: no, onclick: () => end(null) }));
+    box.hidden = false;
+    buttons[0].focus();
+  });
+}
+
+/** "Sam", "Sam and Ana", "Sam, Ana and Lee". */
+const listNames = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '');
+
 /** A message on the page with a Close button, in place of alert(). */
 function sayHere(box, text) {
   box.classList.add('page-ask');
@@ -1384,7 +1405,7 @@ function drawChat(lines, chat) {
   const last = lines.at(-1);
   if (last?.role === 'assistant' && last.cut) log.lastElementChild.append(continueButton());
   // This chat's answer is still coming (it was opened again from Home, or from the list): it carries on at the end.
-  const live = streams.get(chat?.id ?? '');
+  const live = streams.get(streamKey(chat?.id ?? '', chat?.who ?? app.chatWho?.()));
   if (live?.out) {
     log.querySelector('.empty')?.remove();
     if (live.inPlace && log.lastElementChild) log.lastElementChild.replaceWith(live.out);
@@ -1462,6 +1483,23 @@ chatDrop.addEventListener('drop', e => {
 });
 
 // ---- Long answers (PLAN F10 G1): Continue on an answer its length limit cut ----
+/** The first answer's file could not be saved: the same words, offered once more until they are saved. */
+function saveAnswerAgain(chat, prompt, text) {
+  const said = el('span', { class: 'hint', role: 'status' });
+  const go = el('button', { class: 'btn', type: 'button', text: 'Save the file again', onclick: async () => {
+    go.disabled = true;
+    try {
+      const r = await api('/api/chats/keep-answer', { id: chat, prompt, text });
+      said.textContent = `Saved as ${r.path.replace(/\//g, '\\')} in the workspace folder.`;
+      go.remove();
+    } catch (err) {
+      said.textContent = err.message;
+      go.disabled = false;
+    }
+  } });
+  return el('div', { class: 'team-actions' }, go, said);
+}
+
 function continueButton() {
   const b = el('button', { class: 'btn quiet continue', type: 'button', text: 'Continue', title: 'The answer reached its length limit before it was finished: carry it on from where it stopped' });
   b.addEventListener('click', () => {

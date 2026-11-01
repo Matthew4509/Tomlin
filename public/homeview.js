@@ -290,11 +290,11 @@ for (const id of ['#team', '#jobs']) $(id)?.addEventListener('close', () => {
 });
 
 // ---- "Lets create a project": a name, a mini description, the prompt, and who leads it ----
-// The project's folder is the date and time it was made ("2026-10-07-1116"), made by the server.
+// The project's folder is named after it (the date and time, "2026-10-07-1116", with no name), made by the server.
 
 const homeAsk = { pm: '', drawn: '' };
 
-/** The name a project gets when none is typed: "Project " and the date and time now, as its folder is named. */
+/** The name a project gets when none is typed: "Project " and the date and time now, as its folder is then named. */
 function folderNow() {
   const n = new Date();
   const p = x => String(x).padStart(2, '0');

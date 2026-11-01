@@ -109,7 +109,7 @@ async function openOnPc(program: string, args: string[]): Promise<boolean> {
 }
 
 /** One backup at a time: a second press while one is being made waits for it instead of writing the same zip. */
-let backingUp: Promise<string> | null = null;
+let backingUp: Promise<unknown> | null = null;
 
 async function keepAction(res: ServerResponse, b: Record<string, unknown>) {
   const restartWords = canRestart ? 'TOMLIN is starting again to do it (about 10 seconds).' : 'It happens the next time TOMLIN starts: close its window and start it again.';
@@ -128,9 +128,11 @@ async function keepAction(res: ServerResponse, b: Record<string, unknown>) {
       return json(res, 200, await keepView());
     case 'backup': {
       if (backingUp) return json(res, 409, { error: 'A backup is being made now. Wait for it to finish (it shows in the list below).' });
-      backingUp = keep.backup(HOME, 'by hand');
-      const name = await backingUp.finally(() => { backingUp = null; });
-      return json(res, 200, { ...(await keepView()), said: `Backed up as "${name.replace(/\.zip$/, '')}".` });
+      const making = keep.backupSaying(HOME, 'by hand');
+      backingUp = making;
+      const { name, links } = await making.finally(() => { backingUp = null; });
+      const left = links.length ? ` Not in it: what ${links.length === 1 ? 'this link leads' : `these ${links.length} links lead`} to (${links.slice(0, 3).map(l => l.replace(/\//g, '\\')).join(', ')}${links.length > 3 ? '…' : ''}). A backup does not follow links: back those folders up yourself.` : '';
+      return json(res, 200, { ...(await keepView()), said: `Backed up as "${name.replace(/\.zip$/, '')}".${left}` });
     }
     case 'restore': {
       const name = (await keep.listBackups(HOME)).find(x => x.name === b.name)?.name;

@@ -163,7 +163,8 @@ async function facesView() {
 /** The Chats tab's list (newest first), each with whom and how many pictures. */
 async function chatsView() {
   const people = chatPeople();
-  const pics = await images.gallery.countByChat();
+  // A picture list that cannot be read now (the Images pane says so) does not take the chats away.
+  const pics = await images.gallery.countByChat().catch(() => ({} as Record<string, number>));
   const nameOf = (who: string) => people.find(p => p.who === who) ?? (who.startsWith('node:') ? { name: 'Someone on another PC', avatar: '?', role: 'Worked on a linked PC (linked PCs no longer lend staff)' } : who.startsWith('staff:') ? { name: 'Someone who left the team', avatar: '?', role: 'Left the team' } : { name: HOST_NAME, avatar: '?', role: '' });
   const list = (await chats.list()).map(c => {
     const p = nameOf(c.who);

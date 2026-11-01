@@ -49,6 +49,9 @@ export interface Picture {
   chat?: string;
 }
 
+/** Has what search and the pages read from every picture. */
+const wholePicture = (p: Picture): boolean => [p.at, p.prompt, p.output].every(x => typeof x === 'string');
+
 export type Shelf = 'gallery' | 'drafts' | 'all';
 /** Kept, unless the picture says otherwise (older pictures have no flag and stay in the gallery). */
 export const isKept = (p: Picture): boolean => p.kept !== false;
@@ -56,6 +59,8 @@ export const isKept = (p: Picture): boolean => p.kept !== false;
 export class Gallery {
   readonly dir: string;
   private cache: Picture[] | null = null;
+  private loading: Promise<Picture[]> | null = null;
+  private turn: Promise<unknown> = Promise.resolve();
   private endChecked = false;
 
   /** One line on the list. The first in a run starts on a new line if the last one was cut off (a crash mid-write), so a
@@ -90,27 +95,55 @@ export class Gallery {
   }
 
   async all(): Promise<Picture[]> {
-    if (!this.cache) {
-      let text = '';
-      try {
-        text = await readFile(this.index, 'utf8');
-      } catch {
-        text = '';
-      }
-      // Later lines for the same id (an alt text added) replace earlier ones.
-      const byId = new Map<string, Picture>();
-      for (const line of text.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const p = JSON.parse(line) as Picture;
-          byId.set(p.id, { ...byId.get(p.id), ...p });
-        } catch {
-          // a half-written last line after a crash: skipped
-        }
-      }
-      this.cache = [...byId.values()];
+    if (this.cache) return this.cache;
+    // Everyone asking while it is being read shares one read, so all of them hold the same list.
+    this.loading ??= this.load().finally(() => { this.loading = null; });
+    return this.loading;
+  }
+
+  private async load(): Promise<Picture[]> {
+    let text = '';
+    try {
+      text = await readFile(this.index, 'utf8');
+    } catch (e) {
+      // Only no list yet is an empty gallery. Any other fault is said, and the next look reads again.
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw new Error(`The picture list could not be read (${code ?? 'a disk fault'}). Your pictures are still on the disk: try again in a moment.`);
     }
+    // Later lines for the same id (an alt text added) replace earlier ones.
+    const byId = new Map<string, Picture>();
+    let damaged = 0;
+    const lines = text.split('\n');
+    for (const [i, line] of lines.entries()) {
+      if (!line.trim()) continue;
+      try {
+        const p = JSON.parse(line) as Picture;
+        if (typeof p?.id !== 'string') damaged++;
+        else byId.set(p.id, { ...byId.get(p.id), ...p });
+      } catch {
+        // a half-written last line after a crash: skipped, and not a fault
+        if (i < lines.length - 1) damaged++;
+      }
+    }
+    // Whole pictures only: a damaged or hand-edited one would break search and the pages. Its line stays in the file.
+    const all = [...byId.values()];
+    this.cache = all.filter(wholePicture);
+    damaged += all.length - this.cache.length;
+    if (damaged) console.warn(`${this.index}: ${damaged} damaged ${damaged === 1 ? 'line' : 'lines'} skipped; the other pictures are fine.`);
     return this.cache;
+  }
+
+  /** Changes to the list run one after another, each seeing the one before. */
+  private inOrder<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.turn.then(job);
+    this.turn = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The change on the disk first, then in the list: one that could not be written is never shown as made. */
+  private async write(p: Picture, change: Partial<Picture>): Promise<void> {
+    await this.line(`${JSON.stringify({ id: p.id, ...change })}\n`);
+    Object.assign(p, change);
   }
 
   /**
@@ -197,21 +230,35 @@ export class Gallery {
     }
   }
 
-  async add(p: Picture): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
-    // Read the list before the new line is written, or a first read would find the picture and it would be added twice.
-    const all = await this.all();
-    await this.line(`${JSON.stringify(p)}\n`);
-    all.push(p);
+  add(p: Picture): Promise<void> {
+    return this.inOrder(async () => {
+      await mkdir(this.dir, { recursive: true });
+      // Read the list before the new line is written, or a first read would find the picture and it would be added twice.
+      // A list that cannot be read now does not lose a finished picture: its line is written, and the next read finds it.
+      const all = await this.all().catch(() => null);
+      await this.line(`${JSON.stringify(p)}\n`);
+      all?.push(p);
+    });
   }
 
-  async update(id: string, change: Partial<Picture>): Promise<Picture | undefined> {
-    const all = await this.all();
-    const p = all.find(x => x.id === id);
-    if (!p) return undefined;
-    Object.assign(p, change);
-    await this.line(`${JSON.stringify({ id, ...change })}\n`);
-    return p;
+  update(id: string, change: Partial<Picture>): Promise<Picture | undefined> {
+    return this.inOrder(async () => {
+      const p = (await this.all()).find(x => x.id === id);
+      if (!p) return undefined;
+      await this.write(p, change);
+      return p;
+    });
+  }
+
+  /** Into the gallery, or back to the drafts. `fromDraft`: this press took it out of the drafts, which happens once. */
+  keep(id: string, kept: boolean): Promise<{ picture: Picture; fromDraft: boolean } | undefined> {
+    return this.inOrder(async () => {
+      const p = (await this.all()).find(x => x.id === id);
+      if (!p || p.removed) return undefined;
+      const fromDraft = kept && p.kept === false;
+      await this.write(p, { kept });
+      return { picture: p, fromDraft };
+    });
   }
 
   /** The full path of a file named in the gallery (null for anything else). */

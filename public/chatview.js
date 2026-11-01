@@ -54,12 +54,12 @@ function dropOtherAsk() {
 }
 function showChat(r) {
   drawChat(r.lines, r.chat);
-  syncSend(r.chat?.id ?? '');
   setThink(!!r.chat?.think);
   setWeb(!!r.chat?.web);
   // Where this chat's last answer ran, for the chat head ("Rowan · Coder · on laptop 9B").
   app.lastRan = [...r.lines].reverse().find(l => l.ran && !l.picture)?.ran ?? '';
   app.onChat?.(r.chat ?? null);
+  syncSend();
   restoreDraft(r.chat?.id ?? '');
   if (r.chat?.live) followAnswer(r.chat.id);
   dropOtherAsk();
@@ -119,11 +119,14 @@ app.chatNote = text => {
  * it shows it carrying on. Send and Stop are the open chat's own.
  */
 const streams = new Map();
-const streamingHere = () => streams.has(app.chatId ?? '');
+/** An answer's place in `streams`: its chat's id, or for a chat not made yet the person it is with (two of those are two chats). */
+const streamKey = (id, who) => id || `new:${who ?? ''}`;
+const hereKey = () => streamKey(app.chatId ?? '', app.chatWho?.());
+const streamingHere = () => streams.has(hereKey());
 app.liveChat = id => streams.has(id);
 /** Send and Stop for the chat on screen: Stop while its own answer streams, Send otherwise. */
-function syncSend(id = app.chatId ?? '') {
-  const busy = streams.has(id);
+function syncSend() {
+  const busy = streams.has(hereKey());
   sendBtn.disabled = busy;
   stopBtn.hidden = !busy;
 }
@@ -191,9 +194,10 @@ async function talk(url, body, out, message, from = '') {
   // The chat this answer belongs to, and who it is with, as they were when it was sent (another may be open by the end).
   const chatId = app.chatId ?? '';
   const who = chatUi.open?.who ?? app.chatWho?.();
-  const here = () => (app.chatId ?? '') === chatId;
+  const key = hereKey();
+  const here = () => hereKey() === key;
   const scroll = () => { if (out.isConnected) log.scrollTop = log.scrollHeight; };
-  streams.set(chatId, { ac, out, inPlace: url === '/api/chat/continue' });
+  streams.set(key, { ac, out, inPlace: url === '/api/chat/continue' });
   syncSend();
   const t0 = performance.now();
   let first = 0;
@@ -210,7 +214,7 @@ async function talk(url, body, out, message, from = '') {
       b.disabled = true;
       b.textContent = 'Asking for the answer…';
       try {
-        await api('/api/chat/answer-now', { chatId: streams.get(chatId)?.liveId ?? chatId });
+        await api('/api/chat/answer-now', { chatId: streams.get(key)?.liveId ?? chatId });
       } catch (e) {
         b.textContent = e.message;
       }
@@ -253,7 +257,7 @@ async function talk(url, body, out, message, from = '') {
         } else if (ev === 'chat' || ev === 'brain') {
           // A new chat's id, known once its first message is in: Stop and Answer now reach this answer by it (a Stop
           // pressed before it came is sent now).
-          const s = streams.get(chatId);
+          const s = streams.get(key);
           if (s && data.chat) {
             s.liveId = data.chat;
             if (s.stopAsked) {
@@ -306,6 +310,7 @@ async function talk(url, body, out, message, from = '') {
           const secs = ((performance.now() - t0) / 1000).toFixed(1);
           const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', webLine(data.tools), data.note]);
           if (stats) out.append(stats);
+          if (data.unsaved) out.append(saveAnswerAgain(chatId, message, data.text));
           if (data.text && !data.saved && !data.continued) {
             // A chat made by this first message is not open in the list yet: the person picked for it is.
             const acts = msgActs(data.text, true, who);
@@ -334,7 +339,7 @@ async function talk(url, body, out, message, from = '') {
           out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
           out.remove();
           if (here()) input.value = message;
-          const s = streams.get(chatId);
+          const s = streams.get(key);
           if (s && data.chat) s.liveId = data.chat;
           if (message && here()) {
             const how = await app.offerQueue(data, message, thinkOn());
@@ -362,18 +367,18 @@ async function talk(url, body, out, message, from = '') {
       out.textContent = error.message;
     }
   } finally {
-    const sentTo = streams.get(chatId)?.liveId || chatId;
-    streams.delete(chatId);
+    const sentTo = streams.get(key)?.liveId || chatId;
+    streams.delete(key);
     syncSend();
     scroll();
     // The first message names a new chat, and a message moves it to the top of the list. Sent again (agreed, or "send
     // now anyway"): the chat the first try made is taken up first, so the message goes into it, not a second new chat.
     if (again === true || again === 'now') {
-      await app.afterSend?.(sentTo, chatId);
+      await app.afterSend?.(sentTo, chatId, who);
       send(message, from, again === true, again === 'now');
     } else {
       if (again === 'reload') api(chatUrl(chatId)).then(r => { if (here()) showChat(r); }).catch(() => undefined);
-      app.afterSend?.(sentTo, chatId);
+      app.afterSend?.(sentTo, chatId, who);
     }
   }
 }
@@ -475,7 +480,7 @@ input.addEventListener('keydown', e => {
 // A new chat's id comes with the answer's first word from the server: a Stop pressed before that is sent once it comes
 // (sent as '' it would stop the blog writer instead).
 stopBtn.addEventListener('click', () => {
-  const s = streams.get(app.chatId ?? '');
+  const s = streams.get(hereKey());
   const id = s?.liveId || app.chatId || '';
   if (!id) {
     if (s) s.stopAsked = true;
@@ -493,7 +498,7 @@ clearBtn.addEventListener('click', () => {
     yes.disabled = true;
     try {
       const cleared = app.chatId ?? '';
-      streams.get(cleared)?.ac.abort();
+      streams.get(hereKey())?.ac.abort();
       await api('/api/chat/clear', { chatId: cleared });
       // Drawn again from the server: the chat's documents stay (and are still read), so their bar stays too.
       const again = cleared ? await api(chatUrl(cleared)).catch(() => null) : null;

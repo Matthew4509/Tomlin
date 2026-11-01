@@ -33,7 +33,7 @@ export interface NodeFacts {
   port: number;
   adapters: Adapter[];
   /** src/firewall.ts judge(), or null when it could not be read. */
-  firewall: { ok: boolean; problems: string[]; networks: { alias: string; category: string }[] } | null;
+  firewall: { ok: boolean; unread?: boolean; problems: string[]; networks: { alias: string; category: string }[] } | null;
   /** Other security programs with a firewall of their own (Windows Security Center). */
   others: string[];
 }
@@ -185,7 +185,7 @@ export function nodeChecklist(f: NodeFacts): NodeReport {
     if (!typeThis && !lines.slice(before).some(l => l.state === 'bad')) typeThis = `${h.address}:${f.port}`;
   }
 
-  if (!f.firewall) lines.push({ state: 'warn', text: `Could not read this PC's firewall. Allow TCP port ${f.port} in for your home network.` });
+  if (!f.firewall || (f.firewall.unread && !f.firewall.problems.length)) lines.push({ state: 'warn', text: `Could not read this PC's firewall. Allow TCP port ${f.port} in for your home network.` });
   else if (f.firewall.ok) lines.push({ state: 'ok', text: `Windows Firewall lets other PCs in on port ${f.port} (${f.firewall.networks.map(n => `${n.alias}: ${n.category}`).join(', ') || 'no network'}).` });
   else lines.push({ state: 'bad', text: f.firewall.problems.join(' '), steps: ['Press Copy below, then: Start, type PowerShell, right-click it, Run as administrator, paste, press Enter.', 'Then press Check again.'] });
   if (f.others.length) lines.push({ state: 'warn', text: `${f.others.join(', ')} also guards this PC, and Windows' rules do not pass it. This cannot be checked from here: if your main PC still finds nothing, mark your home network as trusted in it, or allow Node.js.` });

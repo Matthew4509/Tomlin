@@ -160,10 +160,14 @@ export async function step(res: ServerResponse, b: Record<string, unknown>) {
   const st = stream(res, { kind: 'step', jobId: job.id, goal: job.goal, n: i, title: job.steps[i].title, role: job.steps[i].role });
   if (!st) return;
   try {
-    await clearWaiting(job.id);
+    // What came back last time stays until there is something better: a re-run that fails keeps it to save or throw away.
+    const steps = job.steps.length;
     const r = await doStep(job, i, st.send, st.signal);
-    if ('error' in r) st.send('error', { text: r.error });
-    else {
+    if ('error' in r) {
+      // The step became parts while it was sized: the step numbers moved, so a waiting result no longer belongs to its step.
+      if (job.steps.length !== steps) await clearWaiting(job.id);
+      st.send('error', { text: r.error });
+    } else {
       await saveWaiting(job.id, i, r.result);
       st.send('done', r.result);
     }
@@ -436,15 +440,15 @@ export async function tests(b: Record<string, unknown>): Promise<{ status: numbe
 // ---- Home ----
 
 /** Projects saved (Start project, or "Lets create a project" on Home) whose plan was never made: newest first. */
-export async function unplanned(): Promise<{ id: string; name: string; goal: string; at: string; chat?: string }[]> {
+export async function unplanned(): Promise<{ id: string; name: string; goal: string; at: string; folder: string; chat?: string }[]> {
   const root = await d.workspaceDir();
-  const out: { id: string; name: string; goal: string; at: string; chat?: string }[] = [];
+  const out: { id: string; name: string; goal: string; at: string; folder: string; chat?: string }[] = [];
   for (const id of (await readdir(join(root, 'jobs')).catch(() => [] as string[])).filter(jobs.validId)) {
     if (await stat(join(root, 'jobs', id, 'plan.json')).then(() => true, () => false)) continue;
     // Not there, or damaged: left out of the list, which every other project (and the To Do, the queue, Home) still needs.
     const p = await readFile(join(root, 'jobs', id, 'project.json'), 'utf8').then(t => JSON.parse(t) as Record<string, unknown> & { answers?: { statement?: unknown } }).catch(() => null);
     if (!p) continue;
-    out.push({ id, name: String(p.name ?? ''), goal: String(p.prompt || p.about || p.answers?.statement || ''), at: String(p.created ?? ''), ...(typeof p.chat === 'string' && p.chat ? { chat: p.chat } : {}) });
+    out.push({ id, name: String(p.name ?? ''), goal: String(p.prompt || p.about || p.answers?.statement || ''), at: String(p.created ?? ''), folder: typeof p.folder === 'string' ? p.folder : '', ...(typeof p.chat === 'string' && p.chat ? { chat: p.chat } : {}) });
   }
   return out.sort((a, b) => b.at.localeCompare(a.at));
 }

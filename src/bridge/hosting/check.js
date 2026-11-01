@@ -19,7 +19,7 @@ const LINE_PART = 20000, LINE_OVERLAP = 2000; // a long line (a minified bundle)
 const HARD = [
   [/(^|\/)\.git(\/|$)/i, 'git\'s own history'],
   [/(^|\/)node_modules\//i, 'installed packages (the host installs its own)'],
-  [/(^|\/)\.env($|\.|\/)/i, 'a secrets file (.env): its values belong in Secrets'],
+  [/(^|\/)[^/]*\.env($|\.|\/)/i, 'a secrets file (.env): its values belong in Secrets'],
   [/(^|\/)[^/]*\.(pem|key|p12|pfx|ppk|jks|keystore|kdbx)$/i, 'a key or certificate file'],
   [/(^|\/)(id_rsa|id_dsa|id_ecdsa|id_ed25519)(\.pub)?$/i, 'an SSH key'],
   [/(^|\/)(\.npmrc|\.yarnrc(\.yml)?|\.netrc|_netrc|\.git-credentials|\.pgpass|\.pypirc|\.my\.cnf)$|(^|\/)\.(aws|docker|ssh|kube)\//i, 'a file that holds logins or tokens (.npmrc, .netrc, .git-credentials, .aws/ and the like)'],
@@ -222,7 +222,7 @@ async function checkFolder(opts) {
       for (let at = 0; at < Math.max(line.length, 1) && !(key && set); at += LINE_PART - LINE_OVERLAP) {
         const l = line.length > LINE_PART ? line.slice(at, at + LINE_PART) : line;
         if (!key) key = KEYS.find(([, re]) => re.test(l)) || null;
-        if (!set) set = writtenOut(l);
+        if (!set) set = writtenOut(l) || (SETTINGS_FILE.test(rel) ? bareValue(l) : null);
         if (line.length <= LINE_PART) break;
       }
       if (key) found('KEY', i + 1, line, 'holds ' + key[0]);
@@ -239,6 +239,14 @@ async function checkFolder(opts) {
 // A password or key written into the text: every assignment on it is looked at (not only the first), as is PHP's
 // define() and a password inside an address. A placeholder value is not one.
 const ASSIGN_ALL = new RegExp(ASSIGN.source, 'gi');
+// A settings file writes values without quotes: password=hunter22, api_key: abc123. Not a number, a yes or no, or a path.
+const SETTINGS_FILE = /\.(ini|cfg|conf|env|ya?ml|toml|properties)$/i;
+const BARE_VALUE = /^\s*(?:export\s+)?([A-Za-z_.-]*(?:pass(?:word|wd)?|pwd|secret|api_?key|apikey|token|private_?key|client_?secret|auth_?key)[A-Za-z_.-]*)\s*[=:]\s*([^\s'"#;]\S{3,})\s*(?:[#;].*)?$/i;
+const NOT_A_SECRET = /^(?:\d+|true|false|yes|no|on|off|none|[/~.].*)$/i;
+function bareValue(l) {
+  const m = BARE_VALUE.exec(l);
+  return m && !PLACEHOLDER.test(m[2]) && !NOT_A_SECRET.test(m[2]) ? { name: m[1] } : null;
+}
 function writtenOut(l) {
   for (const m of l.matchAll(ASSIGN_ALL)) if (!PLACEHOLDER.test(m[3])) return { name: m[1] };
   for (const m of l.matchAll(DEFINE)) if (!PLACEHOLDER.test(m[4])) return { name: m[2] };
