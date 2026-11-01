@@ -126,6 +126,29 @@ about each one and choose for yourself.
 - **Thoughts**, the office chat: a line from each hire when what they do really changes (an answer started, a step done or
   stuck, a picture drawn, a PC off), and banter from six fixed characters on top. Everything, Work only or Off.
 
+## What pictures to expect
+
+These are real results, so you know what your PC can do. Each one is the same prompt and the same seed, drawn by TOMLIN on
+an ordinary PC with nothing retouched; the files here are only made smaller.
+
+> a tall waterfall pouring over a mossy mountain cliff into a clear green pool, mist in the air, soft morning light, photograph, sharp detail
+
+<table>
+<tr><th>Model, and what drew it</th><th>Draft</th><th>Mid</th><th>High</th></tr>
+<tr><td><b>Realistic Vision 6 + LCM</b><br>Quadro K1200, a 4 GB graphics card</td><td><img src="public/samples/waterfall-realistic-vision-draft.webp" width="220" alt="Realistic Vision at Draft"><br>384×384, 23 s</td><td><img src="public/samples/waterfall-realistic-vision-mid.webp" width="220" alt="Realistic Vision at Mid"><br>512×512, 84 s</td><td><img src="public/samples/waterfall-realistic-vision-high.webp" width="220" alt="Realistic Vision at High"><br>1280×1280, 3.4 min</td></tr>
+<tr><td><b>DreamShaper 8 LCM</b><br>Quadro K1200, a 4 GB graphics card</td><td><img src="public/samples/waterfall-dreamshaper-draft.webp" width="220" alt="DreamShaper at Draft"><br>384×384, 20 s</td><td><img src="public/samples/waterfall-dreamshaper-mid.webp" width="220" alt="DreamShaper at Mid"><br>512×512, 78 s</td><td><img src="public/samples/waterfall-dreamshaper-high.webp" width="220" alt="DreamShaper at High"><br>1280×1280, 3.2 min</td></tr>
+<tr><td><b>RealVisXL V5 Lightning</b><br>Core i7-6700K, no graphics card, 32 GB of RAM</td><td><img src="public/samples/waterfall-realvisxl-draft.webp" width="220" alt="RealVisXL at Draft"><br>768×768, 7.7 min</td><td><img src="public/samples/waterfall-realvisxl-mid.webp" width="220" alt="RealVisXL at Mid"><br>1024×1024, 24 min</td><td>On a CPU, High draws the same picture as Mid, without the sharpener</td></tr>
+</table>
+
+Times are for one picture. TOMLIN 2.0.70, 2 November 2026.
+
+**What did not work, on that same 4 GB card:**
+- **RealVisXL** failed all 7 times, so it is shown above on the CPU instead. Plan on a bigger card or a long wait.
+- **Qwen-Image 2.1** did not finish a picture in 3 tries. Its High moved from the card to the CPU, where TOMLIN's own estimate was over 6 hours.
+- **The two fast models** drew 17 of 18 Mid pictures. One Realistic Vision picture failed.
+
+**Up close:** High's sharpener is made for drawings, so photographs look slightly painted when you zoom in. RealVisXL's Mid has a fine diagonal weave in leaves and rock at full size.
+
 ## Install (2.0.37)
 
 Unzip, then double-click **Install TOMLIN.cmd**. It asks first, needs no administrator and downloads nothing
