@@ -391,7 +391,7 @@ export async function pictureDrawer(refs: string[], anyPc: boolean, why: string[
  * that, loading it first, and while it draws for someone else this waits and asks again every 3 s (up to 10 minutes or
  * Stop); without, it uses its own loaded model (or another of its own for the style).
  */
-export async function drawOn(r: Remote, ask: { prompt: string; style: string | null; width?: number; height?: number; model?: string; queue?: boolean }, progress: (p: Record<string, unknown>) => void, signal: AbortSignal): Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note: string }> {
+export async function drawOn(r: Remote, ask: { prompt: string; style: string | null; width?: number; height?: number; quality?: string; seed?: number; model?: string; queue?: boolean }, progress: (p: Record<string, unknown>) => void, signal: AbortSignal): Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note: string }> {
   let res: Response;
   const until = Date.now() + 10 * 60_000;
   let told = false;

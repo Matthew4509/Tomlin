@@ -166,8 +166,8 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 (chats, staff, pictures, memory, settings, links to other PCs, the app lock), `models` (downloaded models),
 `runtime` (downloaded graphics-card runners) and `backups`. The app folder holds only the program.
 
-To update: **Updates** (under Settings; also Update TOMLIN in the My PC window) opens **Update this
-install** on This PC: models and updates, with **Check git** or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
+To update: **Manage updates** (under Settings; also Update TOMLIN in the My PC window) opens **Update this
+install**, with **Check git** or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
 data it zips the `data` folder into `backups` (models are not in them). The newest 5 are kept, and older ones thin out:
 one a day for a week, one a week for a month, one every 3 months for a year. **Settings** (top bar),
@@ -450,7 +450,7 @@ rather than misread it.
   steps. Every job keeps its events in `jobs/<id>/events.jsonl` in the workspace (job rooms were dropped in 2.0.36).
 - **Network: connect PCs** (under Settings; also a card on Home while nothing is set up): this PC as a node,
   finding other PCs, and the linked PCs as tiles (three across on a wide screen: On / Asleep / Off, their memory bar, the models each lets
-  this PC use under Standard and Images, one a line, speed). **This PC: models and updates** has every model on this
+  this PC use under Standard and Images, one a line, speed). **This PC** has every model on this
   PC with its speed, and Update this install. This PC's own memory and loaded models are in the
   top bar. Nothing loads by itself. A model you load stays loaded until you drop it (Drop in the top bar) or another
   model needs its place: a new one goes beside the loaded ones when it fits, else the least recently used one that

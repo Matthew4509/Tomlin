@@ -1,4 +1,4 @@
-// Finding the update (2.0.63: it was hard to find): Update this install (on This PC: models and updates) was
+// Finding the update (2.0.63: it was hard to find): Update this install was
 // reached only by scrolling that page, or from Settings' foot. Now: an Update TOMLIN entry of its own in the Set up
 // menu, the version and Check git at the head of Settings, Update TOMLIN in the My PC window, and the no-release line
 // says what to do instead. Read from the page's own files, as test/settingspages.test.ts does; the line is a pure
@@ -11,17 +11,17 @@ import { noRelease } from '../src/release.ts';
 const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 const page = (f: string) => read(`public/${f}`);
 
-test('the Settings menu has Updates of its own, after This PC, opening Update this install', () => {
+test('the Settings menu has Manage updates of its own, after This PC, opening Update this install', () => {
   const html = page('index.html');
   const thispc = html.indexOf('data-setup="thispc"');
-  const update = html.indexOf('data-setup="update"');
-  assert.ok(thispc > 0 && update > thispc, 'an Updates entry after This PC');
-  assert.match(html.slice(update, update + 900), /Updates<\/button>/);
+  const update = html.indexOf('data-setup="updates"');
+  assert.ok(thispc > 0 && update > thispc, 'a Manage updates entry after This PC');
+  assert.match(html.slice(update, update + 900), /Manage updates<\/button>/);
   // One press from the menu: the same opener Settings' button uses (home.js app.openUpdateInstall).
-  assert.match(page('homeview.js'), /b\.dataset\.setup === 'update'\) app\.openUpdateInstall\?\.\(\)/);
-  assert.match(page('home.js'), /app\.openUpdateInstall = async \(\) => \{/);
-  // The page it opens is This PC: models and updates, so that menu entry is the one marked there (SETUP_VIEWS unchanged).
-  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'\];/);
+  assert.match(page('homeview.js'), /b\.dataset\.setup === 'updates'\) app\.openUpdateInstall\?\.\(\)/);
+  assert.match(page('home.js'), /app\.openUpdateInstall = \(\) => \{/);
+  // A page of its own, so that menu entry is the one marked there.
+  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours'\];/);
 });
 
 test('Update this install has Check git, one function for it, and a download followed on its own page', () => {
@@ -53,8 +53,8 @@ test('with no release on GitHub, Check git says what to do instead (Check zip, o
 test('Help and the README name the new ways in', () => {
   const html = page('index.html');
   const help = html.slice(html.indexOf('id="help-copies"'), html.indexOf('id="help-git"'));
-  assert.match(help, /<b>Updates<\/b>/);
+  assert.match(help, /<b>Manage updates<\/b>/);
   assert.match(help, /under Settings/);
   assert.match(help, /My PC window/);
-  assert.match(read('README.md'), /\*\*Updates\*\* \(under Settings; also Update TOMLIN in the My PC window\)/);
+  assert.match(read('README.md'), /\*\*Manage updates\*\* \(under Settings; also Update TOMLIN in the My PC window\)/);
 });

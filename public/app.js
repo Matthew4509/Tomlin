@@ -132,7 +132,7 @@ const DEVICE_TEXT = { cpu: 'CPU', vulkan: 'graphics chip (Vulkan)', cuda: 'NVIDI
 
 const app = { status: null, models: null, onStatus: [] };
 
-// ---- "Show hidden": models hidden on This PC: models and updates (Models on this PC, Hide) are left out where a model is picked ----
+// ---- "Show hidden": models hidden on This PC (Models on this PC, Hide) are left out where a model is picked ----
 
 app.showHidden = store('show-hidden') === '1';
 /** The models of a pick list to offer: a hidden one only once "Show hidden" is ticked, or when it is the pick now. */

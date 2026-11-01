@@ -8,6 +8,8 @@ import type { Picture } from '../gallery.ts';
 import { type Routes, chats, json, shortName, staff, store } from './core.ts';
 import { images, runners, runnerUsed } from './panes.ts';
 import { optionsFrom, promptWhy } from '../images.ts';
+import { drawChoices } from '../nodestaff.ts';
+import type { Quality } from '../quality.ts';
 import { answeringBusy, imageSpecialist } from './answering.ts';
 import { isArtistWho } from './people.ts';
 import { jobRoutes } from './jobs.ts';
@@ -68,7 +70,7 @@ async function startAway(away: { r: Remote; model?: string; name: string }, b: R
   awayJob = job;
   void (async () => {
     try {
-      const got = await jobRoutes.drawOn(away.r, { prompt, style, width: size(b.width), height: size(b.height), ...(away.model ? { model: away.model } : {}) }, p => {
+      const got = await jobRoutes.drawOn(away.r, { prompt, style, width: size(b.width), height: size(b.height), ...drawChoices(b), ...(away.model ? { model: away.model } : {}) }, p => {
         if (typeof p.text === 'string') {
           job.state = 'starting';
           job.note = `${away.name} on "${away.r.name}": ${p.text}…`;
@@ -180,8 +182,8 @@ export function pictureModels(): brains.PictureModel[] {
  * One picture for a linked PC, on the picture model connected here (F7 E2). It is drawn in memory and sent: it never
  * enters this PC's gallery or its folder, and this PC's Images pane shows only "Drawing for <that PC>".
  */
-export async function drawForPc(o: { prompt: string; mode: string; width?: number; height?: number; forPc: string }, progress: (p: unknown) => void, signal: AbortSignal) {
-  const job = await images.generate({ prompt: o.prompt, mode: o.mode as Mode, width: o.width, height: o.height, drafts: 1, source: 'api', forPc: o.forPc });
+export async function drawForPc(o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) {
+  const job = await images.generate({ prompt: o.prompt, mode: o.mode as Mode, width: o.width, height: o.height, quality: o.quality as Quality, seed: o.seed, drafts: 1, source: 'api', forPc: o.forPc });
   if (!('id' in job)) return { error: job.error };
   const timer = setInterval(() => {
     const j = images.jobView();

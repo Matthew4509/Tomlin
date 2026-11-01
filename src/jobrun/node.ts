@@ -584,6 +584,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
   if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
   const style = brains.isStyle(b.style) ? b.style : null;
   const size = (n: unknown) => (Number.isInteger(n) && (n as number) >= 64 && (n as number) <= 2048 ? (n as number) : undefined);
+  const choices = nodestaff.drawChoices(b);
   const models = d.pictureModels();
   const want = typeof b.model === 'string' && b.model ? b.model : null;
   if (want) {
@@ -591,7 +592,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
     const busy = drawing || d.imageBusy() || (v.state === 'loading' && v.model !== want);
     const why = nodestaff.modelRefusal(want, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy, pcName: shareState.name });
     if (why) return workerJson(res, why.busy ? 409 : 403, why.busy ? { ...why, error: why.error.replace('is answering something else', 'is drawing something else') } : why);
-    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height) }, res, forPc, link, b.queue === true);
+    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height), ...choices }, res, forPc, link, b.queue === true);
   }
   const v = d.imagePane.view;
   if (v.state !== 'connected') return workerJson(res, 409, { error: 'no picture model is connected on that PC. Its owner connects one in an artist\'s chat there; nothing loads by itself.' });
@@ -614,7 +615,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
       send('progress', { state: 'starting', text: `Switching to ${plan.use.name.replace(/\s*\(.*\)$/, '')} for the style` });
       if (!(await d.swapImage(plan.use.id))) throw new Error(`${plan.use.name} did not load there. Its owner can connect it in an artist's chat there.`);
     }
-    const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc }, p => send('progress', p), ac.signal);
+    const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices }, p => send('progress', p), ac.signal);
     if ('error' in r) throw new Error(r.error);
     send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: plan.note });
   } catch (e) {
@@ -634,7 +635,7 @@ const pictureName = (m: brains.PictureModel | undefined) => (m ? m.name.replace(
  * already in the prompt). A picture model loaded for a linked PC is dropped by itself 10 minutes after its last picture
  * (src/picturelock.ts PICTURE_DROP_MS): long enough for pictures one after another, short while the PC is locked.
  */
-async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number }, res: ServerResponse, forPc: string, link: string, queue = false) {
+async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number; quality?: string; seed?: number }, res: ServerResponse, forPc: string, link: string, queue = false) {
   drawing = true;
   const send = streamTo(res);
   const ac = new AbortController();
@@ -656,7 +657,7 @@ async function drawShared(model: brains.PictureModel, ask: { prompt: string; sty
       pictureFor.by.add(forPc);
       pictureFor.links.add(link);
     }
-    const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc }, p => send('progress', p), ac.signal);
+    const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed }, p => send('progress', p), ac.signal);
     if ('error' in r) throw new Error(r.error);
     send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: '' });
   } catch (e) {

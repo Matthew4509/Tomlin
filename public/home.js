@@ -46,7 +46,7 @@ function setView(view) {
 app.showPanes = () => setView('chat');
 
 /** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
-const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', data: '#settings-data', colours: '#settings-colours', help: '#help' };
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', data: '#settings-data', colours: '#settings-colours', help: '#help' };
 /** Off for the first view at start: the page opens where it was, focus left alone. */
 let pageFocus = false;
 /**
@@ -71,7 +71,7 @@ const viewName = view => (view === 'home' ? 'Home' : view === 'chat' ? 'the chat
 // ---- Settings' pages: Staff, Jobs and Files open as pages beside the Settings menu, not as windows over it ----
 
 /** The pages the Settings menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'];
+const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings' };
@@ -1166,12 +1166,10 @@ app.openPcs = async () => {
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
-/** Update this install, on This PC: models and updates (opened by Updates under Settings and by the My PC window). */
-app.openUpdateInstall = async () => {
-  openThisPc();
-  await new Promise(r => setTimeout(r, 100));
-  $('#node-install').scrollIntoView({ block: 'start' });
-  $('#node-install-git').focus({ preventScroll: true });
+/** Manage updates: a page of its own (Settings, and the My PC window's Update TOMLIN). */
+app.openUpdateInstall = () => {
+  setView('updates');
+  drawInstall();
 };
 
 function drawOthers(pcs) {
@@ -1349,12 +1347,11 @@ function openNodes() {
   refreshNodes();
   refreshOthers();
 }
-/** This PC: models and updates (under Settings; also where Updates opens). */
+/** This PC: the models on it (under Settings). */
 function openThisPc() {
   setView('thispc');
   homeUi.drawn.models = homeUi.drawn.team = null;
   refreshNodes();
-  drawInstall();
 }
 app.openThisPc = openThisPc;
 
@@ -1453,7 +1450,7 @@ function gitSay(...kids) {
 /**
  * Check git, pressed (`btn`): GitHub's newest TOMLIN, said through `say(...nodes)`, with a Download button when it is
  * newer than this PC (`download(version, button)` takes it). One function for both places it is pressed: Update this
- * install on This PC: models and updates (2.0.63).
+ * install on Manage updates (2.0.63).
  */
 async function checkGit(btn, say, download) {
   btn.disabled = true;

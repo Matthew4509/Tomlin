@@ -141,3 +141,11 @@ export function cleanStats(x: unknown): NodeStats | null {
     gpu: g ? { name: String(g.name ?? '').replace(/[^\w .()+×-]/g, '').slice(0, 60), busy: num(g.busy, 100), used: num(g.used) ?? 0, total: num(g.total), shared: g.shared === true } : null,
   };
 }
+
+/** Draft, Mid or High and the seed, as a picture asked of a linked PC gives them: what is not good is left to that PC. */
+export function drawChoices(b: Record<string, unknown>): { quality?: string; seed?: number } {
+  return {
+    ...(b.quality === 'draft' || b.quality === 'mid' || b.quality === 'high' ? { quality: b.quality } : {}),
+    ...(Number.isInteger(b.seed) && (b.seed as number) >= 0 && (b.seed as number) < 2 ** 31 ? { seed: b.seed as number } : {}),
+  };
+}

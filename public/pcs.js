@@ -449,7 +449,7 @@
     // This PC only: Repair install, Shortcut to desktop, Start on start up, under Manage PC.
     let manage = null;
     if (v.here) {
-      // Update TOMLIN beside this PC's version: Update this install (This PC: models and updates), 2.0.63.
+      // Update TOMLIN beside this PC's version: Update this install (Manage updates), 2.0.63.
       go = el('button', { class: 'btn primary', type: 'button', text: 'Update TOMLIN' });
       go.addEventListener('click', () => {
         dlg.close();

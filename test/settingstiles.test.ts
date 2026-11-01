@@ -22,8 +22,8 @@ test('the left menu says TOMLIN - HOME, then Settings, with the submenu under Se
 });
 
 test('nine lines in the order drawn: the low-priority three last, Colours at the very end', () => {
-  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'Network', 'This PC', 'Jobs', 'Files and blog writer', 'Updates', 'Data and lock', 'Colours']);
-  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'nodes', 'thispc', 'jobs', 'files', 'update', 'data', 'colours']);
+  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'Network', 'This PC', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Colours']);
+  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'nodes', 'thispc', 'jobs', 'files', 'updates', 'data', 'colours']);
 });
 
 test('each has one short sentence', () => {
@@ -66,11 +66,26 @@ test('Settings opens the tiles; what was on its long page has pages of its own',
 });
 
 test('the two new pages behave like the other Settings pages', () => {
-  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'data', 'colours'\];/);
+  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours'\];/);
   assert.match(read('home.js'), /data: '#settings-data', colours: '#settings-colours'/);
   const css = read('style.css');
   assert.match(css, /\.shell:not\(\[data-view="data"\]\) > #settings-data/);
   assert.match(css, /\.shell:not\(\[data-view="colours"\]\) > #settings-colours/);
+});
+
+test('Manage updates is a page of its own: pressing it goes there and marks it, whatever is on This PC', () => {
+  const home = read('home.js');
+  const open = /app\.openUpdateInstall = [^\n]*\n[\s\S]*?\n\};/.exec(home)![0];
+  assert.match(open, /setView\('updates'\)/);
+  assert.doesNotMatch(open, /openThisPc|scrollIntoView/, 'it was a scroll down This PC, lost as that page drew its models');
+  assert.match(home, /updates: '#updates-page'/);
+  assert.match(read('homeview.js'), /b\.dataset\.setup === 'updates'\) app\.openUpdateInstall\?\.\(\)/);
+  const thispc = html.slice(html.indexOf('id="thispc"'), html.indexOf('id="updates-page"'));
+  assert.ok(thispc.length > 0 && !thispc.includes('id="node-install"'), 'not on This PC any more');
+  assert.match(html, /<h2 id="thispc-title">This PC<\/h2>/);
+  assert.match(html, /id="updates-page"[\s\S]*?<h2 id="updates-title">Manage updates<\/h2>[\s\S]*?id="node-install"/);
+  assert.doesNotMatch(/function openThisPc\(\) \{[\s\S]*?\n\}/.exec(home)![0], /drawInstall/);
+  assert.match(read('style.css'), /\.shell:not\(\[data-view="updates"\]\) > #updates-page/);
 });
 
 test('everywhere else the left panel shows only the two lines, and the submenu opens on Settings', () => {

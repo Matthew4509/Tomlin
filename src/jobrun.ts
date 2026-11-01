@@ -101,7 +101,7 @@ export interface JobDeps {
   /** Whether picture model `id` fits in the memory free now (counting what the picture model loaded frees). */
   pictureFit: (id: string) => 'ok' | 'tight' | 'no';
   /** Draws one picture on this PC's connected picture model (nothing is loaded for it), with progress. */
-  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number } | { error: string }>;
+  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number } | { error: string }>;
   /** Swaps the connected picture model for another on this PC (same device and cores); true when it is connected. */
   swapImage: (id: string) => Promise<boolean>;
   /** A hire's system prompt (who they are, the role, the level, the writing tone chosen here), for a paired PC's chat with them. */
