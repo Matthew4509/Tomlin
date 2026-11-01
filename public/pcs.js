@@ -13,6 +13,7 @@
   /** What a model's row last said (a speed test that failed, a Delete refused), kept across the redraws. */
   const rowSay = {};
   const BIN = 'M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Zm4 2v8h2v-8h-2Zm4 0v8h2v-8h-2Z';
+  const PC_PICTURE = 'M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM2 14h20M12 17v4M7 21h10';
   const GBs = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
   /** The Uptime part of the window: hidden for now. */
   const SHOW_UPTIME = false;
@@ -240,10 +241,12 @@
 
   /** One model's row: its name, the memory it needs and its file, its state, and (this PC) Test speed, Hide and Delete. */
   function modelRow(v, x) {
-    const state = x.busy ? (x.kind === 'image' ? 'Drawing now' : 'Answering now') : x.loaded ? (v.here ? 'In use' : 'Loaded there') : x.ollama ? 'Kept by Ollama' : x.hidden ? 'Hidden' : v.here ? 'Installed' : 'Loads when asked';
-    const facts = [x.need ? `Needs about ${GBs(x.need)}` : '', x.bytes ? `file ${GBs(x.bytes)}` : '', x.kind === 'image' ? 'pictures' : '', x.speed?.expect ? app.speedWords(x.speed.expect) : ''].filter(Boolean).join(' · ');
+    const state = x.busy ? (x.kind === 'image' ? 'Drawing now' : 'Answering now') : x.loaded ? (v.here ? 'In use' : 'Loaded there') : x.ollama ? 'Kept by Ollama' : x.hidden ? 'Hidden' : '';
+    const facts = [x.kind === 'image' ? 'Pictures' : 'Chat', x.speed?.expect ? app.speedWords(x.speed.expect) : '', x.need ? `needs about ${GBs(x.need)}` : ''].filter(Boolean).join(' · ');
     const said = rowSay[x.id];
+    // On show: Test speed. Behind the "…": everything done less often.
     const acts = [];
+    const more = [];
     if (v.here) {
       if (x.kind === 'chat') acts.push(app.speedLink(`model:${x.id}`, msg => { rowSay[x.id] = msg; drawList(v); }, ok => {
         if (ok) delete rowSay[x.id];
@@ -277,16 +280,17 @@
         }
         await modelsChanged();
       });
-      acts.push(hide, del);
+      more.push(hide, del);
     }
     // Find the fastest setup: a chat model here, or one a linked PC lends (that PC runs the test on itself).
-    if (x.kind === 'chat' && !x.ollama) acts.unshift(app.finderButton(v.here ? x.id : `remote:${v.id}:${x.id}`, { name: x.name, pcName: v.name, link: true }));
+    if (x.kind === 'chat' && !x.ollama) more.unshift(app.finderButton(v.here ? x.id : `remote:${v.id}:${x.id}`, { name: x.name, pcName: v.name, link: true }));
     return el('li', { class: `pc-model${x.hidden ? ' hidden-model' : ''}` },
       el('span', { class: 'pc-model-text' },
         el('strong', { text: x.name }),
         el('span', { class: 'hint', text: facts || 'Size not known' })),
-      el('span', { class: `pc-model-state${x.loaded || x.busy ? ' on' : ''}`, text: state }),
-      acts.length ? el('span', { class: 'pc-model-acts' }, ...acts) : null,
+      state ? el('span', { class: `pc-model-state${x.loaded || x.busy ? ' on' : ''}`, text: state }) : null,
+      acts.length || more.length ? el('span', { class: 'pc-model-acts' }, ...acts,
+        more.length ? el('details', { class: 'pc-model-more' }, el('summary', { 'aria-label': `More for ${x.name}`, title: 'Find the fastest setup, Hide, Delete', text: '…' }), el('span', { class: 'pc-model-more-list' }, ...more)) : null) : null,
       said ? el('p', { class: 'hint fault-line pc-model-said', role: 'status', text: said }) : null);
   }
 
@@ -339,10 +343,13 @@
     });
     drawList(v);
     const shown = v.here ? v.models.filter(x => !x.hidden).length : v.models.length;
-    return el('section', { class: 'pc-part' },
-      el('div', { class: 'pc-part-head' }, el('h3', { text: `${v.here ? 'Installed models' : 'Models it lets this PC use'} (${shown})` }), search),
-      el('div', { class: 'pc-tools' }, shelf, el('label', { class: 'pc-sort' }, 'Sort ', sort)),
-      el('p', { class: 'hint', text: `Memory needed is an estimate (a chat model with an 8K context).${v.here ? '' : ' Hide and Delete are on that PC itself.'}` }),
+    // Search, filters and sort are for a long list: with a few models they are clutter. A hidden model still needs its filter.
+    const many = v.models.length > 6;
+    const add = v.here ? el('button', { class: 'btn', type: 'button', text: 'Get a model', onclick: () => { dlg.close(); app.openModels?.(); } }) : null;
+    return el('section', { class: 'pc-part pc-card-part' },
+      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Memory needed is an estimate (a chat model with an 8K context).', text: `Models (${shown})` }), many ? search : null, add),
+      many ? el('div', { class: 'pc-tools' }, shelf, el('label', { class: 'pc-sort' }, 'Sort ', sort)) : cats.includes('hidden') ? el('div', { class: 'pc-tools' }, shelf) : null,
+      v.here ? null : el('p', { class: 'hint', text: 'Hide and Delete are on that PC itself.' }),
       listBox);
   }
 
@@ -354,14 +361,13 @@
       el('strong', { text: s.name }),
       el('span', { class: 'hint', text: s.role }),
       el('span', { class: 'pc-num', text: s.ms ? span(s.ms / 1000) : '—' })));
-    const hire = el('button', { class: 'btn', type: 'button', text: 'Hire staff on this PC', onclick: () => {
+    const hire = el('button', { class: 'btn', type: 'button', text: 'Hire staff here', onclick: () => {
       dlg.close();
       app.openHire?.({ pc: v.id });
     } });
-    return el('section', { class: 'pc-part' },
-      el('div', { class: 'pc-part-head' }, el('h3', { text: 'Staff using this PC' }), el('span', { class: 'hint', text: 'Time worked, last 7 days' })),
-      rows.length ? el('ul', { class: 'pc-people' }, ...rows) : el('p', { class: 'hint', text: 'Nobody works on this PC yet.' }),
-      el('div', { class: 'team-actions' }, hire));
+    return el('section', { class: 'pc-part pc-card-part' },
+      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Time worked, last 7 days', text: `Staff on this PC (${v.staff.length})` }), hire),
+      rows.length ? el('ul', { class: 'pc-people' }, ...rows) : el('p', { class: 'hint', text: 'Nobody works on this PC yet.' }));
   }
 
   function topPart(v) {
@@ -379,6 +385,31 @@
       el('div', { class: 'pc-part-head' }, el('h3', { text: 'Most-used models' }), el('span', { class: 'hint', text: 'Last 7 days' })),
       rows.length ? el('ul', { class: 'pc-tops' }, ...rows) : el('p', { class: 'hint', text: 'Nothing counted yet. Each answer from now on is counted here, for whoever it was for. Pictures are not counted.' }));
   }
+
+  /** Its photo, or a computer. */
+  function pcPicture(v) {
+    if (v.profile.photo) return el('img', { class: 'pc-head-pic', src: v.profile.photo, alt: `Photo of ${v.name}` });
+    const pic = svgIcon(PC_PICTURE, 56);
+    const line = pic.querySelector('path');
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', 'currentColor');
+    line.setAttribute('stroke-width', '1.4');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-linejoin', 'round');
+    pic.classList.add('pc-head-pic');
+    return pic;
+  }
+
+  /** What it is, in one line: processor, memory, graphics card. */
+  const specLine = v => {
+    const m = v.memory;
+    const card = m?.gpu && !m.gpu.shared && m.gpu.total ? `${(m.gpu.name ?? 'graphics card').replace(/^(NVIDIA|AMD)\s+/i, '')} with ${GBs(m.gpu.total)}` : m?.ram?.total ? 'no graphics card' : '';
+    const cpu = v.cpu?.name?.replace(/\(R\)|\(TM\)|\bCPU\b|@.*$/g, '').replace(/^Intel\s+Core\s+/i, '').replace(/\s+/g, ' ').trim();
+    return [cpu, m?.ram?.total ? `${GBs(m.ram.total)} of RAM` : '', card].filter(Boolean).join(', ');
+  };
+
+  /** A nearly full disk says so at the top, without being looked for. */
+  const LOW_DISK = 10 * 2 ** 30;
 
   /** Its processor, memory and drive, as known: this PC reads them; a linked PC says its memory when it answers. */
   function specsPart(v) {
@@ -462,10 +493,16 @@
       });
       installBox.id = 'pc-manage';
     }
+    // The short version beside the name; said in full only when there is something to do about it.
+    const fine = !v.fault && !older && !ahead && (v.here || v.version === v.ours);
     const head = el('div', { class: 'pc-head' },
-      el('span', { class: 'pc-head-dot' }, el('span', { class: 'sdot', 'data-state': on ? 'on' : 'off', 'aria-hidden': 'true' })),
-      el('span', { class: 'pc-head-name' }, el('strong', { text: on ? 'On' : 'Off or not answering' }), v.profile.model ? ` · ${v.profile.model}` : '', el('span', { class: 'sr-only', text: on ? ' (connected)' : ' (not connected)' })),
-      el('span', { class: `pc-head-ver${v.fault ? ' fault-line' : ''}`, text: version }),
+      pcPicture(v),
+      el('span', { class: 'pc-head-name' },
+        el('span', { class: 'pc-head-title' }, el('strong', { text: v.name }), el('span', { class: `pc-head-chip${on ? '' : ' off'}`, text: on ? 'On' : 'Off or not answering' }), el('span', { class: 'sr-only', text: on ? ' (connected)' : ' (not connected)' })),
+        el('span', { class: 'hint', text: [v.profile.model, specLine(v)].filter(Boolean).join(' · ') })),
+      el('span', { class: `pc-head-ver${v.fault ? ' fault-line' : ''}` },
+        fine ? el('strong', { text: `TOMLIN ${v.version ?? ''}` }) : version,
+        fine && !v.here ? el('span', { class: 'pc-head-ok', text: '✓ Up to date' }) : null),
       go, manage);
 
     // ---- The strip: TOMLIN, tokens, time worked, power cost ----
@@ -566,12 +603,18 @@
     fold.open = foldOpen;
     fold.addEventListener('toggle', () => { foldOpen = fold.open; });
 
-    body.replaceChildren(head, v.here ? installBox : '', el('div', { class: 'pcw' },
-      el('div', { class: 'pcw-left' }, profileBlock(v), specsPart(v)),
-      el('div', { class: 'pcw-right' }, strip, tokenLine, ...up, modelsPart(v),
-        el('div', { class: 'pc-two' }, peoplePart(v), topPart(v)),
-        fold)));
+    const opened = (key, details) => {
+      details.open = !!foldsOpen[key];
+      details.addEventListener('toggle', () => { foldsOpen[key] = details.open; });
+      return details;
+    };
+    const detailsFold = opened('details', el('details', { class: 'pc-fold' }, el('summary', {}, el('span', { text: 'Details' }), el('span', { class: 'hint', text: 'processor, disk, tokens, power cost' })), specsPart(v), strip, tokenLine, ...up, topPart(v)));
+    const nameFold = opened('name', el('details', { class: 'pc-fold' }, el('summary', {}, el('span', { text: 'Name and photo' }), el('span', { class: 'hint', text: 'what this PC is called in the left panel' })), profileBlock(v)));
+    const lowDisk = v.disk && v.disk.free < LOW_DISK ? el('p', { class: 'fault-line pc-warn', role: 'alert', text: `The disk is nearly full: ${GBs(v.disk.free)} free. A model or a backup may not fit.` }) : null;
+    body.replaceChildren(head, lowDisk ?? '', v.here ? installBox : '', modelsPart(v), peoplePart(v), detailsFold, nameFold, fold
+    );
   }
+  const foldsOpen = {};
   let foldOpen = false;
   installBox.hidden = true;
 

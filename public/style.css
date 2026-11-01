@@ -2446,3 +2446,24 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .settings-tile strong { font-weight: 600; }
 @media (max-width: 1000px) { .settings-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .settings-tiles { grid-template-columns: minmax(0, 1fr); } }
+/* The My PC window: what matters first, the rest under folds */
+.pc-dlg { width: min(860px, calc(100vw - 32px)); }
+.pc-dlg .pc-head { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto auto; gap: 8px 14px; padding: 14px; }
+.pc-dlg .pc-head .btn { margin-left: 0; }
+.pc-head-pic { width: 64px; height: 56px; color: var(--accent); object-fit: cover; border-radius: 8px; }
+.pc-head-name { display: grid; gap: 2px; }
+.pc-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-lg); }
+.pc-head-chip { font-size: var(--fs-xs); font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--good); }
+.pc-head-chip.off { background: var(--bad-bg); color: var(--bad); }
+.pc-dlg .pc-head-name + .pc-head-ver { display: grid; justify-items: end; gap: 2px; padding-left: 0; border-left: 0; text-align: right; }
+.pc-head-ok { color: var(--good); font-size: var(--fs-sm); font-weight: 600; }
+.pc-warn { margin: 8px 0 0; }
+.pc-card-part { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.pc-card-part .pc-part-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.pc-card-part .pc-part-head h3 { margin: 0; }
+#pc-body > .pc-fold { margin-top: 10px; }
+.pc-model-more { position: relative; display: inline-block; }
+.pc-model-more > summary { list-style: none; cursor: pointer; padding: 2px 10px; border: 1px solid var(--line); border-radius: var(--r-ctl); font-weight: 700; }
+.pc-model-more > summary::-webkit-details-marker { display: none; }
+.pc-model-more-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; gap: 8px; justify-items: start; min-width: 190px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); box-shadow: var(--shadow-sm); }
+@media (max-width: 620px) { .pc-dlg .pc-head { grid-template-columns: 64px minmax(0, 1fr); } .pc-dlg .pc-head-name + .pc-head-ver { grid-column: 1 / -1; justify-items: start; text-align: left; } }

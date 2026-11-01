@@ -229,7 +229,7 @@
     const list = networkModels().filter(e => !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
     $('#hs-all-line').textContent = !hs.net ? 'Asking the linked PCs which models they have…'
-      : list.length ? `The ${thing} on your other PCs that ${pcName(target)} has not got. Copy one there, then hire on it.`
+      : list.length ? `${kind() === 'image' ? 'Picture models' : 'Chat models'} available from across your network.`
       : `${pcName(target)} has every ${thing.slice(0, -1)} your linked PCs share${q ? ` that matches "${hs.q.trim()}"` : ''}.`;
     keepButtons($('#hs-all'), list.map(allCard));
   }
