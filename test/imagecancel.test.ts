@@ -1,5 +1,6 @@
 // Cancel while a picture is being asked for, drawn or sharpened, against a made-up runner that holds its answers back:
-// the picture stays cancelled, nothing late brings it back, and the app is free at once. Run: npm test
+// the picture stays cancelled, nothing late brings it back, and the app is free at once. Also what a failure on a card
+// leads to: only words of running out of memory move the picture to RAM or the CPU. Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -14,7 +15,12 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const PNG = (await sharp({ create: { width: 512, height: 512, channels: 3, background: '#336699' } }).png().toBuffer()).toString('base64');
 
 type Route = 'img_gen' | 'jobs' | 'upscale';
-/** What the made-up runner does with each kind of request: answer now, or (null) hold it back until released. */
+/** The made-up runner cuts the connection instead of answering. */
+const DROP = Symbol('drop');
+/**
+ * What the made-up runner does with each kind of request: answer now, (null) hold it back until released, (DROP) cut
+ * the connection, or a function of how many times that kind was asked before that says which.
+ */
 type Answers = Partial<Record<Route, unknown | null>>;
 
 async function withRunner(answers: Answers, fn: (r: {
@@ -29,9 +35,12 @@ async function withRunner(answers: Answers, fn: (r: {
   let closed = 0;
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const route: Route = req.url!.includes('img_gen') ? 'img_gen' : req.url!.includes('upscale') ? 'upscale' : 'jobs';
+    const before = seen.filter(s => s === route).length;
     seen.push(route);
     req.resume();
-    const answer = answers[route];
+    const given = answers[route];
+    const answer = typeof given === 'function' ? given(before) : given;
+    if (answer === DROP) return void req.socket.destroy();
     if (answer === null) {
       held[route].push(res);
       res.on('close', () => {
@@ -215,5 +224,67 @@ test('a deleted or private picture cannot be drawn again or finalised: nothing i
     const ok = await im.generate({ prompt: '', source: 'page', again: 'fine' });
     assert.ok(ok.id, 'a picture still there draws again');
     await ok.done;
+  });
+});
+
+// ---- A failure on a card: only words of running out of memory move the picture to RAM or the CPU ----
+
+/** Lines every sd.cpp runner writes as it loads a model on a card: "memory" and "alloc" in them say nothing. */
+const LOADING = [
+  '[INFO ] stable-diffusion.cpp:592 - total params memory size = 2135.66MB (VRAM 2135.66MB, RAM 0.00MB)',
+  '[DEBUG] ggml_extend.hpp:1201 - vae compute buffer size: 1664.00 MB(VRAM), allocating',
+  '[INFO ] image.cpp:899  - sampling completed, taking 11.84s',
+];
+
+/** The made-up runner as a card's: Auto, on CUDA, its process `pid` (null: it has stopped), these last lines. */
+function onCard(im: any, lines: string[], pid: () => number | null = () => 4242): string[] {
+  Object.assign(im.pane.view, { device: 'cuda', asked: 'auto' });
+  Object.defineProperty(im.pane.worker, 'pid', { get: pid, configurable: true });
+  im.pane.worker.log = lines;
+  const why: string[] = [];
+  im.fallBack = async (_job: unknown, _plan: unknown, _m: unknown, w: string) => void why.push(w);
+  return why;
+}
+
+test('On a card, a picture that fails with no word of running out of memory is not drawn again on the CPU', { timeout: 20_000 }, async () => {
+  await withRunner({ img_gen: { id: 'one' }, jobs: { status: 'failed', error: { message: 'made up' } } }, async ({ im }) => {
+    const fellBack = onCard(im, LOADING);
+    const job = await ask(im);
+    await job.done;
+    assert.deepEqual(fellBack, [], 'the loading lines alone are no reason to move it');
+    assert.equal(job.state, 'failed');
+    assert.match(job.error, /made up/);
+  });
+});
+
+test('On a card, running out of memory still moves the picture, and says which line said so', { timeout: 20_000 }, async () => {
+  for (const [message, line] of [['made up', 'CUDA error: out of memory'], ['generate_image returned no results', '']]) {
+    await withRunner({ img_gen: { id: 'one' }, jobs: { status: 'failed', error: { message } } }, async ({ im }) => {
+      const fellBack = onCard(im, line ? [...LOADING, line] : LOADING);
+      await (await ask(im)).done;
+      assert.equal(fellBack.length, 1, `moved for "${message}"`);
+      assert.equal(fellBack[0].split('\n')[0], line || message);
+    });
+  }
+});
+
+test('On a card, a look at the runner that is cut while the runner still runs is tried again, not drawn again on the CPU', { timeout: 20_000 }, async () => {
+  await withRunner({ img_gen: { id: 'one' }, jobs: (n: number) => (n === 0 ? DROP : completed) }, async ({ im }) => {
+    const fellBack = onCard(im, LOADING);
+    const job = await ask(im);
+    await job.done;
+    assert.deepEqual(fellBack, []);
+    assert.equal(job.state, 'done');
+  });
+});
+
+test('On a card, a runner that stopped with no word of memory fails in plain words, not drawn again on the CPU', { timeout: 20_000 }, async () => {
+  await withRunner({ img_gen: { id: 'one' }, jobs: DROP }, async ({ im }) => {
+    const fellBack = onCard(im, LOADING, () => null);
+    const job = await ask(im);
+    await job.done;
+    assert.deepEqual(fellBack, []);
+    assert.equal(job.state, 'failed');
+    assert.match(job.error, /stopped while drawing/);
   });
 });

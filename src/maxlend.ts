@@ -47,10 +47,24 @@ export const CACHE_DISK = 20 * 2 ** 30;
 /** Whether someone is at this PC: milliseconds since the last key press or mouse move, and Windows locked. */
 export interface Presence {
   idleMs: number;
+  /** The lock screen is up, or a screen saver runs that locks Windows when it ends. */
   locked: boolean;
+  /** A screen saver runs (unset: read by a reader from before 3 Nov). */
+  saver?: boolean;
 }
 
-export const presenceWords = (p: Presence) => (p.locked ? 'Windows is locked' : `last used ${Math.round(p.idleMs / 60_000)} min ago`);
+/** How long ago, exact to the second under 10 minutes ("2 min" beside "after 2 minutes" read as if it should lend). */
+function ago(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s} s`;
+  if (s >= 600) return `${Math.floor(s / 60)} min`;
+  return s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`;
+}
+
+export function presenceWords(p: Presence): string {
+  if (p.locked) return p.saver ? 'its screen saver is on and locks Windows' : 'Windows is locked';
+  return `last used ${ago(p.idleMs)} ago${p.saver ? '; its screen saver is on but does not lock Windows' : ''}`;
+}
 
 /** Someone is at the PC (and Windows is not locked). */
 export const ownerBack = (p: Presence) => !p.locked && p.idleMs < OWNER_BACK_MS;
@@ -93,21 +107,35 @@ export function loanEnds(o: { on: boolean; allow: Allow; away: boolean; presence
 
 // ---- Reading whether someone is at this PC ----
 
-/** The PowerShell lines: Windows' last-input time (GetLastInputInfo) and whether the lock screen is up, every second. */
+/**
+ * The PowerShell lines, every second: Windows' last-input time (GetLastInputInfo), whether the lock screen is up, whether
+ * a screen saver runs, and whether it locks Windows when it ends ("On resume, display logon screen", or the same set by
+ * policy). Behind such a screen saver Windows is as good as locked, but the lock screen (LogonUI) starts only when
+ * someone wakes it: 2 Nov, a node behind one was read as in use.
+ */
 const PRESENCE_SCRIPT = `Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 public static class TomlinIdle {
   [StructLayout(LayoutKind.Sequential)] struct LII { public uint cbSize; public uint dwTime; }
   [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LII p);
+  [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, ref bool c, uint d);
   public static uint Ms() { var l = new LII(); l.cbSize = (uint)Marshal.SizeOf(l); if (!GetLastInputInfo(ref l)) return 0; return unchecked((uint)Environment.TickCount - l.dwTime); }
+  public static int Saver() { bool on = false; SystemParametersInfo(0x0072, 0, ref on, 0); return on ? 1 : 0; }
 }
 "@
-while ($true) { $l = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue); [Console]::Out.WriteLine("$([TomlinIdle]::Ms()) $([int]$l)"); [Console]::Out.Flush(); Start-Sleep -Milliseconds 1000 }`;
+function Locks { foreach ($k in 'HKCU:\\Software\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop', 'HKCU:\\Control Panel\\Desktop') { $v = (Get-ItemProperty -Path $k -Name ScreenSaverIsSecure -ErrorAction SilentlyContinue).ScreenSaverIsSecure; if ($null -ne $v) { return [int]("$v" -eq '1') } }; return 0 }
+while ($true) { $l = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue); $s = [TomlinIdle]::Saver(); $k = if ($s) { Locks } else { 0 }; [Console]::Out.WriteLine("$([TomlinIdle]::Ms()) $([int]$l) $s $k"); [Console]::Out.Flush(); Start-Sleep -Milliseconds 1000 }`;
 
-/** One line the reader prints: "idleMs locked(0|1)". */
+/**
+ * One line the reader prints: "idleMs lockScreen(0|1) saverRuns(0|1) saverLocks(0|1)" (the last two since 3 Nov; a
+ * test file may still hold the first two only).
+ */
 export function presenceOf(line: string): Presence | null {
-  const m = /^(\d+) ([01])$/.exec(line.trim());
-  return m ? { idleMs: Number(m[1]), locked: m[2] === '1' } : null;
+  const m = /^(\d+) ([01])(?: ([01]) ([01]))?$/.exec(line.trim());
+  if (!m) return null;
+  if (m[3] === undefined) return { idleMs: Number(m[1]), locked: m[2] === '1' };
+  const saver = m[3] === '1';
+  return { idleMs: Number(m[1]), locked: m[2] === '1' || (saver && m[4] === '1'), saver };
 }
 
 /**
@@ -259,10 +287,13 @@ export class Lender {
   private ends = 0;
   private cacheDir: string;
   private check: () => string;
+  /** Told each time a loan ends, and why (for the log). */
+  private onEnd: (e: LoanEnd) => void;
 
-  constructor(cacheDir: string, check: () => string) {
+  constructor(cacheDir: string, check: () => string, onEnd: (e: LoanEnd) => void = () => undefined) {
     this.cacheDir = cacheDir;
     this.check = check;
+    this.onEnd = onEnd;
   }
 
   view() {
@@ -345,7 +376,10 @@ export class Lender {
   /** Ends the loan now: the streams are cut and the RPC server is ended (and waited for). */
   async end(why: string): Promise<void> {
     this.ends++;
-    if (this.lease) this.ended = { to: this.lease.name, why, at: new Date().toISOString() };
+    if (this.lease) {
+      this.ended = { to: this.lease.name, why, at: new Date().toISOString() };
+      this.onEnd(this.ended);
+    }
     this.lease = null;
     this.port = 0;
     if (this.watch) clearInterval(this.watch);

@@ -112,3 +112,17 @@ export async function rpcFor(pcs = maxPcs()): Promise<{ endpoints: string[]; len
   }
   return { endpoints, lent, notes };
 }
+
+/**
+ * Max mode for a chat model about to load (`model`, its name): null with no TOMLIN_MAX; otherwise rpcFor the PCs it
+ * names, and a note when it names none saved here. Every load writes one line to the log, borrowed or not (2 Nov: two
+ * loads left no word, and a split that never happened could not be told from one refused).
+ */
+export async function maxLoad(model: string, said = process.env.TOMLIN_MAX ?? '', pcs = maxPcs(said), ask = rpcFor): Promise<{ endpoints: string[]; lent: string[]; notes: string[] } | null> {
+  if (!said.trim()) return null;
+  const named = said.split(',').map(x => x.trim()).filter(Boolean).map(x => `"${x}"`).join(' or ');
+  const max = pcs.length ? await ask(pcs) : { endpoints: [], lent: [], notes: [`Max mode: no linked PC here is called ${named} (TOMLIN_MAX names linked PCs by their name or id, with commas between).`] };
+  const got = max.lent.length ? `borrowing ${max.lent.map(n => `"${n}"`).join(' and ')} (--rpc ${max.endpoints.join(',')})` : 'nothing borrowed';
+  log.info('max', `${model}: ${got}.${max.notes.length ? ` ${max.notes.join(' ')}` : ''}`);
+  return max;
+}

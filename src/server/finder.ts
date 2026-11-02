@@ -164,6 +164,9 @@ const lastView = (k: Kept) => ({ at: k.at, size: k.size, run: k.run, applied: k.
 /** True while a test runs here: chats and linked PCs wait, with this said. */
 export const finderBusy = () => (job && !job.run?.now?.startsWith('Putting') && (!job.run || job.run.state === 'running') ? `a speed test of ${job.name} is running here${job.by !== 'this PC' ? ` (asked by "${job.by}")` : ''}` : '');
 
+/** The model under test now (it is unloaded and loaded again between tries), or null. */
+export const finderTesting = () => (job && (!job.run || job.run.state === 'running') ? job.model : null);
+
 export function jobView() {
   return job ? { model: job.model, name: job.name, size: job.size, by: job.by, started: job.started, run: job.run } : null;
 }

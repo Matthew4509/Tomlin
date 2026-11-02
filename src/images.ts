@@ -9,7 +9,8 @@ import { Pane, type ConnectRequest } from './pane.ts';
 import type { Asked } from './worker.ts';
 import type { Store } from './store.ts';
 import { missingCardRunner, tccNote, type Runtimes, type Device } from './runtimes.ts';
-import { pictureOffload } from './devices.ts';
+import { pictureCardNeed, pictureOffload, tooLongPath } from './devices.ts';
+import { pictureRoom } from './nodestaff.ts';
 import type { HardwareInfo, Sampler } from './hardware.ts';
 import { Registry, type RegistryModel } from './registry.ts';
 import { Gallery, type Picture, type Shelf } from './gallery.ts';
@@ -100,13 +101,27 @@ export interface ImagesDeps {
 }
 
 const DEVICE_WORDS: Record<Device, string> = { cpu: 'CPU', vulkan: 'graphics chip', cuda: 'NVIDIA card' };
+/** The runner's words when a picture came to nothing (on a card: it ran out of memory part-way). */
+const NO_RESULTS = /returned no results/i;
+/** The runner's words when memory ran out. Not "memory" or "alloc" alone: the lines of every load say both. */
+const OUT_OF_MEMORY = /out of memory|outofdevicememory|failed to allocate|alloc.*fail|bad_alloc|not enough memory/i;
+
+/**
+ * The line that says a picture on a card ran out of memory ('' when none does): the runner's message, or one of its
+ * last lines. Anything else (3 Nov: SD 1.5 at High on a 5 GB card, sampled in 12 s) is no reason to draw it again in
+ * RAM or on the CPU, which takes minutes.
+ */
+function ranOut(msg: string, tail: string): string {
+  if (NO_RESULTS.test(msg) || OUT_OF_MEMORY.test(msg)) return msg;
+  return tail.split('\n').find(l => OUT_OF_MEMORY.test(l)) ?? '';
+}
 
 /** Plain words for why the image runner stopped, from its last lines. */
 function whyImage(tail: string): string {
   if (vcrtFault(tail)) return VCRT_HELP.replace('model runner', 'image runner');
   if (tail.includes(RUNNER_FILE_LINE)) return RUNNER_FILE_HELP.replace('model runner', 'image runner');
   const t = tail.toLowerCase();
-  if (/out of memory|outofdevicememory|failed to allocate|alloc.*fail|bad_alloc|not enough memory/.test(t)) return 'The picture model did not fit in memory on this device. Drop the chat model (Drop in the top bar), close other programs, or choose CPU under the gear.';
+  if (OUT_OF_MEMORY.test(t)) return 'The picture model did not fit in memory on this device. Drop the chat model (Drop in the top bar), close other programs, or choose CPU under the gear.';
   if (/device_lost|devicelost|vk::|vulkan.*error/.test(t)) return 'The graphics chip stopped responding while it ran the image model (Windows reset it). Choose CPU, or try again.';
   if (/unknown model|unsupported|get sd version failed|invalid/.test(t)) return 'The image runner could not read this model file. It may be damaged or a kind this runner does not know; download it again.';
   return 'The image runner stopped while loading the model. Try once more; if it fails again, choose CPU or another model. Its own words are under "What does this mean?".';
@@ -134,6 +149,10 @@ export class Images {
   private asking: AbortController | null = null;
   private used = 0;
   private restarting = false;
+  /** The card ran out of memory with this model: its weights wait in RAM from now on (until another model is loaded). */
+  private forceOffload = false;
+  /** The last picture failed inside the runner: the next one starts it again first, as a failed runner can fail every picture after (2 Nov). */
+  private broken = false;
 
   constructor(deps: ImagesDeps) {
     this.deps = deps;
@@ -185,20 +204,33 @@ export class Images {
     return Math.max(this.registry.bytes(m), m.minRamGB * GB * 0.8);
   }
 
-  /** True when the model is known to be bigger than the biggest graphics card's own memory, so its weights wait in RAM. */
+  /** The biggest graphics card (not a built-in chip), the one pictures are drawn on (src/devices.ts pickSdDevice). */
+  private card() {
+    return this.deps.hardware.gpus.filter(g => !g.integrated && g.total).sort((a, b) => b.total! - a.total!)[0];
+  }
+
+  /** True when the model, with what it works in, is known to be too big for the card's own memory, so its weights wait in RAM. */
   private overCard(m: RegistryModel): boolean {
-    const card = this.deps.hardware.gpus.filter(g => !g.integrated && g.total).sort((a, b) => b.total! - a.total!)[0];
-    return pictureOffload(this.registry.bytes(m), card?.total ?? null);
+    return pictureOffload(this.registry.bytes(m), this.card()?.total ?? null, m.native);
+  }
+
+  /** Whether this picture model fits on the card beside `held` bytes the chat models hold there now (true when no card is known). */
+  cardRoom(id: string, held: number): boolean {
+    const m = this.registry.get(id);
+    const total = this.card()?.total ?? null;
+    if (!m || total === null) return true;
+    return pictureRoom({ cardTotal: total, heldByOthers: held, need: pictureCardNeed(this.registry.bytes(m), m.native ?? 512, total) });
   }
 
   /** Will this model run on this PC at all? (The free-memory check at Connect is separate.) */
   private hardwareFit(m: RegistryModel): { level: 'ok' | 'slow' | 'no'; text: string } {
     const hw = this.deps.hardware;
     const ramGB = hw.ram / GB;
-    const card = hw.gpus.find(g => !g.integrated && g.total);
+    const card = this.card();
     const vramGB = card?.total ? card.total / GB : 0;
     if (ramGB < m.minRamGB) return { level: 'no', text: `Needs ${m.minRamGB} GB of RAM; this PC has ${ramGB.toFixed(0)} GB.` };
     if (m.minVramGB >= 4 && vramGB < m.minVramGB) return { level: 'slow', text: `Made for a graphics card with ${m.minVramGB} GB or more; ${card ? `this one has ${vramGB.toFixed(1)} GB` : 'this PC has none'}, so it runs on the CPU and is very slow.` };
+    if (card && this.overCard(m)) return { level: 'slow', text: `Too big for this ${vramGB.toFixed(1)} GB card while it draws: part of it waits in RAM and moves to the card as needed, so it is slower, and on a card this small it may not draw at all.` };
     return { level: 'ok', text: 'Fits this PC.' };
   }
 
@@ -221,7 +253,7 @@ export class Images {
     if (path('llm')) args.push('--llm', path('llm')!);
     if (path('vae')) args.push('--vae', path('vae')!);
     if (decoder === 'fast' && path('taesd')) args.push('--taesd', path('taesd')!);
-    if (device !== 'cpu' && this.overCard(m)) args.push(...OFFLOAD);
+    if (device !== 'cpu' && (this.forceOffload || this.overCard(m))) args.push(...OFFLOAD);
     // The LoRA's own folder: a model lent by another folder or copy has its LoRA there, not in this copy's models.
     if (path('lora')) args.push('--lora-model-dir', dirname(path('lora')!));
     // The sharpener for High, when it is downloaded: the runner finds it in this folder, by its file name (2.0.65).
@@ -237,6 +269,10 @@ export class Images {
     const m = this.registry.get(id);
     if (!m || m.kind !== 'image') return { error: `There is no image model ${id}.` };
     if (!this.registry.installed(m)) return { error: `${m.name} is not downloaded yet. Download it under Models first.` };
+    const long = tooLongPath(m.files.map(f => this.registry.filePath(m, f)));
+    if (long) return { error: `The picture runner cannot open ${m.name}: the path to its file is ${long.length} characters long, and it stops at 259. Keep the models in a folder with a shorter path.` };
+    // Another model starts without the last one's lesson about the card.
+    if (this.lastConnect?.id !== id) this.forceOffload = false;
     this.lastConnect = { id, asked, threads };
     await this.deps.store.saveSettings({ image: { model: id, asked, threads } });
     const s = await this.deps.store.settings();
@@ -349,7 +385,7 @@ export class Images {
 
   private lastJob: Job | null = null;
   /** Pictures drawn for a linked PC, by job, held in memory only until drawForPc takes them (F7 E2). */
-  private away = new Map<string, { png: Buffer; modelName: string; modelPrompt: string; mode: Mode; seconds: number }>();
+  private away = new Map<string, { png: Buffer; modelName: string; modelPrompt: string; mode: Mode; seconds: number; note: string }>();
 
   /** The picture drawn for a linked PC, handed over once and forgotten here. */
   takeAway(jobId: string) {
@@ -468,6 +504,12 @@ export class Images {
     if (wantDecoder !== this.decoder && m.files.some(f => f.role === 'taesd')) {
       job.note = wantDecoder === 'full' ? 'Switching to the full-quality decoder (the model reloads).' : 'Switching back to the fast decoder for drafts (the model reloads).';
       if (!(await this.restart(wantDecoder, wantDecoder === 'full' ? 'Loading the full-quality decoder' : 'Loading the fast decoder'))) return this.fail(job, 'The image model did not load again after switching decoders. Press Connect to try again.');
+      this.broken = false;
+    }
+    if (this.broken) {
+      this.broken = false;
+      job.note = 'Starting the image runner again first: the last picture failed in it.';
+      if (!(await this.restart(this.decoder, 'Starting the image runner again'))) return this.fail(job, 'The image model did not load again after the last picture failed. Press Connect to try again.');
     }
     // A Cancel just before this loads the model again: this picture waits for it (up to 15 minutes) instead of failing.
     for (const t0 = Date.now(); (this.restarting || this.pane.view.state === 'loading') && !cancelled() && Date.now() - t0 < 15 * 60_000;) await sleep(300);
@@ -475,6 +517,15 @@ export class Images {
     const base = this.pane.worker.base;
     if (!base || this.pane.view.state !== 'connected') return this.fail(job, 'The picture model was unloaded before the picture started.');
     const device = this.pane.view.device!;
+    // The runner drawing it: a look at it that fails while this one still runs (a dropped connection) is tried again.
+    const runnerPid = this.pane.worker.pid;
+    let missed = 0;
+    // On the CPU while this PC has a card it could use: said, as it is far slower and High loses its sharpener (2 Nov,
+    // a node's card was full of chat models and five pictures went to the CPU with no word).
+    const card = this.card();
+    if (device === 'cpu' && this.pane.view.asked !== 'cpu' && card && !job.note) {
+      job.note = `Drawn on the CPU, not the ${card.name}: the model could not load on the card (often other models fill it), so it is slower${job.opts.quality === 'high' ? ', and High is drawn without the sharpener' : ''}.`;
+    }
     const loras = m.files.filter(f => f.role === 'lora').map(f => ({ path: this.registry.fileName(f), multiplier: 1 }));
     const body = {
       prompt: plan.modelPrompt, negative_prompt: plan.negative, width: job.generated.width, height: job.generated.height, seed: plan.seed, batch_count: job.count,
@@ -506,12 +557,15 @@ export class Images {
       try {
         st = await (await fetch(`${this.pane.worker.base ?? base}/sdcpp/v1/jobs/${sdJob}`, { signal })).json();
       } catch {
-        // The runner went away (it ran out of memory, or Cancel restarted it).
         if (stateNow() === 'cancelled') return;
+        if (runnerPid && this.pane.worker.pid === runnerPid && ++missed < 5) continue;
+        // The runner went away (it ran out of memory, or Cancel restarted it).
         const tail = this.pane.worker.tail();
-        if (mayFallBack && this.pane.view.asked === 'auto' && device !== 'cpu') return this.fallBack(job, plan, m, tail);
+        const oom = device !== 'cpu' ? ranOut('', tail) : '';
+        if (mayFallBack && this.pane.view.asked === 'auto' && oom) return this.fallBack(job, plan, m, oom);
         return this.fail(job, `The image runner stopped while drawing. ${whyImage(tail)}`);
       }
+      missed = 0;
       if (stateNow() === 'cancelled') return;
       // No status: the runner answering now does not know this job (it was started again), so it will never finish.
       if (typeof st?.status !== 'string') return this.fail(job, 'The image runner was started again while it drew, and no longer knows this picture. Draw it again.');
@@ -521,8 +575,13 @@ export class Images {
       }
       if (st.status === 'failed' || st.status === 'cancelled') {
         const msg = st.error?.message ?? 'no reason given';
-        if (mayFallBack && this.pane.view.asked === 'auto' && device !== 'cpu' && /memory|alloc/i.test(msg + this.pane.worker.tail())) return this.fallBack(job, plan, m, msg);
-        return this.fail(job, `The picture failed in the image runner: ${msg}.`);
+        // "generate_image returned no results" on a card: what the runner says when the card runs out of memory part-way
+        // (2 Nov: a 3.1 GB SDXL model on a 4 GB card, every time), with no word of memory in it.
+        const oom = device !== 'cpu' ? ranOut(msg, this.pane.worker.tail()) : '';
+        const card = !!oom;
+        if (mayFallBack && this.pane.view.asked === 'auto' && card) return this.fallBack(job, plan, m, oom);
+        this.broken = true;
+        return this.fail(job, `The picture failed in the image runner: ${msg}.${card ? ' Most likely the graphics card ran out of memory: choose CPU for pictures, or a smaller model.' : ''}`);
       }
     }
     const seconds = (Date.now() - t0) / 1000;
@@ -545,7 +604,7 @@ export class Images {
         if (job.opts.forPc) {
           // For a linked PC: shaped in memory, never saved here (F7 E2). drawForPc takes it at once.
           const shaped = await this.shape(job, plan, png);
-          this.away.set(job.id, { png: shaped.data, modelName: m.name, modelPrompt: plan.modelPrompt, mode: job.mode, seconds: Math.round((seconds / result.images.length) * 10) / 10 });
+          this.away.set(job.id, { png: shaped.data, modelName: m.name, modelPrompt: plan.modelPrompt, mode: job.mode, seconds: Math.round((seconds / result.images.length) * 10) / 10, note: job.note ?? '' });
           continue;
         }
         job.results.push(await this.finish(job, plan, m, png, plan.seed + i, seconds / result.images.length, device));
@@ -604,10 +663,18 @@ export class Images {
   }
 
   private async fallBack(job: Job, plan: Plan, m: RegistryModel, why: string): Promise<void> {
-    job.note = `The ${DEVICE_WORDS[this.pane.view.device ?? 'vulkan']} ran out of memory (${why.split('\n')[0].slice(0, 120)}), so TOMLIN moved the image model to the CPU and is drawing again there.`;
+    const device = this.pane.view.device ?? 'vulkan';
+    const first = why.split('\n')[0].slice(0, 120);
     job.state = 'starting';
     job.step = 0;
     job.perStep = null;
+    // First the same card with the weights waiting in RAM, when they were not already: slower, but still on the card.
+    if (device !== 'cpu' && !this.forceOffload && !this.overCard(m)) {
+      this.forceOffload = true;
+      job.note = `The ${DEVICE_WORDS[device]} ran out of memory (${first}), so TOMLIN keeps part of the model in RAM and is drawing again on the card. It is slower.`;
+      if (await this.restart(this.decoder, 'Keeping part of the model in RAM', [device], job.note)) return this.run(job, plan, m, true);
+    }
+    job.note = `The ${DEVICE_WORDS[device]} ran out of memory (${first}), so TOMLIN moved the image model to the CPU and is drawing again there.`;
     if (!(await this.restart(this.decoder, 'Moving to the CPU', ['cpu'], job.note))) return this.fail(job, 'The image model did not load on the CPU either. Close other programs and press Connect again.');
     return this.run(job, plan, m, false);
   }

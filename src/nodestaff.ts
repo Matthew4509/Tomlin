@@ -86,6 +86,44 @@ export function modelRefusal(id: string, o: { onPc: (id: string) => string | nul
 /** A chat model loaded on a node for a linked PC stays this long unused, so a reply minutes later does not reload it. */
 export const CHAT_DROP_MS = 10 * 60_000;
 
+/**
+ * What becomes of a chat model a node loaded for linked PCs, at each look: kept, gone (unloaded), theirs (someone at
+ * this PC answers on it), dropped (unused too long), or waiting. One the speed finder is testing is kept even while it is
+ * unloaded between tries: the finder loads it again at the end, and it must still drop after (2 Nov: a node kept three
+ * models loaded, 14 to 15 GB, long after the tests).
+ */
+export function chatVerdict(o: { state: string; lending: boolean; busyHere: boolean; testing: boolean; idleMs: number }): 'keep' | 'gone' | 'theirs' | 'drop' | 'wait' {
+  if (o.testing) return 'keep';
+  if (o.state !== 'connected' && o.state !== 'loading') return 'gone';
+  if (o.lending || o.state === 'loading') return 'keep';
+  if (o.busyHere) return 'theirs';
+  return o.idleMs > CHAT_DROP_MS ? 'drop' : 'wait';
+}
+
+/**
+ * The same for the picture model loaded for linked PCs. While it draws for one it is kept, even when it is started
+ * again part-way (moved to the CPU, or with its weights in RAM): it stays theirs, and drops after.
+ */
+export function pictureVerdict(o: { id: string; model: string | null; state: string; drawing: boolean; busyHere: boolean; idleMs: number; dropMs: number }): 'keep' | 'gone' | 'theirs' | 'drop' | 'wait' {
+  if (o.drawing) return 'keep';
+  if (o.model !== o.id || (o.state !== 'connected' && o.state !== 'loading')) return 'gone';
+  if (o.state === 'loading') return 'keep';
+  if (o.busyHere) return 'theirs';
+  return o.idleMs > o.dropMs ? 'drop' : 'wait';
+}
+
+/** Whether a picture model fits on the card beside what other models hold there now. No card known: yes. */
+export function pictureRoom(o: { cardTotal: number | null; heldByOthers: number; need: number }): boolean {
+  return o.cardTotal === null || o.cardTotal - o.heldByOthers >= o.need;
+}
+
+/** A linked PC's stream cut part-way, in plain words: "terminated" and "fetch failed" are fetch's own. Other words pass through. */
+export function cutWords(pcName: string, message: string): string {
+  return /^(terminated|fetch failed|other side closed|socket hang up)$/i.test(message.trim()) || /ECONNRESET|UND_ERR_SOCKET/.test(message)
+    ? `"${pcName}" stopped sending part-way: the link closed (it may have restarted, slept or lost the network). Try again.`
+    : message;
+}
+
 /** The chat models a node loaded for linked PCs: the PCs using each (names, links) and when one last did. */
 export type LoadedFor = Map<string, { by: Set<string>; links: Set<string>; at: number }>;
 

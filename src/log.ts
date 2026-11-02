@@ -2,7 +2,7 @@
 // last 7 days kept. It holds what went wrong and where (a request, a model that would not load, a chat or job step that
 // stopped), never a chat's words, a prompt or a file's text, so it can be sent to someone who helps. Everything written
 // to console.error and console.warn lands here too. Help has "Open the log". Tested in test/log.test.ts.
-import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const KEEP_DAYS = 7;
@@ -30,6 +30,36 @@ export const logDir = () => dir;
 export const logFile = (now = new Date()) => (dir ? join(dir, `${day(now)}.log`) : null);
 
 const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** The most lines a linked PC can ask for at once. */
+export const MAX_TAIL = 1000;
+
+/**
+ * Today's last `n` lines (at most MAX_TAIL), for the PC this one is linked to (src/jobrun/node.ts /worker/log): only
+ * the end of the file is read, as a day's file can be 20 MB. None when there is no log yet.
+ */
+export function lastLines(n = 300, now = new Date()): { day: string; lines: string[] } {
+  const want = Math.max(1, Math.min(MAX_TAIL, Math.floor(n) || 300));
+  const file = logFile(now);
+  if (!file) return { day: day(now), lines: [] };
+  try {
+    const fd = openSync(file, 'r');
+    try {
+      const size = fstatSync(fd).size;
+      const bytes = Math.min(size, want * (MAX_LINE + 40));
+      const buf = Buffer.alloc(bytes);
+      readSync(fd, buf, 0, bytes, size - bytes);
+      const lines = buf.toString('utf8').split('\n').filter(Boolean);
+      // A read that starts mid-file starts mid-line: that part line is left out.
+      if (bytes < size) lines.shift();
+      return { day: day(now), lines: lines.slice(-want) };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return { day: day(now), lines: [] };
+  }
+}
 
 /** Deletes the day files older than KEEP_DAYS days (by the date in the name). */
 export function prune(now = new Date()): number {

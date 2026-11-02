@@ -21,7 +21,7 @@ const idleMinutes = () => maxlend.cleanLendIdle(shareState.lendIdle);
 const facts = () => ({ on: shareState.on, allow: carry.cleanAllow(shareState.allow, maxlend.maxShown()), away: !!shareState.away });
 
 function theLender(): maxlend.Lender {
-  lender ??= new maxlend.Lender(maxlend.cacheDirOf(d.store.dir), () => maxlend.loanEnds({ ...facts(), presence: presence.now(), lease: lender?.lease ?? null, paired: shareState.paired }));
+  lender ??= new maxlend.Lender(maxlend.cacheDirOf(d.store.dir), () => maxlend.loanEnds({ ...facts(), presence: presence.now(), lease: lender?.lease ?? null, paired: shareState.paired }), e => log.info('max', `Stopped lending to "${e.to}": ${e.why}.`));
   return lender;
 }
 
@@ -52,35 +52,45 @@ function refuse(socket: Duplex, status: number, error: string): void {
  * lendWhy). The answer carries this side's nonce, sealed; from then on the socket is the sealed stream.
  */
 export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  // Each refusal goes in this PC's log too: the PC asking sees only the words, and this one is where they are checked.
+  let from = '';
+  const no = (status: number, error: string) => {
+    log.info('max', `Did not lend (${from}): ${error}`);
+    refuse(socket, status, error);
+  };
   try {
     const ip = req.socket.remoteAddress ?? '';
-    if (!share.isPrivateAddress(ip)) return refuse(socket, 403, 'This worker only answers PCs on its own home network.');
-    if (req.headers.origin) return refuse(socket, 403, 'Web pages cannot use this worker.');
-    if (new URL(req.url ?? '/', 'http://worker').pathname !== MAX_DOOR || String(req.headers.upgrade).toLowerCase() !== MAX_UPGRADE) return refuse(socket, 404, 'There is no such door here.');
+    from = ip;
+    if (!share.isPrivateAddress(ip)) return no(403, 'This worker only answers PCs on its own home network.');
+    if (req.headers.origin) return no(403, 'Web pages cannot use this worker.');
+    if (new URL(req.url ?? '/', 'http://worker').pathname !== MAX_DOOR || String(req.headers.upgrade).toLowerCase() !== MAX_UPGRADE) return no(404, 'There is no such door here.');
     const named = /^Link ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1];
     const who = share.pairedByHash(shareState, named);
-    if (!who) return refuse(socket, 401, 'that PC no longer knows this one (it was removed there, or set up again)');
+    if (!who) return no(401, 'that PC no longer knows this one (it was removed there, or set up again)');
+    from = `"${who.name}", ${ip}`;
     const keys = link.keysOf(who.key);
-    if (!keys) return refuse(socket, 401, 'this link was made before links were encrypted. Link this PC again from the main PC.');
+    if (!keys) return no(401, 'this link was made before links were encrypted. Link this PC again from the main PC.');
     const opened = link.openRequest(keys, { box: String(req.headers['x-link'] ?? '') }, MAX_DOOR, taken);
-    if ('error' in opened) return refuse(socket, 400, opened.error);
+    if ('error' in opened) return no(400, opened.error);
     const hostNonce = Buffer.from(String(opened.body.nonce ?? ''), 'base64url');
-    if (hostNonce.length !== 16) return refuse(socket, 400, 'a Max mode request was not in the expected form.');
+    if (hostNonce.length !== 16) return no(400, 'a Max mode request was not in the expected form.');
     const l = theLender();
     // The reader starts at the first ask: a second or two for its first reading.
     const p = presence.now() ?? (await presence.first());
     const why = maxlend.lendWhy({ pc: shareState.name, ...facts(), shown: maxlend.maxShown(), presence: p, idleMinutes: idleMinutes(), lease: l.lease, by: who });
-    if (why) return refuse(socket, 409, why);
+    if (why) return no(409, why);
+    const fresh = !l.lease;
     let port: number;
     try {
       port = await l.open({ hash: who.hash, name: who.name }, d.rpcProgram?.() ?? null);
     } catch (e) {
-      return refuse(socket, 409, `"${shareState.name}" cannot lend now: ${(e as Error).message}.`);
+      return no(409, `"${shareState.name}" cannot lend now: ${(e as Error).message}.`);
     }
+    if (fresh && l.lease) log.info('max', `Lending this PC's card memory to "${who.name}" (${p ? maxlend.presenceWords(p) : 'presence unknown'}).`);
     const rpc = await maxlend.reachRpc(port, () => socket.destroyed);
     if (!rpc || socket.destroyed) {
       rpc?.destroy();
-      return refuse(socket, 503, `"${shareState.name}" started lending, but its RPC server did not answer.`);
+      return no(503, `"${shareState.name}" started lending, but its RPC server did not answer.`);
     }
     const nodeNonce = newNonce();
     const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url') });
@@ -91,6 +101,6 @@ export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       if (ended) log.info('max', `A stream from "${who.name}" ended: ${ended}`);
     });
   } catch (e) {
-    refuse(socket, 500, `Max mode failed here: ${(e as Error).message}`);
+    no(500, `Max mode failed here: ${(e as Error).message}`);
   }
 }

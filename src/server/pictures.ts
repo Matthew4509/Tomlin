@@ -200,7 +200,7 @@ export async function drawForPc(o: { prompt: string; mode: string; width?: numbe
   });
   const pic = images.takeAway(job.id);
   if (!pic) return { error: job.state === 'cancelled' ? 'it was stopped.' : job.error ?? 'the picture did not come out.' };
-  return { png: pic.png, modelName: pic.modelName.replace(/\s*\(.*\)$/, ''), modelPrompt: pic.modelPrompt, mode: pic.mode, seconds: pic.seconds };
+  return { png: pic.png, modelName: pic.modelName.replace(/\s*\(.*\)$/, ''), modelPrompt: pic.modelPrompt, mode: pic.mode, seconds: pic.seconds, note: pic.note };
 }
 
 /** Swaps this PC's connected picture model for another of its own (a paired PC asked for a style this one draws better). */

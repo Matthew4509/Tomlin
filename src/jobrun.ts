@@ -27,7 +27,7 @@ import type { RunOptions, Settings, Store } from './store.ts';
 import type { RunnerHello } from './runnerpush.ts';
 import type { Device, Runtimes } from './runtimes.ts';
 import { d, useDeps } from './jobrun/shared.ts';
-import { canKeep, canThink, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
+import { canKeep, canThink, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, nodeLog, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
 import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
@@ -100,8 +100,10 @@ export interface JobDeps {
   isHidden?: (id: string) => boolean;
   /** Whether picture model `id` fits in the memory free now (counting what the picture model loaded frees). */
   pictureFit: (id: string) => 'ok' | 'tight' | 'no';
+  /** Whether picture model `id` fits on the graphics card beside the chat models loaded there now. */
+  pictureRoom: (id: string) => boolean;
   /** Draws one picture on this PC's connected picture model (nothing is loaded for it), with progress. */
-  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number } | { error: string }>;
+  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note?: string } | { error: string }>;
   /** Swaps the connected picture model for another on this PC (same device and cores); true when it is connected. */
   swapImage: (id: string) => Promise<boolean>;
   /** A hire's system prompt (who they are, the role, the level, the writing tone chosen here), for a paired PC's chat with them. */
@@ -134,6 +136,8 @@ export interface JobDeps {
   /** The speed finder a linked PC asks for (/worker/tune-*; src/server/finder.ts tuneDoor), and what it says while one runs here. */
   tune?: (action: string, b: Record<string, unknown>, by: string) => Promise<{ status: number; json: Record<string, unknown> }>;
   tuneBusy?: () => string;
+  /** The chat model the speed finder is testing here now, or null: it stays counted as loaded for a linked PC while it reloads. */
+  finderTesting?: () => string | null;
   /** Max mode (src/maxlend.ts): the RPC server beside this PC's best chat runner, what it lends, its threads; null with none. */
   rpcProgram?: () => import('./maxlend.ts').RpcProgram | null;
   /** Told when a linked PC says "I need to log off for now" (its name). */
@@ -294,7 +298,7 @@ export function createJobs(deps: JobDeps) {
   startNode();
   startLinks();
   startProjectBackups();
-  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
+  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
 }
 
 // ---- Routes ----

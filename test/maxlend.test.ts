@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import * as carry from '../src/carry.ts';
 import { alive } from '../src/hardware.ts';
 import { createServer } from 'node:net';
-import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, reachRpc, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
+import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, presenceWords, PresenceReader, reachRpc, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
 import { chatArgs, maxFault, whyItFailed } from '../src/llama.ts';
 
 const ALL = { pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true };
@@ -197,4 +197,42 @@ test('a lent PC that went away is named as the reason', () => {
   assert.ok(maxFault(tail));
   assert.match(whyItFailed(tail), /a PC lending its card for Max mode stopped answering/);
   assert.ok(!maxFault('llama_model_load: error loading model: failed to allocate buffer'));
+});
+
+test('a loan that ends is told, with why (it goes in the lending PC\'s log); ending with no loan tells nothing', async () => {
+  const told: { to: string; why: string }[] = [];
+  const l = new Lender(tmpdir(), () => '', e => told.push({ to: e.to, why: e.why }));
+  await l.end('nothing lent yet');
+  assert.deepEqual(told, []);
+  l.lease = { hash: 'a', name: 'Office PC', since: new Date().toISOString() };
+  await l.end('someone started using it');
+  assert.deepEqual(told, [{ to: 'Office PC', why: 'someone started using it' }]);
+});
+
+test('a screen saver that locks Windows when it ends counts as locked; one that does not, and its idle time, are said', () => {
+  // "idleMs logonUI saverRunning saverLocks": the reader's line since 3 Nov.
+  assert.deepEqual(presenceOf('61234 0 1 1'), { idleMs: 61234, locked: true, saver: true });
+  assert.deepEqual(presenceOf('61234 0 1 0'), { idleMs: 61234, locked: false, saver: true });
+  assert.deepEqual(presenceOf('61234 0 0 1'), { idleMs: 61234, locked: false, saver: false }, 'set to lock, but not running');
+  assert.deepEqual(presenceOf('61234 1 0 0'), { idleMs: 61234, locked: true, saver: false });
+  const base = { pc: 'Worker PC', on: true, shown: true, allow: LEND, away: false, idleMinutes: 2, lease: null, by: { hash: 'a' } };
+  assert.equal(lendWhy({ ...base, presence: presenceOf('30000 0 1 1') }), '', 'the locking screen saver: lends at once');
+  assert.equal(presenceWords({ idleMs: 30_000, locked: true, saver: true }), 'its screen saver is on and locks Windows');
+  // Exact under 10 minutes: "2 min" beside "after 2 minutes" read as if it should have lent (2 Nov).
+  assert.equal(presenceWords({ idleMs: 100_000, locked: false }), 'last used 1 min 40 s ago');
+  assert.equal(presenceWords({ idleMs: 45_400, locked: false }), 'last used 45 s ago');
+  assert.equal(presenceWords({ idleMs: 4 * min, locked: false }), 'last used 4 min ago');
+  assert.equal(presenceWords({ idleMs: 100_000, locked: false, saver: true }), 'last used 1 min 40 s ago; its screen saver is on but does not lock Windows');
+  assert.equal(presenceWords({ idleMs: 25 * min + 20_000, locked: false }), 'last used 25 min ago');
+});
+
+test('the presence reader on Windows says whether the screen saver runs', { skip: process.platform !== 'win32' }, async () => {
+  const r = new PresenceReader();
+  try {
+    const p = await r.first(20_000);
+    assert.ok(p, 'a reading came');
+    assert.equal(typeof p.saver, 'boolean', JSON.stringify(p));
+  } finally {
+    r.stop();
+  }
 });

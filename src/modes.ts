@@ -63,17 +63,22 @@ const ONE_PERSON = /\b(man|woman|boy|girl|child|kid|baby|lady|guy|person|teen|te
 const MANY_PEOPLE = /\b(people|couples?|famil(?:y|ies)|crowds?|groups? of|twins|friends|siblings|parents|grandparents|brothers|sisters)\b/i;
 const COUNTED = /\b(two|three|four|five|six|seven|eight|nine|ten|several|many|a few|[2-9]|1\d)\s+(?:[a-z-]+\s+){0,2}(men|women|people|persons|boys|girls|children|kids|babies|ladies|guys|adults|teens|teenagers|students|dancers|friends|sisters|brothers|mothers|fathers)\b/i;
 
+/** People the prompt leaves out ("no people", "without any person") are not people in it. */
+const LEFT_OUT = /\b(?:no|without|not any|free of)\s+(?:(?:a|an|any|other)\s+)?(?:people|persons?|humans?|figures?|crowds?|men|women|man|woman|kids?|children)\b/gi;
+const said = (prompt: string) => prompt.replace(LEFT_OUT, ' ');
+
 /** Two or more people asked for ("two women", "a couple", "a man and a woman"): drawn wide, so both fit (src/quality.ts GROUP_SIZE). */
 export function groupAsk(prompt: string): boolean {
-  if (COUNTED.test(prompt) || MANY_PEOPLE.test(prompt)) return true;
-  return (prompt.match(ONE_PERSON) ?? []).length >= 2;
+  const p = said(prompt);
+  if (COUNTED.test(p) || MANY_PEOPLE.test(p)) return true;
+  return (p.match(ONE_PERSON) ?? []).length >= 2;
 }
 
 /** The mode a prompt asks for: icon words mean Icon (never when people are asked for); cartoon words mean Cartoon;
  * photo words mean Blog; anything else Custom. A small size alone no longer means Icon (2.0.65: a "2 people" picture
  * at 256 came out as one person with no background). */
 export function detectMode(prompt: string, _target: Size | null): { mode: Mode; why: string } {
-  const people = PEOPLE.exec(prompt);
+  const people = PEOPLE.exec(said(prompt));
   const icon = /\b(icons?|logos?|favicons?|app ?icons?|emoji|glyph|pictogram|symbol)\b/i.exec(prompt);
   if (icon && !people) return { mode: 'icon', why: `"${icon[0]}" in the prompt` };
   const cartoon = /\b(cartoons?|cartoony|comic(?: book| strip)?|anime|manga|cel[- ]shaded|caricature|chibi)\b/i.exec(prompt);

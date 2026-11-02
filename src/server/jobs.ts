@@ -11,13 +11,13 @@ import { pinWhy } from '../runtimes.ts';
 import { BUILD, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
 import { scope } from '../meter.ts';
 import { appLock, appLockOn, appPinCheck, recoveryHashes, sameAsLock, updatePinCheck, whenCodesChange } from './locks.ts';
-import { chat, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcProgram, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
+import { chat, chatCardBytes, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcProgram, runOf, runOn, runnerFor, runnerUsed, runners } from './panes.ts';
 import { answeringBusy, stepAnswers, stopOn } from './answering.ts';
 import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
 import { tellJob } from './notices.ts';
 import { memoryNow } from './thispc.ts';
 import { fetchHere } from './hf.ts';
-import { finderBusy, tuneDoor } from './finder.ts';
+import { finderBusy, finderTesting, tuneDoor } from './finder.ts';
 
 // ---- Jobs (src/jobrun.ts) ----
 
@@ -78,6 +78,7 @@ export function startJobs(): void {
     pictureModels,
     isHidden: id => hidden.has(id),
     pictureFit: id => images.list().find(m => m.id === id)?.fit.level ?? 'ok',
+    pictureRoom: id => images.cardRoom(id, chatCardBytes()),
     draw: drawForPc,
     swapImage,
     loadImage,
@@ -107,6 +108,7 @@ export function startJobs(): void {
     fetch: fetchHere,
     tune: tuneDoor,
     tuneBusy: finderBusy,
+    finderTesting,
     rpcProgram,
     carry: {
       // A chat model's files: its first part and the parts beside it. Ollama keeps its own (named by Ollama): not sent.

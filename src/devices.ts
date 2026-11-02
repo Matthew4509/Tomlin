@@ -130,10 +130,26 @@ export function pickSdDevice(list: { name: string; desc: string }[], gpus: { nam
 }
 
 /**
- * A picture model's weights wait in RAM (--offload-to-cpu) only when the model is known to be bigger than 85% of the
- * card; a card of unknown size is left to sd-server's own fit (--auto-fit, on by default), which reads the free memory.
+ * The card memory a picture takes beyond the model's files while it draws, by the model's own size (an estimate): a
+ * 1024 model needs far more than a 512 one. Measured 2 Nov on a 4 GB Quadro K1200: SD 1.5 (2.3 GB, 512) drew there,
+ * RealVisXL (3.1 GB, 1024) failed every time.
  */
-export const pictureOffload = (bytes: number, cardTotal: number | null) => cardTotal !== null && bytes > cardTotal * 0.85;
+export const pictureWork = (native: number) => (native >= 1024 ? 1.5 : 0.6) * 2 ** 30;
+
+/**
+ * A picture model's weights wait in RAM (--offload-to-cpu) when the model and what it works in are known to be more than
+ * 90% of the card; a card of unknown size is left to sd-server's own fit (--auto-fit, on by default), which reads the
+ * free memory.
+ */
+export const pictureOffload = (bytes: number, cardTotal: number | null, native = 512) => cardTotal !== null && bytes + pictureWork(native) > cardTotal * 0.9;
+
+/** What a picture model needs on the card: with its weights in RAM, only the part in use is there (an estimate). */
+export const pictureCardNeed = (bytes: number, native: number, cardTotal: number) =>
+  (pictureOffload(bytes, cardTotal, native) ? Math.min(bytes, cardTotal * 0.5) : bytes) + pictureWork(native);
+
+/** The first path too long for the runners on Windows (259 characters with its drive): they cannot open it, and say only that they stopped. */
+export const tooLongPath = (paths: string[], platform: string = process.platform): string | null =>
+  platform === 'win32' ? paths.find(p => p.length > 259) ?? null : null;
 
 /** Reads the picture runner's device list (it loads its card libraries, lists, and ends): [] when it cannot. */
 export function listSdDevices(exe: string, env?: NodeJS.ProcessEnv): Promise<{ name: string; desc: string }[]> {

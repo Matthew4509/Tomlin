@@ -31,7 +31,7 @@ import { whoList } from './people.ts';
 import { paneJob } from './pictures.ts';
 import { readSpeedsNow } from './thispc.ts';
 import { jobRoutes } from './jobs.ts';
-import { maxPcs, rpcFor } from '../jobrun/maxhost.ts';
+import { maxLoad } from '../jobrun/maxhost.ts';
 
 // The chat runners (src/runners.ts): one llama-server per chat model loaded at once. A loaded model stays until it is
 // dropped or another needs its place: the next model goes beside it when it fits, else the least recently used goes.
@@ -217,6 +217,9 @@ function cardBytesFor(ids: string[] | undefined): number[] {
   const chosen = ids?.length ? cardList.filter(c => c.ids.some(id => ids.includes(id))) : [];
   return chosen.length ? chosen.map(c => c.total) : chatCards().map(g => g.total ?? 0);
 }
+
+/** What the loaded chat models hold on the graphics cards now, as the sampler last read it (bytes). */
+export const chatCardBytes = () => runners.reduce((n, p) => n + (p.view.pid ? sampler.latest.processes[p.view.pid]?.gpuDedicated ?? 0 : 0), 0);
 
 export function fit(bytes: number, pane: 'chat' | 'image', cardIds?: string[]) {
   // Chat: what the model that would be swapped out frees (the least recently used one not answering).
@@ -435,7 +438,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   runnerRun.set(runner, run);
   const draftPath = run.draft ? chatModels.path(run.draft) : null;
   // Max mode (hidden: TOMLIN_MAX names the linked PCs): their cards join this load as more devices.
-  const max = maxPcs().length ? await rpcFor() : null;
+  const max = await maxLoad(name);
   // A laptop's built-in chip beside its card: Vulkan would spread the layers over both, so the cards are named.
   const cards = startCards(run.cards, await readCards(), builtInHere);
   const started = { ...run, cards, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };

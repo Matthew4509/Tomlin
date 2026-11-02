@@ -87,7 +87,7 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     assert.equal(tick.body.lend.idle, 5);
     p = await load();
     assert.equal(p.state, 'connected');
-    assert.match(p.note ?? '', /Max mode: someone is using "Test node" \(last used 0 min ago\)\. It lends once Windows is locked there, or after 5 minutes/);
+    assert.match(p.note ?? '', /Max mode: someone is using "Test node" \(last used \d+ s ago\)\. It lends once Windows is locked there, or after 5 minutes/);
     await unload();
 
     // 3. Nobody there for 10 minutes: it lends, the host loads through it and answers.

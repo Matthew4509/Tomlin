@@ -12,6 +12,7 @@ import * as speedKeys from '../speed.ts';
 import { cleanRid, ridOf } from '../outbox.ts';
 import { cleanTally, cleanUsed, scope } from '../meter.ts';
 import type { Remote } from '../store.ts';
+import { MAX_TAIL } from '../log.ts';
 import { d, sleep } from './shared.ts';
 import type { Brain, Hello } from '../jobrun.ts';
 
@@ -446,7 +447,8 @@ export async function drawOn(r: Remote, ask: { prompt: string; style: string | n
     }
   } catch (e) {
     if (signal.aborted) throw new Error('Stopped.');
-    throw e;
+    // fetch's own one word ("terminated") when the link closes part-way, said plainly (2 Nov).
+    throw new Error(nodestaff.cutWords(r.name, (e as Error).message));
   }
   throw new Error(`"${r.name}" stopped before the picture was finished (it may have been closed, or its picture model disconnected).`);
 }
@@ -519,6 +521,25 @@ export async function nodeStats(pc: string, chatModel = ''): Promise<{ state: 'o
     return stats ? { state: 'on', stats, name: r.name, model } : { state: 'off', name: r.name, model };
   } catch {
     return { state: 'off', name: r.name, model };
+  }
+}
+
+/**
+ * A linked PC's log today, its last `lines` lines: 'on' with them, 'old' when its TOMLIN is from before the door,
+ * 'off' when it does not answer in 10 s, 'gone' when it is not linked. Its lines are its own words: kept as text, trimmed.
+ */
+export async function nodeLog(pc: string, lines = 300): Promise<{ state: 'on'; name: string; day: string; lines: string[] } | { state: 'old' | 'off' | 'gone'; name: string; error?: string }> {
+  const r = (await d.store.settings()).remotes.find(x => x.id === pc || x.name.toLowerCase() === pc.toLowerCase());
+  if (!r) return { state: 'gone', name: '' };
+  try {
+    const res = await linkFetch(r, '/worker/log', { lines }, AbortSignal.timeout(10_000));
+    if (res.status === 404) return { state: 'old', name: r.name };
+    const got = (res.ok ? await res.json().catch(() => null) : null) as { day?: unknown; lines?: unknown } | null;
+    if (!got || !Array.isArray(got.lines)) return { state: 'off', name: r.name };
+    const day = typeof got.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(got.day) ? got.day : '';
+    return { state: 'on', name: r.name, day, lines: got.lines.filter((l): l is string => typeof l === 'string').slice(-MAX_TAIL).map(l => l.slice(0, 4000)) };
+  } catch (e) {
+    return { state: 'off', name: r.name, error: (e as Error).message };
   }
 }
 

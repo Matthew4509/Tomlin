@@ -21,7 +21,7 @@ import * as update from '../update.ts';
 import { lastStart } from '../worker.ts';
 import { cleanRid, Outbox, type Follower, type Kept, type Lock } from '../outbox.ts';
 import { inScope, scope } from '../meter.ts';
-import { log } from '../log.ts';
+import { lastLines, log } from '../log.ts';
 import { PICTURE_DROP_MS, unloadWhileLocked } from '../picturelock.ts';
 import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
@@ -511,7 +511,8 @@ async function pictureMakesWay(): Promise<boolean> {
 async function chatsMakeWay(model: string): Promise<string[]> {
   const out: string[] = [];
   for (const [id] of [...loadedForPc].sort((a, b) => a[1].at - b[1].at)) {
-    if (d.pictureFit(model) !== 'no') break;
+    // Room in RAM, and room on the card: chat models left on the card sent pictures to the CPU with no word (2 Nov).
+    if (d.pictureFit(model) !== 'no' && d.pictureRoom(model)) break;
     const r = d.runnerFor(id);
     if (!r || lending.has(id) || d.busy(r) || r.view.state !== 'connected') continue;
     out.push(d.chatList().find(m => m.id === id)?.name ?? id);
@@ -519,7 +520,7 @@ async function chatsMakeWay(model: string): Promise<string[]> {
     await r.disconnect();
     await sleep(1500);
   }
-  if (out.length) console.log(`Unloaded ${out.join(' and ')} to make room for a picture model a linked PC's queue asked for.`);
+  if (out.length) console.log(`Unloaded ${out.join(' and ')} to make room for a picture model a linked PC asked for.`);
   return out;
 }
 
@@ -617,7 +618,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
     }
     const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices }, p => send('progress', p), ac.signal);
     if ('error' in r) throw new Error(r.error);
-    send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: plan.note });
+    send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: [plan.note, r.note ? `says: ${r.note}` : ''].filter(Boolean).join('; ') });
   } catch (e) {
     send('error', { text: (e as Error).message });
   } finally {
@@ -648,8 +649,8 @@ async function drawShared(model: brains.PictureModel, ask: { prompt: string; sty
     const v = d.imagePane.view;
     const fresh = !(v.model === model.id && v.state === 'connected');
     if (fresh) {
-      // From a linked PC's queue: chat models loaded here for linked PCs make way when it does not fit.
-      const made = queue ? await chatsMakeWay(model.id) : [];
+      // Chat models loaded here for linked PCs make way when it does not fit, in RAM or on the card.
+      const made = await chatsMakeWay(model.id);
       send('progress', { state: 'starting', text: `${made.length ? `Unloaded ${made.join(' and ')} there to make room. ` : ''}${v.state === 'connected' && v.model ? `Switching to ${name} there` : `Loading ${name} there`}` });
       if (!(await d.loadImage(model.id))) throw new Error(`${name} did not load on "${shareState.name}" (its owner may have started a picture there, or it is too big for that PC's memory now).`);
       pictureFor = { id: model.id, by: new Set([forPc]), links: new Set([link]), at: Date.now() };
@@ -659,7 +660,7 @@ async function drawShared(model: brains.PictureModel, ask: { prompt: string; sty
     }
     const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed }, p => send('progress', p), ac.signal);
     if ('error' in r) throw new Error(r.error);
-    send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: '' });
+    send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: r.note ? `says: ${r.note}` : '' });
   } catch (e) {
     send('error', { text: (e as Error).message });
   } finally {
@@ -919,6 +920,9 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     // This PC's own log of the work it did for that PC, per project (2.0.40 on): that PC's final tally (src/meter.ts).
     if (p === '/worker/usage') return workerJson(res, 200, { rows: d.ledgerRows(`for-${keepOf(who)}`) });
+    // This PC's log today, its last lines: a test across PCs is checked from the main PC (3 Nov: Max mode's refusals were
+    // only on this PC). The log holds no chat's words, prompts or file text (src/log.ts).
+    if (p === '/worker/log') return workerJson(res, 200, lastLines(Number(body.lines) || 300));
     if (p === '/worker/taken') {
       for (const rid of (Array.isArray(body.rids) ? body.rids : []).slice(0, 100).map(cleanRid)) if (rid) await box.take(keepOf(who), rid);
       return workerJson(res, 200, { ok: true });
@@ -1134,11 +1138,11 @@ export function startNode(): void {
     const v = d.imagePane.view;
     if (v.state !== 'connected' || drawing || d.imageBusy()) pictureUsedAt = Date.now();
     let dropped = false;
-    if (pictureFor && (v.model !== pictureFor.id || (v.state !== 'connected' && v.state !== 'loading'))) pictureFor = null;
-    else if (pictureFor && (drawing || v.state === 'loading')) pictureFor.at = Date.now();
-    // Drawing, but not for a linked PC: someone at this PC uses it now, so it is theirs.
-    else if (pictureFor && d.imageBusy()) pictureFor = null;
-    else if (pictureFor && Date.now() - pictureFor.at > PICTURE_DROP_MS) {
+    // Drawing, but not for a linked PC: someone at this PC uses it now, so it is theirs (src/nodestaff.ts pictureVerdict).
+    const picture = pictureFor ? nodestaff.pictureVerdict({ id: pictureFor.id, model: v.model, state: v.state, drawing, busyHere: d.imageBusy(), idleMs: Date.now() - pictureFor.at, dropMs: PICTURE_DROP_MS }) : null;
+    if (pictureFor && picture === 'keep') pictureFor.at = Date.now();
+    else if (picture === 'gone' || picture === 'theirs') pictureFor = null;
+    else if (pictureFor && picture === 'drop') {
       console.log(`Dropping ${v.modelName ?? pictureFor.id}: loaded for a linked PC, and no linked PC used it for ${PICTURE_DROP_MS / 60_000} minutes.`);
       pictureFor = null;
       dropped = true;
@@ -1151,11 +1155,11 @@ export function startNode(): void {
     }
     for (const [id, v] of loadedForPc) {
       const r = d.runnerFor(id);
-      if (!r || (r.view.state !== 'connected' && r.view.state !== 'loading')) loadedForPc.delete(id);
-      else if (lending.has(id) || r.view.state === 'loading') v.at = Date.now();
-      // Answering, but not for a linked PC: someone at this PC uses it now, so it is theirs.
-      else if (d.busy(r)) loadedForPc.delete(id);
-      else if (Date.now() - v.at > UNUSED_DROP_MS) {
+      // Answering, but not for a linked PC: someone at this PC uses it now, so it is theirs (src/nodestaff.ts chatVerdict).
+      const verdict = nodestaff.chatVerdict({ state: r?.view.state ?? 'disconnected', lending: lending.has(id), busyHere: !!r && d.busy(r), testing: d.finderTesting?.() === id, idleMs: Date.now() - v.at });
+      if (verdict === 'keep') v.at = Date.now();
+      else if (verdict === 'gone' || verdict === 'theirs') loadedForPc.delete(id);
+      else if (verdict === 'drop' && r) {
         loadedForPc.delete(id);
         console.log(`Dropping ${r.view.modelName ?? id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 60_000} minutes.`);
         void r.disconnect().catch(() => undefined);

@@ -246,6 +246,11 @@ export const thispcGet: Routes = {
     const m = who.startsWith('staff:') ? staff.get(who.slice(6)) : undefined;
     return json(res, 200, await jobRoutes.nodeStats(pc, nodestaff.statsModel(m ? nowModel(m) ?? m.model : null, pc)));
   },
+  // A linked PC's log today, its last lines (?pc= its id or name, &lines= up to 1000): for tests across PCs.
+  '/api/node/log': async ({ res, url }) => {
+    const got = await jobRoutes.nodeLog(String(url.searchParams.get('pc') ?? ''), Number(url.searchParams.get('lines')) || 300);
+    return json(res, got.state === 'gone' ? 404 : 200, got.state === 'gone' ? { ...got, error: 'There is no linked PC by that id or name.' } : got);
+  },
 };
 
 /** POST requests answered here, by path (the body is read already). */
