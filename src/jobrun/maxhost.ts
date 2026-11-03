@@ -125,7 +125,9 @@ export async function rpcFor(pcs = maxPcs()): Promise<{ endpoints: string[]; len
  * loads left no word, and a split that never happened could not be told from one refused).
  */
 export async function maxLoad(model: string, said = process.env.TOMLIN_MAX ?? '', pcs = maxPcs(said), ask = rpcFor): Promise<{ endpoints: string[]; lent: string[]; notes: string[] } | null> {
-  if (!said.trim()) return null;
+  // "1", "on", "true" or "yes" only switches Max mode on (a lending PC): it names no PC to borrow from (3 Nov, the
+  // Worker PC noted "no linked PC here is called "1"" on every load).
+  if (!said.trim() || /^(1|on|true|yes)$/i.test(said.trim())) return null;
   const named = said.split(',').map(x => x.trim()).filter(Boolean).map(x => `"${x}"`).join(' or ');
   const max = pcs.length ? await ask(pcs) : { endpoints: [], lent: [], notes: [`Max mode: no linked PC here is called ${named} (TOMLIN_MAX names linked PCs by their name or id, with commas between).`] };
   const got = max.lent.length ? `borrowing ${max.lent.map(n => `"${n}"`).join(' and ')} (--rpc ${max.endpoints.join(',')})` : 'nothing borrowed';

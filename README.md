@@ -1071,14 +1071,14 @@ Main PC: HP Z240, Quadro P2000 5 GB, 48 GB DDR4. Linked PC: HP 800 G1, Quadro K1
 | LFM2.5-8B-A1B Q4_K_M | 4.8 GB | 39 | 19 |
 | Gemma 3n E4B Q4_K_M | 4.2 GB | 25 | 8.6 |
 | GPT-OSS-20B MXFP4 | 11.3 GB | 12.7 | 6.1 |
-| Qwen3-Coder-30B-A3B UD-Q4_K_XL | 16.5 GB | 12.7 | not tried |
-| Qwen3-30B-A3B-2507 UD-Q4_K_XL | 16.5 GB | 12.3 | not tried |
+| Qwen3-Coder-30B-A3B UD-Q4_K_XL | 16.5 GB | 12.7 | — |
+| Qwen3-30B-A3B-2507 UD-Q4_K_XL | 16.5 GB | 12.3 | — |
 | Qwen3.5-35B-A3B UD-Q2_K_XL | 11.3 GB | 11.2 | 6.5 |
-| Qwen3.6-35B-A3B UD-Q2_K_XL | 11.4 GB | 11.5 | not tried |
-| LFM2.5-24B-A2B Q4_K_M | 13.5 GB | not tried | 11 |
-| Gemma 4 26B-A4B UD-Q4_K_XL | 15.8 GB | 8.5 | not tried |
-| Qwen3-Next-80B-A3B UD-Q3_K_XL | 33.2 GB | 10.9 | does not fit |
-| Qwen3-Coder-Next UD-Q3_K_XL | 33.8 GB | 5.9 | does not fit |
+| Qwen3.6-35B-A3B UD-Q2_K_XL | 11.4 GB | 11.5 | — |
+| LFM2.5-24B-A2B Q4_K_M | 13.5 GB | — | 11 |
+| Gemma 4 26B-A4B UD-Q4_K_XL | 15.8 GB | 8.5 | — |
+| Qwen3-Next-80B-A3B UD-Q3_K_XL | 33.2 GB | 10.9 | — |
+| Qwen3-Coder-Next UD-Q3_K_XL | 33.8 GB | 5.9 | — |
 
 **One model across both PCs (Max mode, hidden, still being tested).** Splitting a model that fits on the main PC was
 slower every time: Qwen3.5-35B 7.0 against 11.2, Qwen3-Next-80B 4.6 against 10.9 (llama.cpp's own placement).

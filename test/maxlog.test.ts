@@ -60,3 +60,7 @@ test('the borrowing PC waits longer for a stream than the lending PC can take to
   // borrowing PC gave up at 30 s ("did not answer in 30 seconds"), then borrowed fine 26 s later.
   assert.ok(OPEN_MS >= PRESENCE_FIRST_MS + RPC_START_MS + RPC_REACH_MS + 15_000, `${OPEN_MS}`);
 });
+
+test('TOMLIN_MAX=1 (or on, true, yes) only switches Max mode on: no PC is borrowed from and no note is written', async () => {
+  for (const said of ['1', 'on', 'TRUE', 'yes']) assert.equal(await maxLoad('Qwen 2B', said, [], async () => assert.fail('no PC is asked')), null);
+});
