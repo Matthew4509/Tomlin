@@ -105,6 +105,10 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
   const sealer = new Sealer(keys.send, `max|${side}`);
   const opener = new Opener(keys.read, `max|${side === 'host' ? 'node' : 'host'}`);
   let heard = Date.now();
+  // This side stopped reading the wire because `plain` is full (the RPC server copying weights to the card): what the
+  // other PC sends waits unread, so the silence is this side's own and does not count (3 Nov: a lending PC dropped an
+  // 80B model's load as "went quiet" while its RPC server was busy for over 20 s).
+  let holding = false;
   let why = '';
   let done!: (why: string) => void;
   const ended = new Promise<string>(r => (done = r));
@@ -129,9 +133,15 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
     } catch (e) {
       return end((e as Error).message);
     }
-    for (const p of parts) if (p.length && !plain.write(p)) wire.pause();
+    for (const p of parts) {
+      if (p.length && !plain.write(p)) {
+        holding = true;
+        wire.pause();
+      }
+    }
   };
   const beat = setInterval(() => {
+    if (holding) heard = Date.now();
     if (Date.now() - heard > (o.silentMs ?? SILENT_MS)) return end('the other PC went quiet (off the network, or stopped).');
     toWire(sealer.frames(Buffer.alloc(0)));
   }, o.beatMs ?? BEAT_MS);
@@ -139,7 +149,11 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
     if (!toWire(sealer.frames(c))) plain.pause();
   });
   wire.on('drain', () => plain.resume());
-  plain.on('drain', () => wire.resume());
+  plain.on('drain', () => {
+    holding = false;
+    heard = Date.now();
+    wire.resume();
+  });
   wire.on('data', fromWire);
   for (const s of [plain, wire]) {
     s.on('close', () => end());

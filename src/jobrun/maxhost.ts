@@ -20,8 +20,14 @@ export function maxPcs(said = process.env.TOMLIN_MAX ?? ''): Remote[] {
   return (d.store.peek()?.remotes ?? []).filter(r => names.includes(r.name.toLowerCase()) || names.includes(r.id.toLowerCase()));
 }
 
+/**
+ * How long a stream may take to open: more than the lending PC's own waits from cold (src/maxlend.ts: its presence
+ * reading, its RPC server's start, reaching it), which came to nearly 30 s on 3 Nov, the old limit here.
+ */
+export const OPEN_MS = 60_000;
+
 /** Opens one sealed stream to `r`: its socket, this stream's keys, and any bytes read past the answer. Throws in plain words. */
-export async function openWire(r: Remote, ms = 30_000): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
+export async function openWire(r: Remote, ms = OPEN_MS): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
   if (backupsOnly(r.id)) throw new Error(backupsOnlyWhy(r.name));
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${r.name}" was linked before links were encrypted. Link it again.`);

@@ -69,8 +69,13 @@ async function pair(): Promise<[Socket, Socket]> {
  * A local echo server standing in for rpc-server, two sealed pipes, and a "network" between them that can be cut
  * without closing (as when a PC drops off the network: nothing more arrives, and nothing says so).
  */
-async function rig(o: { silentMs?: number; beatMs?: number } = {}) {
-  const echo = createServer(s => s.pipe(s)).listen(0, '127.0.0.1');
+async function rig(o: { silentMs?: number; beatMs?: number; busyMs?: number } = {}) {
+  // busyMs: the RPC server reads nothing for that long first (as llama.cpp's does while it copies weights to the card).
+  const echo = createServer(s => {
+    if (!o.busyMs) return void s.pipe(s);
+    s.pause();
+    setTimeout(() => s.pipe(s), o.busyMs);
+  }).listen(0, '127.0.0.1');
   await new Promise(r => echo.once('listening', r));
   const h = newNonce();
   const n = newNonce();
@@ -81,6 +86,8 @@ async function rig(o: { silentMs?: number; beatMs?: number } = {}) {
   relayOut.on('data', c => void (!cut && relayIn.write(c)));
   relayIn.on('close', () => !cut && relayOut.destroy());
   relayOut.on('close', () => !cut && relayIn.destroy());
+  // One side ending mid-write resets the other: said by the pipes' own `ended`, not thrown.
+  for (const s of [relayIn, relayOut]) s.on('error', () => undefined);
   const rpc = connect((echo.address() as { port: number }).port, '127.0.0.1');
   await new Promise(r => rpc.once('connect', r));
   // The runner's side on the host.
@@ -151,4 +158,27 @@ test('a PC that goes quiet is dropped after the silent time', async () => {
   assert.match(await r.hostEnded, /went quiet/);
   assert.match(await r.nodeEnded, /went quiet/);
   r.close();
+});
+
+test('a lending PC whose RPC server is busy for longer than the silent time keeps the stream: it held the network back itself', { timeout: 30_000 }, async () => {
+  const r = await rig({ beatMs: 50, silentMs: 300, busyMs: 1500 });
+  let ended = '';
+  void r.nodeEnded.then(w => (ended ||= `node: ${w}`));
+  void r.hostEnded.then(w => (ended ||= `host: ${w}`));
+  const big = randomBytes(64 * 2 ** 20);
+  let back = 0;
+  r.runner.on('data', (c: Buffer) => (back += c.length));
+  // A stream that ends cuts the runner's side mid-write: said by `ended`, not thrown.
+  r.runner.on('error', () => undefined);
+  try {
+    r.runner.write(big);
+    for (let i = 0; i < 300 && back < big.length && !ended; i++) await new Promise(res => setTimeout(res, 50));
+    assert.equal(ended, '', 'the stream stayed open');
+    assert.equal(back, big.length, 'every byte came back once the RPC server was free');
+  } finally {
+    r.runner.destroy();
+    r.hostWire.destroy();
+    r.nodeWire.destroy();
+    r.close();
+  }
 });

@@ -52,3 +52,11 @@ test('The lending PC writes each refusal in its own log', async () => {
   assert.match(answer, /403/);
   assert.match(lines().at(-1)!, /Did not lend \(8\.8\.8\.8\): This worker only answers PCs on its own home network\./);
 });
+
+test('the borrowing PC waits longer for a stream than the lending PC can take to open one from cold', async () => {
+  const { OPEN_MS } = await import('../src/jobrun/maxhost.ts');
+  const { PRESENCE_FIRST_MS, RPC_START_MS, RPC_REACH_MS } = await import('../src/maxlend.ts');
+  // 3 Nov: the lending PC's RPC server had stopped between two loads; starting it again took nearly 30 s, and the
+  // borrowing PC gave up at 30 s ("did not answer in 30 seconds"), then borrowed fine 26 s later.
+  assert.ok(OPEN_MS >= PRESENCE_FIRST_MS + RPC_START_MS + RPC_REACH_MS + 15_000, `${OPEN_MS}`);
+});

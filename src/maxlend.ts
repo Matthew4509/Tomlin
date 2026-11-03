@@ -41,6 +41,12 @@ export const cleanLendIdle = (v: unknown): number => ((LEND_IDLE_CHOICES as read
 export const OWNER_BACK_MS = 5_000;
 /** The RPC server waits this long for a stream after the last one closed (a model loading again), then it stops. */
 export const SPARE_MS = 60_000;
+/** The longest the lending PC waits for its first reading of whether someone is at it. */
+export const PRESENCE_FIRST_MS = 8_000;
+/** The longest its RPC server may take to start (a card's first start is slow). */
+export const RPC_START_MS = 15_000;
+/** The longest it tries to reach its RPC server once started (busy with the last connection for a moment). */
+export const RPC_REACH_MS = 5_000;
 /** The weight cache is used only with this much disk free (it keeps a copy of the lent part of each model). */
 export const CACHE_DISK = 20 * 2 ** 30;
 
@@ -165,7 +171,7 @@ export class PresenceReader {
   }
 
   /** Waits up to `ms` for a first reading. */
-  async first(ms = 8_000): Promise<Presence | null> {
+  async first(ms = PRESENCE_FIRST_MS): Promise<Presence | null> {
     for (const t0 = Date.now(); Date.now() - t0 < ms; await new Promise(r => setTimeout(r, 200))) {
       const p = this.now();
       if (p) return p;
@@ -250,7 +256,7 @@ const answers = (port: number) => new Promise<boolean>(resolve => {
  * which a loaded PC showed as "did not answer" with the server running: tried for about 5 s, until `gone` says nobody waits.
  */
 export async function reachRpc(port: number, gone: () => boolean = () => false, gapMs = 200): Promise<Socket | null> {
-  for (let t = 0; t < 25 && !gone(); t++) {
+  for (let t = 0; t < RPC_REACH_MS / 200 && !gone(); t++) {
     const s = connect(port, '127.0.0.1');
     const ok = await new Promise<boolean>(r => {
       s.once('connect', () => r(true));
@@ -342,7 +348,7 @@ export class Lender {
       leftovers.ended(child.pid);
       if (this.child === child) void this.end('its RPC server stopped');
     });
-    for (let t = 0; t < 75; t++) {
+    for (let t = 0; t < RPC_START_MS / 200; t++) {
       if (this.child !== child) throw new Error('its RPC server stopped as it started');
       if (await answers(port)) {
         this.port = port;
@@ -353,7 +359,7 @@ export class Lender {
       await new Promise(r => setTimeout(r, 200));
     }
     await this.end('its RPC server did not start');
-    throw new Error('its RPC server did not start in 15 seconds');
+    throw new Error(`its RPC server did not start in ${RPC_START_MS / 1000} seconds`);
   }
 
   /** A stream to the RPC server is open (its socket on the network side). */
