@@ -25,6 +25,8 @@ import { keepFirstAnswer, saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
 import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, type ToolUse } from '../webtools.ts';
+import { FILE_ROUNDS, FILE_TOOLS, FileTurn, cleanPermit, fileCallWords, filesFit, isFileTool, withFilesLine, type Permit } from '../filetools.ts';
+import { chatFilesRoot } from './places.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Pane } from '../pane.ts';
 import * as Q from '../queue.ts';
@@ -244,6 +246,8 @@ class LiveAnswer {
   readonly chatId: string;
   /** Answer now (POST /api/chat/answer-now): stops the working and asks for the answer. */
   readonly hurry = new AbortController();
+  /** The open "may this chat use your files?" question, answered by POST /api/chat/permit. */
+  permit: ((p: Permit) => void) | null = null;
   constructor(chatId: string, first: ServerResponse) {
     this.chatId = chatId;
     this.followers.add(first);
@@ -504,6 +508,22 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       const webTotal = Math.max(2000, Math.min(60_000, Math.floor(left * 0.7)));
       const webPerCall = Math.max(1500, Math.min(12_000, Math.floor(webTotal / 3)));
       const search = (await store.settings()).webSearch ?? { provider: 'duckduckgo' as const };
+      // The model may also list, read and save files in the chat's folder when it can call tools, once the person allows
+      // it (src/filetools.ts): asked in the chat the first time, up to 10 minutes; Stop is a no.
+      const filesRoot = mode === 'message' && filesFit(runner.view.model ?? '') && !(await toolsWhy(runner)) ? await chatFilesRoot(info?.project) : null;
+      let filesThread = info?.files === true;
+      const askFiles = (what: string) => new Promise<Permit>(resolve => {
+        const done = (p: Permit) => {
+          clearTimeout(timer);
+          if (live.permit === done) live.permit = null;
+          resolve(p);
+        };
+        const timer = setTimeout(() => done('no'), 10 * 60_000);
+        ac.signal.addEventListener('abort', () => done('no'), { once: true });
+        live.permit = done;
+        holdNoMore();
+        send('permit', { who: member ? member.name.split(/\s+/)[0] : 'This chat', what, folder: filesRoot });
+      });
       const ask = () => {
         // Asked again (a smaller context, or no prefill): the web is used afresh, and only that ask's use is kept.
         // What it is doing, in the answer's place until the answer comes (a text held back is not sent after it).
@@ -514,9 +534,15 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         };
         const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: webPerCall, total: webTotal, onStatus: say }) : null;
         web = turnWeb;
-        const tools = turnWeb ? { defs: WEB_TOOLS, run: (n: string, a: string, sig: AbortSignal, round: number) => turnWeb.run(n, a, sig, round), rounds: WEB_ROUNDS, onCall: (n: string, a: string) => say(callWords(n, a)) } : undefined;
+        const files = filesRoot ? new FileTurn(filesRoot, { perCall: webPerCall, allowed: filesThread, ask: askFiles, onThread: async () => void (filesThread = true, await chats.mark(openId, { files: true })) }) : null;
+        const tools = turnWeb || files ? {
+          defs: [...(turnWeb ? WEB_TOOLS : []), ...(files ? FILE_TOOLS : [])],
+          run: (n: string, a: string, sig: AbortSignal, round: number) => (files && (isFileTool(n) || !turnWeb) ? files.run(n, a) : turnWeb!.run(n, a, sig, round)),
+          rounds: files ? FILE_ROUNDS : WEB_ROUNDS,
+          onCall: (n: string, a: string) => say(isFileTool(n) ? fileCallWords(n, a) : callWords(n, a)),
+        } : undefined;
         const repeats = repeatWatch();
-        return streamChat(runner.worker.base!, runner.view.model ?? '', turns, text => {
+        return streamChat(runner.worker.base!, runner.view.model ?? '', filesRoot ? withFilesLine(turns) : turns, text => {
           const loop = repeats(text);
           shown = fresh(loop ?? text);
           show(shown);
@@ -949,6 +975,15 @@ export const chatPost: Routes = {
     const live = liveAnswers.get(String(b.chatId ?? ''));
     if (!live) return json(res, 404, { error: 'That answer has finished already.' });
     live.hurry.abort();
+    return json(res, 200, { ok: true });
+  },
+  '/api/chat/permit': async ({ res, b }) => {
+    // {chatId, answer: once | thread | no}: the person's answer to "may this chat use your files?" (src/filetools.ts).
+    const live = liveAnswers.get(String(b.chatId ?? ''));
+    const answer = cleanPermit(b.answer);
+    if (!answer) return json(res, 400, { error: 'Answer once, thread or no.' });
+    if (!live?.permit) return json(res, 404, { error: 'That question has been answered or has ended.' });
+    live.permit(answer);
     return json(res, 200, { ok: true });
   },
   '/api/chat/think': async ({ res, b }) => {

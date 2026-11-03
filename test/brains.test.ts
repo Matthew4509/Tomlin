@@ -28,8 +28,12 @@ test('the preferred brain answers when it can; else the fallback that is ready; 
   assert.deepEqual(pickBrain([c('a', true), c('b', true)]), { use: c('a', true), load: false });
   // The laptop is off: the model here that is loaded now answers.
   assert.deepEqual(pickBrain([c('remote:1', false, false, 'off'), c('b', true)]), { use: c('b', true), load: false });
-  // A fallback that is already answering beats loading the preferred one.
-  assert.deepEqual(pickBrain([c('a', false, true, 'not loaded'), c('remote:1', true)]), { use: c('remote:1', true), load: false });
+  // The hire's own model is loaded on their PC when it can be, before a fallback that is already answering elsewhere
+  // (3 Nov: Rosa's 35B was not loaded, so a 0.8B on the Worker PC answered for her).
+  assert.deepEqual(pickBrain([c('a', false, true, 'not loaded'), c('remote:1', true)]), { use: c('a', false, true, 'not loaded'), load: true });
+  assert.deepEqual(pickBrain([c('a', false, true, 'not loaded'), c('b', true)]), { use: c('a', false, true, 'not loaded'), load: true });
+  // Only when the first choice cannot answer at all (its PC is off, it does not fit): a ready fallback, then a loadable one.
+  assert.deepEqual(pickBrain([c('a', false, false, 'too big'), c('remote:1', false, true, 'x'), c('b', true)]), { use: c('b', true), load: false });
   assert.deepEqual(pickBrain([c('remote:1', false, false, 'off'), c('b', false, true, 'not loaded')]), { use: c('b', false, true, 'not loaded'), load: true });
   assert.deepEqual(pickBrain([c('remote:1', false, false, '"laptop" is off'), c('remote:2', false, false, '"desk" has no chat model loaded')]), { error: ['"laptop" is off', '"desk" has no chat model loaded'] });
 });

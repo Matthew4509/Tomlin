@@ -27,9 +27,10 @@ test('any model can be matched to any hire: it only changes the order', () => {
   const junior = { id: 'a', name: 'Sam', role: 'coder', level: 'junior' };
   const small = matchModel(junior, { name: 'qwen3-1.7b', bytes: GB });
   const big = matchModel(junior, { name: 'glm-72b', bytes: 40 * GB });
-  assert.equal(small.against, 'match');
-  assert.equal(big.against, 'above');
-  assert.ok(small.rank > big.rank);
+  // No Level to pick (2.0.75): a level saved before is not held against a model.
+  assert.equal(small.against, 'any');
+  assert.equal(big.against, 'any');
+  assert.equal(small.rank, big.rank);
   // The project manager likes a mixture-of-experts model.
   const pm = { id: 'b', name: 'Pat', role: 'pm', level: 'expert' };
   assert.ok(matchModel(pm, { name: 'qwen3-30b-a3b', bytes: 18 * GB }).rank > matchModel(pm, { name: 'llama-33b', bytes: 18 * GB }).rank);
@@ -38,10 +39,13 @@ test('any model can be matched to any hire: it only changes the order', () => {
 });
 
 test('the system prompt carries the name, the job, the level and the examples; tone only when given', () => {
-  const p = staffSystem({ id: 'x', name: 'Sam', role: 'coder', level: 'junior' });
+  // The level comes from the size of the hire's model, not one picked (2.0.75: Rosa was "Junior" on a 35B).
+  const p = staffSystem({ id: 'x', name: 'Sam', role: 'coder', level: 'expert', model: 'Qwen3.5-2B-Q4_K_M' });
   assert.match(p, /You are Sam/);
   assert.match(p, /software developer/);
-  assert.match(p, /junior/);
+  assert.match(p, /You are junior/);
+  assert.match(staffSystem({ id: 'x', name: 'Rosa', role: 'coder', level: 'junior', model: 'Qwen3.6-35B-A3B-UD-Q2_K_XL' }), /You are an expert/);
+  assert.doesNotMatch(staffSystem({ id: 'x', name: 'Sam', role: 'coder', level: 'junior', model: null }), /You are (junior|experienced|an expert|senior)/, 'no model, no level line');
   assert.match(p, /Examples of how you sound/);
   assert.doesNotMatch(p, /write a letter/);
   assert.match(staffSystem({ id: 'x', name: 'Sam', role: 'writer', level: 'expert' }, 'Write formally.'), /write a letter, article, post or message, write formally\./);
@@ -122,9 +126,9 @@ test('picture specialists: designer and artist have a recipe and three test pict
   assert.equal(matchImageModel({ id: 'x', name: 'X', role: 'artist', level: 'default' }, 9.9 * 2 ** 30).against, 'any');
   const junior = { id: 'x', name: 'X', role: 'artist', level: 'junior' };
   const GB = 2 ** 30;
-  assert.equal(matchImageModel(junior, 2.1 * GB).against, 'match');
-  assert.equal(matchImageModel(junior, 9.9 * GB).against, 'above');
-  assert.equal(matchImageModel({ ...junior, level: 'expert' }, 2.1 * GB).against, 'below');
+  // No Level to pick (2.0.75): every picture model is 'any'.
+  assert.equal(matchImageModel(junior, 2.1 * GB).against, 'any');
+  assert.equal(matchImageModel({ ...junior, level: 'expert' }, 9.9 * GB).against, 'any');
 });
 
 test('a blog picture is drawn by the artist, never in the designer\'s icon style', () => {
@@ -149,7 +153,8 @@ test('Default is the first role and the first level, and a Default hire is sent 
   const coder = staffSystem({ ...qwen, role: 'coder' });
   assert.match(coder, /software developer/);
   assert.ok(!LEVELS.some(l => coder.includes(l.style)));
-  assert.ok(staffSystem({ ...qwen, role: 'coder', level: 'junior' }).includes(levelOf('junior').style));
+  // The level line comes from the model's size (2.0.75), not the level saved on the hire.
+  assert.ok(staffSystem({ ...qwen, role: 'coder', level: 'expert', model: 'Qwen3.5-2B-Q4_K_M' }).includes(levelOf('junior').style));
   // Every model ranks the same for a Default level ("any"); a MoE still suits a role that likes one.
   const m = matchModel(qwen, { name: 'Qwen3-30B-A3B', bytes: 0 });
   assert.deepEqual([m.against, m.rank], ['any', 2]);

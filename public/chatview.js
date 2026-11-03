@@ -269,6 +269,25 @@ async function talk(url, body, out, message, from = '') {
         } else if (ev === 'status') {
           hurry = null;
           out.replaceChildren(data.text);
+        } else if (ev === 'permit') {
+          // "May this chat use your files?" (src/filetools.ts): the answer waits for it. Allow once lasts this answer;
+          // Allow for this thread is kept on the chat.
+          hurry = null;
+          const said = el('span', { class: 'hint' });
+          const answer = (a, words) => el('button', { class: a === 'thread' ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: async e => {
+            for (const b of e.target.parentElement.querySelectorAll('button')) b.disabled = true;
+            try {
+              await api('/api/chat/permit', { chatId: streams.get(key)?.liveId ?? chatId, answer: a });
+              said.textContent = a === 'no' ? 'Not allowed: answering without your files…' : 'Allowed. Working…';
+            } catch (err) {
+              said.textContent = err.message;
+            }
+          } });
+          out.replaceChildren(el('div', { class: 'permit' },
+            el('p', { text: `${data.who} wants to use your files (${data.what}), in ${data.folder}. Files can be read and saved there; nothing is run or deleted.` }),
+            el('div', { class: 'row' }, answer('once', 'Allow once'), answer('thread', 'Allow for this thread'), answer('no', 'Don\'t allow')),
+            said));
+          scroll();
         } else if (ev === 'progress') {
           out.replaceChildren(el('span', { class: 'hint', text: progressText(data) }));
         } else if (ev === 'reading') {

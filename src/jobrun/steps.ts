@@ -7,7 +7,7 @@ import type { Job } from '../jobs.ts';
 import * as ws from '../workspace.ts';
 import { syntaxCheck, type CheckResult } from '../checks.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
-import { roleOf, levelOf, type StaffMember } from '../staff.ts';
+import { roleOf, levelOfHire, type StaffMember } from '../staff.ts';
 import * as home from '../home.ts';
 import * as seats from '../seats.ts';
 import { d, type Send } from './shared.ts';
@@ -116,7 +116,7 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   // Files too long to write out whole in the answer are changed by edit blocks that code checks (PLAN F10 G2).
   const edit = jobs.editFiles(step.files, texts, Math.floor(b.answer * 2.2));
   if (edit.length) send('stage', { text: `${edit.join(' and ')} ${edit.length > 1 ? 'are' : 'is'} too long to write out whole: the ${role} changes ${edit.length > 1 ? 'them' : 'it'} with find-and-replace blocks, checked before anything is saved.` });
-  const system = jobs.workerSystem(`${kind.prompt}${hire ? ` ${levelOf(hire.level).style}` : ''}`, job, step, i + 1, front.text, edit);
+  const system = jobs.workerSystem(`${kind.prompt}${hire ? ` ${levelOfHire(hire).style}` : ''}`, job, step, i + 1, front.text, edit);
   const first = jobs.workerUser(step, texts, job.notes, ownerNotes, edit);
   await saveHandoff(job, i, brain, front.parts, system, first);
   await started(brain.label);

@@ -475,11 +475,11 @@
     </ul>
 
     <h4 id="help-staff">2. Hiring staff</h4>
-    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role and level), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Staff: hire and edit</b> (in the left panel, or Hire staff under Settings) opens the Staff menu: <b>Hire staff</b> (type a name or roll the dice, then Create) or <b>Manage staff</b> (everyone, each with Edit). <b>Hire staff</b> is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards (<b>Add new</b>, beside its search, opens Models: add or remove), each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
+    <p class="hint">Everyone you talk to is someone you hire (the host, a separate assistant, is switched off for now: your old chats with it are kept to read). A hire ties three things together: <b>the specialist</b> (their role), <b>the software</b> (the model they think with) and <b>the hardware</b> (the PC that model runs on). <b>Staff: hire and edit</b> (in the left panel, or Hire staff under Settings) opens the Staff menu: <b>Hire staff</b> (type a name or roll the dice, then Create) or <b>Manage staff</b> (everyone, each with Edit). <b>Hire staff</b> is one page: their look, name, role and level on the left; on the right <b>Assign a PC</b>, then <b>Choose a model</b>: the models on that PC as cards (<b>Add new</b>, beside its search, opens Models: add or remove), each with the memory it needs (a card says when a model is a tight fit or needs more memory than is free).</p>
     <figure class="help-shot"><img src="help-hire.webp" alt="Hire staff: the profile and the roles on the left; Assign a PC with My PC and Worker PC, then the model cards, then All models with Copy to My PC" width="1000" height="690" loading="lazy"><figcaption>A coder on this PC. All models, at the foot, lists the models your other PCs have and this one has not.</figcaption></figure>
     <ul class="help-tips">
       <li><strong>The role</strong>: Default, Coder, Writer, Project manager, Graphic designer or Artist. Default is the model as it is, with nothing of ours sent (no instructions, no memory, the model's own settings), as in a plain chat window. An artist or a graphic designer draws with a picture model.</li>
-      <li><strong>The level</strong> starts at the size of the model picked (change it if you like: it only orders the models suggested to them). Their name comes from the model (Qwen, Gemma…) unless you type one.</li>
+      <li><strong>The level</strong> (junior to senior) follows the size of the model they use: there is nothing to pick. Their name comes from the model (Qwen, Gemma…) unless you type one.</li>
       <li><strong>All models</strong>, under Choose a model: the models (of the role's kind) on this PC and the linked PCs that the PC picked has not got, each with "On &lt;PCs&gt;" and <b>Copy to &lt;PC&gt;</b> (from one linked PC to another it goes through this PC). When the copy is done the model is in that PC's list and picked. <b>Push to node</b> on a card opens a window of every PC on the list: press Push on any of them (a PC that has it says so).</li>
       <li><strong>Later</strong>: give each a first choice model and a fallback under Edit Staff (the pencil beside them). Firing someone (Staff, Edit, Fire) opens the office on them: the boss walks in, they pack a box and leave by the front door.</li>
     </ul>
@@ -1254,7 +1254,7 @@
           <label class="field"><span>Their name</span><input id="sm-name" type="text" maxlength="30" autocomplete="off" placeholder="Type a name, or roll the dice"></label>
           <button class="btn quiet sm-dice" type="button" id="sm-dice" title="A random name" aria-label="A random name"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/></svg></button>
         </div>
-        <p class="hint">Next you pick their role and level, the PC (or node) they work on, and the model they use.</p>
+        <p class="hint">Next you pick their role, the PC (or node) they work on, and the model they use.</p>
         <button class="btn primary" type="submit">Create</button>
       </form>
       <section class="staff-tile" aria-labelledby="sm-manage-title">
@@ -1556,8 +1556,6 @@
         </div>
         <fieldset class="pick-set"><legend>Role</legend><div class="hs-roles" id="hs-roles"></div></fieldset>
         <p class="hint" id="hs-role-line"></p>
-        <label class="field"><span>Level</span><select id="hs-level"></select></label>
-        <p class="hint" id="hs-level-line"></p>
         <dl class="hs-sum">
           <dt>Computer</dt><dd id="hs-sum-pc"></dd>
           <dt>Model</dt><dd id="hs-sum-model"></dd>

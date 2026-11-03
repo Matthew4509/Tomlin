@@ -79,8 +79,9 @@ about each one and choose for yourself.
 - Scratch pad, Snippets (prompts to use again), documents added to a chat, a memory line per person.
 
 **Staff you hire**
-- Hire people with a name, a role (Default, Coder, Writer, Project manager, Graphic designer, Artist), a level and a
-  look; each works on the model you choose for them, on the PC you choose.
+- Hire people with a name, a role (Default, Coder, Writer, Project manager, Graphic designer, Artist) and a look;
+  each works on the model you choose for them, on the PC you choose, at the level its size gives (Junior to Senior).
+  The Role list shows each role's icon, with a line between the chat and the picture roles.
 - Move a hire to another PC; a model that will not fit that PC's memory is not offered (and refused if sent), with why.
 - Staff overview: who is reading, thinking, typing or drawing, and on which PC.
 
@@ -213,13 +214,12 @@ rather than misread it.
   - **Hire staff** is one window, opened from Home's role icons, HIRE STAFF in the left panel, the Staff window's
     **Hire staff** button, "Hire one" in a project, and a PC window's **Hire staff on this PC**. Left: their look (the
     round picture; **Change look** opens the look editor under it), **Name** (from the model unless typed; Random),
-    **Role** (all six), **Level** and what they will run on. Right: **Assign a PC** (this PC and each linked PC as a
+    **Role** (all six) and what they will run on. Right: **Assign a PC** (this PC and each linked PC as a
     card: on, off or away, its RAM and graphics memory, how many models of the role's kind it has or shares), then
     **Choose a model** on that PC: search, **Add new** beside it (opens Add a model), cards with the memory each needs (a chat model at an 8K context), its file,
     the size level, Loaded / Installed / Loads when asked, and a warning when it needs more memory than is free (never
-    a block: any model can be picked). **Show hidden** shows there when the PC has a hidden model. The level starts at
-    the size of the model picked (Junior, Experienced, Expert, Senior; a picture model by its size on disk) and can be
-    changed; changed by hand, it stays. No model on this PC: hire now and pick it after (their profile opens).
+    a block: any model can be picked). **Show hidden** shows there when the PC has a hidden model. There is no Level to
+    pick (2.0.75): a hire's level follows the size of the model they use (Junior, Experienced, Expert, Senior). No model on this PC: hire now and pick it after (their profile opens).
     The Staff window no longer has its own Hire new side: the right side is always Edit Staff.
   - **The PC window** (this PC and each linked PC): left, its photo, Name and Make / model, and **Specifications**
     (this PC: processor, RAM, graphics memory, disk free on the drive TOMLIN keeps its data on; a linked PC: its

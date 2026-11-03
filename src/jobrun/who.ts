@@ -187,8 +187,8 @@ export async function brainForRef(want: string, forWhat: string, change: string,
 }
 
 /**
- * A hire's own brain: the preferred one if it can answer now, else the fallback if it can, else whichever of them
- * this PC can load. A hire with no model given answers on the connected model, as before. Nothing is loaded on a
+ * A hire's own brain: the preferred one, loaded on this PC when it is not loaded yet; the fallback only when the
+ * preferred one cannot answer at all (its PC is off, it does not fit here). A hire with no model given answers on the connected model, as before. Nothing is loaded on a
  * paired PC.
  */
 export async function hireBrain(m: StaffMember, stage: (text: string) => void, signal: AbortSignal, only?: string): Promise<HireBrain> {

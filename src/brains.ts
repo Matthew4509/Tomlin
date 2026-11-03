@@ -39,10 +39,12 @@ export interface Candidate {
 }
 
 /**
- * Which brain answers: the first that is ready now (preferred before fallback); else the first that this PC can load;
- * else none, with every reason. Nothing is loaded on a paired PC: it keeps control of what it has.
+ * Which brain answers: the first choice, ready now or loaded on this PC; only when it cannot answer at all, the first
+ * other that is ready, else the first other this PC can load; else none, with every reason. Nothing is loaded on a
+ * paired PC: it keeps control of what it has.
  */
 export function pickBrain(cands: Candidate[]): { use: Candidate; load: boolean } | { error: string[] } {
+  if (cands[0]?.ready || cands[0]?.loadable) return { use: cands[0], load: !cands[0].ready };
   const ready = cands.find(c => c.ready);
   if (ready) return { use: ready, load: false };
   const load = cands.find(c => c.loadable);

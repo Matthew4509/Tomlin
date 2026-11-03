@@ -1,4 +1,4 @@
-// The team: hire a person for a role at a level, see which of your models suit them, and audition the connected model.
+// The team: hire a person for a role, see which of your models suit them, and audition the connected model.
 // Levels only suggest models; any model can be given to anyone. Uses app.js's helpers ($, el, api, app, panes, loadModels, drawChat).
 'use strict';
 
@@ -53,6 +53,93 @@ function pick(items, value, onChange) {
   s.value = value;
   s.addEventListener('change', () => onChange(s.value));
   return s;
+}
+
+/**
+ * The Role list on Edit staff: like a select, with each role's icon on the right of its row and a line between the
+ * chat roles and the picture roles (a select cannot show pictures). `value` reads and sets the role shown.
+ */
+function rolePicker(roles, value, onChange) {
+  let current = value;
+  let marked = value;
+  const iconOf = id => svgIcon(ROLE_ICONS[id] ?? PERSON, 16);
+  const name = el('span', { class: 'rp-name' });
+  const icon = el('span', { class: 'rp-icon', 'aria-hidden': 'true' });
+  const button = el('button', { class: 'rp-button', type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' }, name, icon);
+  const list = el('ul', { class: 'rp-list', role: 'listbox', tabindex: '-1', 'aria-label': 'Role', hidden: true });
+  const options = [];
+  roles.forEach((r, i) => {
+    if (i && (roles[i - 1].kind === 'image') !== (r.kind === 'image')) list.append(el('li', { class: 'rp-line', role: 'separator' }));
+    const o = el('li', { class: 'rp-option', role: 'option', id: `rp-${r.id}`, title: r.hint ?? '' }, el('span', { text: r.name }), el('span', { class: 'rp-icon', 'aria-hidden': 'true' }, iconOf(r.id)));
+    o.dataset.id = r.id;
+    o.addEventListener('click', () => choose(r.id));
+    o.addEventListener('mousemove', () => mark(r.id));
+    options.push(o);
+    list.append(o);
+  });
+  const wrap = el('div', { class: 'role-picker' }, button, list);
+  const draw = () => {
+    const r = roles.find(x => x.id === current);
+    name.textContent = r?.name ?? current;
+    button.setAttribute('aria-label', `Role: ${r?.name ?? current}`);
+    icon.replaceChildren(iconOf(current));
+    for (const o of options) o.setAttribute('aria-selected', String(o.dataset.id === current));
+  };
+  const mark = id => {
+    marked = id;
+    for (const o of options) o.classList.toggle('marked', o.dataset.id === id);
+    list.setAttribute('aria-activedescendant', `rp-${id}`);
+    options.find(o => o.dataset.id === id)?.scrollIntoView({ block: 'nearest' });
+  };
+  const outside = e => {
+    if (!wrap.contains(e.target)) close(false);
+  };
+  const open = () => {
+    list.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    mark(current);
+    list.focus();
+    document.addEventListener('pointerdown', outside, true);
+  };
+  const close = (focus = true) => {
+    list.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    if (focus) button.focus();
+  };
+  const choose = id => {
+    close();
+    if (id === current) return;
+    current = id;
+    draw();
+    onChange(id);
+  };
+  button.addEventListener('click', () => (list.hidden ? open() : close()));
+  button.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      open();
+    }
+  });
+  list.addEventListener('keydown', e => {
+    const at = options.findIndex(o => o.dataset.id === marked);
+    const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: options.length - 1 }[e.key];
+    if (to !== undefined) {
+      e.preventDefault();
+      mark(options[Math.max(0, Math.min(options.length - 1, to))].dataset.id);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      choose(marked);
+    } else if (e.key === 'Escape') {
+      // Only the list closes, not the Edit staff window around it.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'Tab') close(false);
+  });
+  Object.defineProperty(wrap, 'value', { get: () => current, set: v => { current = v; draw(); } });
+  draw();
+  return wrap;
 }
 
 async function teamAct(body) {
@@ -207,7 +294,6 @@ function teamDraw() {
 
 function staffCard(m) {
   const d = team.data;
-  const level = d.levels.find(l => l.id === m.level);
   const role = d.roles.find(r => r.id === m.role);
   const imageRole = m.kind === 'image';
   const use = el('button', { class: 'btn primary', type: 'button', text: imageRole ? `Draw with ${m.name}` : `Talk to ${m.name}` });
@@ -225,7 +311,7 @@ function staffCard(m) {
     dlg.close();
     app.showPanes?.();
   });
-  const edit = el('button', { class: 'btn quiet', type: 'button', title: `See and manage ${m.name}: role, level, models${SHOW_AUDITION ? ', audition' : ''}` });
+  const edit = el('button', { class: 'btn quiet', type: 'button', title: `See and manage ${m.name}: role, models${SHOW_AUDITION ? ', audition' : ''}` });
   edit.append(pencil(), ' Edit');
   edit.addEventListener('click', () => openProfile(m.id));
   return el('article', { class: 'team-card', 'data-id': m.id },
@@ -233,7 +319,7 @@ function staffCard(m) {
       el('span', { class: 'role-icon', 'aria-hidden': 'true' }, roleIcon(m.role)),
       el('span', { class: 'rail-text' },
         el('span', { class: 'rail-name', text: m.name }),
-        el('span', { class: 'rail-sub', text: `${role?.name ?? m.role} · ${level?.name ?? m.level} · ${brainName(m, m.model)}` })),
+        el('span', { class: 'rail-sub', text: `${role?.name ?? m.role} · ${brainName(m, m.model)}` })),
       use, edit));
 }
 
@@ -652,7 +738,6 @@ function usageSection(m, section) {
 function drawPerson(m) {
   const d = team.data;
   const role = d.roles.find(r => r.id === m.role);
-  const level = d.levels.find(l => l.id === m.level);
   const image = m.kind === 'image';
   const first = m.name.split(/\s+/)[0];
   const lent = String(m.model ?? '').startsWith('remote:');
@@ -671,7 +756,7 @@ function drawPerson(m) {
     el('div', { class: 'person-head' },
       el('div', { class: 'person-pic' }, app.avatar ? app.avatar(`staff:${m.id}`, initials) : el('span', { class: 'rail-avatar', text: initials })),
       el('h3', { class: 'person-name', text: m.name }),
-      el('p', { class: 'person-role', text: `${role?.name ?? m.role} · ${level?.name ?? m.level}` }),
+      el('p', { class: 'person-role', text: role?.name ?? m.role }),
       personFigures(m),
       pencilBtn),
     pcCard(m, now),
@@ -855,7 +940,6 @@ function drawEdit() {
     return drawEdit();
   }
   const role = d.roles.find(r => r.id === m.role);
-  const level = d.levels.find(l => l.id === m.level);
   const image = m.kind === 'image';
   drawPerson(m);
   const run = profileRuns[m.id];
@@ -876,7 +960,7 @@ function drawEdit() {
   const section = (title, ...kids) => el('section', { class: 'profile-section' }, el('h3', { text: title }), ...kids);
   // A chat role and a picture role cannot share models: changing across asks first, and names what comes off.
   const roleAsk = el('div', { hidden: true });
-  const roleSel = pick(d.roles, m.role, async v => {
+  const roleSel = rolePicker(d.roles, m.role, async v => {
     const to = d.roles.find(r => r.id === v);
     const had = [m.model, m.fallback].filter(Boolean).map(ref => brainName(m, ref));
     // Every role has a kind ('chat' or 'image'): only 'image' is a picture role.
@@ -891,9 +975,8 @@ function drawEdit() {
     }
     await teamAct({ action: 'change', id: m.id, role: v });
   });
-  // Name, role and level on one line: the name with Rename, then the two lists (they wrap when narrow).
-  const levelPick = el('label', { class: 'field' }, el('span', { text: 'Level' }), pick(d.levels, m.level, v => teamAct({ action: 'change', id: m.id, level: v })));
-  levelPick.title = image ? `${level?.name}: ${level?.imageSuggest}` : `${level?.name} means ${level?.size}. ${level?.suggest}`;
+  // Name and role on one line: the name with Rename, then the Role list (they wrap when narrow). No Level (2.0.75): it
+  // follows the size of the model they use.
   const rolePick = el('label', { class: 'field' }, el('span', { text: 'Role' }), roleSel);
   rolePick.title = role?.hint ?? '';
   // One page (2.0.65; it was three tabs), in the order it is used: who they are, the PC and software they work on (the
@@ -902,7 +985,7 @@ function drawEdit() {
   const sub = (title, ...kids) => el('div', { class: 'profile-sub' }, el('h4', { text: title }), ...kids);
   const speed = typeof m.speed === 'number' ? m.speed : m.speed?.expect;
   const body = [
-    section('Who', el('div', { class: 'profile-line' }, renameForm(m), rolePick, levelPick), roleAsk),
+    section('Who', el('div', { class: 'profile-line' }, renameForm(m), rolePick), roleAsk),
     section('Works on',
       pcPicker(m, sub),
       sub('Models', modelOptions(m)),

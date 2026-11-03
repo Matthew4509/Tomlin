@@ -460,7 +460,10 @@
   }
 
   /** A made-up look. The role leans it a little: designers and artists towards a beret, coders towards headphones. */
-  function random(role = '', rnd = Math.random) {
+  // The person (gender, skin, hair, top, facial hair) comes from the same draws whatever the role; the role's things
+  // (headphones, a beret, glasses) come after, from `extra`, so a hire whose role changes is drawn as the same person
+  // (3 Nov: a coder's headphones took a draw before the skin, and Rosa was drawn as someone else).
+  function random(role = '', rnd = Math.random, extra = rnd) {
     if (!options) return null;
     const any = kind => options[kind][Math.floor(rnd() * options[kind].length)].id;
     const from = list => list[Math.floor(rnd() * list.length)];
@@ -469,23 +472,20 @@
       : gender === 'man' ? from(['short', 'buzz', 'side-part', 'curly', 'afro', 'bald', 'short', 'long'])
         : any('hair');
     const hairColour = rnd() < 0.08 ? from(['blue', 'pink']) : from(['black', 'dark-brown', 'brown', 'auburn', 'ginger', 'blonde', 'black', 'dark-brown', 'grey']);
+    const plainHat = rnd() < 0.2 ? any('headwear') : 'none';
+    const skin = any('skin');
+    const top = any('top');
+    const plainGlasses = rnd() < 0.25 ? from(['square', 'round']) : rnd() < 0.05 ? 'sun' : 'none';
+    const facial = gender === 'man' && rnd() < 0.45 ? from(['stubble', 'beard', 'moustache']) : 'none';
     const lean = { designer: ['beret', 0.45], artist: ['beret', 0.45], coder: ['headphones', 0.4], writer: ['none', 1], pm: ['none', 1] }[role];
-    const headwear = lean && rnd() < lean[1] ? lean[0] : rnd() < 0.2 ? any('headwear') : 'none';
-    const glassesOdds = role === 'writer' || role === 'coder' ? 0.5 : 0.25;
-    return {
-      gender,
-      skin: any('skin'),
-      hair,
-      hairColour,
-      top: any('top'),
-      glasses: rnd() < glassesOdds ? from(['square', 'round']) : rnd() < 0.05 ? 'sun' : 'none',
-      facial: gender === 'man' && rnd() < 0.45 ? from(['stubble', 'beard', 'moustache']) : 'none',
-      headwear: headwear === 'bow' && gender === 'man' ? 'none' : headwear,
-    };
+    const headwear = lean && extra() < lean[1] ? lean[0] : plainHat;
+    // Writers and coders wear glasses half the time (a third of those without them get a pair: 0.25 + 0.75 / 3).
+    const glasses = (role === 'writer' || role === 'coder') && plainGlasses === 'none' && extra() < 1 / 3 ? (extra() < 0.5 ? 'square' : 'round') : plainGlasses;
+    return { gender, skin, hair, hairColour, top, glasses, facial, headwear: headwear === 'bow' && gender === 'man' ? 'none' : headwear };
   }
 
   /** The look the office game draws for someone with none saved: made up, the same each time for the same hire. */
-  const fromId = (id, role = '') => random(role, seeded(`look:${id}`));
+  const fromId = (id, role = '') => random(role, seeded(`look:${id}`), seeded(`look:${id}:${role}`));
 
   /** Their round picture (a PNG address), drawn once per look and kept. */
   function picture(look, px = 160) {

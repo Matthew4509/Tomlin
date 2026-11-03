@@ -71,3 +71,25 @@ test('Help, the Models page hint and the README name the new layout, not the tab
   assert.doesNotMatch(read('README.md'), /Look, Staff settings and PC settings tabs/);
   assert.ok(read('README.md').includes('Edit staff is one page (2.0.65; it had three tabs)'));
 });
+
+test('the Role list shows each role\'s icon on the right of its row, with a line between the chat and the picture roles', () => {
+  const picker = fn('rolePicker');
+  assert.match(picker, /role: 'listbox'/);
+  assert.match(picker, /role: 'separator'/);
+  assert.match(picker, /\.kind === 'image'\) !== \(r\.kind === 'image'\)/, 'the line goes where chat roles end');
+  assert.match(picker, /ROLE_ICONS\[id\]/, 'the same icons as Hire staff');
+  assert.match(picker, /'Escape'/);
+  assert.match(picker, /Object\.defineProperty\(wrap, 'value'/, 'Cancel on "is a picture role" puts the old role back');
+  assert.match(team, /const roleSel = rolePicker\(d\.roles, m\.role,/);
+  const css = read('public/style.css');
+  assert.match(css, /\.rp-option \{[^}]*justify-content: space-between/);
+  assert.match(css, /\.rp-line \{/);
+});
+
+test('no Level to pick, on Edit staff or Hire staff: the level follows the model (2.0.75)', () => {
+  assert.doesNotMatch(team, /levelPick/);
+  assert.doesNotMatch(team, /action: 'change', id: m\.id, level:/);
+  const hire = read('public/hire.js');
+  assert.doesNotMatch(hire, /hs-level|levelPicked|level: hs\.level/);
+  assert.doesNotMatch(read('public/index.html'), /id="hs-level/);
+});

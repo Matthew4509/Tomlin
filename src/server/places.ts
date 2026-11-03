@@ -18,6 +18,15 @@ export async function projectFolder(id: string | undefined): Promise<string | nu
   return (await jobRoutes.projectInfo(id))?.folder ?? null;
 }
 
+/** The folder a coder hire's file tools work in (src/filetools.ts): the chat's project's, or the whole workspace in Default. */
+export async function chatFilesRoot(project: string | undefined): Promise<string> {
+  const dir = await workspaceDir();
+  const sub = await projectFolder(project);
+  const root = sub ? join(dir, sub) : dir;
+  await mkdir(root, { recursive: true });
+  return root;
+}
+
 /** The role a chat's person has (a hire's role; the manager plans), for which specialist folder their work goes in. */
 const roleOfChat = (c: ChatInfo) => (staffId(c.who) ? staff.get(c.who.slice(6))?.role ?? 'default' : c.who === 'manager' ? 'pm' : 'default');
 

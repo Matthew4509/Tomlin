@@ -6,7 +6,7 @@ import { streamChat, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
-import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOf, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
+import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOfHire, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
 import { staffState as homeState, activityOf, awardBehind, awardPeriods, bookAfter, buy, cleanAwards, cleanBook, doingOf, DOING_WORDS, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Award } from '../home.ts';
 import { DamagedFile, markMended, readData, updateData, writeAtomic } from '../atomic.ts';
 import * as mute from '../mute.ts';
@@ -239,7 +239,7 @@ async function homeView() {
       name: m.name,
       role: role.name,
       roleId: role.id,
-      level: levelOf(m.level).name,
+      level: levelOfHire(m).name,
       kind: image ? 'image' : 'chat',
       model: m.model ?? null,
       modelName: away ? away.modelName : shortName(entry?.name),

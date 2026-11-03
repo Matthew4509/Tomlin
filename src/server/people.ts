@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as brains from '../brains.ts';
 import { WHO, whoOf, cleanName } from '../persona.ts';
-import { levelOf, roleOf, type StaffMember } from '../staff.ts';
+import { levelOfHire, roleOf, type StaffMember } from '../staff.ts';
 import { isFaceKey, visibleFaces } from '../faces.ts';
 import { LOOK_OPTIONS, cleanLook } from '../look.ts';
 import * as mute from '../mute.ts';
@@ -19,7 +19,7 @@ import { moveChatFiles, projectFolder, saveToOf } from './places.ts';
 import { bridgePictures } from './bridge.ts';
 import { Previews } from '../previews.ts';
 
-export const whoList = () => [...WHO.map(({ id, name, hint }) => ({ id, name, hint })), ...staff.list().filter(m => !roleOf(m.role).kind).map(m => ({ id: 'staff:' + m.id, name: m.name + ' (' + roleOf(m.role).name + ', ' + levelOf(m.level).name + ')', hint: roleOf(m.role).hint, staff: true }))];
+export const whoList = () => [...WHO.map(({ id, name, hint }) => ({ id, name, hint })), ...staff.list().filter(m => !roleOf(m.role).kind).map(m => ({ id: 'staff:' + m.id, name: m.name + ' (' + roleOf(m.role).name + ', ' + levelOfHire(m).name + ')', hint: roleOf(m.role).hint, staff: true }))];
 export const whoId = (v: unknown) => staffId(v) ?? whoOf(v).id;
 
 // ---- Chats: which one is open, starting one, the list for the left panel ----

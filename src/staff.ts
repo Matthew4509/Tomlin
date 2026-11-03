@@ -254,7 +254,7 @@ const BASE = 'You are {name}, a member of the person\'s team, running entirely o
 export function staffSystem(member: StaffMember, tone = ''): string {
   if (isPlain(member)) return '';
   const role = roleOf(member.role);
-  const level = levelOf(member.level);
+  const level = levelOfHire(member);
   const lines = [BASE.replace('{name}', member.name), `Your job: ${role.name.toLowerCase()}. ${role.prompt}`, ...(level.style ? [level.style] : []), ...(role.examples.length ? [`Examples of how you sound (they show the style only; never repeat their content):\n${role.examples.map(e => `- ${e}`).join('\n')}`] : [])];
   if (tone) lines.push(`When asked to write a letter, article, post or message, ${tone[0].toLowerCase()}${tone.slice(1)}`);
   return lines.join('\n\n');
@@ -279,35 +279,32 @@ export function levelOfSize(b: number): Level {
   return LEVELS.find(l => b <= l.maxB) ?? LEVELS[LEVELS.length - 1];
 }
 
+/**
+ * A hire's level: from the size of the model they use now, Default when it is not known. None is picked (2.0.75):
+ * a picked level could say "Junior" of a 35B. A level saved before is kept in staff.json and read by nothing.
+ */
+export function levelOfHire(m: { model?: string | null; group?: string[]; active?: string | null }): Level {
+  const b = paramsB(String(nowModel(m) ?? m.model ?? ''));
+  return b === null ? DEFAULT_LEVEL : levelOfSize(b);
+}
+
 export interface Match {
-  /** How the model sits against the hire's level: 'match', 'above' (bigger than the level), 'below', or 'any' (Default level). */
+  /** How the model sits against the hire's level: always 'any' since no Level is picked (2.0.75); the others are kept for older pages. */
   against: 'match' | 'above' | 'below' | 'any';
   sizeB: number;
   moe: boolean;
-  /** 0 to 3: how well it suggests itself (the level, plus a MoE for a role that likes one). Only ordering; never a limit. */
+  /** 2 or 3: how well it suggests itself (a MoE for a role that likes one). Only ordering; never a limit. */
   rank: number;
 }
 
 export function matchModel(member: StaffMember, model: { name: string; bytes: number }): Match {
-  const b = sizeB(model.name, model.bytes);
   const moe = isMoe(model.name);
-  if (levelOf(member.level).id === DEFAULT_LEVEL.id) return { against: 'any', sizeB: b, moe, rank: 2 + (roleOf(member.role).likesMoe && moe ? 1 : 0) };
-  const want = LEVELS.findIndex(l => l.id === levelOf(member.level).id);
-  const have = LEVELS.findIndex(l => l.id === levelOfSize(b).id);
-  const against = have === want ? 'match' : have > want ? 'above' : 'below';
-  const rank = (against === 'match' ? 2 : against === 'above' ? 1 : 0) + (roleOf(member.role).likesMoe && moe ? 1 : 0);
-  return { against, sizeB: b, moe, rank };
+  return { against: 'any', sizeB: sizeB(model.name, model.bytes), moe, rank: 2 + (roleOf(member.role).likesMoe && moe ? 1 : 0) };
 }
 
-/** Where a picture model sits against an image hire's level, from its size on disk. Only ordering; never a limit. */
-export function matchImageModel(member: StaffMember, bytes: number): Match {
-  const gb = bytes / 2 ** 30;
-  if (levelOf(member.level).id === DEFAULT_LEVEL.id) return { against: 'any', sizeB: Math.round(gb * 10) / 10, moe: false, rank: 2 };
-  const ids = LEVELS.map(l => l.id);
-  const have = ids.findIndex(id => gb <= IMAGE_TIERS[id].maxGB);
-  const want = ids.indexOf(levelOf(member.level).id);
-  const against = have === want ? 'match' : have > want ? 'above' : 'below';
-  return { against, sizeB: Math.round(gb * 10) / 10, moe: false, rank: against === 'match' ? 2 : against === 'above' ? 1 : 0 };
+/** A picture model's size on disk, for an image hire. Every model is 'any' (no Level to pick since 2.0.75). */
+export function matchImageModel(_member: StaffMember, bytes: number): Match {
+  return { against: 'any', sizeB: Math.round((bytes / 2 ** 30) * 10) / 10, moe: false, rank: 2 };
 }
 
 /** Takes the "As an AI language model," habit out of an answer; leaves everything else as it was. */

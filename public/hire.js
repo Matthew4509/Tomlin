@@ -1,13 +1,13 @@
 // Hire staff: one window for every way in (Home's role icons, the Staff window, Hire staff in the left panel, a PC's
-// window). Left: the profile (their look, name, role, level, and what they will run on). Right: the PC first, then the
-// models on that PC as cards with the memory each needs, then Hire staff. The level starts at the size of the model
-// picked (src/staff.ts levelOfSize) and can be changed: it only orders suggestions, never limits them.
+// window). Left: the profile (their look, name, role, and what they will run on). Right: the PC first, then the
+// models on that PC as cards with the memory each needs, then Hire staff. There is no Level to pick (2.0.75): it
+// follows the size of the model they use (src/staff.ts levelOfHire).
 // Everything here sits in one block: page scripts share one global scope, so no name of this file can clash.
 'use strict';
 {
   const dlg = $('#hire-dlg');
   // fromMenu: opened from the Staff menu's Create, so Cancel and Close go back to that menu.
-  const hs = { role: '', pc: '', model: '', level: '', levelPicked: false, look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map(), fromMenu: false };
+  const hs = { role: '', pc: '', model: '', look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map(), fromMenu: false };
 
   /** Names of four or five letters for Random, never one already on the team or the one in the box now. */
   const NAMES = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina', 'Adam', 'Alan', 'Brian', 'Colin', 'David', 'Dylan', 'Ethan', 'Frank', 'Gavin', 'Harry', 'Henry', 'Isaac', 'Jack', 'James', 'Jason', 'Kyle', 'Liam', 'Lucas', 'Mark', 'Mason', 'Neil', 'Noah', 'Oscar', 'Owen', 'Peter', 'Ryan', 'Simon', 'Tyler', 'Wade'];
@@ -72,26 +72,12 @@
     hs.role = id;
     if (!hs.lookPicked) drawLook();
     // A chat role and a picture role start on different kinds of model.
-    if (kind() !== before) {
-      hs.model = '';
-      if (!hs.levelPicked) hs.level = '';
-    }
+    if (kind() !== before) hs.model = '';
     drawAll();
   }
 
-  /** The level: from the model picked (until one is picked by hand), each with the size it suggests. */
-  function drawLevel() {
-    const sel = $('#hs-level');
-    const image = kind() === 'image';
-    const picked = onPc(hs.pc).find(c => c.id === hs.model);
-    if (!hs.levelPicked) hs.level = picked?.level ?? hs.level ?? '';
-    if (!d().levels.some(l => l.id === hs.level)) hs.level = d().levels[0]?.id ?? '';
-    sel.replaceChildren(...d().levels.map(l => el('option', { value: l.id, text: `${l.name} · ${image ? l.imageSize : String(l.size).replace(/ \(.*\)/, '')}` })));
-    sel.value = hs.level;
-    const level = d().levels.find(l => l.id === hs.level);
-    $('#hs-level-line').textContent = hs.levelPicked ? 'Picked by you. It only orders the models suggested to them; any model works.'
-      : picked?.level ? `From ${picked.label}'s size. Change it if you like: it only orders the models suggested to them.`
-      : `${(image ? level?.imageSuggest : level?.suggest) ?? ''}`;
+  /** The line under the role: what it is for. */
+  function drawRoleLine() {
     $('#hs-role-line').textContent = role()?.hint ?? '';
   }
 
@@ -155,7 +141,7 @@
   }
   function pickModel(id) {
     hs.model = id;
-    drawLevel();
+    drawRoleLine();
     fillName();
     drawSummary();
   }
@@ -356,7 +342,7 @@
     $('#hs-pcs-block').hidden = !d().pcs.length;
     drawModels();
     drawAllModels();
-    drawLevel();
+    drawRoleLine();
     fillName();
     drawSummary();
     for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === hs.role;
@@ -375,8 +361,6 @@
     hs.role = d().roles.some(r => r.id === role) ? role : d().roles[0]?.id ?? '';
     hs.pc = pc === 'here' ? '' : d().pcs.some(p => p.id === pc) ? pc : '';
     hs.model = '';
-    hs.level = '';
-    hs.levelPicked = false;
     hs.lookPicked = false;
     hs.look = null;
     hs.q = '';
@@ -417,11 +401,6 @@
   });
 
   $('#hs-look-btn').addEventListener('click', openLook);
-  $('#hs-level').addEventListener('change', e => {
-    hs.level = e.target.value;
-    hs.levelPicked = true;
-    drawLevel();
-  });
   // The search is inside the form: Enter there only filters, it never presses Hire.
   $('#hs-search').addEventListener('keydown', e => {
     if (e.key === 'Enter') e.preventDefault();
@@ -460,7 +439,7 @@
     go.disabled = true;
     fault('');
     try {
-      team.data = await api('/api/staff', { action: 'hire', name: $('#hs-name').value, role: hs.role, level: hs.level, model: hs.model || undefined, look: hs.look ?? undefined });
+      team.data = await api('/api/staff', { action: 'hire', name: $('#hs-name').value, role: hs.role, model: hs.model || undefined, look: hs.look ?? undefined });
       dlg.close();
       // The rest of the page catches up (left panel, Home, chats, faces); a hire with no model opens their profile.
       await app.afterHire?.(team.data.staff.at(-1));
