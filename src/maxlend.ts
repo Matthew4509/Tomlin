@@ -101,6 +101,9 @@ export function lendWhy(o: { pc: string; on: boolean; shown: boolean; allow: All
   return '';
 }
 
+/** Why an update must wait while this PC lends its card (it restarts TOMLIN, which cuts the loan mid-load); null when it lends to nobody. */
+export const loanBusy = (lease: Lease | null) => (lease ? `lending its card memory to "${lease.name}" (Max mode)` : null);
+
 /** Why a loan already running must end now ('' while it may go on). `paired`: the links this PC still has. */
 export function loanEnds(o: { on: boolean; allow: Allow; away: boolean; presence: Presence | null; lease: Lease | null; paired: { hash: string }[] }): string {
   if (!o.on) return 'sharing was turned off there';

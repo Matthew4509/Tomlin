@@ -182,3 +182,15 @@ test('a lending PC whose RPC server is busy for longer than the silent time keep
     r.close();
   }
 });
+
+test('both of a sealed pipe\'s connections send small writes at once (no Nagle delay): RPC is many small asks and answers', async () => {
+  const { PassThrough } = await import('node:stream');
+  const said: string[] = [];
+  const sock = (name: string) => Object.assign(new PassThrough(), { setNoDelay: (on = true) => void said.push(`${name} ${on}`) });
+  const plain = sock('plain');
+  const wire = sock('wire');
+  const ended = sealedPipe(plain, wire, streamKeys(linkKeys, newNonce(), newNonce(), 'host'), 'host');
+  plain.destroy();
+  await ended;
+  assert.deepEqual(said.sort(), ['plain true', 'wire true']);
+});

@@ -917,6 +917,8 @@ function askAppPin(fault, other) {
     app.fitSecret?.($('#node-pin-input'), kind);
     $('#node-pin-title').textContent = other ? `Type the app lock PIN of "${other}"` : `Type the app lock ${w}`;
     $('#node-pin-label').textContent = other ? 'PIN (or password)' : kind === 'password' ? 'Password' : 'PIN';
+    // The button says what pressing it does: "Change it" read as changing the PIN (3 Nov).
+    $('#node-pin-ok').textContent = other ? `Update "${other}"` : 'Apply the change';
     $('#node-pin-about').textContent = other
       ? `Updating another PC needs the PIN (or password) that opens TOMLIN on "${other}", typed here for this update. It is checked there and not kept here, so only someone who knows it can update that PC.`
       : `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;

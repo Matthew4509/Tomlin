@@ -104,6 +104,9 @@ export class Opener {
 export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; read: Buffer }, side: Side, o: { head?: Buffer; beatMs?: number; silentMs?: number } = {}): Promise<string> {
   const sealer = new Sealer(keys.send, `max|${side}`);
   const opener = new Opener(keys.read, `max|${side === 'host' ? 'node' : 'host'}`);
+  // Small writes go at once. RPC is many small asks and answers each word, and with Nagle's delay on (the default)
+  // Windows held each one back for its acknowledgement: 3 Nov, each word cost about 50 ms more through the relay.
+  for (const s of [plain, wire]) (s as Duplex & { setNoDelay?: (on?: boolean) => unknown }).setNoDelay?.(true);
   let heard = Date.now();
   // This side stopped reading the wire because `plain` is full (the RPC server copying weights to the card): what the
   // other PC sends waits unread, so the silence is this side's own and does not count (3 Nov: a lending PC dropped an

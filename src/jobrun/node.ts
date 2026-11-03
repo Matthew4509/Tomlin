@@ -27,7 +27,7 @@ import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
-import { endLoan, lendingTo, lendView, lentTo, maxUpgrade } from './maxnode.ts';
+import { endLoan, lendingTo, lendView, lentTo, loanBusyNow, maxUpgrade } from './maxnode.ts';
 import { cleanLendIdle, maxShown } from '../maxlend.ts';
 import { adapterKind } from '../linkhelp.ts';
 
@@ -1117,7 +1117,7 @@ export function startNode(): void {
     restarts: d.update.restarts,
     pinCheck: (pin, who) => d.updatePinCheck(pin, who),
     // A restart cuts what is running: someone at this PC, or work for a linked PC, finishes first.
-    busy: () => [...serving.values()][0] ?? (lending.size || drawing ? 'answering for a linked PC' : d.busy() ? 'someone at that PC is getting an answer' : d.imageBusy() ? 'someone at that PC is drawing a picture' : actionBusy() ? 'a job is running on that PC' : d.chat.view.state === 'loading' || d.imagePane.view.state === 'loading' ? 'a model is loading on that PC' : null),
+    busy: () => loanBusyNow() ?? [...serving.values()][0] ?? (lending.size || drawing ? 'answering for a linked PC' : d.busy() ? 'someone at that PC is getting an answer' : d.imageBusy() ? 'someone at that PC is drawing a picture' : actionBusy() ? 'a job is running on that PC' : d.chat.view.state === 'loading' || d.imagePane.view.state === 'loading' ? 'a model is loading on that PC' : null),
     done: async (dir, version, by, pulled) => {
       shareState.updated = { version, by: String(by).slice(0, 40), at: new Date().toISOString(), ...(pulled ? { pulled: true } : {}) };
       await saveShare();

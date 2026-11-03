@@ -31,6 +31,9 @@ export function lendView() {
   return { shown: maxlend.maxShown(), idle: idleMinutes(), to: v.lease?.name ?? null, since: v.lease?.since ?? null, streams: v.streams, ended: v.ended };
 }
 
+/** For the update door: why it must wait while this PC lends (null when it lends to nobody). */
+export const loanBusyNow = () => maxlend.loanBusy(lender?.lease ?? null);
+
 /** For a linked PC's hello: lent to whom now (null: to nobody). */
 export const lentTo = () => lender?.lease?.name ?? null;
 

@@ -236,3 +236,12 @@ test('the presence reader on Windows says whether the screen saver runs', { skip
     r.stop();
   }
 });
+
+test('an update waits while this PC lends its card: restarting TOMLIN would cut the loan mid-load (3 Nov, the Worker PC dropped off the network)', async () => {
+  const { loanBusy } = await import('../src/maxlend.ts');
+  assert.equal(loanBusy(null), null);
+  assert.equal(loanBusy({ hash: 'a', name: 'Office PC', since: '' }), 'lending its card memory to "Office PC" (Max mode)');
+  // The node's busy rule (what the update door asks) puts a loan first.
+  const node = readFileSync(new URL('../src/jobrun/node.ts', import.meta.url), 'utf8');
+  assert.match(node, /busy: \(\) => loanBusyNow\(\) \?\? /);
+});
