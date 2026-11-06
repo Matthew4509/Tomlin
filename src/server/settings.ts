@@ -1,6 +1,7 @@
 // This PC's settings, its data and updates (src/keep.ts: the home folder, import, backups), and Connect Claude.
 import type { ServerResponse } from 'node:http';
 import { cleanSearch } from '../webtools.ts';
+import { cleanPermissions } from '../permits.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { log, logFile } from '../log.ts';
@@ -198,6 +199,8 @@ export const settingsPost: Routes = {
       const asked = b.webSearch as Record<string, unknown>;
       await store.saveSettings({ webSearch: cleanSearch({ ...asked, key: 'key' in asked ? asked.key : was?.key }) });
     }
+    // Permissions ({files, web: ask | auto, webDelay}): what a chat's model may do without asking (src/permits.ts).
+    if (b.permissions && typeof b.permissions === 'object') await store.saveSettings({ permissions: cleanPermissions(b.permissions, (await store.settings()).permissions) });
     if (hostModel !== null) await store.saveSettings({ hostModel });
     if ('imageAs' in b) {
       const v = String(b.imageAs);

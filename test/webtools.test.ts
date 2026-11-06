@@ -230,21 +230,23 @@ test('a person\'s pace: the same site waits its turn and says so, another site d
   await assert.rejects(slow.run('open_page', '{"url":"https://example.com/b"}', stop.signal), /stopped/);
 });
 
-test('3 pages in one go and 8 in an answer; parts of a page already read are not counted', async () => {
+test('6 pages in one go and 20 in an answer; parts of a page already read are not counted', async () => {
   const pages: Record<string, { body: string }> = {};
-  for (let i = 1; i <= 10; i++) pages[`https://example.com/p${i}`] = { body: `<p>Page ${i}.</p>` };
+  for (let i = 1; i <= 25; i++) pages[`https://example.com/p${i}`] = { body: `<p>Page ${i}.</p>` };
   pages['https://example.com/long'] = { body: Array.from({ length: 400 }, (_, i) => `<p>Line ${i} of a long page.</p>`).join('') };
   const site = web(pages);
-  const t = new w.WebTurn([Object.keys(pages).join(' ')], { ...OPTS, perCall: 3000, total: 200_000, get: site.get });
+  const t = new w.WebTurn([Object.keys(pages).join(' ')], { ...OPTS, perCall: 3000, total: 400_000, get: site.get });
   const open = (u: string, round: number, part = 1) => t.run('open_page', JSON.stringify({ url: `https://example.com/${u}`, part }), never, round);
-  for (const u of ['p1', 'p2', 'long']) assert.match(await open(u, 0), /^Page:/);
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `p${from + i}`);
+  for (const u of [...range(1, 5), 'long']) assert.match(await open(u, 0), /^Page:/);
   assert.match(await open('long', 0, 2), /Part 2 of/, 'a further part is not a fetch');
-  assert.match(await open('p3', 0), /^Not opened yet: 3 pages are being read in this go, the most at once/);
-  for (const u of ['p3', 'p4', 'p5']) assert.match(await open(u, 1), /^Page:/);
-  for (const u of ['p6', 'p7']) assert.match(await open(u, 2), /^Page:/);
-  assert.match(await open('p8', 2), /^Not opened: 8 pages have been read for this answer, the most one answer reads\. Answer now/);
-  assert.equal(site.asked.length, 8);
-  assert.deepEqual(t.uses.filter(u => !u.ok).map(u => u.said), ['not opened: 3 pages asked for in one go already', 'not opened: 8 pages read in this answer already']);
+  assert.match(await open('p6', 0), /^Not opened yet: 6 pages are being read in this go, the most at once/);
+  for (const u of range(6, 11)) assert.match(await open(u, 1), /^Page:/);
+  for (const u of range(12, 17)) assert.match(await open(u, 2), /^Page:/);
+  for (const u of range(18, 19)) assert.match(await open(u, 3), /^Page:/);
+  assert.match(await open('p20', 3), /^Not opened: 20 pages have been read for this answer, the most one answer reads\. Answer now/);
+  assert.equal(site.asked.length, 20);
+  assert.deepEqual(t.uses.filter(u => !u.ok).map(u => u.said), ['not opened: 6 pages asked for in one go already', 'not opened: 20 pages read in this answer already']);
 });
 
 test('a site that says too many requests or busy is waited for once, as long as it asks; a second no leaves it alone', async () => {

@@ -240,6 +240,8 @@ export interface Hello {
 export interface Brain {
   label: string;
   ctx: number;
+  /** A model on this PC: its id now (null when none is connected). Not set for a linked PC's model. */
+  model?: () => string | null;
   ask: (system: string, user: string, maxTokens: number, onText: (t: string) => void, signal: AbortSignal, opts?: AskOpts) => Promise<string>;
   /**
    * A whole conversation (system line first). `plain`: a Default hire's, asked with the model's own settings (engine.ts

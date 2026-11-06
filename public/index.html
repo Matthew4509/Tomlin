@@ -385,6 +385,7 @@
     <div id="settings-keep"></div>
     <div id="settings-lock"></div>
     <div id="settings-notify"></div>
+    <div id="settings-permissions"></div>
     <div id="settings-web"></div>
   </div>
 </section>
@@ -1479,6 +1480,8 @@
               <button class="btn" type="button" id="job-stop" hidden>Stop</button>
             </div>
             <label class="check" id="job-review-each-row"><input type="checkbox" id="job-review-each"> The auditor also reads each step before LETS GO!!! saves it (slower; on a small model it raises false alarms)</label>
+            <label class="check" id="job-keep-going-row"><input type="checkbox" id="job-keep-going" checked> Keep going: when a step does not pass its checks, try it again by itself, and stop for you only when the same check fails twice</label>
+            <label class="check" id="job-verify-row"><input type="checkbox" id="job-verify"> Run and check it when the steps are done: start it on this PC, ask for every page, form and file it uses, run its own tests, and let the model fix what fails (two rounds, then it stops and tells you). This runs the code the job wrote.</label>
             <p class="hint" id="job-note" aria-live="polite"></p>
             <ul class="job-log" id="job-log" hidden></ul>
 

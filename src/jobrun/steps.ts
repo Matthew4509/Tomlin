@@ -78,26 +78,32 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   // Who does it is the job's team (Roles in its Overview): a hire runs on their own brain; else the strongest worker.
   const team = teamOf(job);
   let hire: StaffMember | null = whoDoes(team, role)?.hire ?? null;
-  let brain: Brain;
-  try {
-    // `seat`: the step was moved to another worker (too big for its own).
-    if (seat) {
-      brain = (await brainForRef(seat.ref, `step ${i + 1}`, 'in the job\'s Overview (Roles)', text => send('stage', { text }), signal)).brain;
-      hire = null;
-      workAs(null);
-    } else {
-      const got = await seatBrain(team, role, `the ${role} for step ${i + 1}`, text => send('stage', { text }), signal);
-      // A smaller backup (an intern) writes drafts, never a step across several files: that waits for the hire.
-      if (got.hire && got.intern && step.files.length > 1) {
-        const first = got.hire.name.split(/\s+/)[0];
-        return { error: `${first}'s backup is a smaller model (an intern), and step ${i + 1} changes ${step.files.length} files together: that waits for ${first}. Pick a bigger backup in ${first}'s chat, or wait for ${first}'s PC, then press Run step ${i + 1} again.` };
+  let brain!: Brain;
+  // Picks the step's brain (again after a reload with a bigger context); a reason it cannot, or null.
+  const pick = async (): Promise<string | null> => {
+    try {
+      // `seat`: the step was moved to another worker (too big for its own).
+      if (seat) {
+        brain = (await brainForRef(seat.ref, `step ${i + 1}`, 'in the job\'s Overview (Roles)', text => send('stage', { text }), signal)).brain;
+        hire = null;
+        workAs(null);
+      } else {
+        const got = await seatBrain(team, role, `the ${role} for step ${i + 1}`, text => send('stage', { text }), signal);
+        // A smaller backup (an intern) writes drafts, never a step across several files: that waits for the hire.
+        if (got.hire && got.intern && step.files.length > 1) {
+          const first = got.hire.name.split(/\s+/)[0];
+          return `${first}'s backup is a smaller model (an intern), and step ${i + 1} changes ${step.files.length} files together: that waits for ${first}. Pick a bigger backup in ${first}'s chat, or wait for ${first}'s PC, then press Run step ${i + 1} again.`;
+        }
+        brain = got.brain;
+        hire = got.hire;
       }
-      brain = got.brain;
-      hire = got.hire;
+      return null;
+    } catch (e) {
+      return (e as Error).message;
     }
-  } catch (e) {
-    return { error: (e as Error).message };
-  }
+  };
+  const cannot = await pick();
+  if (cannot) return { error: cannot };
   const root = await jobRoot(job);
   const texts: Record<string, string | null> = {};
   let size = 0;
@@ -108,6 +114,26 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     texts[f] = 'error' in r ? null : r.text;
     size += texts[f]?.length ?? 0;
   }
+  // A long file on a small context (6 Nov build tests, fault 2: 8,192 cut edits off three times; 32,768 worked): a model
+  // on this PC that is not answering anything is reloaded with JOB_CTX first, when the bigger cache fits in free memory.
+  // Saved in the model's run options, so the person sees it there and it stays.
+  const localId = brain.model?.() ?? null;
+  const pane = localId ? d.runnerFor(localId) : null;
+  if (localId && pane && pane.view.state === 'connected' && !d.busy(pane)) {
+    const now = d.runOn(pane);
+    const want = { ...now, ctx: jobs.JOB_CTX };
+    const was = d.fit(localId, now), will = d.fit(localId, want);
+    const biggest = Math.max(0, ...Object.values(texts).map(t => t?.length ?? 0));
+    const ctx = jobs.raiseContext(now.ctx, biggest, Math.max(0, will.need - was.need), will.free);
+    if (ctx) {
+      send('stage', { text: `${brain.label} has a ${now.ctx.toLocaleString()}-token context and this step's biggest file is ${biggest.toLocaleString()} characters: long edits get cut off at that size. Reloading it with ${ctx.toLocaleString()} (saved in its run options; there is memory for it)…` });
+      const s = await d.store.settings();
+      await d.store.saveSettings({ run: { [localId]: { ...(s.run[localId] ?? now), ctx } } });
+      await pane.disconnect();
+      const again = await pick();
+      if (again) return { error: again };
+    }
+  }
   const front = await packetFront(job.id, brain.ctx, hire ?? null, `${step.title} ${step.brief}`);
   const b = jobs.budget(brain.ctx, front.text.length);
   // Sized before it ran (sizeStep); this stays as the last guard (a linked PC may have changed its model since).
@@ -115,9 +141,18 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   if (size > room) return { error: `The files for step ${i + 1} hold ${size.toLocaleString()} characters, more than ${brain.label} can read in one go with a ${brain.ctx.toLocaleString()}-token context (about ${room.toLocaleString()}). Give that model a bigger context (chat settings), name fewer files in the step, or split the file first.` };
   // Files too long to write out whole in the answer are changed by edit blocks that code checks (PLAN F10 G2).
   const edit = jobs.editFiles(step.files, texts, Math.floor(b.answer * 2.2));
-  if (edit.length) send('stage', { text: `${edit.join(' and ')} ${edit.length > 1 ? 'are' : 'is'} too long to write out whole: the ${role} changes ${edit.length > 1 ? 'them' : 'it'} with find-and-replace blocks, checked before anything is saved.` });
+  if (edit.length) send('stage', { text: `${edit.join(' and ')} ${edit.length > 1 ? 'are' : 'is'} too long to write out whole: the ${role} changes ${edit.length > 1 ? 'them' : 'it'} with find-and-replace blocks, checked before anything is saved.${jobs.contextAdvice(brain.ctx) ? ` ${jobs.contextAdvice(brain.ctx)}` : ''}` });
   const system = jobs.workerSystem(`${kind.prompt}${hire ? ` ${levelOfHire(hire).style}` : ''}`, job, step, i + 1, front.text, edit);
-  const first = jobs.workerUser(step, texts, job.notes, ownerNotes, edit);
+  // A script or style step does not hold the page, so it is told the page's real ids (read-only).
+  const pageTexts: Record<string, string> = {};
+  if (step.files.some(f => /\.(m?js|css)$/i.test(f)) && !step.files.some(f => /\.html?$/i.test(f))) {
+    for (const f of (await ws.list(root)).filter(f => /\.html?$/i.test(f.path) && !f.path.startsWith('jobs/')).slice(0, 4)) {
+      const r = await ws.read(root, f.path);
+      if (!('error' in r)) pageTexts[f.path] = r.text;
+    }
+  }
+  const pageNote = jobs.pageNote(pageTexts, step.files);
+  const first = jobs.workerUser(step, texts, job.notes, ownerNotes, edit) + (pageNote ? `\n\n${pageNote}` : '');
   await saveHandoff(job, i, brain, front.parts, system, first);
   await started(brain.label);
   let user = first;
@@ -139,11 +174,12 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   const webTurns: WebTurn[] = [];
   let checks: CheckResult[] = [];
   let problems: string[] = [];
+  let prevProblems: string[] = [];
   let tries = 0;
   const planned = step.files;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < jobs.STEP_TRIES; attempt++) {
     tries = attempt + 1;
-    if (attempt) send('stage', { text: `Check failed: ${problems[0]} Asking the ${role} to fix it (try ${attempt + 1} of 3).` });
+    if (attempt) send('stage', { text: `Check failed: ${problems[0]} Asking the ${role} to fix it (try ${attempt + 1} of ${jobs.STEP_TRIES}).` });
     try {
       raw = await brain.ask(system, user, b.answer, text => send('text', { text }), signal, await webAsk());
       web.push(...(webTurns.at(-1)?.uses.length ? webTurns.at(-1)!.uses : brain.tools ?? []));
@@ -169,12 +205,31 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     problems = [...editProblems, ...checks.filter(c => !c.ok).map(c => `${c.path} (${c.tool}): ${c.message.split('\n').slice(0, 3).join(' ')}`)];
     // A long file sent back as a fragment would lose the rest if saved.
     problems.push(...jobs.shrunk(texts, parsed.files));
+    // A change to a long file can lose its ending (the program start, the last functions): send it back, unless the step's own words name what goes.
+    for (const f of parsed.files) {
+      const was = texts[f.path];
+      if (was == null) continue;
+      const said = `${step.title} ${step.brief}`.toLowerCase();
+      const gone = jobs.droppedDefinitions(was, f.text).filter(n => !said.includes(n.toLowerCase()));
+      if (gone.length) problems.push(`${f.path}: the change removed ${gone.slice(0, 5).join(', ')}${gone.length > 5 ? '…' : ''}. The file must still have everything it had, so put ${gone.length === 1 ? 'it' : 'them'} back and change only what the step needs.`);
+      // A failing test is fixed in the code, not by deleting the test (unless the step says to remove tests).
+      const fewer = /\b(remove|delete|drop)\b[^.]*\btests?\b/.test(said) ? null : jobs.droppedTests(was, f.text);
+      if (fewer) problems.push(`${f.path}: the change left ${fewer.after} tests where there were ${fewer.before}. Keep every test; fix the code so the tests pass, not the tests.`);
+    }
     // An answer stopped by its length limit may end part way through a file that still passes the checks.
     if (brain.cut) problems.push('The answer was cut off at its length limit, so a file may be unfinished. Send the files again, shorter: change only what the step needs.');
     if (step.files.length && !parsed.files.length && !editProblems.length) problems.push(edit.length ? `No change came back: give EDIT blocks for ${edit[0]} in the "=== EDIT: ${edit[0]} ===" form.` : `No file came back in the "=== FILE: ${step.files[0]} ===" form.`);
     // A small model often sends the files back as they were and says it fixed them.
     if (parsed.files.length && parsed.files.every(f => texts[f.path] != null && texts[f.path]!.replace(/\s+$/, '') === f.text.replace(/\s+$/, ''))) problems.push('The answer changed nothing: every file came back exactly as it was.');
     if (!problems.length) break;
+    // The same "nothing changed" twice: a third try only costs minutes. The step may already be done.
+    const same = jobs.repeatsNoChange(problems, prevProblems);
+    prevProblems = [...problems];
+    if (same) {
+      problems.unshift('It came back unchanged twice, so the step may already be done: if the files already do what the step asks, press Mark done.');
+      break;
+    }
+    if (brain.cut && jobs.contextAdvice(brain.ctx)) send('stage', { text: jobs.contextAdvice(brain.ctx) });
     user = `${first}\n\n${jobs.fixMessage(problems, step.files, edit)}`;
   }
   // The files a step with none planned ended up with go on the plan, so saving it (now or by hand later) may write them.

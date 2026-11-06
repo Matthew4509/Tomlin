@@ -1,7 +1,8 @@
 // What TOMLIN keeps between runs, in the data folder: settings (per pane: last model picked, device, CPU cores, idle
 // unload) and the chat. Written whole each time, through a temporary file, so a crash never leaves half a file.
 import { join } from 'node:path';
-import { cleanSearch, type SearchSetting, type ToolUse } from './webtools.ts';
+import { POLITE, cleanSearch, type SearchSetting, type ToolUse } from './webtools.ts';
+import { cleanPermissions, type Permissions } from './permits.ts';
 import type { Asked } from './worker.ts';
 import { cleanShared, type SharedModel } from './nodestaff.ts';
 import { readData, updateData, writeAtomic } from './atomic.ts';
@@ -38,6 +39,8 @@ export interface Settings {
   foldWait?: Record<string, number>;
   /** The search engine of a chat with Web on (src/webtools.ts), and its key or address. Unset: DuckDuckGo. */
   webSearch?: SearchSetting;
+  /** What a chat's model may do without asking: Manual or Auto per kind, and the wait between pages (src/permits.ts). */
+  permissions: Permissions;
   /** RETIRED with "Who does the work" (each job's team took its place): kept in old settings files, read by nothing. */
   jobModels: Record<string, string>;
   /** Worker PCs this one has paired with (the token is this PC's key to that worker). */
@@ -204,7 +207,8 @@ export class Store {
     // A file that is not an object (null, a list) holds no settings: it reads as none, so TOMLIN still starts.
     const s = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Partial<Settings>;
     // Fields this version does not know (written by a newer copy) are carried through, so going back never erases them.
-    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), jobModels: s.jobModels ?? {}, remotes: (Array.isArray(s.remotes) ? s.remotes : []).filter(r => r && typeof r === 'object').map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), permissions: cleanPermissions(s.permissions), jobModels: s.jobModels ?? {}, remotes: (Array.isArray(s.remotes) ? s.remotes : []).filter(r => r && typeof r === 'object').map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    POLITE.delay = this.cache.permissions.webDelay;
     return this.cache;
   }
 
@@ -214,11 +218,12 @@ export class Store {
   }
 
   /** `run` and `jobModels` are merged key by key; `remotes` is replaced whole. */
-  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; foldWait?: Record<string, number>; webSearch?: SearchSetting; jobModels?: Record<string, string>; remotes?: Remote[]; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
+  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; foldWait?: Record<string, number>; webSearch?: SearchSetting; permissions?: Permissions; jobModels?: Record<string, string>; remotes?: Remote[]; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
     await this.settings();
     // Read after the wait: another save may have changed it meanwhile, and its change must stay.
     const s = this.cache!;
-    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, foldWait: { ...s.foldWait, ...change.foldWait }, webSearch: change.webSearch ?? s.webSearch, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
+    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, foldWait: { ...s.foldWait, ...change.foldWait }, webSearch: change.webSearch ?? s.webSearch, permissions: change.permissions ?? s.permissions, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
+    POLITE.delay = this.cache.permissions.webDelay;
     const next = this.cache;
     try {
       await this.writeJson('settings.json', next);

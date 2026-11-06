@@ -90,7 +90,8 @@ function faultsText(r, a) {
 }
 function showAudit(r, a, lead) {
   const c = a.counts || {};
-  const head = c.Critical || c.High ? 'Fix the Critical and High faults before this goes live.' : c.Medium ? 'No Critical or High faults. Medium ones are warnings.' : (c.Low || c.Info) ? 'Passed: only low-priority findings (below).' : 'Passed every rule that ran.';
+  const partly = a.partly === true, notRead = Array.isArray(a.notRead) ? a.notRead : [];
+  const head = c.Critical || c.High ? 'Fix the Critical and High faults before this goes live.' : partly ? (c.Medium ? 'No Critical or High faults in what was read, but not everything was read. Medium ones are warnings.' : 'No faults in what was read, but not everything was read, so this is not a full pass.') : c.Medium ? 'No Critical or High faults. Medium ones are warnings.' : (c.Low || c.Info) ? 'Passed: only low-priority findings (below).' : 'No known faults in the checks that ran.';
   const liveNote = a.url ? (a.liveReached ? 'Checked ' + a.url + ' as well as the code.' : a.url + ' did not answer, so it was not checked.') : 'The local copy was not running, so localhost was not checked.';
   const cmp = a.compare;
   const cmpNote = cmp ? (cmp.stopped && !cmp.pages.length ? 'Live site ' + hostOf(cmp.liveUrl) + ': not compared. ' + cmp.stopped
@@ -103,6 +104,7 @@ function showAudit(r, a, lead) {
   const recText = rec => 'set aside as not a fault in ' + rec.false + ' place' + (rec.false === 1 ? '' : 's') + ' (' + rec.files + ' file' + (rec.files === 1 ? '' : 's') + ') across your projects, still flagged in ' + rec.standing;
   const item = f => h('div', { class: 'check' }, h('span', { class: 'sev ' + (SEV[f.sev] || SEV.Medium).cls }, (SEV[f.sev] || SEV.Medium).mark),
     h('span', { class: 'what' }, f.title + ' (' + f.area + ')', f.knownAs ? h('b', null, ' · already known as ' + f.knownAs) : null,
+      f.confidence === 'review-required' ? h('b', null, ' · a pattern guess: check this by hand') : null,
       f.check && records[f.rule] ? h('b', null, ' · check this one: the rule was ' + recText(records[f.rule])) : null,
       h('span', { class: 'where' }, f.where + (f.also && f.also.length ? ' (also ' + f.also.length + ' other place' + (f.also.length > 1 ? 's' : '') + ': ' + f.also.slice(0, 3).join('; ') + (f.also.length > 3 ? '…' : '') + ')' : '') + ' · ' + f.rule + (f.evidence ? ' · seen: ' + f.evidence : '') + ' · ' + f.fix),
       h('button', { class: 'linkbtn', type: 'button', onclick: () => judgeDialog(r, a, f) }, 'Not a fault…')));
@@ -117,12 +119,14 @@ function showAudit(r, a, lead) {
       ...lowShown.map(item), low.length > lowShown.length ? h('p', { class: 'muted' }, '…and ' + (low.length - lowShown.length) + ' more. Copy faults to see them all.') : null) : null,
     recRows.length ? h('details', { class: 'notes' }, h('summary', null, 'Rule record: how often people judged these rules wrong'),
       h('ul', null, ...recRows.map(([rule, rec]) => h('li', null, rule + ': ' + recText(rec) + (rec.check ? ' — marked "check this one" (wrong in ' + rec.files + '+ files, more often than it stands)' : ''))))) : null,
-    !major.length ? h('div', { class: 'check' }, h('span', { class: 'sev a-ok' }, '✓ Passed'), h('span', { class: 'what' }, 'Secrets, injection, auth, CSRF, uploads, exposed files, trackers' + (a.disclosure ? ', private details' : '') + (a.url || cmp ? ', headers' : '') + (cmp && !cmp.stopped ? ', live vs local' : ''))) : null,
+    partly ? h('div', { class: 'check' }, h('span', { class: 'sev a-warn' }, '◐ Partly'), h('span', { class: 'what' }, 'Not read, so nothing is known about it. Fix what you can and scan again, or check these by hand:',
+      ...notRead.map(n => h('span', { class: 'where' }, n)))) : null,
+    !major.length && !partly ? h('div', { class: 'check' }, h('span', { class: 'sev a-ok' }, '✓ Passed'), h('span', { class: 'what' }, 'No known faults in the checks that ran: secrets, injection, auth, CSRF, uploads, exposed files, trackers' + (a.disclosure ? ', private details' : '') + (a.url || cmp ? ', headers' : '') + (cmp && !cmp.stopped ? ', live vs local' : ''))) : null,
     notes.length ? h('details', { class: 'notes' }, h('summary', null, notes.length + ' note' + (notes.length === 1 ? '' : 's') + ' (checked, not counted)'), h('ul', null, ...notes.slice(0, 30).map(n => h('li', null, n)))) : null,
     setAside.length ? h('details', { class: 'notes' }, h('summary', null, setAside.length + ' set aside: judged not a fault by a person (an edited line comes back)'),
       h('ul', null, ...setAside.map(f => h('li', null, f.rule + ' · ' + f.where + ' — ' + (f.judged ? f.judged.why + ' (' + f.judged.by + (f.judged.on ? ', ' + f.judged.on : '') + ')' : 'set aside in projects.json') + ' ',
         f.judged && f.judged.id ? h('button', { class: 'linkbtn', type: 'button', onclick: () => unjudge(r, f.judged.id) }, 'Bring back') : null)))) : null,
-    h('p', { class: 'muted', style: 'margin-top:12px' }, 'This is a simple built-in check. It catches common core faults, not everything.')],
+    h('p', { class: 'muted', style: 'margin-top:12px' }, 'This is a simple built-in check. It catches common core faults, not everything, and a pass is not proof the app is safe.')],
     [a.findings.length ? h('button', { class: 'btn', type: 'button', onclick: async () => {
         try { await navigator.clipboard.writeText(faultsText(r, a)); info('Faults copied. Paste them into the AI you use.'); }
         catch { info('Could not copy: the clipboard was blocked.', true); }

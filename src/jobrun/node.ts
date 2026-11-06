@@ -13,6 +13,7 @@ import { everyFew, paced, type AskOpts, type ChatTurn, type ToolBox } from '../e
 import * as brains from '../brains.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import * as nodestaff from '../nodestaff.ts';
+import type { Place } from '../runners.ts';
 import * as carry from '../carry.ts';
 import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
@@ -507,6 +508,28 @@ async function pictureMakesWay(): Promise<boolean> {
   return true;
 }
 
+/**
+ * A chat model linked PC `pc` asked for does not fit: the chat models loaded only for that PC and not answering are
+ * unloaded one at a time, oldest first, until it fits (P1-4, 3 Nov: one was unloaded, then Gemma 4 was refused with three
+ * test models idle). Returns where it goes now, or `refused` when it still does not fit with all of them gone.
+ */
+async function chatsMakeRoomFor(id: string, pc: string, refused: Place): Promise<Place> {
+  const out: string[] = [];
+  let at = refused;
+  for (const other of nodestaff.makeWayOrder(loadedForPc, pc, id, x => { const r = d.runnerFor(x); return !!r && r.view.state === 'connected' && !d.busy(r) && !lending.has(x); })) {
+    const r = d.runnerFor(other);
+    if (!r) continue;
+    out.push(d.chatList().find(m => m.id === other)?.name ?? other);
+    loadedForPc.delete(other);
+    await r.disconnect();
+    await sleep(1500);
+    at = d.place(id);
+    if (!('error' in at)) break;
+  }
+  if (out.length) console.log(`Unloaded ${out.join(' and ')} (loaded for "${pc}", not answering) to make room for a chat model it asked for.`);
+  return at;
+}
+
 /** The other way round: chat models this PC loaded for linked PCs, not answering, make way for a picture model that does not fit. */
 async function chatsMakeWay(model: string): Promise<string[]> {
   const out: string[] = [];
@@ -529,6 +552,7 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
   const runner = d.runnerFor(id);
   let at = runner ? null : d.place(id);
   if (at && 'error' in at && b.queue === true && (await pictureMakesWay())) at = d.place(id);
+  if (at && 'error' in at && d.chatList().some(m => m.id === id)) at = await chatsMakeRoomFor(id, forPc, at);
   const swapped = at && !('error' in at) && !at.already && at.replaces ? d.runnerFor(at.replaces) : null;
   const busy = lending.has(id) || (!!runner && d.busy(runner)) || (!!swapped && (d.busy(swapped) || lending.has(swapped.view.model ?? '')));
   const why = nodestaff.modelRefusal(id, { onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy, pcName: shareState.name });

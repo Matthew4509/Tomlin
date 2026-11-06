@@ -199,6 +199,25 @@ function writesVersionZip(line, ctx, lines, i) {
   return /version/i.test(near + '\n' + line);
 }
 
+// KEY-002: a Supabase service-role key: a token whose middle part says role service_role (the fixed key the local
+// Supabase tools print for every developer is left alone), or a key in the newer sb_secret_ form. Each key on a line
+// is judged by itself: an example key beside a real one must not hide it.
+const KEY_TEST_PATH = /(^|\/)(tests?|spec|__tests__|fixtures?|museum)\/|\.(test|spec)\.\w+$|(^|\/)test_\w*\.py$/i;
+const KEY_PUBLIC_PREFIX = '(?:NEXT_PUBLIC|VITE|REACT_APP|EXPO_PUBLIC|NUXT_PUBLIC|VUE_APP|GATSBY|PUBLIC)';
+const KEY_ENV_LINE_PUBLIC = new RegExp('^\\s*(?:export\\s+)?' + KEY_PUBLIC_PREFIX + '_');
+const SIGNED_TOKEN = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,1000}\.(eyJ[A-Za-z0-9_-]{16,2000})\.[A-Za-z0-9_-]{16}/g;
+function serviceRoleKey(line, ctx) {
+  // In a .env file the key is where it belongs, unless the variable's name sends it to the browser.
+  if (!ctx.history && /^\.env/i.test(path.basename(ctx.rel)) && !KEY_ENV_LINE_PUBLIC.test(line)) return false;
+  for (const m of line.matchAll(/\bsb_secret_\w{16,}/g)) if (!/^sb_secret_(?:x{3}|your|example)/i.test(m[0])) return true;
+  for (const m of line.matchAll(SIGNED_TOKEN)) {
+    let said = '';
+    try { said = Buffer.from(m[1], 'base64').toString('utf8'); } catch { continue; }
+    if (/"role"\s*:\s*"service_role"/.test(said) && !/"iss"\s*:\s*"supabase-demo"/.test(said)) return true;
+  }
+  return false;
+}
+
 const RULES_MORE = [
   // ---- images and uploads ----
   { id: 'IMG-001', sev: 'Medium', area: 'uploads', title: 'An image is decoded with no check on its pixel count first (a small file can need gigabytes and stop the page with a blank 500)', file: PHP,
@@ -552,6 +571,9 @@ const RULES_MORE = [
         !/aria-label|type\s*=\s*["']?(hidden|submit|button|checkbox|radio|image|reset)\b/i.test(field[0]);
     },
     fix: 'Add for="the field\'s id", or put the field inside the label.' },
+  { id: 'KEY-002', sev: 'Critical', area: 'secrets', title: 'A Supabase service-role key is written into a file (whoever sees it can read and change your whole database)', skipFile: KEY_TEST_PATH,
+    re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,1000}\.eyJ[A-Za-z0-9_-]{16,2000}\.[A-Za-z0-9_-]{16}|\bsb_secret_\w{16}/, test: serviceRoleKey,
+    fix: 'In the Supabase dashboard, replace the key now (treat this one as leaked). Keep the new one in a server-only setting with no public prefix, and use the anon key in the browser.' },
 ];
 
 module.exports = { RULES_MORE, insideTry, insideScript, locationFromRequestVar, newRun };

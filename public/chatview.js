@@ -270,23 +270,44 @@ async function talk(url, body, out, message, from = '') {
           hurry = null;
           out.replaceChildren(data.text);
         } else if (ev === 'permit') {
-          // "May this chat use your files?" (src/filetools.ts): the answer waits for it. Allow once lasts this answer;
-          // Allow for this thread is kept on the chat.
+          // "May this chat use your files / the web?" (src/permits.ts): the answer waits for it. Allow once lasts this
+          // answer; Auto for this chat is kept on the chat; Auto always is saved in Settings. The card also shows where
+          // every permission stands now, and they can be changed on it.
           hurry = null;
+          const kind = data.kind === 'web' ? 'web' : 'files';
           const said = el('span', { class: 'hint' });
-          const answer = (a, words) => el('button', { class: a === 'thread' ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: async e => {
-            for (const b of e.target.parentElement.querySelectorAll('button')) b.disabled = true;
+          const card = el('div', { class: 'permit' });
+          const answered = async (a) => {
+            for (const b of card.querySelectorAll('.permit-answers button')) b.disabled = true;
             try {
               await api('/api/chat/permit', { chatId: streams.get(key)?.liveId ?? chatId, answer: a });
-              said.textContent = a === 'no' ? 'Not allowed: answering without your files…' : 'Allowed. Working…';
+              said.textContent = a === 'no' ? `Not allowed: answering without ${kind === 'web' ? 'the web' : 'your files'}…` : 'Allowed. Working…';
             } catch (err) {
               said.textContent = err.message;
             }
-          } });
-          out.replaceChildren(el('div', { class: 'permit' },
-            el('p', { text: `${data.who} wants to use your files (${data.what}), in ${data.folder}. Files can be read and saved there; nothing is run or deleted.` }),
-            el('div', { class: 'row' }, answer('once', 'Allow once'), answer('thread', 'Allow for this thread'), answer('no', 'Don\'t allow')),
-            said));
+          };
+          const answer = (a, words, primary) => el('button', { class: primary ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: () => answered(a) });
+          const thread = data.thread ?? {};
+          const doing = kind === 'web'
+            ? `${data.who} wants to use the web: ${data.what}.`
+            : `${data.who} wants to use your files (${data.what}), in ${data.folder}. Files can be read and saved there; nothing is run or deleted.`;
+          // Switching the asked kind to Auto here answers the card too (Auto always).
+          const rows = app.permissionRows?.(perms => {
+            if (perms?.[kind] === 'auto' && !card.querySelector('.permit-answers button:disabled')) answered('always');
+          });
+          const threadOn = app.PERMISSION_KINDS?.filter(k => thread[k.kind]).map(k => k.name) ?? [];
+          card.append(
+            el('p', { text: doing }),
+            el('div', { class: 'row permit-answers' },
+              answer('once', 'Allow once', true),
+              answer('thread', 'Auto: this chat only'),
+              answer('always', 'Auto: always'),
+              answer('no', 'Don\'t allow')),
+            said,
+            el('details', { class: 'permit-now', open: true },
+              el('summary', { text: `Your permissions now${threadOn.length ? ` (Auto in this chat: ${threadOn.join(', ')})` : ''}` }),
+              rows ?? ''));
+          out.replaceChildren(card);
           scroll();
         } else if (ev === 'progress') {
           out.replaceChildren(el('span', { class: 'hint', text: progressText(data) }));

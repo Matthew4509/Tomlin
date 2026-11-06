@@ -1351,6 +1351,49 @@ function webLine(uses) {
   return `Web: ${uses.map(one).join('; ')}`;
 }
 
+/** What a chat's model may do (src/permits.ts), in the order shown. */
+app.PERMISSION_KINDS = [
+  { kind: 'files', name: 'Files', what: 'list, read and save files in the chat\'s folder (nothing is run or deleted)' },
+  { kind: 'web', name: 'Web', what: 'search the web and read pages (when Web is on in the chat)' },
+];
+
+/**
+ * The permission switches, Manual or Auto for each kind, and the wait between pages on a site: saved as they change.
+ * Used in Settings and on the card a chat shows when it asks. `onChange(perms)` is told after each save.
+ */
+app.permissionRows = (onChange) => {
+  const now = () => ({ files: 'ask', web: 'ask', webDelay: true, ...(app.models?.settings?.permissions ?? {}) });
+  const said = el('span', { class: 'hint', role: 'status' });
+  const save = async change => {
+    try {
+      const s = await api('/api/settings', { permissions: { ...now(), ...change } });
+      if (app.models?.settings) app.models.settings.permissions = s.permissions;
+      said.textContent = 'Saved.';
+      onChange?.(s.permissions);
+    } catch (error) {
+      said.textContent = `Not saved: ${error.message}`;
+    }
+  };
+  const rows = app.PERMISSION_KINDS.map(k => {
+    const box = el('input', { type: 'checkbox', role: 'switch', checked: now()[k.kind] === 'auto', 'aria-label': `${k.name}: Auto` });
+    const state = el('span', { class: 'perm-state', text: box.checked ? 'Auto' : 'Manual' });
+    box.addEventListener('change', () => {
+      state.textContent = box.checked ? 'Auto' : 'Manual';
+      save({ [k.kind]: box.checked ? 'auto' : 'ask' });
+    });
+    return el('label', { class: 'perm-row', title: k.what }, el('span', { class: 'perm-name', text: k.name }), el('span', { class: 'perm-switch' }, box, el('span', { class: 'perm-knob' })), state, el('span', { class: 'hint', text: k.what }));
+  });
+  const delay = el('input', { type: 'checkbox', checked: now().webDelay !== false });
+  delay.addEventListener('change', () => save({ webDelay: delay.checked }));
+  return el('div', { class: 'perm-rows' }, ...rows, el('label', { class: 'check' }, delay, ' Wait 1-5 seconds (at random) between pages on the same site, so the site does not ban this PC'), said);
+};
+
+/** Settings, Permissions: Manual (asked in the chat the first time in each answer) or Auto, for each kind. */
+app.permissionsBox = () => el('fieldset', { class: 'colours-pick permissions' },
+  el('legend', { text: 'Permissions' }),
+  el('p', { class: 'hint', text: 'What a chat\'s model may do on its own. Manual: it asks in the chat the first time in each answer (Allow once, Auto for this chat, Auto always, or Don\'t allow). Auto: it goes ahead without asking. Pages on this PC or your home network are never opened, and files outside the chat\'s folder are never touched, whatever is chosen here.' }),
+  app.permissionRows());
+
 /** Settings, Web search: which engine a chat with Web on searches with, and its key or address. */
 app.webSearchBox = () => {
   const now = app.models?.settings?.webSearch ?? { provider: 'duckduckgo' };

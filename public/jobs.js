@@ -828,7 +828,7 @@ $('#job-go').addEventListener('click', async () => {
   const out = $('#job-stream');
   let current = null;
   try {
-    const r = await jobStream('/api/jobs/run', { id: job.id, review: $('#job-review-each').checked }, {
+    const r = await jobStream('/api/jobs/run', { id: job.id, review: $('#job-review-each').checked, verify: $('#job-verify').checked, keepGoing: $('#job-keep-going').checked }, {
       step: d => {
         current = logLine(`Step ${d.n + 1}, ${d.title}: working…`);
         out.hidden = false;

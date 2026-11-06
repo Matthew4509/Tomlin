@@ -110,7 +110,7 @@ function renderBackups() {
   $('bk-full').checked = !!v.full;
   $('bk-what').textContent = v.full ? 'Everything in the project\'s folder, with its git history and the rebuildable folders.'
     : 'Everything in the project\'s folder, with its git history. Left out: ' + v.leaveOut + '.';
-  $('bk-where').textContent = 'On the drive: ' + v.folderName + '\\<project>\\<project>-<date>-<time>.zip, with a .txt beside each saying what is in it, and an index another PC reads when the drive is added there. To restore: right-click a zip › Extract All.';
+  $('bk-where').textContent = 'On the drive: ' + v.folderName + '\\<project>\\<project>-<date>-<time>.zip, with a .txt beside each saying what is in it, and an index another PC reads when the drive is added there. To restore: right-click a zip › Extract All. A zip is not encrypted: it holds everything in the project folder, keys and git history included, so keep the drive private. "Read back and checked" means the zip is whole, not private.';
 }
 
 $('cmd-backup-run').addEventListener('click', () => openRun());

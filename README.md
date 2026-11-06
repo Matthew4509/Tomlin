@@ -292,7 +292,7 @@ rather than misread it.
   project's `.claude/launch.json` or `project.json`), the built-in audit (about 130 rules, the privacy pass, Not a
   fault, Review with AI), git marks and See what changed, Hosted live lights, prompts, and the tokens your AI tools
   used. Its page is `/bridge/`, its code `src/bridge/` (plain JavaScript) and `public/bridge/`, its data the home's
-  `data/bridge`. TOMLIN's app lock covers it; its page's own Help says what each part does. Added in Smart
+  `data/bridge`. A clean audit is not proof the app is safe, and no claim of "secure" rests on a rule count or a green mark: it covers the checks that ran, and the page names what was not read. TOMLIN's app lock covers it; its page's own Help says what each part does. Added in Smart
   Manager: **Copies on my other PCs** (a project's git window: tick it, and it goes with the node backups every 10
   minutes when it changed; Back up now; Bring back into `restored projects`), **Start with a hire** beside Copy (a
   prompt, a project's prompt, a review, an audit's faults: TOMLIN's Send to card opens with the words), and
@@ -1086,6 +1086,44 @@ Placed by hand (Qwen3.6-35B): the main PC's CPU alone writes 7.4; with the linke
 or 12 layers, 6.1, 6.7 and 6.7; the P2000 alone 12.5, and with the K1200 added 8.2. Each word crosses the network
 and back, which costs more than the K1200 saves. More PCs help by answering at the same time, one model each, not by
 sharing one answer.
+
+## Which model for the planner (ranked 6 Nov 2026)
+
+Every model was given the same four jobs, and each answer was scored by running it, not by opinion: a Python function
+(13 hidden checks), a JavaScript function (9), a Python bug fix (8) and a JSON plan for a small web page (6 rules). Score
+is the sum of the four shares, out of 4. Same PC as above, same test copy for all, answer limit 4,096 tokens, one run
+each (a score that differs by 0.1 or so is a tie). Ties go to the quicker one. Speed is the average over the four jobs.
+
+| # | Model | Score | Python | JavaScript | Bug fix | Plan | Tokens/s |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | Qwen3-Next-80B-A3B UD-Q3_K_XL (35.6 GB) | 4.00 | 13/13 | 9/9 | 8/8 | 6/6 | 9.9 |
+| 2 | GPT-OSS-20B MXFP4 | 3.92 | 12/13 | 9/9 | 8/8 | 6/6 | 10.9 |
+| 3 | Qwen3-30B-A3B-2507 UD-Q4_K_XL | 3.89 | 13/13 | 8/9 | 8/8 | 6/6 | 12.7 |
+| 4 | Qwen3.6-35B-A3B UD-Q2_K_XL | 3.67 | 13/13 | 6/9 | 8/8 | 6/6 | 10.8 |
+| 4 | Qwen3-Coder-Next UD-Q3_K_XL | 3.67 | 13/13 | 6/9 | 8/8 | 6/6 | 5.1 |
+| 6 | Qwen3.5-35B-A3B UD-Q2_K_XL | 3.62 | 8/13 | 9/9 | 8/8 | 6/6 | 11.1 |
+| 7 | Qwen3-Coder-30B-A3B UD-Q4_K_XL | 3.58 | 9/13 | 8/9 | 8/8 | 6/6 | 9.9 |
+| 8 | Gemma 3n E2B Q4_K_M | 2.72 | 5/13 | 3/9 | 8/8 | 6/6 | 28.8 |
+| 9 | Gemma 3n E4B Q4_K_M | 2.42 | 6/13 | 3/9 | 5/8 | 6/6 | 17.8 |
+| 10 | LFM2.5-8B-A1B Q4_K_M | 2.31 | 4/13 | 0/9 | 8/8 | 6/6 | 33.1 |
+| 11 | Qwen3.5-2B Q4_K_M | 2.23 | 6/13 | 5/9 | 3/8 | 5/6 | 45.6 |
+| 12 | Gemma 2 2B Q4_K_M | 2.16 | 7/13 | 0/9 | 5/8 | 6/6 | 34.0 |
+| 13 | Gemma 4 26B-A4B UD-Q4_K_XL | 2.00 | 0/13 | 0/9 | 8/8 | 6/6 | 4.7 |
+| 14 | Qwen3.5-0.8B Q4_K_M | 1.54 | 0/13 | 3/9 | 3/8 | 5/6 | 68.8 |
+| — | Qwen3-Next-80B-A3B UD-Q4_K_XL (46 GB) | — | | | | | does not load: needs 48.8 GB, 38 GB free |
+
+How to read it:
+- **For the planner, take the top of the list that fits the PC.** Everything from place 1 to 7 wrote a valid plan with every
+  rule met, so the plan alone does not tell them apart; the code jobs do. The 20B (place 2) is the best one that
+  fits in about 12 GB, and the 30B-2507 (place 3) is the quickest of the top three. The small models (places 8 to 14) wrote a
+  plan too, but their code mostly fails the checks: fine for a quick answer, not for a plan the others must follow.
+- **Qwen 3, 3.5 and 3.6 models were asked not to think**, as TOMLIN itself asks them. Left to think they used the whole
+  4,096 tokens on their reasoning and gave no answer (Qwen3.6-35B scored 0, Qwen3.5-35B 3.0, Qwen3.5-0.8B 0.22).
+- **Gemma 4 26B is not fairly judged here.** It thinks at length whatever is asked, on this PC at 4.7 tokens a second,
+  so it ran out of the 4,096 tokens on the three code jobs. Its 8/8 bug fix and 6/6 plan show it can do the work; it needs
+  a larger allowance and about an hour per run.
+- Four short jobs, one run each: the order among places 3 to 7 can change on another day. The test script and the scores are
+  in `docs/ranking-2026-11-06/`.
 
 ## Tests
 

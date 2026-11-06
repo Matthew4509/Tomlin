@@ -71,6 +71,27 @@ export async function saveWaiting(id: string, n: number, result: StepResult): Pr
 
 export const clearWaiting = async (id: string) => rm(await waitingFile(id), { force: true }).catch(() => undefined);
 
+// ---- Run and check: the project's files as they were before the last repair round. Kept on disk, so a repair that made
+// the project worse is still put back after a restart between the repair and the next check ----
+
+const beforeFile = async (id: string) => join(await d.workspaceDir(), 'jobs', id, 'verify-before.json');
+
+/** The files before the last repair round (path to text), or null when there is none or the file is not one of ours. */
+export async function loadBeforeRepair(id: string): Promise<Record<string, string> | null> {
+  try {
+    const s = JSON.parse(await readFile(await beforeFile(id), 'utf8'));
+    return s && typeof s === 'object' && !Array.isArray(s) && Object.values(s).every(v => typeof v === 'string') ? (s as Record<string, string>) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveBeforeRepair(id: string, files: Record<string, string>): Promise<void> {
+  await writeAtomic(await beforeFile(id), JSON.stringify(files));
+}
+
+export const clearBeforeRepair = async (id: string) => rm(await beforeFile(id), { force: true }).catch(() => undefined);
+
 // ---- The job's events: appended by code as things happen; the job room is replayed from them ----
 
 const eventsFile = async (id: string) => join(await d.workspaceDir(), 'jobs', id, 'events.jsonl');

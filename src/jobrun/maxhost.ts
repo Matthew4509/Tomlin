@@ -9,7 +9,7 @@ import * as link from '../link.ts';
 import { joinWhenOpen, newNonce, streamKeys } from '../linkstream.ts';
 import type { Remote } from '../store.ts';
 import { log } from '../log.ts';
-import { backupsOnly, backupsOnlyWhy, onHomeNetwork } from './links.ts';
+import { backupsOnly, backupsOnlyWhy, lastHello, onHomeNetwork } from './links.ts';
 import { d } from './shared.ts';
 import { MAX_DOOR, MAX_UPGRADE } from './maxnode.ts';
 
@@ -18,6 +18,31 @@ export function maxPcs(said = process.env.TOMLIN_MAX ?? ''): Remote[] {
   const names = said.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   if (!names.length) return [];
   return (d.store.peek()?.remotes ?? []).filter(r => names.includes(r.name.toLowerCase()) || names.includes(r.id.toLowerCase()));
+}
+
+/**
+ * The memory Max mode's lending PCs add to a load here, from their last hellos (P1-4, 3 Nov: Qwen3-Next-80B Q4 was refused,
+ * "needs 48.8 GB, 37.2 GB free", with a PC lending). A PC lends its card (free, less 0.5 GB), or with no card its RAM
+ * (free, less the 3 GB kept for Windows), as src/server/panes.ts rpcProgram picks. Nothing for a PC with no Max, no
+ * memory reading, or a card whose memory it could not read.
+ */
+export function lentBytes(hellos: ({ can: string[]; memory: unknown } | null)[]): number {
+  const GB = 2 ** 30;
+  let sum = 0;
+  for (const h of hellos) {
+    if (!h?.can.includes('max') || !h.memory || typeof h.memory !== 'object') continue;
+    const m = h.memory as { cards?: { count?: unknown }; ram?: { total?: unknown; used?: unknown }; gpu?: { total?: unknown; used?: unknown } | null };
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const free = n(m.cards?.count) > 0 ? (m.gpu ? n(m.gpu.total) - n(m.gpu.used) - 0.5 * GB : 0) : n(m.ram?.total) - n(m.ram?.used) - 3 * GB;
+    sum += Math.max(0, free);
+  }
+  return sum;
+}
+
+/** lentBytes for the PCs TOMLIN_MAX names now (0 with Max mode off). */
+export function maxLent(said = process.env.TOMLIN_MAX ?? '', hello: (id: string) => { can: string[]; memory: unknown } | null = id => lastHello(id)): number {
+  if (!said.trim() || /^(1|on|true|yes)$/i.test(said.trim())) return 0;
+  return lentBytes(maxPcs(said).map(r => hello(r.id)));
 }
 
 /**

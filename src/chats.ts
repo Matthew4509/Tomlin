@@ -30,6 +30,8 @@ export interface ChatInfo {
   web?: boolean;
   /** Allow for this thread was pressed: the model may use the file tools here without asking (src/filetools.ts). */
   files?: boolean;
+  /** Web set to Auto for this thread on the permission card: the web tools are used here without asking (src/permits.ts). */
+  webOk?: boolean;
   /** Pinned in the left panel: it stays under Projects, above the recent chats, until unpinned. */
   pinned?: boolean;
   /** The project (its job id) this chat's work belongs to; none = Default, the chats by date. */
@@ -229,7 +231,7 @@ export class Chats {
   }
 
   /** Changes a chat's own facts (fill, the handoff answer); the title and count are kept by saved(). */
-  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'files' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
+  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'files' | 'webOk' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
     const c = (await this.index()).find(x => x.id === id);
     if (!c) return null;
     Object.assign(c, patch);

@@ -2484,3 +2484,21 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .pc-model-more > summary::-webkit-details-marker { display: none; }
 .pc-model-more-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; gap: 8px; justify-items: start; min-width: 190px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); box-shadow: var(--shadow-sm); }
 @media (max-width: 620px) { .pc-dlg .pc-head { grid-template-columns: 64px minmax(0, 1fr); } .pc-dlg .pc-head-name + .pc-head-ver { grid-column: 1 / -1; justify-items: start; text-align: left; } }
+
+/* Permissions (Settings and the card a chat shows when it asks): a Manual / Auto switch for each kind. */
+.perm-rows { display: grid; gap: 8px; }
+.perm-row { display: grid; grid-template-columns: 4.5em auto 4em 1fr; align-items: center; gap: 10px; cursor: pointer; }
+.perm-name { font-weight: 600; }
+.perm-state { font-size: var(--fs-sm); }
+.perm-row .hint { margin: 0; }
+.perm-switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+.perm-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.perm-knob { position: absolute; inset: 0; border-radius: 999px; background: var(--line, #bbb); transition: background .15s; }
+.perm-knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.perm-switch input:checked + .perm-knob { background: var(--accent, #2a7de1); }
+.perm-switch input:checked + .perm-knob::after { transform: translateX(16px); }
+.perm-switch input:focus-visible + .perm-knob { outline: 2px solid var(--accent, #2a7de1); outline-offset: 2px; }
+.msg .permit .permit-now { margin-top: 8px; font-size: var(--fs-sm); }
+.msg .permit .permit-now summary { cursor: pointer; }
+.msg .permit .perm-rows { margin-top: 6px; }
+@media (max-width: 520px) { .perm-row { grid-template-columns: 4.5em auto 1fr; } .perm-row .hint { grid-column: 1 / -1; } }

@@ -55,6 +55,13 @@ export interface Role {
   prompt: string;
   /** Lines that show how the role sounds (small models copy these). */
   examples: string[];
+  /**
+   * In place of `prompt` and `examples` when the chat's model can save files itself (src/filetools.ts withFilesLine):
+   * a role told to put code in a block, with an example block, wrote save_file(...) inside a ```js block as text instead
+   * of calling the tool (Qwen3.6 35B, 6 Nov 2026).
+   */
+  filesPrompt?: string;
+  filesExamples?: string[];
   /** Three fixed prompts for the audition, each with plain checks on the answer. */
   audition: Array<{ ask: string; checks: Check[] }>;
   /** True when a mixture-of-experts model is a good match (broad knowledge, fast). */
@@ -100,6 +107,8 @@ export const ROLES: Role[] = [
     hint: 'Writes and fixes code, explains what it did.',
     prompt: 'You are a software developer. Give working code in a code block, then say in one or two sentences what it does. Name the language. If the request is unclear, ask one question first. Do not invent libraries or functions; say so when you are not sure.',
     examples: ['Here is the code:\n```js\n// the code goes here\n```\nOne or two plain sentences on what it does.', 'Which language do you want this in?'],
+    filesPrompt: 'You are a software developer. To make or change a file, call the save_file tool with the whole file, then say in one or two sentences which files you saved and what they do. If the request is unclear, ask one question first. Do not invent libraries or functions; say so when you are not sure.',
+    filesExamples: ['Saved index.html and app.js. The page adds up the bill as you type.', 'Which language do you want this in?'],
     audition: [
       { ask: 'Write a JavaScript function that returns the largest number in an array.', checks: [{ label: 'gave code', pass: hasCode }, { label: 'short enough to read', pass: a => words(a) < 220 }] },
       { ask: 'This Python prints nothing. What is wrong?\n\nfor i in range(3):\nprint(i)', checks: [{ label: 'found the indentation', pass: a => /indent/i.test(a) }, { label: 'showed the fix', pass: hasCode }] },
@@ -245,7 +254,26 @@ export function modelLeft(before: Runs, after: Runs, others: Runs[]): string | n
  * (the old line listed "scanning, installing" and "/image", and answers came back with notes repeating it). Code goes
  * in a block with its file name above, because the block's Save button puts it on the drive (app.js codeSave).
  */
-const BASE = 'You are {name}, a member of the person\'s team, running entirely on their own computer. If you are not sure of a fact, say so. You work through this chat: when asked for code or a file, write it out in full in a code block, with its file name on the line above, and the person saves it to their drive with the Save button on the block. Answer what was asked and stop; about yourself, say only what the person asks. If asked for a picture, say the team\'s artist draws it in the Images window.';
+export const CODE_IN_CHAT = 'You work through this chat: when asked for code or a file, write it out in full in a code block, with its file name on the line above, and the person saves it to their drive with the Save button on the block.';
+/** CODE_IN_CHAT's place when the chat's model can save files itself (src/filetools.ts): the two must not both be said. */
+export const CODE_BY_TOOLS = 'You can save files to the person\'s drive yourself: to make or change a file, call the save_file tool with the whole file, and your answer then says which files you saved. A code block in your answer is for a short piece the person asks to see.';
+const BASE = `You are {name}, a member of the person's team, running entirely on their own computer. If you are not sure of a fact, say so. ${CODE_IN_CHAT} Answer what was asked and stop; about yourself, say only what the person asks. If asked for a picture, say the team's artist draws it in the Images window.`;
+
+const examplesLine = (examples: string[]) => `Examples of how you sound (they show the style only; never repeat their content):\n${examples.map(e => `- ${e}`).join('\n')}`;
+
+/**
+ * A hire's system prompt (staffSystem's) for a chat whose model can save files itself: the lines that send code to a
+ * block for the Save button become ones that send it to save_file. Asked that way (code in a block, an example block),
+ * the model wrote its save_file calls as text in a ```js block and nothing was saved (Qwen3.6 35B, 6 Nov 2026).
+ */
+export function withFileTools(system: string): string {
+  let out = system.replace(CODE_IN_CHAT, CODE_BY_TOOLS);
+  for (const r of ROLES) {
+    if (r.filesPrompt) out = out.replace(`. ${r.prompt}`, `. ${r.filesPrompt}`);
+    if (r.filesExamples && r.examples.length) out = out.replace(examplesLine(r.examples), examplesLine(r.filesExamples));
+  }
+  return out;
+}
 
 /**
  * The system prompt for one hire: who they are, the role, the level's way of working, then examples (and a writing tone).
@@ -255,7 +283,7 @@ export function staffSystem(member: StaffMember, tone = ''): string {
   if (isPlain(member)) return '';
   const role = roleOf(member.role);
   const level = levelOfHire(member);
-  const lines = [BASE.replace('{name}', member.name), `Your job: ${role.name.toLowerCase()}. ${role.prompt}`, ...(level.style ? [level.style] : []), ...(role.examples.length ? [`Examples of how you sound (they show the style only; never repeat their content):\n${role.examples.map(e => `- ${e}`).join('\n')}`] : [])];
+  const lines = [BASE.replace('{name}', member.name), `Your job: ${role.name.toLowerCase()}. ${role.prompt}`, ...(level.style ? [level.style] : []), ...(role.examples.length ? [examplesLine(role.examples)] : [])];
   if (tone) lines.push(`When asked to write a letter, article, post or message, ${tone[0].toLowerCase()}${tone.slice(1)}`);
   return lines.join('\n\n');
 }
@@ -485,6 +513,9 @@ export class Staff {
     // A fallback the same as the preferred one is no fallback; the default is never also in the group; a switch to a
     // model no longer in the list is dropped.
     if (m.fallback && m.fallback === m.model) m.fallback = null;
+    // A hire's only model is their first choice (P1-5, 3 Nov: one given to a hire with none landed as the fallback). Not
+    // while a let-go PC's models are parked: those come back as the first choice with the PC (restored()).
+    if (!m.model && m.fallback && !m.parked?.length) { m.model = m.fallback; m.fallback = null; }
     if (m.cover && (m.cover.ref === m.model || m.cover.ref === m.fallback)) m.cover = null;
     if (m.group) m.group = m.group.filter(x => x !== m.model);
     if (m.active && (m.active === m.model || !modelsOf(m).includes(m.active))) m.active = null;

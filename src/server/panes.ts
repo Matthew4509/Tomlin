@@ -31,7 +31,7 @@ import { whoList } from './people.ts';
 import { paneJob } from './pictures.ts';
 import { readSpeedsNow } from './thispc.ts';
 import { jobRoutes } from './jobs.ts';
-import { maxLoad } from '../jobrun/maxhost.ts';
+import { maxLent, maxLoad } from '../jobrun/maxhost.ts';
 
 // The chat runners (src/runners.ts): one llama-server per chat model loaded at once. A loaded model stays until it is
 // dropped or another needs its place: the next model goes beside it when it fits, else the least recently used goes.
@@ -395,14 +395,15 @@ function runtimeList() {
 
 /**
  * Where a chat model would load (src/runners.ts): the runner that has it, a runner beside the loaded ones when it fits,
- * or the place of the least recently used one not answering. An error in plain words when it does not fit.
+ * or the place of the least recently used one not answering. An error in plain words when it does not fit. With Max mode
+ * on, the memory the lending PCs add counts as free here (P1-4).
  */
 export function chatPlace(id: string): runnersOf.Place {
   const entry = chatModels.list().find(m => m.id === id);
   if (!entry) return { error: `The model ${id} is not in the models folder any more. Pick another.` };
   const s = store.peek();
   const run = s ? runOf(s, id) : { ...DEFAULT_RUN };
-  return runnersOf.place(id, shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), chatNeed(entry.bytes + draftBytes(run), contextBytes(id, run)), freemem(), runnerLooks());
+  return runnersOf.place(id, shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), chatNeed(entry.bytes + draftBytes(run), contextBytes(id, run)), freemem() + maxLent(), runnerLooks());
 }
 
 /** The memory a chat model is expected to need: its file and context cache, a tenth more, and 0.8 GB for the runner. */

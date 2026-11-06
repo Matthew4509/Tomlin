@@ -13,6 +13,7 @@ const { gitConfigRisky } = require('./gitstate');
 const { fingerprint, applyJudged } = require('./judged');
 const { findRoots } = require('./roots');
 const { RULES_MORE, locationFromRequestVar, newRun } = require('./rules-more');
+const { ADVANCED_RULES } = require('./advanced-security');
 const { crossAudit, CROSS_RULES } = require('./cross');
 const { agentAudit, RULE: AGENT_RULES } = require('./agents');
 
@@ -68,7 +69,7 @@ function innerHtmlFromOutside(line, ctx) {
   for (const n of ctx.tainted) if (new RegExp('(^|[^\\w$.])' + n.replace(/\$/g, '\\$') + '\\b').test(rhs)) return true;
   return false;
 }
-const CODE_EXT = /\.(php|js|mjs|cjs|ts|tsx|jsx|py|html?|css|scss|less|json|ya?ml|ini|env|conf|htaccess|sh|bat|cmd|toml|pem|key|txt)$/i;
+const CODE_EXT = /\.(php|js|mjs|cjs|ts|tsx|jsx|py|html?|css|scss|less|json|ya?ml|ini|env|conf|htaccess|sh|bat|cmd|toml|pem|key|txt|sql)$/i;
 // Files only ever run on the developer's own PC (a dev/ folder, a *.dev.* or *.local.* file, docker-compose).
 const DEV_FILE = /(^|\/)(dev|local|docker)(\/|[._-])|[._-](dev|local)\.[a-z]+$|docker-compose/i;
 // A comment line: a tracker tag or a setting written in a comment is not live. Secrets are still read in comments.
@@ -199,6 +200,7 @@ const RULES = [
 
   { id: 'PRIV-001', sev: 'Medium', area: 'privacy', title: 'Tracker loads - check it waits for consent', file: /\.(php|html?|m?js|tsx?|jsx)$/i, re: /<script\b[^>]*\bsrc\s*=\s*["']?(https?:)?\/\/[^"'\s>]*(googletagmanager\.com|google-analytics\.com\/(analytics|ga)\.js|connect\.facebook\.net|static\.hotjar\.com|clarity\.ms\/tag|pagead2\.googlesyndication\.com)/i, test: notBehindConsent, fix: 'Load trackers only after the visitor says yes.' },
   ...RULES_MORE,
+  ...ADVANCED_RULES,
 ];
 
 // Files that must never sit in a web root.
@@ -383,6 +385,7 @@ function codeAudit(dir, skipList, opts = {}) {
           if (r.needsNear.test(near)) continue;
         }
         const hit = { rule: r.id, sev: r.sev, area: r.area, title: r.title, where: rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(line) };
+        if (r.confidence) hit.confidence = r.confidence;
         findings.push(hit);
         // One finding per rule per file keeps the list readable. A place set aside as not a fault does not count:
         // the rule goes on, so a real one further down the same file is still found.
@@ -395,6 +398,11 @@ function codeAudit(dir, skipList, opts = {}) {
   if (overTotal) notes.push('The scan reads up to ' + (MAX_TOTAL >> 20) + ' MB of code in all: ' + overTotal + ' more files were not read.');
   if (unreadable.length) notes.push(unreadable.length + ' code file' + (unreadable.length === 1 ? '' : 's') + ' could not be opened, so ' + (unreadable.length === 1 ? 'it was' : 'they were') + ' not checked: ' + unreadable.slice(0, 5).join(', ') + (unreadable.length > 5 ? '…' : '') + '. Another program may hold ' + (unreadable.length === 1 ? 'it' : 'them') + ', or the antivirus may have blocked ' + (unreadable.length === 1 ? 'it' : 'them') + ' (it does that to files that look like a web shell: look at it first).');
   if (tooBig.length) notes.push(tooBig.length + ' code file' + (tooBig.length === 1 ? '' : 's') + ' over ' + (MAX_BYTES >> 10) + ' KB ' + (tooBig.length === 1 ? 'was' : 'were') + ' not read: ' + tooBig.slice(0, 5).join(', ') + (tooBig.length > 5 ? '…' : '') + '. Check ' + (tooBig.length === 1 ? 'it' : 'them') + ' by hand, or split ' + (tooBig.length === 1 ? 'it' : 'them') + '.');
+  // Files the scan did not read: the audit is then partly checked, not a clean pass.
+  const notRead = [];
+  if (tooBig.length) notRead.push('Code files over ' + (MAX_BYTES >> 10) + ' KB: ' + tooBig.length);
+  if (overTotal) notRead.push('Code files past the ' + (MAX_TOTAL >> 20) + ' MB read limit: ' + overTotal);
+  if (unreadable.length) notRead.push('Code files that could not be opened: ' + unreadable.length);
   let has = null;
   for (const e of exposed.values()) {
     // An archive a page of the project links to (a download, an update feed) is published on purpose.
@@ -429,7 +437,7 @@ function codeAudit(dir, skipList, opts = {}) {
     (r, f, i, title) => ({ rule: r.id, sev: r.sev, area: r.area, title: title || r.title, where: f.rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(f.lines[i] || '') }));
   findings.push(...cross.findings);
   notes.push(...cross.notes);
-  return { findings: mergeCopies(findings), notes, filesSeen: files.length, filesScanned: scanned, truncated: files.full === true };
+  return { findings: mergeCopies(findings), notes, notRead, tooBig, filesSeen: files.length, filesScanned: scanned, truncated: files.full === true };
 }
 
 // The same line in the same file name across several folders (old release copies: v1.5/, v1.6/ ...) is one fault,
@@ -577,6 +585,28 @@ const LOW_RULES = new Set(['A11Y-001', 'A11Y-002', 'A11Y-003', 'A11Y-004', 'DATA
 // repository whose settings are safe to read; anywhere else every file could be uploaded, so nothing changes. A
 // finding with copies (also) stays as it is when any copy is published. The live check still asks the live site for
 // the usual leaks (.env, dumps), so an ignored file that was uploaded by hand is found there as its own finding.
+// Only a leak is softer when git ignores the file (it does not go to the remote). Code that runs (injection, missing
+// authorization) is as wrong in an ignored file as in any other.
+const LEAK_AREAS = new Set(['secrets', 'exposed files', 'disclosure', 'AI agent files']);
+// A code file over the size limit that git ignores stays on this PC, so not reading it is no gap (same rule as the
+// leak softening above: only in a git repository whose settings are safe to read). Files git keeps or would take stay.
+async function dropIgnoredGaps(dir, code) {
+  const big = code.tooBig || [];
+  if (!big.length || !fs.existsSync(path.join(dir, '.git')) || gitConfigRisky(dir)) return;
+  const list = await publishedFiles(dir, true);
+  if (!list) return;
+  const published = new Set(list.map(f => f.rel.toLowerCase()));
+  const left = big.filter(r => published.has(r.toLowerCase()));
+  if (left.length === big.length) return;
+  const kb = (MAX_BYTES >> 10), one = left.length === 1;
+  const was = code.notes.findIndex(n => / over \d+ KB (was|were) not read: /.test(n));
+  const say = left.length ? left.length + ' code file' + (one ? '' : 's') + ' over ' + kb + ' KB ' + (one ? 'was' : 'were') + ' not read: ' + left.slice(0, 5).join(', ') + (left.length > 5 ? '…' : '') + '. Check ' + (one ? 'it' : 'them') + ' by hand, or split ' + (one ? 'it' : 'them') + '.' : null;
+  if (was >= 0) { if (say) code.notes[was] = say; else code.notes.splice(was, 1); }
+  code.notRead = code.notRead.filter(n => !/^Code files over \d+ KB: /.test(n));
+  if (left.length) code.notRead.push('Code files over ' + kb + ' KB: ' + left.length);
+  code.tooBig = left;
+}
+
 async function softenIgnored(dir, findings) {
   if (!fs.existsSync(path.join(dir, '.git')) || gitConfigRisky(dir)) return 0;
   const list = await publishedFiles(dir, true);
@@ -595,6 +625,7 @@ async function softenIgnored(dir, findings) {
   };
   let n = 0;
   for (const f of findings) {
+    if (!LEAK_AREAS.has(f.area)) continue;
     // a .git folder inside the site folder goes up with the site whatever .gitignore says
     if (f.rule === 'EXP-005' || ORDER[f.sev] > ORDER.High || !ignored(f.where) || (f.also || []).some(w => !ignored(w))) continue;
     f.ignored = { was: f.sev };
@@ -621,8 +652,8 @@ function summarise(findings) {
 // SEC-012: a key or password taken out of the files that an older version in the git history still holds. Anyone with
 // a copy of the repository has it, so it counts as given away until it is rotated. The disclosure pass reads every
 // past file version once and hands each one here; a key the files still hold is left to its own rule (SEC-001..006).
-const HISTORY_KEYS = { 'SEC-001': 'private key', 'SEC-002': 'Anthropic / OpenAI API key', 'SEC-003': 'live payment, cloud or GitHub key', 'SEC-005': 'service key', 'SEC-006': 'Google API key', 'SEC-004': 'password' };
-const KEYISH = /PRIVATE KEY|sk-|sk_live_|rk_live_|AKIA|ghp_|github_pat_|xox[baprs]-|whsec_|hooks\.slack|SG\.|key-|SK[0-9a-f]{32}|AIza|passw|db_pass|secret/i;
+const HISTORY_KEYS = { 'SEC-001': 'private key', 'SEC-002': 'Anthropic / OpenAI API key', 'SEC-003': 'live payment, cloud or GitHub key', 'SEC-005': 'service key', 'SEC-006': 'Google API key', 'KEY-002': 'Supabase service-role key', 'SEC-004': 'password' };
+const KEYISH = /PRIVATE KEY|eyJ|sb_secret_|sk-|sk_live_|rk_live_|AKIA|ghp_|github_pat_|xox[baprs]-|whsec_|hooks\.slack|SG\.|key-|SK[0-9a-f]{32}|AIza|passw|db_pass|secret/i;
 function historySecrets() {
   const rules = RULES.filter(r => HISTORY_KEYS[r.id]);
   const now = new Set(), past = new Map();
@@ -633,7 +664,7 @@ function historySecrets() {
       const line = lines[i];
       if (line.length > 2000) continue;
       const m = r.re.exec(line);
-      if (!m || (r.except && r.except.test(line)) || (r.test && !r.test(line, {}, lines, i))) continue;
+      if (!m || (r.except && r.except.test(line)) || (r.test && !r.test(line, { rel, text, history: true }, lines, i))) continue;
       // a private key's BEGIN line is the same in every key: the line after it tells two keys apart
       const k = r.id + '|' + (r.id === 'SEC-001' ? line + (lines[i + 1] || '') : m[0]);
       if (isCurrent) { now.add(k); continue; }
@@ -686,6 +717,7 @@ async function runAudit(dir, url, opts = {}) {
       projectHas: projectIndex(dir, skip), maxPages: opts.maxPages || 4, maxScripts: 2, httpPaths: privateAreas(dir), dnsTxt: opts.dnsTxt });
   }
   const all = [...code.findings, ...(local ? local.findings : []), ...(cmp ? cmp.findings : [])];
+  await dropIgnoredGaps(dir, code);
   const softened = await softenIgnored(dir, code.findings);
   if (softened) code.notes.push(softened + (softened === 1 ? ' fault is' : ' faults are') + ' in files git ignores, so they stay on this PC: shown as warnings, not "fix first".');
   for (const f of all) if (LOW_RULES.has(f.rule) && ORDER[f.sev] < ORDER.Low) f.sev = 'Low';
@@ -707,6 +739,8 @@ async function runAudit(dir, url, opts = {}) {
     filesScanned: code.filesScanned,
     disclosure: !!opts.disclosure, // the disclosure pass ran (private details, other projects' names, AI trail, local paths)
     filesTruncated: code.truncated,
+    notRead: [...code.notRead, ...(code.truncated ? ['Stopped at the file limit: the rest of a big folder was not read'] : [])],
+    partly: code.notRead.length > 0 || code.truncated === true,
     ...summarise(findings),
     findings,
     setAside: j.setAside,

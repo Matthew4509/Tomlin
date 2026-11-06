@@ -82,12 +82,17 @@ function whenParts(ms) {
 function fmtUp(s) { const d = Math.floor(s / 86400), hr = Math.floor(s % 86400 / 3600); return d ? d + ' day' + (d > 1 ? 's' : '') + ' ' + hr + ' h' : hr + ' h ' + Math.floor(s % 3600 / 60) + ' min'; }
 const tokensCounting = () => stats && stats.tokensBusy && !stats.tokensAt;
 
-function auditLabel(a) {
+// `updated` (ms) is when the project's files last changed: an audit older than that no longer covers what is there
+// now, so its label says "changed since" (it never turns a fault into a pass, only a pass into a doubt).
+function auditLabel(a, updated) {
   if (!a) return null;
   const c = a.counts || {}, when = fmtWhen(Date.parse(a.ranAt));
-  if (c.Critical || c.High) return { cls: 'a-bad', text: '▲ ' + [c.Critical && c.Critical + ' Critical', c.High && c.High + ' High'].filter(Boolean).join(', '), when };
-  if (c.Medium) return { cls: 'a-warn', text: '■ ' + c.Medium + ' Medium', when };
-  return { cls: 'a-ok', text: '✓ Passed', when };
+  const stale = Number(updated) > Date.parse(a.ranAt) + 60000;
+  const mark = t => stale ? t + ' · changed since' : t;
+  if (c.Critical || c.High) return { cls: 'a-bad', stale, text: mark('▲ ' + [c.Critical && c.Critical + ' Critical', c.High && c.High + ' High'].filter(Boolean).join(', ')), when };
+  if (c.Medium) return { cls: 'a-warn', stale, text: mark('■ ' + c.Medium + ' Medium'), when };
+  if (a.partly === true) return { cls: 'a-warn', stale, text: mark('◐ Passed, partly checked'), when };
+  return stale ? { cls: 'a-warn', stale, text: '✓ Passed · changed since: scan again', when } : { cls: 'a-ok', stale, text: '✓ Passed', when };
 }
 
 // ---- Connection lost. The page stays open when TOMLIN stops; a bar over every page and a Reconnect item at

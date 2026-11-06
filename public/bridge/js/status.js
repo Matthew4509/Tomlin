@@ -100,7 +100,7 @@ function renderPC() {
 function renderAudits() {
   const aud = rows.filter(r => r.audit).sort((a, b) => Date.parse(b.audit.ranAt) - Date.parse(a.audit.ranAt));
   $('audit-list').replaceChildren(...(aud.length ? aud.map(r => {
-    const l = auditLabel(r.audit);
+    const l = auditLabel(r.audit, r.updated);
     return h('div', { class: 'set-row' }, icon(0xEA18), h('div', { class: 'txt' }, h('b', null, r.name), h('span', null, l.when + (r.audit.url ? ' · code + ' + r.audit.url : ' · code') + (r.audit.liveUrl ? ' + live ' + hostOf(r.audit.liveUrl) : r.audit.url ? '' : ' only'))),
       h('span', { class: l.cls, style: 'font-weight:600;font-size:13px' }, l.text), h('button', { class: 'btn', type: 'button', onclick: () => showLastAudit(r) }, 'Open'));
   }) : [h('div', { class: 'set-row' }, h('div', { class: 'txt' }, h('b', null, 'No audits yet'), h('span', null, 'Run one from a project\'s … menu › Scan app.')))]));

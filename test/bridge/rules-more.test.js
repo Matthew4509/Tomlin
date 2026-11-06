@@ -22,6 +22,8 @@ const PAIRS = [
   ['ZIP-001', 'unpack.php', `<?php\n$z = new ZipArchive; $z->open($file);\n$z->extractTo($dest);\n`,
     `<?php\n$z = new ZipArchive; $z->open($file);\nfor ($i = 0; $i < $z->numFiles; $i++) { if ($z->statIndex($i)['size'] > LIMIT) exit; }\n$z->extractTo($dest);\n`],
   ['ZIP-002', 'inflate.php', `<?php\n$data = gzdecode($blob);\n`, `<?php\n$data = gzdecode($blob, 10000000);\n`],
+  ['KEY-002', 'public/app.js', 'const k = "sb_secret_' + 'Ab3dE6gH9jK2mN5pQ8";\n', 'const k = "sb_secret_example_0123456789";\n'],
+  ['KEY-002', 'public/f11.js', 'const k = "sb_secret_' + 'Ab3dE6gH9jK2mN5pQ8"; // e.g. sb_secret_example\n', 'const k = "sb_secret_xxxxxxxxxxxxxxxxxx";\n'],
   ['UPL-002', 'docs.php', `<?php\nif (!isset($_FILES['doc'])) { $err = 'Pick a file first.'; }\n`,
     `<?php\nif ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 && !$_FILES) { http_response_code(413); }\nelseif (!isset($_FILES['doc'])) { $err = 'Pick a file first.'; }\n`],
   ['UPL-003', 'store.php', `<?php\nmove_uploaded_file($t, $target);\n$type = mime_content_type($target);\nif ($type !== 'image/png') unlink($target);\n`,

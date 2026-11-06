@@ -541,6 +541,7 @@ export type JobEvent = { at: string } & (
   | { type: 'mark'; n: number; status: string; left: number }
   | { type: 'edit'; steps: number }
   | { type: 'addfix'; n: number }
+  | { type: 'verify'; ok: boolean; rounds: number; added?: number; halted?: boolean }
   | { type: 'tests'; ok: boolean; label: string }
   | { type: 'review'; n: number; ok: boolean | null; problems: number; notes: string[] }
   | { type: 'report'; path: string }
@@ -649,6 +650,7 @@ export function roomLines(events: JobEvent[], job: Job, staff: Person[]): RoomLi
         break;
       case 'edit': lines.push(you(e.at, `Changed the plan: now ${e.steps} step${e.steps === 1 ? '' : 's'}.`)); break;
       case 'addfix': lines.push(mgr(e.at, `Added step ${e.n + 1} to fix the failing tests.`, cap(whoFor('coder', staff).name))); break;
+      case 'verify': lines.push(mgr(e.at, e.ok ? 'Ran the project and asked for every page and form: no faults found.' : e.halted ? `Ran the project: still faulty after ${e.rounds} fix round${e.rounds === 1 ? '' : 's'}. Stopped to ask you.` : `Ran the project: found faults and added ${e.added ?? 0} step${e.added === 1 ? '' : 's'} to fix them (round ${e.rounds}).`, e.halted ? 'You' : null, e.halted === true)); break;
       case 'tests': lines.push(mgr(e.at, `The tests ${e.ok ? 'passed' : 'failed'} (${e.label}).`, e.ok ? null : 'You', !e.ok)); break;
       case 'review': lines.push(by('reviewer', e.at, e.ok === true ? `Read step ${e.n + 1}: it looks right.` : e.ok === false ? `Read step ${e.n + 1}: found ${e.problems} problem${e.problems === 1 ? '' : 's'}. See the step in Jobs.` : `Read step ${e.n + 1} but gave no clear answer.`, 'You')); break;
       case 'report': lines.push(by('reviewer', e.at, `Wrote the end-of-job report (${e.path}). Please read it: a model wrote it.`, 'You', true)); break;

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { log } from './log.ts';
+import { takeWaitDoor } from './waitdoor.ts';
 import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
 import { refreshTray } from './trayfresh.ts';
@@ -91,7 +92,9 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
 const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, todoGet);
 const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, todoPost);
 
-const server = createServer(async (req, res) => {
+// The holding page's socket (src/waitdoor.ts) when it is listening, so the port never goes quiet; else a new one.
+const server = takeWaitDoor() ?? createServer();
+server.on('request', async (req, res) => {
   try {
     // Only this PC, by its own address (a web page cannot reach in by another name), and a browser page from
     // another site cannot post here. Programs on this PC (no Origin header) can use the API.
@@ -168,8 +171,8 @@ server.on('error', (error: NodeJS.ErrnoException) => {
   process.exit(error.code === 'EADDRINUSE' ? ALREADY_RUNNING : 1);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  const clear = async () => images.gallery.clearDrafts((await store.settings()).draftDays).catch(() => 0);
+const started = () => {
+  const clear =async () => images.gallery.clearDrafts((await store.settings()).draftDays).catch(() => 0);
   void clear();
   setInterval(clear, 3_600_000).unref();
   console.log(`TOMLIN ${VERSION} is running at http://127.0.0.1:${PORT}  (nothing is loaded until you press Connect; ${process.env.TOMLIN_TRAY === '1' ? 'quit it from its icon by the clock' : 'close this window to stop'})`);
@@ -203,4 +206,6 @@ server.listen(PORT, '127.0.0.1', () => {
       .then(r => r === 'built' && console.log('TOMLIN\'s program (by the clock) was built again for this version: the new one runs from the next start.'))
       .catch(error => console.error(`TOMLIN's program (by the clock) could not be built again: ${(error as Error).message}`));
   }
-});
+};
+if (server.listening) started();
+else server.listen(PORT, '127.0.0.1', started);

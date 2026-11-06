@@ -66,6 +66,7 @@ export function localBrain(label: string, runner?: Pane): Brain {
   const brain: Brain = {
     label,
     ctx: runner ? d.runOn(runner).ctx : d.runNow().ctx,
+    model: () => seat().view.model ?? null,
     chat,
     ask: (system, user, maxTokens, onText, signal, opts) => chat([{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, onText, signal, opts),
     last: null,

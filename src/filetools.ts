@@ -5,15 +5,15 @@
 // test/filetools.test.ts; the model's side (calls and results) is in src/engine.ts streamChat.
 import type { ToolDef } from './webtools.ts';
 import * as ws from './workspace.ts';
-import { paramsB } from './staff.ts';
+import { paramsB, withFileTools } from './staff.ts';
 
 /** Offered to a model of 4B or more (or of a size its name does not tell): a 0.8B offered them stopped answering what was asked. */
 export const FILES_MIN_B = 4;
 export const filesFit = (model: string): boolean => (paramsB(model) ?? FILES_MIN_B) >= FILES_MIN_B;
 
-/** The person's answer to "may this chat use your files?". */
-export type Permit = 'once' | 'thread' | 'no';
-export const cleanPermit = (x: unknown): Permit | null => (x === 'once' || x === 'thread' || x === 'no' ? x : null);
+/** The person's answer to "may this chat use your files?" (src/permits.ts: always is Auto in Settings). */
+export { cleanPermit, type Permit } from './permits.ts';
+import type { Permit } from './permits.ts';
 
 export const FILE_TOOLS: ToolDef[] = [
   {
@@ -53,11 +53,14 @@ export const FILES_LINE = 'You can work on the person\'s files yourself, in the 
 
 const DENIED = 'The person did not allow file access for this answer, so nothing was read or saved. Answer without it, and say they can allow it next time.';
 
-/** The turns with FILES_LINE at the end of the system turn (one is put first when there is none). */
+/**
+ * The turns with FILES_LINE at the end of the system turn (one is put first when there is none), and a hire's lines that
+ * send code to a block for the Save button turned to save_file (src/staff.ts withFileTools).
+ */
 export function withFilesLine<T extends { role: string; content: string }>(turns: T[]): T[] {
   const i = turns.findIndex(t => t.role === 'system');
   if (i < 0) return [{ role: 'system', content: FILES_LINE } as T, ...turns];
-  return turns.map((t, j) => (j === i ? { ...t, content: t.content ? `${t.content}\n\n${FILES_LINE}` : FILES_LINE } : t));
+  return turns.map((t, j) => (j === i ? { ...t, content: t.content ? `${withFileTools(t.content)}\n\n${FILES_LINE}` : FILES_LINE } : t));
 }
 
 /** What a file call is doing, for the answer's place while it runs. */
@@ -99,7 +102,7 @@ export class FileTurn {
     if (this.allowed !== null) return Promise.resolve(this.allowed);
     this.asking ??= (async () => {
       const p = this.ask ? await this.ask(what).catch((): Permit => 'no') : 'no';
-      if (p === 'thread') await this.onThread?.();
+      if (p === 'thread' || p === 'always') await this.onThread?.();
       return (this.allowed = p !== 'no');
     })();
     return this.asking;

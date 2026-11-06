@@ -21,7 +21,7 @@ function lastAudit(id) {
   a.findings = Array.isArray(a.findings) ? a.findings.filter(f => f && typeof f === 'object' && typeof f.rule === 'string' && typeof f.where === 'string' && typeof f.sev === 'string') : [];
   return a;
 }
-function auditSummary(a) { return a && { ranAt: a.ranAt, counts: a.counts, verdict: a.verdict, url: a.url, liveUrl: a.liveUrl || null }; }
+function auditSummary(a) { return a && { ranAt: a.ranAt, partly: a.partly === true, counts: a.counts, verdict: a.verdict, url: a.url, liveUrl: a.liveUrl || null }; }
 
 // What the disclosure pass looks for in project p: the person's own list, this PC's details, and the names of every
 // other project on the list (and the Bridge's own folder), but not p's own names.
@@ -80,7 +80,7 @@ async function auditProject(p, target) {
   try {
     const opts = { skip: p.auditSkip, skipOwn: p.auditSkipOwn, include: p.auditInclude, judged: judgedFor(p), notes: ownNotes(p), disclosure: disclosureContext(p), ...(p.liveUrl ? { liveUrl: p.liveUrl, ...liveOpts(p.liveUrl) } : {}) };
     const a = withRecords(p, await auditOffThread(p.dir, target, opts));
-    fs.writeFileSync(file(p.id), JSON.stringify(a, null, 2));
+    require('./settings').saveJson(file(p.id), a);
     return a;
   } finally { scanning.delete(k); }
 }
@@ -94,7 +94,7 @@ function rejudge(p) {
   const j = judged.applyJudged(all, judgedFor(p));
   const out = withRecords(p, { ...a, findings: j.findings, setAside: j.setAside, ...summarise(j.findings) });
   delete out.accepted;
-  fs.writeFileSync(file(p.id), JSON.stringify(out, null, 2));
+  require('./settings').saveJson(file(p.id), out);
   return out;
 }
 

@@ -9,7 +9,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, statfs, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -285,6 +285,23 @@ export async function backup(home: Home, label: string, o: { forOtherPc?: boolea
 /** In a backup that left out links: which ones (taken out again when it is put back). */
 export const LINKS_NOTE = 'left-out-links.json';
 
+/** The Max mode weight cache in data/ (src/maxlend.ts): model weights kept for lending, rebuilt when needed. Never in a backup. */
+export const MAX_CACHE = 'max-cache';
+
+/** Kept free on the drive after a backup, so a backup never fills it (Windows and TOMLIN's own saves need room). */
+export const BACKUP_SPARE = 2 * 2 ** 30;
+
+/**
+ * Why a backup of `need` bytes (the files before zipping, an upper bound for the zip) is not started with `free` bytes
+ * free on the backups drive, or null when it fits (6 Nov slow-start plan, fix 6: say so and skip, never fill the drive).
+ * An unknown `free` (the drive could not be read) does not stop it.
+ */
+export function noRoomWhy(need: number, free: number | null): string | null {
+  if (free === null || free >= need + BACKUP_SPARE) return null;
+  const gb = (n: number) => `${(Math.max(0, n) / 2 ** 30).toFixed(1)} GB`;
+  return `there is not enough free space on the drive for it: about ${gb(need + BACKUP_SPARE)} is needed and ${gb(free)} is free`;
+}
+
 /** The same as `backup`, and `links`: the links and junctions in data/, which are not followed, so what they lead to is not in the zip. */
 export async function backupSaying(home: Home, label: string, o: { forOtherPc?: boolean } = {}): Promise<{ name: string; links: string[] }> {
   await mkdir(home.backups, { recursive: true });
@@ -302,9 +319,11 @@ export async function backupSaying(home: Home, label: string, o: { forOtherPc?: 
     // junction is not followed (data/ holds none of its own).
     const top = new Set(o.forOtherPc ? ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE] : []);
     const { items, links } = await listFolder(home.data, (rel, dir) => {
-      return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || (!rel.includes('/') && top.has(rel));
+      return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || rel === MAX_CACHE || (!rel.includes('/') && top.has(rel));
     });
     leftOut = links;
+    const noRoom = noRoomWhy(items.reduce((n, it) => n + (it.size ?? 0), 0), await statfs(home.backups).then(s => s.bavail * s.bsize, () => null));
+    if (noRoom) throw new Error(noRoom);
     if (links.length) items.push({ name: LINKS_NOTE, data: Buffer.from(JSON.stringify({ links }, null, 1)) });
     if (o.forOtherPc) {
       // settings.json goes in without the keys, and a mark says what was left out.
@@ -392,7 +411,7 @@ async function swapData(home: Home, fresh: string): Promise<void> {
  * old goes, unless the new data brought its own.
  */
 async function carryKept(old: string, data: string): Promise<void> {
-  for (const rel of [HOSTING.split('/'), ...NOT_ELSEWHERE.map(f => [f])]) {
+  for (const rel of [HOSTING.split('/'), [MAX_CACHE], ...NOT_ELSEWHERE.map(f => [f])]) {
     const from = join(old, ...rel);
     const to = join(data, ...rel);
     if (!existsSync(from) || existsSync(to)) continue;
@@ -685,6 +704,13 @@ export async function prepare(home: Home, root: string, appVersion: string, star
     const sources = hasOwnData(home) ? [] : findSources(root, home);
     if (sources.length) return { state: 'offer', sources };
     await writeVersion(home, { ...v, offer: undefined });
+  }
+  if (newer(v.app, appVersion)) {
+    // An older TOMLIN on data a newer one used: no backup (the newer one already kept one before it used the data), and
+    // the data stays marked as the newer one's, so going back to it is not a version change either. Before this, each
+    // switch between versions made another full backup before localhost answered (12 GB, about 7 minutes on a test PC).
+    const note = `TOMLIN ${appVersion} is older than the version that last used your data (${v.app}), so no backup was made. Start ${v.app} or newer when you can.`;
+    return { state: 'ready', note, noteTitle: 'Your data' };
   }
   if (v.app !== appVersion) {
     // A new version (or an older one started again) uses this data for the first time: keep a copy first.

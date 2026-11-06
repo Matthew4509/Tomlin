@@ -29,6 +29,7 @@ import * as keep from '../keep.ts';
 import { LOCK_FILE, releaseHome, takeHomeOrRepair } from '../onecopy.ts';
 import { HfList } from '../hflist.ts';
 import { buildId, NEXT_COPY_FILE, RESTART_INTO } from '../update.ts';
+import { openWaitDoor } from '../waitdoor.ts';
 
 export const staffId = (v: unknown) => (typeof v === 'string' && v.startsWith('staff:') && staff.get(v.slice(6)) ? v : null);
 /** What the chat with this PC's own assistant is called until it is given a name: the host (it is not one of the staff). */
@@ -84,6 +85,9 @@ export async function restartInto(dir: string): Promise<void> {
   await writeFile(join(ROOT, NEXT_COPY_FILE), dir);
   setTimeout(() => process.exit(RESTART_INTO), 1500).unref();
 }
+// From here the start may take minutes (a new version's backup, an import, a restore): a holding page answers on the
+// port meanwhile, and src/server.ts answers on the same socket once every part is in place (src/waitdoor.ts).
+await openWaitDoor(PORT);
 export const ready = await keep.prepare(HOME, ROOT, VERSION, {
   // "Start TOMLIN when this PC starts" pointed at the copy imported from: it now starts this one (the tick meant the app, not the folder).
   repoint: async from => (await autostart(from).on()) && (await startupOf.set(true), true),

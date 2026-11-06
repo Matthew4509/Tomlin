@@ -146,10 +146,11 @@ test('data already in the home (a test copy) is adopted without a question, afte
     // The note and its heading go together once the page has shown them.
     await keep.noteShown(w.home);
     assert.equal(keep.readVersion(w.home)?.noteTitle, undefined);
-    // Starting an older copy again is not called an update.
+    // Starting an older copy again is not called an update, and makes no backup (test/startup-backup.test.ts).
     const back = await keep.prepare(w.home, w.root, '2.0.27');
-    assert.equal(back.state === 'ready' ? back.noteTitle : 'x', undefined);
-    assert.match(back.state === 'ready' ? back.note ?? '' : '', /TOMLIN 2\.0\.27 is using your data for the first time; the data as 2\.0\.28 left it/);
+    assert.equal(back.state === 'ready' ? back.noteTitle : 'x', 'Your data');
+    assert.match(back.state === 'ready' ? back.note ?? '' : '', /TOMLIN 2\.0\.27 is older than the version that last used your data \(2\.0\.28\), so no backup was made/);
+    assert.equal((await keep.listBackups(w.home)).length, 2);
   } finally {
     await rm(w.top, { recursive: true, force: true });
   }

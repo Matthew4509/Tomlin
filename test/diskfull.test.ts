@@ -75,7 +75,9 @@ test('a full disk: each save says the disk is full, the server keeps answering, 
     // A save that was refused does not show as done either: not in the list, not in the team, not in the settings.
     assert.equal((JSON.parse(during) as { chats: unknown[] }).chats.length, 1, 'only the chat made before');
     assert(!JSON.stringify(await (await fetch(`${base}/api/staff`)).json()).includes('Ivo'), 'the refused hire is on the team');
-    assert(!JSON.stringify(await (await fetch(`${base}/api/pc?id=here`)).json()).includes('250'), 'the refused power setting shows');
+    // Check the field itself: the page also carries live memory and card numbers, where "250" turns up by chance.
+    const pc = (await (await fetch(`${base}/api/pc?id=here`)).json()) as { power?: { watts: number | null } };
+    assert.notEqual(pc.power?.watts, 250, 'the refused power setting shows');
     assert(!exited, 'the server stopped: ' + said.slice(-2000));
     // No half-written copy left behind by a save that failed.
     assert.deepEqual(filesIn(home).filter(f => /\.tmp$/i.test(f)), []);

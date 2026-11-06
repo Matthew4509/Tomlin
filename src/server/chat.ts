@@ -25,7 +25,8 @@ import { keepFirstAnswer, saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
 import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, type ToolUse } from '../webtools.ts';
-import { FILE_ROUNDS, FILE_TOOLS, FileTurn, cleanPermit, fileCallWords, filesFit, isFileTool, withFilesLine, type Permit } from '../filetools.ts';
+import { FILE_ROUNDS, FILE_TOOLS, FileTurn, fileCallWords, filesFit, isFileTool, withFilesLine } from '../filetools.ts';
+import { Gate, cleanPermit, deniedWords, type Kind, type Permit } from '../permits.ts';
 import { chatFilesRoot } from './places.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Pane } from '../pane.ts';
@@ -462,6 +463,36 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   };
   // llama.cpp streams a continued answer's start back first: only what comes after it is new.
   const fresh = (text: string) => (before && text.startsWith(before) ? text.slice(before.length) : text);
+  // Permissions (src/permits.ts): a Manual kind is asked on a card the first time in this answer; Auto (in Settings, or
+  // for this thread) is not. The card shows where every kind stands; up to 10 minutes, Stop is a no.
+  const perms = { ...(await store.settings()).permissions };
+  const threadOk: Record<Kind, boolean> = { files: info?.files === true, web: info?.webOk === true };
+  let filesFolder = '';
+  let webNo = '';
+  const gate = new Gate({
+    allowed: k => perms[k] === 'auto' || threadOk[k],
+    ask: (kind, what) => new Promise<Permit>(resolve => {
+      const done = (p: Permit) => {
+        clearTimeout(timer);
+        if (live.permit === done) live.permit = null;
+        resolve(p);
+      };
+      const timer = setTimeout(() => done('no'), 10 * 60_000);
+      ac.signal.addEventListener('abort', () => done('no'), { once: true });
+      live.permit = done;
+      holdNoMore();
+      send('permit', { kind, who: member ? member.name.split(/s+/)[0] : 'This chat', what, folder: kind === 'files' ? filesFolder : '', perms, thread: threadOk });
+    }),
+    keep: async (k, p) => {
+      if (p === 'always') {
+        perms[k] = 'auto';
+        await store.saveSettings({ permissions: { ...(await store.settings()).permissions, [k]: 'auto' } });
+      } else {
+        threadOk[k] = true;
+        await chats.mark(openId, k === 'files' ? { files: true } : { webOk: true });
+      }
+    },
+  });
   try {
     if (target && !target.here) {
       // On a paired PC: the whole conversation goes over, the answer streams back (that PC cuts a repeating answer and
@@ -478,7 +509,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         await addOwed(owe);
       }
       // Web on: that PC runs the web tools itself, with the addresses given here and the room in the context.
-      const webThere = webAway && !webWhy ? { seed: webSeed, perCall: Math.max(1500, Math.min(12_000, Math.floor(Math.max(2000, (built.room - built.used) * 0.7) / 3))), total: Math.max(2000, Math.min(60_000, Math.floor((built.room - built.used) * 0.7))) } : undefined;
+      const webAllowed = webAway && !webWhy && (await gate.permitted('web', `search the web and read pages, on ${target.pc}`));
+      if (webAway && !webWhy && !webAllowed) webNo = 'Web was not allowed for this answer, so it answered from what it knows.';
+      const webThere = webAllowed ? { seed: webSeed, perCall: Math.max(1500, Math.min(12_000, Math.floor(Math.max(2000, (built.room - built.used) * 0.7) / 3))), total: Math.max(2000, Math.min(60_000, Math.floor((built.room - built.used) * 0.7))) } : undefined;
       try {
         shown = fresh(await target.brain.chat(turns, answerTokens, text => show((shown = fresh(text))), inner.signal, { ...askOpts, ...(owe ? { rid: owe.rid } : {}), ...(webThere ? { web: webThere } : {}) }));
         if (target.brain.tools?.length) awayTools = target.brain.tools;
@@ -511,19 +544,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       // The model may also list, read and save files in the chat's folder when it can call tools, once the person allows
       // it (src/filetools.ts): asked in the chat the first time, up to 10 minutes; Stop is a no.
       const filesRoot = mode === 'message' && filesFit(runner.view.model ?? '') && !(await toolsWhy(runner)) ? await chatFilesRoot(info?.project) : null;
-      let filesThread = info?.files === true;
-      const askFiles = (what: string) => new Promise<Permit>(resolve => {
-        const done = (p: Permit) => {
-          clearTimeout(timer);
-          if (live.permit === done) live.permit = null;
-          resolve(p);
-        };
-        const timer = setTimeout(() => done('no'), 10 * 60_000);
-        ac.signal.addEventListener('abort', () => done('no'), { once: true });
-        live.permit = done;
-        holdNoMore();
-        send('permit', { who: member ? member.name.split(/\s+/)[0] : 'This chat', what, folder: filesRoot });
-      });
+      if (filesRoot) filesFolder = filesRoot;
       const ask = () => {
         // Asked again (a smaller context, or no prefill): the web is used afresh, and only that ask's use is kept.
         // What it is doing, in the answer's place until the answer comes (a text held back is not sent after it).
@@ -534,10 +555,17 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         };
         const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: webPerCall, total: webTotal, onStatus: say }) : null;
         web = turnWeb;
-        const files = filesRoot ? new FileTurn(filesRoot, { perCall: webPerCall, allowed: filesThread, ask: askFiles, onThread: async () => void (filesThread = true, await chats.mark(openId, { files: true })) }) : null;
+        const files = filesRoot ? new FileTurn(filesRoot, { perCall: webPerCall, allowed: true }) : null;
         const tools = turnWeb || files ? {
           defs: [...(turnWeb ? WEB_TOOLS : []), ...(files ? FILE_TOOLS : [])],
-          run: (n: string, a: string, sig: AbortSignal, round: number) => (files && (isFileTool(n) || !turnWeb) ? files.run(n, a) : turnWeb!.run(n, a, sig, round)),
+          run: async (n: string, a: string, sig: AbortSignal, round: number) => {
+            const toFiles = !!files && (isFileTool(n) || !turnWeb);
+            const kind: Kind = toFiles ? 'files' : 'web';
+            if (!(await gate.permitted(kind, (toFiles ? fileCallWords(n, a) : callWords(n, a)).replace(/…$/, '')))) return deniedWords(kind);
+            return toFiles ? files!.run(n, a) : turnWeb!.run(n, a, sig, round);
+          },
+          // Web calls in one go run side by side: each site keeps its own pace, so pages on two sites take turns.
+          parallel: (n: string) => !isFileTool(n),
           rounds: files ? FILE_ROUNDS : WEB_ROUNDS,
           onCall: (n: string, a: string) => say(isFileTool(n) ? fileCallWords(n, a) : callWords(n, a)),
         } : undefined;
@@ -611,7 +639,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     // Came in whole, stopped, or failed there: nothing is owed any more.
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
-  const note = [looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, webWhy, thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : ''].filter(Boolean).join(' ');
+  const note = [looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, webWhy, webNo, thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : ''].filter(Boolean).join(' ');
   const tools = (web as WebTurn | null)?.uses ?? awayTools;
   // How full, whether it was layered (no "getting large" bar then), and a linked PC's read speed for the next turn
   // (from a big read only: a small one carries start-up time, src/layers.ts BIG_READ_TOKENS).
@@ -978,10 +1006,10 @@ export const chatPost: Routes = {
     return json(res, 200, { ok: true });
   },
   '/api/chat/permit': async ({ res, b }) => {
-    // {chatId, answer: once | thread | no}: the person's answer to "may this chat use your files?" (src/filetools.ts).
+    // {chatId, answer: once | thread | always | no}: the person's answer on the permission card (src/permits.ts).
     const live = liveAnswers.get(String(b.chatId ?? ''));
     const answer = cleanPermit(b.answer);
-    if (!answer) return json(res, 400, { error: 'Answer once, thread or no.' });
+    if (!answer) return json(res, 400, { error: 'Answer once, thread, always or no.' });
     if (!live?.permit) return json(res, 404, { error: 'That question has been answered or has ended.' });
     live.permit(answer);
     return json(res, 200, { ok: true });

@@ -129,10 +129,14 @@ export function installExe(version: string | null, env: NodeJS.ProcessEnv = proc
   return version && newer(version, c.version) ? null : exe;
 }
 
-/** What to ask first, from what is installed (null = nothing) and this version. `go: false` means stop after saying it. */
-export function firstQuestion(installed: string | null, mine: string): { text: string; yesDefault: boolean; go: boolean } {
+/**
+ * What to ask first, from what is installed (null = nothing) and this version. `go: false` means stop after saying it.
+ * `repair`: a yes runs Repair install instead of installing (6 Nov slow-start plan, fix 5: a zip older than the install
+ * said "Nothing was changed" and left a broken install as it was; Repair keeps the newer copy and fixes the rest).
+ */
+export function firstQuestion(installed: string | null, mine: string): { text: string; yesDefault: boolean; go: boolean; repair?: true } {
   if (!installed) return { text: `Install ${NAME} ${mine} for this Windows user?`, yesDefault: true, go: true };
-  if (newer(installed, mine)) return { text: `${NAME} ${installed} is installed, which is newer than this one (${mine}). Nothing was changed.`, yesDefault: false, go: false };
+  if (newer(installed, mine)) return { text: `${NAME} ${installed} is installed, which is newer than this one (${mine}), so it is not replaced. Check the installed ${NAME} ${installed} and repair what is wrong (it stays ${installed})?`, yesDefault: true, go: true, repair: true };
   if (installed === mine) return { text: `${NAME} ${mine} is already installed. Install it again (repair)?`, yesDefault: false, go: true };
   return { text: `${NAME} ${installed} is already installed. Update to ${mine}?`, yesDefault: true, go: true };
 }

@@ -69,7 +69,14 @@ test('the first question: install, update, repair, or a newer one already there 
   assert.equal(inst.firstQuestion('2.0.33', '2.0.34').yesDefault, true);
   assert.match(inst.firstQuestion('2.0.34', '2.0.34').text, /repair/);
   assert.equal(inst.firstQuestion('2.0.34', '2.0.34').yesDefault, false);
-  assert.equal(inst.firstQuestion('2.0.40', '2.0.34').go, false);
+  // A zip older than the install: not installed over it, but Repair is offered (it keeps 2.0.40).
+  const older = inst.firstQuestion('2.0.40', '2.0.34');
+  assert.equal(older.repair, true);
+  assert.equal(older.yesDefault, true);
+  assert.match(older.text, /2\.0\.40 is installed, which is newer than this one \(2\.0\.34\), so it is not replaced\..*repair.*it stays 2\.0\.40/);
+  assert.equal(inst.firstQuestion('2.0.34', '2.0.34').repair, undefined);
+  assert.equal(inst.firstQuestion('2.0.33', '2.0.34').repair, undefined);
+  assert.equal(inst.firstQuestion(null, '2.0.34').repair, undefined);
   assert.equal(inst.answer('', true), true);
   assert.equal(inst.answer(' Y ', false), true);
   assert.equal(inst.answer('no', true), false);

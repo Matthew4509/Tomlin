@@ -6,7 +6,7 @@ import { freemem } from 'node:os';
 import { join } from 'node:path';
 import { readData, updateData } from '../atomic.ts';
 import { cacheBytes, expertWeights, modelShape } from '../gguf.ts';
-import { runFinder, request, timingsOf, type FinderRun } from '../finderrun.ts';
+import { finderHolds, runFinder, request, timingsOf, type FinderRun } from '../finderrun.ts';
 import { cardsNow, estimateMinutes, finderCards, setupsFor, type ModelFacts, type NowFacts, type PcFacts, type Setup } from '../speedfinder.ts';
 import { guessersFor, type Listed } from '../runset.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
@@ -164,8 +164,19 @@ const lastView = (k: Kept) => ({ at: k.at, size: k.size, run: k.run, applied: k.
 /** True while a test runs here: chats and linked PCs wait, with this said. */
 export const finderBusy = () => (job && !job.run?.now?.startsWith('Putting') && (!job.run || job.run.state === 'running') ? `a speed test of ${job.name} is running here${job.by !== 'this PC' ? ` (asked by "${job.by}")` : ''}` : '');
 
-/** The model under test now (it is unloaded and loaded again between tries), or null. */
-export const finderTesting = () => (job && (!job.run || job.run.state === 'running') ? job.model : null);
+/** Models unloaded for a moment and being loaded again (putBack, reload). */
+const reloading = new Set<string>();
+async function whileReloading<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  reloading.add(id);
+  try {
+    return await fn();
+  } finally {
+    reloading.delete(id);
+  }
+}
+
+/** The model under test now (it is unloaded and loaded again between tries), or one being put back or reloaded; or null. */
+export const finderTesting = () => finderHolds(job, reloading);
 
 export function jobView() {
   return job ? { model: job.model, name: job.name, size: job.size, by: job.by, started: job.started, run: job.run } : null;
@@ -237,12 +248,14 @@ export async function start(id: string, size: 'quick' | 'full', contexts: number
       },
       ramFit: () => (freemem() >= 2 * GB ? 'ok' : freemem() >= 0.5 * GB ? 'tight' : 'no'),
       async putBack() {
-        // Every runner with this model, a try that failed to start too (its "failed" would stay in the top bar).
-        for (const p of runners.filter(r => r.view.model === id)) await p.disconnect();
-        if (wasLoaded) {
-          const c = await connectChat(id, asked, threads);
-          if ('error' in c) throw new Error(c.error);
-        }
+        await whileReloading(id, async () => {
+          // Every runner with this model, a try that failed to start too (its "failed" would stay in the top bar).
+          for (const p of runners.filter(r => r.view.model === id)) await p.disconnect();
+          if (wasLoaded) {
+            const c = await connectChat(id, asked, threads);
+            if ('error' in c) throw new Error(c.error);
+          }
+        });
       },
     },
   }).then(async r => {
@@ -305,9 +318,11 @@ async function reload(id: string): Promise<string> {
   if (!p || p.view.state !== 'connected') return '';
   if (answeringBusy(p)) return ' It is answering now: it uses this from its next load.';
   const s = await store.settings();
-  await p.disconnect();
-  const c = await connectChat(id, s.chat.asked, s.chat.threads);
-  return 'error' in c ? ` It could not be loaded again: ${c.error}` : ' Loading it again with this setup.';
+  return whileReloading(id, async () => {
+    await p.disconnect();
+    const c = await connectChat(id, s.chat.asked, s.chat.threads);
+    return 'error' in c ? ` It could not be loaded again: ${c.error}` : ' Loading it again with this setup.';
+  });
 }
 
 // ---- Routes ----

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FILE_TOOLS, FileTurn, fileCallWords, filesFit, withFilesLine, type Permit } from '../src/filetools.ts';
+import { CODE_BY_TOOLS, CODE_IN_CHAT, ROLES, staffSystem, type StaffMember } from '../src/staff.ts';
 
 const run = (t: FileTurn, name: string, args: unknown) => t.run(name, JSON.stringify(args));
 const allowed = { perCall: 4000, allowed: true };
@@ -109,4 +110,21 @@ test('the hire is told it can use the workspace, in its system turn', () => {
   assert.match(withFilesLine([{ role: 'user', content: 'hi' }])[0].content, /save_file/);
   assert.equal(fileCallWords('read_file', '{"path":"app.js"}'), 'Reading app.js…');
   assert.equal(fileCallWords('save_file', '{"path":"app.js"}'), 'Saving app.js…');
+});
+
+test('with the file tools on, no hire is told to put a file in a code block for the Save button', () => {
+  // Told both (a block for Save, and save_file), Qwen3.6 35B wrote save_file(...) as text in a ```js block and nothing
+  // was saved (6 Nov 2026).
+  for (const role of ROLES.filter(r => !r.kind)) {
+    const card = staffSystem({ id: 'rosa', name: 'Rosa', role: role.id, level: 'default', model: 'm.gguf' } as StaffMember);
+    const sent = withFilesLine([{ role: 'system', content: card }, { role: 'user', content: 'Make an app' }])[0].content;
+    assert.ok(!sent.includes(CODE_IN_CHAT), role.id);
+    assert.doesNotMatch(sent, /Save button|```|code in a code block/, role.id);
+    if (card) assert.ok(sent.includes(CODE_BY_TOOLS), role.id);
+  }
+  const coder = staffSystem({ id: 'sam', name: 'Sam', role: 'coder', level: 'default', model: 'm.gguf' } as StaffMember);
+  assert.ok(coder.includes(CODE_IN_CHAT) && coder.includes('```js'), 'without the tools, code still goes in a block');
+  const sent = withFilesLine([{ role: 'system', content: coder }])[0].content;
+  assert.match(sent, /call the save_file tool with the whole file, then say/);
+  assert.match(sent, /- Saved index\.html and app\.js\./);
 });

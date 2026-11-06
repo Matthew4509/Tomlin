@@ -414,17 +414,20 @@ export async function searchWeb(query: string, s: SearchSetting, signal: AbortSi
 /**
  * How hard this PC may ask the web. A site's firewall can ban an address for a burst of requests, and every PC at home
  * shares one address, so the tools go about as fast as a person clicking through: a page on a site 5 s after the last
- * one there (plus up to 2 s at random), a search 10 s after the last search, other sites without a wait. A site that
+ * one there (1 to 5 s at random; Settings, Permissions can turn the wait off), a search 10 s after the last search, other
+ * sites without a wait (calls in one go run side by side, so pages on two sites take turns). A site that
  * says "too many requests" or "busy" (429, 503) is waited for once, as long as it asks up to a minute (10 s when it does
- * not say). An answer opens at most 3 pages in one go and 8 in all.
+ * not say). An answer opens at most 6 pages in one go and 20 in all.
  */
-export const PACE = { page: 5000, jitter: 2000, search: 10_000, waitMost: 60_000, waitDefault: 10_000, pagesPerRound: 3, pagesPerAnswer: 8 };
+export const PACE = { page: 1000, jitter: 4000, search: 10_000, waitMost: 60_000, waitDefault: 10_000, pagesPerRound: 6, pagesPerAnswer: 20 };
 
 /** When each site (and the search engine) may next be asked, for every chat, job step and linked PC's ask made here. */
 export class Pacer {
   private readonly next = new Map<string, number>();
   readonly gaps: { page: number; jitter: number; search: number };
   private readonly random: () => number;
+  /** The wait between pages on a site (Settings, Permissions: on unless turned off); searches always wait. */
+  delay = true;
 
   constructor(gaps: { page: number; jitter: number; search: number } = PACE, random = Math.random) {
     this.gaps = gaps;
@@ -446,8 +449,9 @@ export class Pacer {
     if ((this.next.get(key) ?? 0) < t) this.next.set(key, t);
   }
 
-  /** The wait after a page on a site: 5 s and up to 2 s more, so the reads do not tick like a clock. */
+  /** The wait after a page on a site: 1 s and up to 4 s more, so the reads do not tick like a clock (0 with the wait off). */
   pageGap(): number {
+    if (!this.delay) return 0;
     return this.gaps.page + Math.round(this.random() * this.gaps.jitter);
   }
 }
@@ -492,7 +496,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 // ---- One answer's use of the tools ----
 
 /** Rounds of tool calls in one answer before it is asked for with the tools off (a search, two pages, one more). */
-export const WEB_ROUNDS = 4;
+export const WEB_ROUNDS = 8;
 
 /** What a tool call is doing, for the answer's place while it runs: "Searching the web: “cuda 13”…", "Reading example.com…". */
 export function callWords(name: string, args: string): string {

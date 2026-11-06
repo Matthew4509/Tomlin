@@ -188,6 +188,10 @@ async function install() {
     say('Nothing was changed.');
     return 0;
   }
+  if (first.repair) {
+    say();
+    return repair();
+  }
   if (!(await closeRunning())) return 1;
   await runtimeCheck();
 

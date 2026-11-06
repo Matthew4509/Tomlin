@@ -43,7 +43,7 @@ const LIVE = { up: { mark: '●', text: 'Live', cls: 'l-up', word: 'Up' }, unsur
 const LIVE_NONE = { mark: '○', text: 'Not checked', cls: 'l-none', word: 'Not checked yet' };
 const hostOf = u => { try { return new URL(u).host; } catch { return String(u || ''); } };
 function liveLabel(r) { return r.liveUrl ? (r.live && LIVE[r.live.state]) || LIVE_NONE : null; }
-function liveTip(r) { return hostOf(r.liveUrl) + ': ' + (r.live ? r.live.reason + '\nChecked ' + fmtWhen(Date.parse(r.live.at)) : 'not checked yet'); }
+function liveTip(r) { return hostOf(r.liveUrl) + ': ' + (r.live ? r.live.reason + '\nChecked ' + fmtWhen(Date.parse(r.live.at)) + '\nLive means one availability request was answered: it does not show that logins or data work, or that alerts reach you.' : 'not checked yet'); }
 function liveChip(r) {
   const l = liveLabel(r);
   if (!l) return null;

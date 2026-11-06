@@ -7,6 +7,17 @@ import type { RunOptions } from './store.ts';
 
 const GB = 2 ** 30;
 
+/**
+ * The model the finder holds now: the one under test while its test runs, else one it has unloaded for a moment and is
+ * loading again (the put back after a test, or Go with this config / Undo). A node keeps its "loaded for a linked PC"
+ * mark on it meanwhile (src/jobrun/node.ts): without this, the gap between unload and load read as "gone", the mark was
+ * lost, and the model loaded again stayed for good, never dropped after 10 minutes and never making way (P1-4).
+ */
+export function finderHolds(job: { model: string; run: { state: string } | null } | null, reloading: ReadonlySet<string>): string | null {
+  if (job && (!job.run || job.run.state === 'running')) return job.model;
+  return reloading.values().next().value ?? null;
+}
+
 export interface FinderDeps {
   /** Loads the model with this setup (not saved). Seconds to load, or the runner's own words why not. */
   load: (run: RunOptions) => Promise<{ seconds: number } | { error: string }>;

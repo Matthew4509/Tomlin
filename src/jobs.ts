@@ -81,6 +81,8 @@ export interface Job {
   team?: Team;
   /** Web on for this job: its steps' model may search the web and read pages (src/webtools.ts). */
   web?: boolean;
+  /** Run and probe (src/verify.ts): the rounds used so far and the faults the last one found, so the same fault twice halts. */
+  verify?: { rounds: number; last: string[] };
 }
 
 /**
@@ -214,6 +216,7 @@ export function planSystem(existing: string[], workers = '', handed: string[] = 
     'STEP: short title\nROLE: coder or writer or artist or designer\nFILES: file names this step reads or changes, separated by commas (workspace paths such as src/app.js or blog/post.md; leave empty for a picture)\nBRIEF: what the worker must do, in two or three plain sentences, with every detail the worker needs, because the worker sees only this brief and those files\nCHECK: what a person can look at to know the step worked',
     'A file too long to write out whole is changed with find-and-replace blocks, so a step may name a long file; keep each step to one change in it.',
     'Order the steps so each one only needs what earlier steps made. Name the files in the plan so later steps can find them. When two steps must agree on a name (an element id, a function, a heading), write that exact name into both briefs, because a worker never sees the other worker\'s file. Use coder for code, writer for text, artist for a picture or scene, designer for an icon or logo.',
+    'Do not add a last step that only tests, only checks or only reviews: nothing is run inside a step, so such a step changes nothing and only costs time. Code checks every step\'s files as it is saved, and the person runs the tests afterwards.',
     existing.length ? `Files already in the workspace (you may plan to change them): ${existing.slice(0, 40).join(', ')}.` : 'The workspace has no files yet.',
     `Text the writer writes for people to read (chapters, articles, copy) is handed in under ${SPECIALISTS}/writer/, each file name starting with the date and time; pictures from the artist or designer go under ${SPECIALISTS}/images/.`,
     handed.length ? `Work the specialists have handed in, newest first (read these for what is done; the newest of each folder is the current one): ${handed.join(', ')}.` : '',
@@ -694,4 +697,119 @@ export function testFixStep(job: Job, label: string, output: string, workspaceFi
 function stripFence(body: string): string {
   const m = /^\s*```[\w+-]*\n([\s\S]*?)\n?```\s*$/.exec(body);
   return m ? m[1] : body;
+}
+
+// ---- Jobs that finish (6 Nov 2026, from the build test on the P2000) ----
+
+/** Every id the page's HTML sets, once each, in the order they appear. */
+export function pageIds(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/\bid\s*=\s*["']([^"'<>\s]+)["']/gi)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+/**
+ * For a step that changes a script or a style sheet but does not hold the page: the page's real ids, so the code looks
+ * up what exists (a step reads only its own files, and a script written without the page invents ids such as
+ * "chart-canvas" for a canvas the page calls "volume-chart"). Empty when the step holds a page, changes no script or
+ * style, or no page has an id. The list is cut so it never fills the context.
+ */
+export function pageNote(workspace: Record<string, string>, stepFiles: string[]): string {
+  const isPage = (p: string) => /\.html?$/i.test(p);
+  if (stepFiles.some(isPage) || !stepFiles.some(p => /\.(m?js|css)$/i.test(p))) return '';
+  const pages = Object.keys(workspace).filter(isPage).sort((a, b) => (/(^|\/)index\.html?$/i.test(a) ? 0 : 1) - (/(^|\/)index\.html?$/i.test(b) ? 0 : 1) || a.localeCompare(b));
+  const lines: string[] = [];
+  for (const p of pages) {
+    const ids = pageIds(workspace[p] ?? '');
+    if (ids.length) lines.push(`${p}: ${ids.join(', ')}`);
+  }
+  if (!lines.length) return '';
+  const body = lines.join('\n').slice(0, 1800);
+  return `The page's own ids (you may not change the page in this step; use only these ids for the page, and no other id):\n${body}`;
+}
+
+/** What a small context costs a long edit, said once when an answer was cut off or edits are needed. */
+export function contextAdvice(ctx: number): string {
+  if (ctx >= 16384) return '';
+  const now = budget(ctx).answer, bigger = budget(16384).answer;
+  return `The context here is ${ctx.toLocaleString()} tokens, so a step's answer can be about ${now.toLocaleString()} tokens. With 16,384 or more it is a third of the context (about ${bigger.toLocaleString()} at 16,384). In the model's run options, choose a bigger context for jobs with long files.`;
+}
+
+/** True when this try and the one before it both did nothing but send the files back unchanged: more tries will not help. */
+export function repeatsNoChange(problems: string[], before: string[]): boolean {
+  const none = (p: string[]) => p.length === 1 && p[0].startsWith('The answer changed nothing');
+  return none(problems) && none(before);
+}
+
+/** A plan made in a workspace that already holds files (an earlier job's pages) says so: the new job may change them. */
+export function workspaceNote(paths: string[]): string {
+  const mine = paths.filter(p => !p.startsWith('jobs/') && !p.endsWith('.bak'));
+  if (!mine.length) return '';
+  const shown = mine.slice(0, 5).join(', ') + (mine.length > 5 ? '…' : '');
+  return `This workspace already holds ${mine.length} file${mine.length === 1 ? '' : 's'} (${shown}). The job may build on or change them. For a new project, start it in its own folder, or clear them first.`;
+}
+
+/**
+ * The two-tries rule (the starter prompt in the Bridge, 6 Nov 2026: "If the same fix fails twice, stop.
+ * Explain the cause and what you've tried, and wait for me"). A step is tried this many times; a finished job is
+ * repaired this many rounds by running it (src/verify.ts). In the build tests a third try never rescued a step.
+ */
+export const STEP_TRIES = 2;
+export const VERIFY_ROUNDS = 2;
+
+/**
+ * What a change removed from a file: its top-level functions and classes (Python, JavaScript) and the program start
+ * (`if __name__ == "__main__"`). A repair that rewrites a long file can lose its ending; the step is sent back then.
+ */
+export function droppedDefinitions(before: string, after: string): string[] {
+  const names = (t: string) => {
+    const out = new Set<string>();
+    for (const m of t.matchAll(/^(?:export\s+)?(?:async\s+)?(?:def|class|function)\s+([A-Za-z_$][\w$]*)/gm)) out.add(m[1]);
+    if (/^if\s+__name__\s*==\s*['"]__main__['"]/m.test(t)) out.add('the program start (if __name__ == "__main__")');
+    return out;
+  };
+  const now = names(after);
+  return [...names(before)].filter(n => !now.has(n));
+}
+
+/**
+ * Keep going (6 Nov build tests: every stop needed a manual Continue): a step that stops on its checks is tried again
+ * by itself, at most this many times, and never when the same check fails twice (the two-tries rule).
+ */
+export const KEEP_GOING_STOPS = 2;
+
+/** True: try the stopped step again by itself. `earlier`: the blockers of this step's earlier stops in this run. */
+export function keepGoing(earlier: string[][], blockers: string[]): boolean {
+  if (earlier.length >= KEEP_GOING_STOPS) return false;
+  // "May already be done": a person decides (Mark done), another go only sends the same files back.
+  if (blockers.some(b => b.startsWith('It came back unchanged twice'))) return false;
+  const norm = (s: string) => s.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+  const last = earlier.at(-1)?.map(norm) ?? [];
+  return !blockers.some(b => last.includes(norm(b)));
+}
+
+/** The context a job step asks for on a local model (32,768 worked on every build test; 8,192 cut long edits off). */
+export const JOB_CTX = 32_768;
+const BIG_FILE_CHARS = 4_000;
+
+/**
+ * The context to reload a local model with before a step, or null to leave it: when it is under JOB_CTX, the step's
+ * biggest file is over 4,000 characters, and the bigger cache fits in free memory with 1 GB to spare.
+ */
+export function raiseContext(ctx: number, biggestFile: number, extraBytes: number, freeBytes: number): number | null {
+  if (ctx >= JOB_CTX || biggestFile <= BIG_FILE_CHARS) return null;
+  return extraBytes + 2 ** 30 <= freeBytes ? JOB_CTX : null;
+}
+
+/** How many tests a file holds: Python `def test_…` (in a class or not) and JavaScript `it(` / `test(` calls. */
+const countTests = (t: string): number =>
+  (t.match(/^[ \t]*(?:async\s+)?def\s+test_\w*/gm)?.length ?? 0) + (t.match(/(?:^|[^\w.$])(?:it|test)(?:\.only|\.skip)?\s*\(/g)?.length ?? 0);
+
+/**
+ * A change that leaves a file with fewer tests than it had: a small model can "fix" a failing test by deleting it (the
+ * blog self-repair, 6 Nov). Null when the file had none, or has as many or more.
+ */
+export function droppedTests(before: string, after: string): { before: number; after: number } | null {
+  const b = countTests(before), a = countTests(after);
+  return b > 0 && a < b ? { before: b, after: a } : null;
 }

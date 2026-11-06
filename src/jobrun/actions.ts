@@ -14,8 +14,9 @@ import { log } from '../log.ts';
 import { inScope } from '../meter.ts';
 import { type Send, d } from './shared.ts';
 import { chatHires, seatBrain, teamOf, workersFor } from './sizing.ts';
-import { addEvent, allJobs, clearWaiting, jobView, left, jobRoot, loadEvents, loadJob, loadWaiting, packetFront, projectCards, saveJob, saveWaiting, webFiles } from './jobfiles.ts';
+import { addEvent, allJobs, clearBeforeRepair, clearWaiting, jobView, left, jobRoot, loadBeforeRepair, loadEvents, loadJob, loadWaiting, packetFront, projectCards, saveBeforeRepair, saveJob, saveWaiting, webFiles } from './jobfiles.ts';
 import { acceptStep, doStep, reviewStep } from './steps.ts';
+import * as verify from '../verify.ts';
 
 let busy = false;
 /** A job action is running here (a step, Run the rest, a plan, tests, or a change to a plan being saved). */
@@ -124,6 +125,9 @@ async function planNow(a: { fromProject: Awaited<ReturnType<typeof projectCards>
     // The specialists' handed-in work is read from their folders, newest first (src/folders.ts); the rest as before.
     const handed = folders.handedIn(all);
     const listed = all.filter(f => !handed.some(h => h.path === f.path) && !f.path.endsWith('.bak'));
+    // A plan made beside an earlier job's pages says so: the new job may change them.
+    const held = folder ? '' : jobs.workspaceNote(listed.map(f => f.path));
+    if (held) st.send('stage', { text: held });
     const cards = fromProject ? fromProject.cards : null;
     const front = await packetFront('', brain.ctx, got.hire, goal, cards);
     // Every worker's limit per step and every file's size, so the planner can size the steps.
@@ -189,7 +193,7 @@ export async function runRest(res: ServerResponse, b: Record<string, unknown>) {
   const st = stream(res, { kind: 'run', jobId: first.id, goal: first.goal, n: null, title: '', role: null }, 'Another project is working now. Add this one to the queue: it starts by itself when that one is done.');
   if (!st) return;
   try {
-    await runSteps(first.id, b.review === true, st.send, st.signal, false);
+    await runSteps(first.id, b.review === true, st.send, st.signal, false, b.verify === true, b.keepGoing !== false);
   } finally {
     st.end();
   }
@@ -211,16 +215,108 @@ export async function runQueued(id: string, review: boolean, signal: AbortSignal
   }
 }
 
-async function runSteps(id: string, review: boolean, send: Send, signal: AbortSignal, queued: boolean): Promise<RunOutcome> {
+/**
+ * Run and probe (src/verify.ts), when the person asked for it on this run: the project's own tests, then the project
+ * started and every page and form its own pages point to requested. What fails becomes fix steps for the same workers,
+ * at most twice (the two-tries rule): the same faults again after a fix, or no rounds left, stops with a report.
+ */
+// The project's files as they were before each repair round, what an undone repair goes back to, are kept in the job's
+// folder (jobfiles.ts saveBeforeRepair), so a restart between a repair and its check does not lose them.
+async function verifyJob(id: string, send: Send, signal: AbortSignal): Promise<{ added: number; halt?: string }> {
+  const job = await loadJob(id);
+  if (!job || signal.aborted) return { added: 0 };
+  const root = await jobRoot(job);
+  const listed = (await ws.list(root)).map(f => f.path).filter(p => !p.startsWith('jobs/') && !p.endsWith('.bak'));
+  const texts: Record<string, string> = {};
+  for (const p of listed.filter(p => /\.(html?|py|m?js|cjs|ts|php|json)$/i.test(p)).slice(0, 80)) {
+    const r = await ws.read(root, p);
+    if (!('error' in r) && r.text.length < 200_000) texts[p] = r.text;
+  }
+  const testProblems: string[] = [];
+  const probeProblems: string[] = [];
+  let testLabel = '', testOutput = '';
+  const testId = verify.detectTest(listed, texts);
+  if (testId) {
+    send('stage', { text: 'Running the project\'s own tests…' });
+    const r = await runTests(testId, root);
+    if (!('error' in r)) {
+      job.tests = { label: r.label, ok: r.ok, at: new Date().toISOString(), output: r.output, seconds: r.seconds };
+      if (!r.ok) { testLabel = r.label; testOutput = r.output; testProblems.push(`${r.label} fails: ${r.output.split('\n').filter(l => /^(FAIL|ERROR|AssertionError|\w*Error)/.test(l)).slice(0, 3).join(' | ') || r.output.slice(0, 200)}`); }
+    }
+  }
+  const start = verify.detectStart(listed, texts);
+  if (start) {
+    send('stage', { text: `Starting the project (${start.label}) and asking for every page and form it points to…` });
+    // A plain web page is also asked for every script, style and image it loads (a missing one is a 404).
+    const targets = start.static ? [...new Map([...verify.pageTargets(texts), ...verify.linkTargets(texts)].map(t => [`${t.method} ${t.path}`, t])).values()] : verify.linkTargets(texts);
+    const r = await verify.startAndProbe(root, start, targets, verify.portsOf(texts));
+    if (!r.started) probeProblems.push(`The project did not start (${start.label}): ${(r.error || r.output || 'it stopped at once with no output').slice(0, 500)}`);
+    else probeProblems.push(...verify.judgeProbes(r.results));
+  } else {
+    send('stage', { text: 'No way to start this project was found, so only its tests were run.' });
+  }
+  const problems = [...testProblems, ...probeProblems];
+  const rounds = job.verify?.rounds ?? 0;
+  // A repair that made it worse (more faults, or it no longer starts) is undone: the files go back as they were before it.
+  const before = await loadBeforeRepair(id);
+  if (before && job.verify?.last.length && verify.isWorse(job.verify.last, problems)) {
+    for (const [p, t] of Object.entries(before)) await ws.save(root, p, t);
+    await clearBeforeRepair(id);
+    await saveJob(job);
+    await addEvent(job.id, { type: 'verify', ok: false, halted: true, rounds });
+    send('stage', { text: 'The last repair made it worse, so the files were put back as they were before it.' });
+    return { added: 0, halt: `The last repair made the project worse (${problems[0]}), so its files were put back as they were before that repair.\n\n${verify.haltReport(job.verify.last, job.steps.filter(s => /^Fix (what running|the failing tests)/.test(s.title)).map(s => s.title))}` };
+  }
+  const decision = verify.verifyDecision(problems, rounds, job.verify?.last);
+  if (decision === 'ok') {
+    job.verify = { rounds, last: [] };
+    await clearBeforeRepair(id);
+    await saveJob(job);
+    await addEvent(job.id, { type: 'verify', ok: true, rounds });
+    send('stage', { text: 'Checked by running it: no faults found.' });
+    return { added: 0 };
+  }
+  const room = jobs.MAX_STEPS - job.steps.length;
+  const tried = job.steps.filter(s => /^Fix (what running|the failing tests)/.test(s.title)).map(s => `${s.title}${s.summary ? `: ${s.summary}` : ''}`);
+  if (decision === 'halt' || room < 1) {
+    await saveJob(job);
+    await addEvent(job.id, { type: 'verify', ok: false, halted: true, rounds });
+    return { added: 0, halt: verify.haltReport(problems, tried) };
+  }
+  await saveBeforeRepair(id, texts);
+  const steps: jobs.Step[] = [];
+  if (testProblems.length) steps.push(jobs.testFixStep(job, testLabel, testOutput, listed, texts));
+  if (probeProblems.length && steps.length < room) steps.push(verify.probeFixStep(job, probeProblems, listed, texts));
+  job.steps.push(...steps.slice(0, room));
+  job.verify = { rounds: rounds + 1, last: problems };
+  await saveJob(job);
+  await addEvent(job.id, { type: 'verify', ok: false, added: steps.length, rounds: rounds + 1 });
+  send('stage', { text: `Running it showed ${problems.length} fault${problems.length === 1 ? '' : 's'}: ${problems[0]} Added ${steps.length} step${steps.length === 1 ? '' : 's'} to fix ${steps.length === 1 ? 'it' : 'them'} (round ${rounds + 1} of ${jobs.VERIFY_ROUNDS}).` });
+  return { added: steps.length };
+}
+
+async function runSteps(id: string, review: boolean, send: Send, signal: AbortSignal, queued: boolean, check = false, keepOn = true): Promise<RunOutcome> {
   let saved = 0;
+  // Keep going: each step's earlier stops in this run (their blockers), so the same check failing twice stops it.
+  const stops = new Map<number, string[][]>();
   try {
     await clearWaiting(id);
-    for (let guard = 0; guard < jobs.MAX_STEPS; guard++) {
+    for (let guard = 0; guard < jobs.MAX_STEPS * (1 + jobs.KEEP_GOING_STOPS) + jobs.VERIFY_ROUNDS * 2; guard++) {
       const job = await loadJob(id);
       if (!job) return { kind: 'error', text: 'That project is not in this workspace any more.', saved };
       const i = jobs.nextIndex(job);
       if (i < 0) {
-        send('finished', await jobView(job));
+        // All steps done: when asked, run the project and repair what running it shows (the queue never does: no one is there to ask).
+        if (check && !queued && job.steps.length) {
+          const v = await verifyJob(id, send, signal);
+          if (v.halt) {
+            const n = Math.max(0, job.steps.length - 1);
+            send('stopped', { n, reason: v.halt, ...(await jobView((await loadJob(id)) ?? job)) });
+            return { kind: 'stopped', n, reason: v.halt, needs: true, saved };
+          }
+          if (v.added) continue;
+        }
+        send('finished', await jobView((await loadJob(id)) ?? job));
         return { kind: 'finished', saved };
       }
       const s = job.steps[i];
@@ -249,6 +345,11 @@ async function runSteps(id: string, review: boolean, send: Send, signal: AbortSi
         }
         result.review = rv;
         if (rv.ok !== true) blockers.push(...(rv.ok === null ? ['The reviewer did not give a clear OK.'] : rv.problems.map(p => `Reviewer: ${p}`)));
+      }
+      if (blockers.length && keepOn && !signal.aborted && jobs.keepGoing(stops.get(i) ?? [], blockers)) {
+        stops.set(i, [...(stops.get(i) ?? []), blockers]);
+        send('stage', { text: `Step ${i + 1} did not pass its checks (${blockers[0].slice(0, 200)}). Keep going is on: trying it again by itself; it stops for you if the same check fails twice.` });
+        continue;
       }
       if (blockers.length) {
         await saveWaiting(job.id, i, result);

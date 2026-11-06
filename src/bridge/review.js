@@ -52,6 +52,10 @@ function fileGroups(dir, skip = []) {
     try { if (fs.statSync(path.join(dir, f)).size < 512 * 1024 && /<form\b/i.test(fs.readFileSync(path.join(dir, f), 'utf8'))) forms.push(f); } catch {}
   }
   if (forms.length) groups.splice(2, 0, { name: 'Forms visitors send', files: forms });
+  // Everything no group claims: a project whose code is only server.js still gets a file to read first.
+  const inGroup = f => GROUPS.some(([, re], gi) => (gi === GROUPS.length - 1 || !HELPER.test(f)) && wordsOf(f).some(w => re.test(w)));
+  const rest = files.filter(f => !inGroup(f) && !forms.includes(f)).sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b)).slice(0, 15);
+  if (rest.length) groups.push({ name: 'Other code', files: rest });
   return { groups, total: files.length };
 }
 

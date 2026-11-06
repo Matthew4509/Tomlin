@@ -127,6 +127,15 @@ export function cutWords(pcName: string, message: string): string {
 /** The chat models a node loaded for linked PCs: the PCs using each (names, links) and when one last did. */
 export type LoadedFor = Map<string, { by: Set<string>; links: Set<string>; at: number }>;
 
+/**
+ * The chat models that make way, oldest first, when a model linked PC `pc` asked for (`keep`) does not fit: every one
+ * loaded only for that PC and not answering (`idle`). Never one its owner loaded, nor one another PC uses too (P1-4, 3 Nov:
+ * one was unloaded, then Gemma 4 was refused with three test models idle).
+ */
+export function makeWayOrder(loaded: LoadedFor, pc: string, keep: string, idle: (id: string) => boolean): string[] {
+  return [...loaded].filter(([id, v]) => id !== keep && v.by.size === 1 && v.by.has(pc) && idle(id)).sort((a, b) => a[1].at - b[1].at).map(([id]) => id);
+}
+
 /** An answer for a linked PC: every chat model loaded for it stays. */
 export function keepAll(loaded: LoadedFor, link: string, now: number): void {
   for (const v of loaded.values()) if (v.links.has(link)) v.at = now;

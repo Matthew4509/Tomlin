@@ -196,7 +196,7 @@ function renderList() {
   }
   const canDrag = $('sort').value === 'mine' && !q;
   L.replaceChildren(...list.map(r => {
-    const a = auditLabel(r.audit);
+    const a = auditLabel(r.audit, r.updated);
     const row = h('div', { class: 'row' + (r.hiddenView ? ' dim' : ''), 'data-id': r.id, draggable: canDrag ? 'true' : null },
       h('div', { style: 'min-width:0' },
         h('div', { class: 'title' },

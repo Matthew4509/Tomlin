@@ -305,6 +305,8 @@ export interface ToolBox {
   run: (name: string, args: string, signal: AbortSignal, round: number) => Promise<string>;
   /** Told as each call starts, with its name and the arguments as the model wrote them. */
   onCall?: (name: string, args: string) => void;
+  /** Whether a call by this name may run beside the others in its round (unset: one after another). */
+  parallel?: (name: string) => boolean;
   rounds: number;
 }
 
@@ -556,17 +558,22 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       // Arguments that are not a JSON object (cut by the length limit, or a small model's broken JSON) are sent back as
       // {}: llama-server refuses the whole next ask over them (a 500, measured). The tool itself still gets what was written.
       const said: Record<string, unknown>[] = [{ role: 'assistant', content: visibleText(raw), tool_calls: asked.map((c, i) => ({ id: ids[i], type: 'function', function: { name: c.name, arguments: jsonObject(c.args) ? c.args : '{}' } })) }];
-      for (const [i, c] of asked.entries()) {
-        opts.tools.onCall?.(c.name, c.args);
-        let out: string;
+      // Calls the tools say may run side by side (web pages: each site keeps its own pace, so two sites take turns) start
+      // at once; the others run one after another, in order. The results go back in the order they were asked.
+      const tools = opts.tools;
+      const one = async (c: (typeof asked)[number]): Promise<string> => {
+        tools.onCall?.(c.name, c.args);
         try {
-          out = await opts.tools.run(c.name, c.args, signal, round);
+          return await tools.run(c.name, c.args, signal, round);
         } catch (e) {
           if (signal.aborted) throw e;
-          out = `The tool did not work: ${(e as Error).message}`;
+          return `The tool did not work: ${(e as Error).message}`;
         }
-        said.push({ role: 'tool', tool_call_id: ids[i], content: out });
-      }
+      };
+      const side = asked.map(c => (tools.parallel?.(c.name) ? one(c) : null));
+      // A side-by-side call that fails while another is awaited is caught when its turn comes (not left unhandled).
+      for (const p of side) p?.catch(() => undefined);
+      for (const [i, c] of asked.entries()) said.push({ role: 'tool', tool_call_id: ids[i], content: await (side[i] ?? one(c)) });
       const next = await streamChat(base, model, turns, onText, signal, maxTokens, { ...opts, toolTurns: [...(opts.toolTurns ?? []), ...said], round: round + 1 });
       return { ...next, thought: [thought, next.thought].filter(Boolean).join('\n\n'), thoughtSeconds: thoughtSeconds + next.thoughtSeconds };
     }
