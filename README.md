@@ -3,6 +3,9 @@
 > **BETA: not ready for production.** TOMLIN is still in beta. Features, screens and the way it stores your data can
 > change from one version to the next, and things will break. Try it on your own PCs and home network, keep your own
 > backups, and do not use it for production work or for data you cannot afford to lose.
+>
+> **When will it be stable?** Not yet. We plan more extensive testing (fresh installs, real models, real projects) before
+> marking a version stable, expected around February 2027.
 
 Chat and pictures on your own PC: two panes, side by side. Each one loads a model only when you press **Connect**,
 and **Disconnect** ends that model's process and gives its memory back. You can run chat only, pictures only, both,
@@ -126,6 +129,25 @@ about each one and choose for yourself.
   pizza, employee of the month, and a weekly leaderboard.
 - **Thoughts**, the office chat: a line from each hire when what they do really changes (an answer started, a step done or
   stuck, a picture drawn, a PC off), and banter from six fixed characters on top. Everything, Work only or Off.
+
+## What it has built so far (tested 6 November 2026)
+
+Jobs (a plan, then one step at a time) were each given a one-paragraph goal and left to work. One model did the planning
+and the coding: **Qwen3.6-35B-A3B UD-Q2_K_XL** (11.4 GB file), on an HP Z240 with a Quadro P2000 (5 GB) and 48 GB RAM,
+writing about 7 to 9 tokens a second. Each result was then tried in a real browser.
+
+| Goal | Time | Continue pressed | Result |
+|---|---:|---:|---|
+| A Flappy Bird-style game | 28 min | 2 | **Works**: flap, pipes, score, best score kept, game over and restart. The score text is small. |
+| A fitness tracker | 64 min | 4 (and one plan edit) | **Works**: logs workouts, totals and a chart, keeps data after a reload, Delete updates the totals. Labels sit beside the wrong boxes on a narrow screen. |
+| A blog with an RSS importer (Python) | 59 min | 0 | **Partly**: home page, posts and RSS feed work; the admin login does not, so posts cannot be written from the page. |
+| A to-do app | 8 min | 0 | **Did not work** as started: its page could not find its script, and nothing was saved. |
+
+What we learned: each step checked its own files, but nothing ran the whole app, so faults like the blog's login and the
+to-do app's missing script got through. **Run and check** (2.0.75 and later) now starts the project, opens every page and
+form, runs its tests and repairs what fails. On the blog it found the faults every time and never left the project worse
+than it found it, but this model could not fix the login without dropping parts of the file, so it stopped and said why.
+A stronger model is the next test. One run each, so times will vary.
 
 ## What pictures to expect
 
