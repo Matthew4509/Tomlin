@@ -136,7 +136,10 @@ async function loadThenDraw() {
   }
   const m = (app.models?.image ?? []).find(x => x.id === p.model.value && x.installed !== false);
   if (!m) {
+    // The Connect row's own message (an earlier Connect with nothing to load) no longer holds: the one below is the answer.
+    showFault(p.said, null);
     showFault(fault, 'No picture model is picked, so nothing can draw. Pick one in the list beside Connect (above), or get one under Settings, Models.');
+    fault.scrollIntoView({ block: 'nearest' });
     return false;
   }
   const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';

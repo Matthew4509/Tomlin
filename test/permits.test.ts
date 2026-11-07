@@ -10,6 +10,14 @@ test('permissions: only known values are kept, anything else falls back to Manua
   assert.equal(cleanPermit('always'), 'always');
   assert.equal(cleanPermit('forever'), null);
   assert.match(deniedWords('web'), /web access/);
+  for (const k of ['web', 'files'] as const) {
+    const w = deniedWords(k);
+    assert.match(w, /NOT (read|done)|NOT allowed/);
+    assert.match(w, /not read the page|did not read|nothing was read/i);
+    assert.match(w, /already know/i);
+    assert.match(w, /not from (the page|a live|a file)|from what you already know/i);
+    assert.match(w, /do not (state|say|claim)/i);
+  }
 });
 
 function gateWith(answers: Partial<Record<Kind, Permit>>, auto: Kind[] = []) {

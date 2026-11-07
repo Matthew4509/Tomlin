@@ -251,10 +251,10 @@ export function diagnoseLink(f: LinkFacts): Verdict {
   if (!f.own.length) return bad('This PC has no home-network connection, so it cannot reach another PC.', ['Plug in its network cable, or join your home Wi-Fi.', 'Then press Check again.']);
   const here = start(f.own[0].address);
   lines.push({ state: 'info', text: `This PC: ${f.own.map(o => `${o.address} on ${o.alias}`).join(', ')}${f.own[0].gateway ? `, router ${f.own[0].gateway}` : ''}.` });
-  if (f.nodeOn === false) return bad('Start TOMLIN on the other PC first.', ['On the other PC: open TOMLIN (Start menu, TOMLIN).', 'Set up, Network: tick Enable this PC as a node (it asks for an app lock PIN first).', 'Then press Check here again.']);
+  if (f.nodeOn === false) return bad('Start TOMLIN on the other PC first.', ['On the other PC: open TOMLIN (Start menu, TOMLIN).', 'Settings, Network: tick Enable this PC as a node (it asks for an app lock PIN first).', 'Then press Check here again.']);
 
   const advice = f.address ? addressAdvice(f.address, f.own, f.port) : null;
-  if (advice?.problem) return bad(advice.problem, advice.suggest ? [`Use ${advice.suggest}, then press Check again.`] : [`On the other PC: TOMLIN, Set up, Network. Its address is under This PC's address: type the one that starts ${here}.`]);
+  if (advice?.problem) return bad(advice.problem, advice.suggest ? [`Use ${advice.suggest}, then press Check again.`] : [`On the other PC: TOMLIN, Settings, Network. Its address is under This PC's address: type the one that starts ${here}.`]);
 
   const who = f.name || 'that PC';
   const onThatPc = (name: string) => [
@@ -278,8 +278,8 @@ export function diagnoseLink(f: LinkFacts): Verdict {
   const target = advice?.url ? new URL(advice.url).hostname.replace(/^\[|\]$/g, '') : found;
   if (!target) {
     v6Line();
-    if (f.name) return bad(`Could not find ${f.name} from here.`, [`Type the address shown on ${f.name} instead: TOMLIN, Set up, Network, This PC's address (the one that starts ${here}).`, ...(f.v6Only ? onThatPc(f.name) : [])]);
-    return bad('Type the address shown on that PC, or its name.', [`On the other PC: TOMLIN, Set up, Network, This PC's address (the one that starts ${here}).`]);
+    if (f.name) return bad(`Could not find ${f.name} from here.`, [`Type the address shown on ${f.name} instead: TOMLIN, Settings, Network, This PC's address (the one that starts ${here}).`, ...(f.v6Only ? onThatPc(f.name) : [])]);
+    return bad('Type the address shown on that PC, or its name.', [`On the other PC: TOMLIN, Settings, Network, This PC's address (the one that starts ${here}).`]);
   }
   const port = advice?.url ? Number(new URL(advice.url).port) || f.port : f.port;
   const at = `${target}:${port}`;
@@ -290,14 +290,14 @@ export function diagnoseLink(f: LinkFacts): Verdict {
     return { state: 'ok', title: `TOMLIN answers at ${at}${f.whoami.version ? ` (${f.whoami.version})` : ''}.`, steps: ['Type its setup code (shown on it under Network) and press Link. Leave Link PIN empty unless it shows one.'], lines };
   }
   if (f.probe === 'open') return bad(`Something answers at ${at}, but not as TOMLIN.`, ['Check the port: 8741 unless it was changed on that PC (Network, Advanced: port).']);
-  if (f.probe === 'refused') return bad(`${target} is there, but TOMLIN's node is not listening on port ${port}.`, [`On ${who}: open TOMLIN, Set up, Network, tick Enable this PC as a node.`, 'If it is ticked, compare its port (Advanced: port) with the one here.']);
+  if (f.probe === 'refused') return bad(`${target} is there, but TOMLIN's node is not listening on port ${port}.`, [`On ${who}: open TOMLIN, Settings, Network, tick Enable this PC as a node.`, 'If it is ticked, compare its port (Advanced: port) with the one here.']);
   if (advice?.warn) {
     v6Line();
     lines.push({ state: 'warn', text: advice.warn });
     return bad(`${target} is on a different network from this PC.`, [...onThatPc(who), 'Or, if that PC is on another router (a second router, an extender with its own network, or a guest Wi-Fi), connect it to the same router or Wi-Fi as this PC.']);
   }
   if (f.ping) return bad(`${target} is on, but something on it blocks port ${port}.`, [
-    `On ${who}: TOMLIN, Set up, Network, press Check under "Can other PCs reach this one?" and do what it says.`,
+    `On ${who}: TOMLIN, Settings, Network, press Check under "Can other PCs reach this one?" and do what it says.`,
     'If Check finds nothing wrong, its antivirus or security program is blocking: in it, trust your home network or allow Node.js.',
     'Or run Install TOMLIN.cmd again there and answer Yes to the firewall question.',
   ]);

@@ -15,6 +15,10 @@ const CODE_FILE = /\.(php|m?js|cjs|tsx?|jsx|py|html?|vue|svelte|rb|go|java|cs)$/
 const ORIGINAL = /^original(?=$|[\s_.-])/i;                                      // original project files, original-2026-01-31
 const FIXES = /[\s_.-]fix(es)?$/i;                                                // my-app-fixes
 const OLD = /^(_?old|old[\s_.-].*|.*[\s_.-]old|_?backups?|bak|_?archive|_attic|previous)$/i; // old/, my-app-old, backups/
+const BARE_OLD = /^(_?old|_?backups?|bak|_?archive|_attic|previous)$/i;
+// "x-fixes", "x-old" and "old-x" name a copy of x only when x is beside them: css-fixes/ or old-posts/ alone is where
+// the person works, and is part of the project.
+const COPY_OF = /^old[\s_.-]+(.+)$|^(.+?)[\s_.-]+(?:old|fix(?:es)?)$/i;
 // A version at the end of the name: v1.2, 1.2.3, my-app-v1.9.4-full. On its own a version is not enough (a library
 // folder is named that way too): it also needs a zip of the same name beside it, a releases-type parent, or a copy
 // of the same name next to it.
@@ -22,6 +26,9 @@ const VERSIONED = /(^|[\s_.-])v?\d+\.\d+(\.\d+)*([\s_.-](full|lite|min|build|rel
 const RELEASE_PARENT = /^_?(releases?|builds?|dist|deploy|archives?|versions)$/i;
 // Folders that are parts of one app, never copies of each other (frontend/ and backend/ both hold code).
 const PART = /^(frontend|backend|api|server|client|web|www|admin|app|apps|docs|src|public|lib|libs|tests?|scripts|tools|assets|static|site)$/i;
+
+// The end of a folder's name that says it is one part of an app (todo-api/ beside todo-web/), not a copy of it.
+const PART_WORD = /[\s_.-](api|web|front|back|frontend|backend|client|server|mobile|admin|site|app|ui|worker|cli|docs|db|ios|android|dashboard)$/i;
 
 const versionOf = name => { const m = /v?(\d+(?:\.\d+)+)(?:[\s_.-][a-z]+)?$/i.exec(name); return m ? m[1].split('.').map(Number) : null; };
 const newerVersion = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d > 0; } return false; };
@@ -87,11 +94,16 @@ function findRoots(dir, opts = {}) {
   const top = dirs(dir);
   const looks = new Map(top.map(n => [n, look(path.join(dir, n))]));
 
+  const beside = (parent, name) => {
+    const m = COPY_OF.exec(name), base = m && String(m[1] || m[2]).toLowerCase();
+    if (!base) return false;
+    return dirs(path.join(dir, parent)).some(o => { const l = o.toLowerCase(); return o !== name && !COPY_OF.test(o) && l.startsWith(base) && !/[a-z0-9]/.test(l.charAt(base.length)); });
+  };
   // 1. By name, at the top and one level down (a releases/ folder's unpacked copies).
   const byName = (parent, name) => {
     if (ORIGINAL.test(name)) return 'the original files it was built from';
-    if (FIXES.test(name)) return 'a "fixes" copy';
-    if (OLD.test(name)) return 'an old copy or backup';
+    if (FIXES.test(name)) { if (beside(parent, name)) return 'a "fixes" copy'; return null; }
+    if (BARE_OLD.test(name) || (OLD.test(name) && beside(parent, name))) return 'an old copy or backup';
     if (VERSIONED.test(name)) {
       const pd = path.join(dir, parent);
       const zipBeside = fs.existsSync(path.join(pd, name + '.zip'));
@@ -121,9 +133,9 @@ function findRoots(dir, opts = {}) {
   if (!topHasCode) {
     const groups = new Map();
     for (const n of top) {
-      if (PART.test(n) || !looks.get(n).code || left.some(l => l.rel === n)) continue; // a copy by name is no candidate
+      if (PART.test(n) || PART_WORD.test(n) || !looks.get(n).code || left.some(l => l.rel === n)) continue; // a copy by name is no candidate
       const s = stem(n);
-      if (s.length >= 3) groups.set(s, [...(groups.get(s) || []), n]);
+      if (s.length >= 3 && s !== 'old') groups.set(s, [...(groups.get(s) || []), n]); // old-posts/ and old-news/ share a word, not an app
     }
     const launched = launchFolders(dir);
     for (const g of groups.values()) {
@@ -136,7 +148,7 @@ function findRoots(dir, opts = {}) {
 
   // 3. Never leave nothing: when every folder that holds code was left out and the top holds none of its own, the
   // newest of them is the app after all (a folder that only keeps an original copy is still scanned).
-  const kept = top.filter(n => looks.get(n).code && !left.some(l => l.rel === n));
+  const kept = top.filter(n => looks.get(n).code && !left.some(l => l.rel === n) && !/^(docs?|tests?|scripts|tools)$/i.test(n));
   if (!topHasCode && !kept.length && left.length) {
     const back = left.filter(l => !l.rel.includes('/') && looks.get(l.rel) && looks.get(l.rel).code).sort((a, b) => looks.get(b.rel).newest - looks.get(a.rel).newest)[0];
     if (back) { left.splice(left.indexOf(back), 1); app = { rel: back.rel, why: 'the only copy there is (' + back.why + ')' }; }
@@ -149,7 +161,7 @@ function findRoots(dir, opts = {}) {
     notes.push('Left out as copies of the app, so their faults are not counted twice (to scan one, add it to "auditInclude" in the project\'s project.json): '
       + left.map(l => l.rel + '/ (' + l.why + ')').join(', ') + '.');
     const pub = left.filter(l => l.publishes);
-    if (pub.length) notes.push('Still read for private details, because git would publish ' + (pub.length === 1 ? 'it' : 'them') + ': ' + pub.map(l => l.rel + '/').join(', ') + '.');
+    if (pub.length) notes.push('Still read for private details and keys, because git would publish ' + (pub.length === 1 ? 'it' : 'them') + ': ' + pub.map(l => l.rel + '/').join(', ') + '.');
   }
   return { left, app, notes };
 }

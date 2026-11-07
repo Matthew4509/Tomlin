@@ -16,11 +16,12 @@ after(() => { for (const d of made) rmSync(d, { recursive: true, force: true });
 
 test('the public copy is checked against the other projects beside it, not tool or scratch folders', () => {
   const projects = tmp();
-  for (const d of ['Mine', 'harbour bakery', '.claude', '.agents', '--help', '_unpack-log']) mkdirSync(join(projects, d));
+  for (const d of ['Mine', 'harbour bakery', 'Tomlin-public', '.claude', '.agents', '--help', '_unpack-log']) mkdirSync(join(projects, d));
   writeFileSync(join(projects, 'notes.md'), 'a file, not a project');
   const list = join(projects, 'private.json');
   writeFileSync(list, JSON.stringify({ details: [{ id: 'a', label: 'a made-up email', value: 'zebedee@example.org' }] }));
   const ctx = publicContext(join(projects, 'Mine'), list);
+  // The public clone beside the source is this project's own copy, not another project.
   assert.deepEqual(ctx.others, ['harbour bakery']);
   assert.deepEqual(ctx.own, ['Mine', 'TOMLIN']);
   assert.equal(ctx.privateCount, 1);

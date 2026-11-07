@@ -90,7 +90,12 @@ function auditLabel(a, updated) {
   const stale = Number(updated) > Date.parse(a.ranAt) + 60000;
   const mark = t => stale ? t + ' · changed since' : t;
   if (c.Critical || c.High) return { cls: 'a-bad', stale, text: mark('▲ ' + [c.Critical && c.Critical + ' Critical', c.High && c.High + ' High'].filter(Boolean).join(', ')), when };
-  if (c.Medium) return { cls: 'a-warn', stale, text: mark('■ ' + c.Medium + ' Medium'), when };
+  // partly: not everything was read (src/bridge/audit.js). A saved audit from before that has no such field, and shows as it did.
+  const cut = Array.isArray(a.cut) && a.cut.length > 0;
+  if (c.Medium) return { cls: 'a-warn', stale, text: mark('■ ' + c.Medium + ' Medium' + (cut ? ', check did not finish' : a.partly ? ', partly checked' : '')), when };
+  // A part that stopped or crashed knows nothing about what it did not read, so "Passed" would be a false claim.
+  if (cut) return { cls: 'a-warn', stale, text: mark('◐ Check did not finish'), when };
+  if (a.partly && a.filesScanned === 0) return { cls: 'a-warn', stale, text: mark('◐ No code was read'), when };
   if (a.partly === true) return { cls: 'a-warn', stale, text: mark('◐ Passed, partly checked'), when };
   return stale ? { cls: 'a-warn', stale, text: '✓ Passed · changed since: scan again', when } : { cls: 'a-ok', stale, text: '✓ Passed', when };
 }

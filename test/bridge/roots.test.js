@@ -11,8 +11,6 @@ const { findRoots } = require('../../src/bridge/roots');
 const { runAudit } = require('../../src/bridge/audit');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-roots-'));
-// Removed however the test ends (a failed check or a crash too); a folder something still holds gets a few tries.
-process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch {} });
 const w = (rel, text) => { const p = path.join(tmp, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); };
 const age = (rel, days) => { const t = new Date(Date.now() - days * 86400000); const walk = p => { if (fs.statSync(p).isDirectory()) for (const n of fs.readdirSync(p)) walk(path.join(p, n)); fs.utimesSync(p, t, t); }; walk(path.join(tmp, rel)); };
 const rels = r => r.left.map(l => l.rel).sort();
@@ -22,6 +20,27 @@ const FAULT = '<?php include($_GET["page"]);\n'; // INJ-002: one planted code fa
 const EMAIL = 'robin.lark@mailbox.test';
 
 async function main() {
+  // ---- parts of one app are not copies, however alike their names ----
+  for (const [a, b] of [['todo-api', 'todo-web'], ['shop-frontend', 'shop-backend'], ['blog', 'blog-mobile'], ['notes_client', 'notes_server']]) {
+    const d = path.join(tmp, 'split-' + a);
+    fs.mkdirSync(path.join(d, a), { recursive: true });
+    fs.mkdirSync(path.join(d, b), { recursive: true });
+    fs.writeFileSync(path.join(d, 'README.md'), 'Notes.\n');
+    fs.writeFileSync(path.join(d, a, 'index.php'), '<?php echo 1;\n');
+    fs.writeFileSync(path.join(d, b, 'index.html'), '<title>x</title>\n');
+    const old = new Date(Date.now() - 86400000 * 30);
+    fs.utimesSync(path.join(d, a, 'index.php'), old, old);
+    const r = findRoots(d);
+    check(a + '/ and ' + b + '/ are two parts of one app: neither is left out', () => assert.deepStrictEqual(r.left.map(l => l.rel), []));
+  }
+  // The real app kept in old/, with only a docs folder beside it: old/ is what there is.
+  const docsBeside = path.join(tmp, 'docs-beside');
+  fs.mkdirSync(path.join(docsBeside, 'old'), { recursive: true });
+  fs.mkdirSync(path.join(docsBeside, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(docsBeside, 'old', 'index.php'), '<?php echo 1;\n');
+  fs.writeFileSync(path.join(docsBeside, 'docs', 'index.html'), '<title>x</title>\n');
+  check('a docs folder beside old/ does not make old/ a copy of anything', () => assert(!findRoots(docsBeside).left.some(l => l.rel === 'old')));
+
   // ---- 1. copies side by side, nothing of its own at the top ----
   w('side/lantern/index.php', FAULT); w('side/lantern/README.md', '# Lantern\n');
   w('side/lantern-php/index.php', FAULT);
@@ -64,6 +83,30 @@ async function main() {
   check('the zip is named as the reason', () => assert(/site-v1\.2\.3\.zip is beside it/.test(N.left.find(l => l.rel === 'site-v1.2.3').why)));
   const I = findRoots(path.join(tmp, 'named'), { include: ['old/'] });
   check('auditInclude brings a folder back', () => assert(!rels(I).includes('old') && rels(I).includes('site-v1.2.3')));
+
+  // ---- 3b. a name alone is not a copy: "-fixes", "old-" and "-old" need the folder they would be a copy of ----
+  for (const live of ['css-fixes', 'app-fixes', 'old-posts', 'posts-old']) w('alone/' + live + '/index.php', FAULT);
+  w('alone/index.php', '<?php echo "home";\n');
+  const AL = findRoots(path.join(tmp, 'alone'));
+  check('css-fixes/, app-fixes/, old-posts/ and posts-old/ with nothing they copy are part of the project', () => assert.deepStrictEqual(rels(AL), [], rels(AL).join(', ')));
+  w('pairs/index.php', '<?php echo "home";\n');
+  for (const n of ['my-app', 'my-app-fixes', 'shop', 'shop-old', 'blog', 'old-blog']) w('pairs/' + n + '/index.php', FAULT);
+  const PR = findRoots(path.join(tmp, 'pairs'));
+  check('beside the folder they copy they are copies: my-app-fixes/, shop-old/, old-blog/', () => assert.deepStrictEqual(rels(PR), ['my-app-fixes', 'old-blog', 'shop-old'], rels(PR).join(', ')));
+  w('bare/index.php', '<?php echo "home";\n');
+  for (const n of ['old', 'backup', 'archive']) w('bare/' + n + '/index.php', FAULT);
+  const BA = findRoots(path.join(tmp, 'bare'));
+  check('bare old/, backup/ and archive/ stay copies', () => assert.deepStrictEqual(rels(BA), ['archive', 'backup', 'old'], rels(BA).join(', ')));
+  // A folder taken as a copy that git would publish goes up with the project: not a clean read, and its keys are read.
+  const KEY = 'sk_' + 'live_' + 'Q3x9Lm2Vb7Tn4Rk8Wd5Hj6Zp';
+  w('tracked/index.php', '<?php echo "home";\n'); w('tracked/archive/pay.js', 'const k = "' + KEY + '";\n'); w('tracked/old/ok.txt', 'x\n');
+  const gitT = (...args) => execFileSync('git', ['-C', path.join(tmp, 'tracked'), ...args], { stdio: 'ignore', windowsHide: true });
+  gitT('init', '-q'); gitT('config', 'user.email', '1+robin@users.noreply.github.com'); gitT('config', 'user.name', 'Robin'); gitT('config', 'commit.gpgsign', 'false'); gitT('add', '-A'); gitT('commit', '-qm', 'first');
+  const TA = await runAudit(path.join(tmp, 'tracked'), null, { disclosure: { details: [], others: [], own: ['tracked'] } });
+  check('a tracked archive/ counts as not read, and the key in it is found', () => {
+    assert(TA.partly && TA.notRead.includes('Folders taken as old copies, read for keys only: archive, old'), JSON.stringify(TA.notRead));
+    assert(TA.findings.some(f => f.rule === 'SEC-003' && f.where === 'archive/pay.js:1'), TA.findings.map(f => f.rule + '@' + f.where).join(', '));
+  });
 
   // ---- 4. a folder whose only code is an old copy keeps it ----
   w('only/HANDOFF.md', '# notes\n'); w('only/original-2026-01-31/app.js', 'var x = 1;\n');

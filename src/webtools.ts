@@ -33,7 +33,7 @@ export const WEB_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'open_page',
-      description: 'Read a web page (or a PDF) as plain text. Only an address from a search result, a link on a page you read, or one the person wrote can be opened, written exactly as it was given. A long page comes in parts: ask for part 2, 3 and so on.',
+      description: 'Read a web page (or a PDF) as plain text. Only an address from a search result, a link on a page you read, or one the person wrote can be opened, written exactly as it was given. A long page comes in parts: ask for part 2, 3 and so on. To read several pages, ask for them all in the same turn (several open_page calls at once, up to 6 in one go) rather than one at a time.',
       parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full address, starting https:// or http://.' }, part: { type: 'integer', description: 'Which part of a long page (1 when not given).' } }, required: ['url'] },
     },
   },

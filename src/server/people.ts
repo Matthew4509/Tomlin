@@ -175,7 +175,9 @@ async function chatsView() {
   const ids = [...new Set(list.map(c => c.project).filter((p): p is string => !!p))];
   const live = new Set((await Promise.all(ids.map(async p => ((await projectKnown(p)) ? p : '')))).filter(Boolean));
   const recent = recentEntries(list, p => live.has(p), await chats.pinnedProjects());
-  return { chats: list, current: open ? open.id : '', people, recent, previews: await previewsView([...live]) };
+  // Nobody to list (a fresh install: the host is off and nobody is hired): the window says so and offers Hire staff.
+  const nobody = people.some(p => p.kind === 'chat') ? undefined : 'Nobody is hired yet, so there is nobody to talk to. Hire someone first: pick their PC and model, and their chat opens here.';
+  return { chats: list, current: open ? open.id : '', people, recent, previews: await previewsView([...live]), ...(nobody ? { nobody } : {}) };
 }
 
 // ---- Chat previews (src/previews.ts): a picture of each project's running site beside its chats in a person's window ----

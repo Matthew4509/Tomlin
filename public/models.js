@@ -731,7 +731,8 @@ function mpDraw() {
   $('#mp-import').setAttribute('aria-current', String(importing));
   for (const b of document.querySelectorAll('#mp-show [data-show]')) b.setAttribute('aria-pressed', String(b.dataset.show === mp.show));
   $('#mp-heading').textContent = importing ? 'Import from another folder' : mpTitle(q, filtering);
-  $('#mp-filter-clear').hidden = !filtering;
+  // Also shown while a box holds a size that is not used (the message is up), so there is a way out.
+  $('#mp-filter-clear').hidden = !filtering && !mp.fBad;
   $('#mp-folder-box').hidden = !importing;
   const list = $('#mp-list');
   list.hidden = importing;
@@ -952,10 +953,37 @@ $('#mp-search-form').addEventListener('submit', e => {
 
 // Size filters: from / to, in billions of parameters and in GB. Empty = any.
 const filterBoxes = { minB: '#mp-min-b', maxB: '#mp-max-b', minGB: '#mp-min-gb', maxGB: '#mp-max-gb' };
-for (const [k, sel] of Object.entries(filterBoxes)) {
-  $(sel).addEventListener('input', e => {
-    const v = Number(e.target.value);
-    mp.f[k] = e.target.value.trim() && v > 0 ? v : null;
+const filterSaid = el('p', { class: 'fault-line', role: 'status', hidden: true });
+$('#mp-filter-clear').after(filterSaid);
+/** Why a box is not used, said beside the boxes: a negative size, or a smallest above the largest. */
+function mpFilterRead() {
+  const why = [];
+  mp.fBad = false;
+  for (const [k, sel] of Object.entries(filterBoxes)) {
+    const box = $(sel);
+    const text = box.value.trim();
+    const v = Number(text);
+    let bad = '';
+    if (text && (!Number.isFinite(v) || v < 0)) bad = 'Sizes cannot be negative: type 0 or more, or leave it empty for any.';
+    mp.f[k] = text && !bad && v > 0 ? v : null;
+    box.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    if (bad) why.push(bad);
+  }
+  for (const [lo, hi, unit] of [['minB', 'maxB', 'billions'], ['minGB', 'maxGB', 'GB']]) {
+    const bad = mp.f[lo] != null && mp.f[hi] != null && mp.f[lo] > mp.f[hi];
+    for (const k of [lo, hi]) if (bad) $(filterBoxes[k]).setAttribute('aria-invalid', 'true');
+    if (bad) {
+      why.push(`The smallest (${mp.f[lo]}) is more than the largest (${mp.f[hi]}) in ${unit}, so these two sizes are not used: lower the smallest or raise the largest.`);
+      mp.f[lo] = mp.f[hi] = null;
+    }
+  }
+  mp.fBad = why.length > 0;
+  filterSaid.textContent = [...new Set(why)].join(' ');
+  filterSaid.hidden = !why.length;
+}
+for (const sel of Object.values(filterBoxes)) {
+  $(sel).addEventListener('input', () => {
+    mpFilterRead();
     mpDraw();
     mpHfSearch();
   });
@@ -964,7 +992,10 @@ function mpClearFilter() {
   for (const [k, sel] of Object.entries(filterBoxes)) {
     mp.f[k] = null;
     $(sel).value = '';
+    $(sel).setAttribute('aria-invalid', 'false');
   }
+  filterSaid.hidden = true;
+  mp.fBad = false;
   // Fits my card and Fits are filters too (they count in the list's heading): cleared with the sizes.
   mp.card = false;
   mp.fitOn = '';

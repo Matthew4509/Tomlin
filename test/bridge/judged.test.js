@@ -1,4 +1,4 @@
-// Self-test for the judged list (lib/judged.js) and the Phase 5 false-flag fixes. Each fix has a case that must stay
+// Self-test for the judged list (lib/judged.js) and the false-flag fixes. Each fix has a case that must stay
 // quiet (the false flag it stops) and a twin that must still fire (so the fix cannot hide a real one).
 // Run: node test/judged.test.js   (no packages; git is used for the folder listing only).
 'use strict';
@@ -12,8 +12,6 @@ const J = require('../../src/bridge/judged');
 const { listProjects } = require('../../src/bridge/projects');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-judged-test-'));
-// Removed however the test ends (a failed check or a crash too); a folder something still holds gets a few tries.
-process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch {} });
 const w = (rel, text) => { const p = path.join(tmp, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); return p; };
 let failures = 0;
 const check = (name, fn) => { try { fn(); console.log('ok   ' + name); } catch (e) { failures++; console.log('FAIL ' + name + ': ' + e.message); } };

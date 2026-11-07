@@ -39,7 +39,7 @@ export const HOST_NAME = 'The host';
  * confusing). Off: no host row, no new chat with it, its old chats kept to read; staff do the talking. true brings it back.
  */
 export const HOST_ON = false;
-export const HOST_OFF = 'The host is switched off for now, so this chat is kept to read. Talk to one of your staff instead: pick them in the left panel, or hire someone (Set up, Staff: hire and edit, in the left panel).';
+export const HOST_OFF = 'The host is switched off for now, so this chat is kept to read. Talk to one of your staff instead: pick them in the left panel, or hire someone (Staff: hire and edit, in the left panel).';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const PORT = Number(process.env.TOMLIN_PORT ?? 8740);

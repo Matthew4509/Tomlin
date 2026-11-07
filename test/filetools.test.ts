@@ -29,6 +29,7 @@ test('nothing is touched until the person allows it: Allow once lasts this answe
     const no = turn('no');
     assert.match(await run(no, 'save_file', { path: 'app.js', text: 'two' }), /did not allow/i);
     assert.match(await run(no, 'read_file', { path: 'app.js' }), /did not allow/i);
+    assert.match(await run(no, 'read_file', { path: 'app.js' }), /NOT allowed.*NOT read/s);
     assert.equal(asked.length, 1, 'asked once per answer, not again after a no');
     assert.equal(await readFile(join(root, 'app.js'), 'utf8'), 'one');
 

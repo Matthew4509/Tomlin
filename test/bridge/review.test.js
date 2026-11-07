@@ -13,8 +13,6 @@ let failures = 0;
 const check = (name, fn) => { try { fn(); console.log('ok   ' + name); } catch (e) { failures++; console.log('FAIL ' + name + ': ' + e.message); } };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-review-'));
-// Removed however the test ends (a failed check or a crash too); a folder something still holds gets a few tries.
-process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch {} });
 const proj = path.join(tmp, 'kettle-cafe');
 const w = (rel, text) => { const p = path.join(proj, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); };
 w('index.php', '<?php ?><form method="post" action="book.php"><input name="n"></form>\n');
@@ -108,6 +106,24 @@ check('the same finding imported again keeps its status and id; a new one is add
 check('the list is kept per project, in the data folder, not in the project', () => {
   assert.strictEqual(review.readFaults(data, 'c:/projects/other').length, 0);
   assert(fs.readdirSync(path.join(data, 'faults')).length === 1 && !fs.existsSync(path.join(proj, 'faults')));
+});
+
+// F13: a project whose code matches no group is still listed, not an empty "0 listed" prompt
+check('F13: a project with only server.js lists server.js under "Other code"', () => {
+  const lone = path.join(tmp, 'lone');
+  fs.mkdirSync(lone);
+  fs.writeFileSync(path.join(lone, 'server.js'), 'require("http").createServer().listen(3000);\n');
+  const pr = review.buildPrompt({ name: 'Lone', folder: 'lone', dir: lone, auditSkip: [] }, { findings: [] }, [], scan.redact);
+  assert(/Other code[^\n]*server\.js/.test(pr), pr);
+  const g = review.fileGroups(lone);
+  assert.strictEqual(g.total, 1);
+  assert.strictEqual(g.groups.reduce((n, x) => n + x.files.length, 0), 1);
+});
+check('F13: a file already in a group is not listed twice under "Other code"', () => {
+  const g = review.fileGroups(proj);
+  const other = g.groups.find(x => x.name === 'Other code');
+  const named = g.groups.filter(x => x !== other).flatMap(x => x.files);
+  assert(!other || !other.files.some(f => named.includes(f)), JSON.stringify(other));
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

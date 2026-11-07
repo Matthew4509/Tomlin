@@ -99,6 +99,7 @@ function buildPrompt(p, audit, judged = [], redact = t => t, opts = {}) {
   lines.push('Files to read first (' + total + ' code files in all):');
   for (const g of groups) lines.push('- ' + g.name + ': ' + g.files.map(r).join(', '));
   lines.push('');
+  if (audit && audit.partly) lines.push((Array.isArray(audit.cut) && audit.cut.length ? 'The built-in scanner did not finish' : 'The built-in scanner did not read everything') + ', so its list is not the whole picture. Read these yourself: ' + r((audit.notRead || []).join('; ')), '');
   if (open.length) {
     lines.push('The built-in scanner already reports these (do not repeat them; if one is wrong, list it under False flags):');
     for (const f of open.slice(0, opts.maxFindings || 80)) lines.push('- ' + f.rule + ' [' + f.sev + '] ' + r(f.where) + ': ' + r(f.title));

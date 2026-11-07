@@ -161,13 +161,14 @@ test('a PC that goes quiet is dropped after the silent time', async () => {
 });
 
 test('a lending PC whose RPC server is busy for longer than the silent time keeps the stream: it held the network back itself', { timeout: 30_000 }, async () => {
-  const r = await rig({ beatMs: 50, silentMs: 300, busyMs: 1500 });
+  const r = await rig({ beatMs: 100, silentMs: 1500, busyMs: 4000 });
   let ended = '';
   void r.nodeEnded.then(w => (ended ||= `node: ${w}`));
   void r.hostEnded.then(w => (ended ||= `host: ${w}`));
   const big = randomBytes(64 * 2 ** 20);
   let back = 0;
   r.runner.on('data', (c: Buffer) => (back += c.length));
+  // The silent time is long beside the beat so a PC under load (a late beat) is not taken for a dead one; busyMs is longer still.
   // A stream that ends cuts the runner's side mid-write: said by `ended`, not thrown.
   r.runner.on('error', () => undefined);
   try {

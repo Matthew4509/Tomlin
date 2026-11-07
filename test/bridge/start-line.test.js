@@ -110,7 +110,9 @@ async function main() {
   const PORT = await freePort();
   const srv = spawn(NODE, [SERVER, '--dry-run'], { env: { ...process.env, BRIDGE_PORT: String(PORT), BRIDGE_DATA: DATA, BRIDGE_ROOT: WS }, stdio: 'ignore' });
   try {
-    for (let i = 0; i < 50 && !(await portOpen(PORT)); i++) await sleep(200);
+    // Wait for the port to open (up to 60 s: a busy PC starts a Node process slowly), or for the server to end before it did.
+    for (let i = 0; i < 300 && srv.exitCode === null && !(await portOpen(PORT)); i++) await sleep(200);
+    assert(srv.exitCode === null, 'the test copy of the Bridge ended before it listened');
     const BASE = 'http://127.0.0.1:' + PORT;
     const key = ((await (await fetch(BASE + '/')).text()).match(/name="bridge-key" content="([0-9a-f]+)"/) || [])[1];
     const get = async p => (await fetch(BASE + p, { headers: { 'X-Bridge-Key': key } })).json();
@@ -124,9 +126,12 @@ async function main() {
       assert.deepStrictEqual([row('no-start').commands.length, row('no-start').startSkipped], [0, []]);
       assert.deepStrictEqual([row('bad-start').commands.length, row('bad-start').startSkipped], [0, ['project.json']]);
     });
-  } finally { try { process.kill(srv.pid); } catch {} }
-
-  await sleep(500); // the test copy lets go of its data folder
+  } finally {
+    // Wait for the test copy to end and let go of its data folder (not a fixed time), up to 10 s.
+    const ended = new Promise(r => srv.once('exit', r));
+    try { process.kill(srv.pid); } catch {}
+    await Promise.race([ended, sleep(10000)]);
+  }
   try { fs.rmSync(WS, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: true, force: true }); } catch {}
   console.log(failures ? failures + ' FAILED' : 'all passed');
   // No process.exit: on Windows it can stop Node while fetch's sockets are still closing (a libuv assertion).

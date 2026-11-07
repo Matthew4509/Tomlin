@@ -8,14 +8,15 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { headerFindings, compareLive, siteOf } = require('./live');
-const { disclosurePass, publishedFiles, decodeText, RULE: DISC_RULES } = require('./disclosure');
+const { disclosurePass, publishedFiles, decodeText, scratchGitDir, listDamaged, RULE: DISC_RULES } = require('./disclosure');
 const { gitConfigRisky } = require('./gitstate');
 const { fingerprint, applyJudged } = require('./judged');
 const { findRoots } = require('./roots');
 const { RULES_MORE, locationFromRequestVar, newRun } = require('./rules-more');
 const { ADVANCED_RULES } = require('./advanced-security');
 const { crossAudit, CROSS_RULES } = require('./cross');
-const { agentAudit, RULE: AGENT_RULES } = require('./agents');
+const { agentAudit, checkSkill, RULE: AGENT_RULES } = require('./agents');
+const { Parts } = require('./audit-part');
 
 // Build output and release copies are skipped: a fault in the source would otherwise be counted once per copy
 // (one real project showed 15 findings from 9 real lines, the rest in _build/deploy copies).
@@ -69,9 +70,9 @@ function innerHtmlFromOutside(line, ctx) {
   for (const n of ctx.tainted) if (new RegExp('(^|[^\\w$.])' + n.replace(/\$/g, '\\$') + '\\b').test(rhs)) return true;
   return false;
 }
-const CODE_EXT = /\.(php|js|mjs|cjs|ts|tsx|jsx|py|html?|css|scss|less|json|ya?ml|ini|env|conf|htaccess|sh|bat|cmd|toml|pem|key|txt|sql)$/i;
-// Files only ever run on the developer's own PC (a dev/ folder, a *.dev.* or *.local.* file, docker-compose).
-const DEV_FILE = /(^|\/)(dev|local|docker)(\/|[._-])|[._-](dev|local)\.[a-z]+$|docker-compose/i;
+const CODE_EXT = /\.(php|js|mjs|cjs|ts|tsx|jsx|vue|svelte|astro|py|html?|css|scss|less|json|ya?ml|ini|env|conf|htaccess|sh|bat|cmd|toml|pem|key|txt|sql)$/i;
+// Files only ever run on the developer's own PC (a dev/ folder, a *.dev.*, *.development.* or *.local.* file, docker-compose, compose.yaml).
+const DEV_FILE = /(^|\/)(dev|local|docker)(\/|[._-])|[._-](dev|development|local)\.[a-z]+$|docker-compose|(^|\/)compose(\.[\w-]{1,40})?\.ya?ml$/i;
 // A comment line: a tracker tag or a setting written in a comment is not live. Secrets are still read in comments.
 const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|#(?![!\[])|<!--|;|--\s|rem\s)/i;
 
@@ -84,8 +85,17 @@ function binaryBody(b64) {
   for (const c of buf) if ((c >= 32 && c < 127) || c === 10 || c === 13 || c === 9) text++;
   return text / buf.length < 0.9;
 }
+// A PuTTY key file opens with its public part: it is a private key only if the private part follows, with a body.
+const PUTTY_KEY = /^\s*PuTTY-User-Key-File-\d{1,2}:/;
 function keyBodyFollows(line, ctx, lines, i) {
-  const after = (line.split(/PRIVATE KEY-----/)[1] || '').replace(/\\n/g, '');
+  if (PUTTY_KEY.test(line)) {
+    for (let k = i + 1; k < Math.min(lines.length, i + 80); k++) {
+      if (/^\s*Private-Lines:\s*[1-9]/.test(lines[k])) return /^\s*[A-Za-z0-9+/]{8,}={0,2}\s*$/.test(lines[k + 1] || '');
+      if (PUTTY_KEY.test(lines[k])) break;
+    }
+    return false;
+  }
+  const after =(line.split(/PRIVATE KEY-----/)[1] || '').replace(/\\n/g, '');
   const inline = /[A-Za-z0-9+/]{60,}={0,2}/.exec(after);
   if (inline) return binaryBody(inline[0]);
   let body = '';
@@ -98,11 +108,27 @@ function keyBodyFollows(line, ctx, lines, i) {
 }
 // SEC-002/003: a key-shaped placeholder ("sk-ant-...fake...", "xxxxxxxx") is not a key.
 function notPlaceholderKey(line) {
-  const m = /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-(proj-)?[A-Za-z0-9]{32,}|sk_live_\w+|rk_live_\w+|AKIA\w+|ghp_\w+|github_pat_\w+|xox[baprs]-[\w-]+)/.exec(line);
+  const m = /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-(?:proj|svcacct|admin|or-v1)-[A-Za-z0-9_-]{32,}|sk-[A-Za-z0-9]{32,}|gsk_[A-Za-z0-9]{32,}|hf_[A-Za-z0-9]{30,}|r8_[A-Za-z0-9]{30,}|xai-[A-Za-z0-9]{40,}|pplx-[A-Za-z0-9]{40,}|npg_[A-Za-z0-9]{10,}|sk_live_\w+|rk_live_\w+|AKIA\w+|ghp_\w+|github_pat_\w+|xox[baprs]-[\w-]+|npm_[A-Za-z0-9]{36}\b|glpat-[\w-]{20,})/.exec(line);
   if (!m) return true;
-  const body = m[0].replace(/^(sk-ant-(api\d+-)?|sk-(proj-)?|[sr]k_live_|AKIA|ghp_|github_pat_|xox[baprs]-)/, '');
+  const body = m[0].replace(/^(sk-ant-(api\d+-)?|sk-(proj-|svcacct-|admin-|or-v1-)?|gsk_|hf_|r8_|xai-|pplx-|npg_|[sr]k_live_|AKIA|ghp_|github_pat_|xox[baprs]-|npm_|glpat-)/, '');
   return !(/fake|test|dummy|example|sample|placeholder|your|xxxxx|00000000|12345678|abcdefgh/i.test(body) || new Set(body).size < 8);
 }
+// SEC-004 where a config format has no quotes round the value, or holds it inside another string. The capture is the
+// value: a reference to where it really lives (${VAR}, %(x)s, {{ x }}, !vault) or a word for one is not a password.
+const PW_PLACEHOLDER = /example|changeme|change_me|changeit|your[_-]|yourStrong|placeholder|_here|xxxx|\*\*\*|test|dummy|sample|not_?a_?secret|dev_?only/i;
+const PW_REFERENCE = /^(\$|%\(|%\w+%|\{|<|@|\*|&|!|ENC\()/;
+// The value alone, not the line: postgres is also a setting's name and a user (Username=postgres;Password=...).
+const PW_WORD = /^(password|passwd|secret|passphrase|db_pass|new_?password|current_?password|required|optional|disabled|enabled|undefined|not_?set|postgres)$/i;
+const pwValue = re => line => { const m = re.exec(line); return !(m && (PW_REFERENCE.test(m[1]) || PW_WORD.test(m[1]))); };
+const PW_DEFINE = /\bdefine\s*\(\s*['"](?:[A-Z0-9_]{0,40}_)?(?:PASSWORD|PASSWD|PASS|SECRET)(?:_[A-Z0-9_]{0,40})?['"]\s*,\s*['"]([^'"\s]{8,})['"]/;
+const PW_CONFIG = /^\s*(?:-\s+)?(?:[\w.-]{0,40}[._-])?(?:password|passwd|db_pass)\s*[:=]\s*([^\s'"#;]{8,})\s*(?:[#;].*)?$/i;
+const PW_CONNECTION = /\b(?:Server|Data Source|Host|Initial Catalog|Database|User Id|Uid)\s*=[^"'\n]{0,300}?;\s*(?:Password|Pwd)\s*=\s*([^;"'\s]{8,})/i;
+// SEC-016: scheme://user:password@host. A value built from settings has a $ or { in it, so it does not match. An address
+// on this PC or a name a local container answers to, and an example with a word for its password, are not a leak.
+const DB_ADDRESS = /\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql2?|mariadb|rediss?|amqps?):\/\/[^\s:@/'"`$]{1,60}:[^\s@/'"`$<{]{6,}@[\w.-]{1,200}/i;
+const DB_ADDRESS_NOT_REAL = new RegExp(PW_PLACEHOLDER.source + String.raw`|:password@|:passw0rd@|:secret@|:pass(?:word)?\d*@|@(?:localhost|127\.|0\.0\.0\.0|host\.docker\.internal)|@(?:db|database|host|mongo|mongodb|postgres|postgresql|mysql|mariadb|redis|rabbitmq)(?![\w.-])`, 'i');
+// SEC-014/015: settings for the developer's own PC, and the templates shipped to be filled in.
+const PW_SKIP_FILE = new RegExp(DEV_FILE.source + '|[._-](example|sample|dist|template)\\.', 'i');
 // INJ-004: request data passed through a function other than a plain pass-through (trim, sprintf...) is taken as
 // escaped or transformed (e(), Preview::fromText(), a template helper). Only a direct echo counts.
 const PASS_THROUGH = /^(trim|rtrim|ltrim|strval|sprintf|vsprintf|implode|join|strtolower|strtoupper|ucfirst|ucwords|nl2br|stripslashes|urldecode|rawurldecode|substr|mb_substr|str_replace|preg_replace|print_r|var_export|string|isset|empty)$/i;
@@ -161,12 +187,17 @@ const MAX_TOTAL = 150 * 1024 * 1024; // all the code read in one scan: every fil
 
 // Pattern rules. `test` runs per line; `file` limits which files; `except` drops obvious placeholders/tests.
 const RULES = [
-  { id: 'SEC-001', sev: 'Critical', area: 'secrets', title: 'Private key in a file', re: /-----BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/, test: keyBodyFollows, fix: 'Move the key out of the project and rotate it.' },
-  { id: 'SEC-002', sev: 'Critical', area: 'secrets', title: 'Anthropic / OpenAI API key in a file', test: notPlaceholderKey, re: /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-(proj-)?[A-Za-z0-9]{32,})/, fix: 'Rotate the key; read it from an environment variable or a config file outside the web root.' },
-  { id: 'SEC-003', sev: 'Critical', area: 'secrets', title: 'Live payment / cloud / GitHub key in a file', test: notPlaceholderKey, re: /\b(sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[baprs]-[A-Za-z0-9-]{10,})/, fix: 'Rotate the key now; keep secrets out of the code.' },
-  { id: 'SEC-005', sev: 'High', area: 'secrets', title: 'Service key in a file (webhook secret, Slack, SendGrid, Mailgun, Twilio)', re: /\b(whsec_[A-Za-z0-9]{24,}|hooks\.slack\.com\/services\/T[A-Z0-9]{6,}\/B[A-Z0-9]{6,}\/[A-Za-z0-9]{20,}|SG\.[A-Za-z0-9_-]{20,24}\.[A-Za-z0-9_-]{39,50}|key-[0-9a-f]{32}\b|SK[0-9a-f]{32}\b)/, fix: 'Rotate the key; read it from config outside the project files you share or upload.' },
+  { id: 'SEC-001', sev: 'Critical', area: 'secrets', title: 'Private key in a file', re: /-----BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----|^\s*PuTTY-User-Key-File-\d{1,2}:/, test: keyBodyFollows, fix: 'Move the key out of the project and rotate it.' },
+  { id: 'SEC-002', sev: 'Critical', area: 'secrets', title: 'AI service API key in a file (Anthropic, OpenAI, OpenRouter, Groq, Hugging Face, Replicate, xAI, Perplexity)', test: notPlaceholderKey, re: /\b(sk-ant-[A-Za-z0-9_-]{20,}|sk-(?:proj|svcacct|admin|or-v1)-[A-Za-z0-9_-]{32,}|sk-[A-Za-z0-9]{32,}|gsk_[A-Za-z0-9]{32,}|hf_[A-Za-z0-9]{30,}|r8_[A-Za-z0-9]{30,}|xai-[A-Za-z0-9]{40,}|pplx-[A-Za-z0-9]{40,})\b/, fix: 'Rotate the key; read it from an environment variable or a config file outside the web root.' },
+  { id: 'SEC-003', sev: 'Critical', area: 'secrets', title: 'Live payment / cloud / GitHub / npm / GitLab key in a file', test: notPlaceholderKey, re: /\b(sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36}\b|glpat-[A-Za-z0-9_-]{20,}|npg_[A-Za-z0-9]{10,}\b)/, fix: 'Rotate the key now; keep secrets out of the code.' },
+  { id: 'SEC-005', sev: 'High', area: 'secrets', title: 'Service key in a file (webhook secret, Slack, SendGrid, Mailgun, Twilio, Resend, Vercel storage)', re: /\b(whsec_[A-Za-z0-9]{24,}|re_[A-Za-z0-9]{8}_[A-Za-z0-9]{20,}\b|vercel_blob_rw_[A-Za-z0-9]{10,}_[A-Za-z0-9]{20,}\b|hooks\.slack\.com\/services\/T[A-Z0-9]{6,}\/B[A-Z0-9]{6,}\/[A-Za-z0-9]{20,}|SG\.[A-Za-z0-9_-]{20,24}\.[A-Za-z0-9_-]{39,50}|key-[0-9a-f]{32}\b|SK[0-9a-f]{32}\b)/, fix: 'Rotate the key; read it from config outside the project files you share or upload.' },
   { id: 'SEC-006', sev: 'Medium', area: 'secrets', title: 'Google API key in a file: check it is restricted to your site', re: /\bAIza[0-9A-Za-z_-]{35}\b/, fix: 'In Google Cloud, restrict the key to your domain and to the APIs it needs; a key for server calls belongs in config, not code.' },
   { id: 'SEC-004', sev: 'Medium', area: 'secrets', title: 'Password written into the code', re: /\b(password|passwd|db_pass|secret)\s*['"]?\s*[:=]>?\s*['"][^'"\s$]{8,}['"]/i, except: /(example|changeme|your[_-]|placeholder|xxxx|\*\*\*|test|dummy|sample|not_?a_?secret|dev_?only)/i, test: realPasswordValue, fix: 'Read it from config outside the web root; if it is a real password, change it.' },
+
+  { id: 'SEC-013', sev: 'Medium', area: 'secrets', title: 'Password written into the code', file: /\.php$/i, re: PW_DEFINE, except: PW_PLACEHOLDER, test: pwValue(PW_DEFINE), fix: 'Read it from config outside the web root; if it is a real password, change it.' },
+  { id: 'SEC-014', sev: 'Medium', area: 'secrets', title: 'Password written into a settings file', file: /\.(properties|ini|cfg|conf|ya?ml)$/i, skipFile: PW_SKIP_FILE, re: PW_CONFIG, except: PW_PLACEHOLDER, test: pwValue(PW_CONFIG), fix: 'Read it from an environment variable (${DB_PASSWORD}) or a settings file git ignores; if it is a real password, change it.' },
+  { id: 'SEC-016', sev: 'High', area: 'secrets', title: 'A database password is written into an address in the code', file: /\.(m?[jt]sx?|cjs|mts|cts|py|php|rb|go|java|cs|kt)$/i, skipFile: PW_SKIP_FILE, re: DB_ADDRESS, except: DB_ADDRESS_NOT_REAL, fix: 'Change that password, then read the address from an environment variable (DATABASE_URL) that is set on the server.' },
+  { id: 'SEC-015', sev: 'Medium', area: 'secrets', title: 'Password written into a connection string', file: /\.(json|config|xml|ya?ml|ini|properties)$/i, skipFile: PW_SKIP_FILE, re: PW_CONNECTION, except: PW_PLACEHOLDER, test: pwValue(PW_CONNECTION), fix: 'Read the connection string from an environment variable or a settings file git ignores; if it is a real password, change it.' },
 
   { id: 'INJ-001', sev: 'High', area: 'injection', title: 'Request data joined into an SQL query', file: /\.php$/i, re: /(["'])[^"']*\b(SELECT|INSERT|UPDATE|DELETE)\b[^"']*\1\s*\.\s*\$_(GET|POST|REQUEST|COOKIE)|"[^"]*\b(SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{?\$_(GET|POST|REQUEST|COOKIE)/i, fix: 'Use a prepared statement with ? placeholders.' },
   { id: 'INJ-002', sev: 'High', area: 'injection', title: 'Request data reaches eval / system / include', file: /\.php$/i, re: /\b(eval|assert|system|exec|shell_exec|passthru|popen|include|require)(_once)?\b\s*\(?[^;]*\$_(GET|POST|REQUEST|COOKIE)/i, fix: 'Never pass request data to code or shell; map it to a fixed list instead.' },
@@ -205,7 +236,8 @@ const RULES = [
 
 // Files that must never sit in a web root.
 const EXPOSED = [
-  { id: 'EXP-001', sev: 'Critical', re: /^\.env(\..*)?$/i, title: '.env file inside the site folder' },
+  // A template (.env.example) is shown on purpose; a real key in one is found by the key rules anyway.
+  { id: 'EXP-001', sev: 'Critical', re: /^\.env(?!\.(?:[\w-]{1,40}\.)?(example|sample|template|dist|defaults)$)(\..*)?$/i, title: '.env file inside the site folder' },
   { id: 'EXP-002', sev: 'High', re: /\.(sql|sqlite|db|bak|old|orig|swp)$/i, title: 'Database dump / backup file inside the site folder' },
   { id: 'EXP-003', sev: 'High', re: /\.(zip|tar|gz|7z|rar)$/i, title: 'Archive inside the site folder' },
   { id: 'EXP-004', sev: 'Medium', re: /^(package\.json|package-lock\.json|composer\.json|composer\.lock|yarn\.lock)$/i, title: 'Package list inside the site folder (shows which versions to attack)' },
@@ -252,34 +284,55 @@ function blockedByHtaccess(file) {
 
 // A file the scan reads (code, a .env, a note): only these count toward MAX_FILES, so 6,500 pictures never stop the
 // scan before the code behind them.
+// Read for keys only: the other rules are written for web code, and would have nothing to say or say it wrongly. A minified
+// file is one long line of someone's build; a compiled language's source still ships or gets pushed with its keys in it.
+const KEYS_ONLY = /\.(min\.js|cs|java|kt|kts|go|rb|rs|c|h|cc|cpp|hpp|dart|swift|scala|pl|lua|ps1|psm1|properties|xml|gradle|tf|tfvars|config)$/i;
 const readable = name => CODE_EXT.test(name) || /^\.env/i.test(name) || /\.md$/i.test(name);
+
+// A link is not followed. That is a gap only when it leads out of the project: a folder inside is read where it is, and
+// a broken link has nothing behind it.
+function linkLeaves(root, p) {
+  let to; try { to = fs.realpathSync(p); } catch { return false; }
+  const rel = path.relative(root, to);
+  return rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel);
+}
+
+// The project folder is the site itself: it holds a home page, no web folder, and nothing says it is built first.
+function rootIsWebroot(dir) {
+  let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+  if (!ents.some(e => e.isFile() && /^index\.(html|php)$/i.test(e.name))) return false;
+  return !ents.some(e => (e.isDirectory() && WEBROOT_NAMES.test(e.name)) || (e.isFile() && e.name.toLowerCase() === 'package.json'));
+}
 
 function listFiles(dir, skip) {
   const out = [];
-  let counted = 0;
+  let counted = 0, root = dir;
+  try { root = fs.realpathSync(dir); } catch {}
+  out.tooDeep = []; out.closed = 0; out.linksOut = [];
   const walk = (d, inWebroot, depth) => {
-    if (counted >= MAX_FILES || depth > 12) return;
+    if (counted >= MAX_FILES) return;
+    if (depth > 12) { out.tooDeep.push(path.relative(dir, d).replace(/\\/g, '/')); return; }
     let ents = [];
-    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.closed++; return; }
     for (const e of ents) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) {
-        if (e.name === '.git' && inWebroot) out.push({ p, inWebroot, name: e.name, gitDir: true });
+        if (e.name === '.git' && inWebroot && depth > 0) out.push({ p, inWebroot, name: e.name, gitDir: true });
         // an old copy of the site kept inside the served folder (old/, backup/, site-old/ ...) that has its own home page
         if (inWebroot && OLD_COPY.test(e.name) && ['index.html', 'index.php', 'index.htm'].some(n => fs.existsSync(path.join(p, n))) && !blockedByHtaccess(path.join(p, 'index.html'))) out.push({ p, inWebroot, name: e.name, oldCopy: true });
         if (SKIP_DIRS.has(e.name)) continue;
         if (skip.has(path.relative(dir, p).replace(/\\/g, '/').toLowerCase())) continue;
-        walk(p, inWebroot || WEBROOT_NAMES.test(e.name), depth + 1);
+        walk(p, (depth > 0 && inWebroot) || WEBROOT_NAMES.test(e.name), depth + 1);
       } else if (e.isFile()) {
         if (readable(e.name)) {
           if (counted >= MAX_FILES) return;
           counted++;
         }
         out.push({ p, inWebroot, name: e.name });
-      }
+      } else if (e.isSymbolicLink() && !SKIP_DIRS.has(e.name) && !skip.has(path.relative(dir, p).replace(/\\/g, '/').toLowerCase()) && linkLeaves(root, p)) out.linksOut.push(path.relative(dir, p).replace(/\\/g, '/'));
     }
   };
-  walk(dir, false, 0);
+  walk(dir, rootIsWebroot(dir), 0);
   out.full = counted >= MAX_FILES;
   return out;
 }
@@ -288,6 +341,51 @@ function listFiles(dir, skip) {
 const TEST_FRAMEWORK = /\bextends\s+\w*TestCase\b|\bPHPUnit\b|\b(describe|it|test)\s*\(\s*['"`]|\bexpect\s*\(|\bassert(Equals|Same|True|False)\s*\(|^\s*(import|from)\s+(pytest|unittest)\b/m;
 /** Slices of a long line (minified code), overlapping so a key across a cut is still whole in one. */
 const slicesOf = line => { const out = []; for (let k = 0; k < line.length; k += 1800) out.push(line.slice(k, k + 2000)); return out; };
+
+const isTestFile = (rel, name, inWebroot, text) => {
+  const testName = /(^|\/)(tests?|spec|__tests__|fixtures?)\//i.test(rel) || /\.(test|spec)\./i.test(name) || /^test_\w*\.py$/i.test(name);
+  // In the folder visitors reach, a test's name is not enough (public_html/test/db.php runs live): only a test
+  // framework's own file is taken as a test there.
+  return testName && (!inWebroot || TEST_FRAMEWORK.test(text));
+};
+// The pattern rules over one file's lines, for the code rules and for the keys pass. file: { name, rel, text, lines, isTest, ctx },
+// and where: how a finding names it when that is not rel (a zip's entry: rel is its path inside the zip).
+function applyRules(rules, file, judged, findings) {
+  const { name, rel, where = rel, text, lines, isTest, ctx } = file;
+  for (const r of rules) {
+    if (r.file && !r.file.test(name)) continue;
+    if (isTest && r.sev !== 'Critical') continue;
+    if (r.skipFile && r.skipFile.test(rel)) continue;
+    if (r.path && !r.path.test(rel)) continue;
+    if (r.fileHas && !r.fileHas.test(text)) continue;
+    if (r.fileLacks && r.fileLacks.test(text)) continue;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // A long line (minified code) is read in slices for keys only: the other rules would take too long on it.
+      if (line.length > 2000 ? r.area !== 'secrets' || !slicesOf(line).some(s => r.re.test(s)) : !r.re.test(line)) continue;
+      if (r.area !== 'secrets' && !r.comments && COMMENT_LINE.test(line)) continue;
+      if (r.except && r.except.test(line)) continue;
+      if (r.test && !r.test(line, ctx, lines, i)) continue;
+      if (r.guardAbove && r.guardAbove.re.test(lines.slice(Math.max(0, i - r.guardAbove.lines), i).join('\n'))) continue;
+      if (r.guardAfter && r.guardAfter.re.test(lines.slice(i, i + 1 + r.guardAfter.lines).join('\n'))) continue;
+      if (r.needAfter && !r.needAfter.re.test(lines.slice(i + 1, i + 1 + r.needAfter.lines).join('\n'))) continue;
+      if (r.needsNear) {
+        const near = lines.slice(Math.max(0, i - 40), i + 40).join('\n');
+        if (r.needsNear.test(near)) continue;
+      }
+      const hit = { rule: r.id, sev: r.sev, area: r.area, title: r.title, where: where + ':' + (i + 1), fix: r.fix, fp: fingerprint(line) };
+      if (r.confidence) hit.confidence = r.confidence;
+      findings.push(hit);
+      // One finding per rule per file keeps the list readable. A place set aside as not a fault does not count:
+      // the rule goes on, so a real one further down the same file is still found.
+      if (judged && applyJudged([hit], judged).setAside.length) continue;
+      break;
+    }
+  }
+}
+const SECRET_RULES = RULES.filter(r => r.area === 'secrets');
+const TOO_BIG_WHY = 'Code files over ' + (MAX_BYTES >> 10) + ' KB';
+const tooBigNote = list => list.length + ' code file' + (list.length === 1 ? '' : 's') + ' over ' + (MAX_BYTES >> 10) + ' KB ' + (list.length === 1 ? 'was' : 'were') + ' not read: ' + list.slice(0, 5).join(', ') + (list.length > 5 ? '…' : '') + '. Check ' + (list.length === 1 ? 'it' : 'them') + ' by hand, or split ' + (list.length === 1 ? 'it' : 'them') + '.';
 
 function codeAudit(dir, skipList, opts = {}) {
   newRun();
@@ -298,7 +396,8 @@ function codeAudit(dir, skipList, opts = {}) {
   const files = listFiles(dir, skip);
   const exposed = new Map(); // rule|folder -> finding (one per folder, with a count)
   const read = [], docs = []; // every file read, and the notes (.md), for the cross-file checks (lib/cross.js)
-  let scanned = 0, readBytes = 0, overTotal = 0;
+  let scanned = 0, readBytes = 0, leftByTime = 0;
+  const overTotal = []; // code files past MAX_TOTAL
   const tooBig = []; // code files over MAX_BYTES, named in a note (never skipped without a word)
   const unreadable = []; // code files that could not be opened, named in a note too
   for (const f of files) {
@@ -329,26 +428,28 @@ function codeAudit(dir, skipList, opts = {}) {
       try { if (fs.statSync(f.p).size < 200 * 1024) docs.push({ rel, text: fs.readFileSync(f.p, 'utf8') }); } catch {}
       continue;
     }
-    if (!CODE_EXT.test(f.name) && !/^\.env/i.test(f.name)) continue;
-    if (/\.min\.js$|package-lock\.json$|\.map$/i.test(f.name)) continue;
-    let st; try { st = fs.statSync(f.p); } catch { continue; }
+    const keysOnly = KEYS_ONLY.test(f.name);
+    if (!CODE_EXT.test(f.name) && !keysOnly && !/^\.env/i.test(f.name)) continue;
+    if (/package-lock\.json$|\.map$/i.test(f.name)) continue;
+    // Past the part's budget (lib/audit-part.js) the files are still listed, so the checks on names above finish, but no
+    // more of them are read.
+    if (leftByTime || (opts.softAt && Date.now() > opts.softAt)) { leftByTime++; continue; }
+    let st; try { st = fs.statSync(f.p); } catch (e) { if (e.code !== 'ENOENT') unreadable.push(rel); continue; }
     if (st.size > MAX_BYTES) { tooBig.push(rel); continue; }
-    if (readBytes + st.size > MAX_TOTAL) { overTotal++; continue; }
+    if (readBytes + st.size > MAX_TOTAL) { overTotal.push(rel); continue; }
     readBytes += st.size;
     // Whatever it was saved as: a .env written by Windows PowerShell 5.1 is UTF-16, and read as UTF-8 its keys vanish.
     // One that cannot be opened (held by another program, or locked by the antivirus as a web shell) is named in a note.
     let text; try { text = decodeText(fs.readFileSync(f.p)); } catch { unreadable.push(rel); continue; }
     if (text === null) continue;
+    if (opts.eachFile) opts.eachFile();
     scanned++;
     const lines = text.split(/\r?\n/);
     const ctx = { text, rel, abs: f.p, dir };
-    const testName = /(^|\/)(tests?|spec|__tests__|fixtures?)\//i.test(rel) || /\.(test|spec)\./i.test(f.name) || /^test_\w*\.py$/i.test(f.name);
-    // In the folder visitors reach, a test's name is not enough (public_html/test/db.php runs live): only a test
-    // framework's own file is taken as a test there.
-    const isTest = testName && (!f.inWebroot || TEST_FRAMEWORK.test(text));
-    read.push({ rel, name: f.name, text, lines, isTest });
-    if (/privacy/i.test(f.name) && /\.(html?|php|md|tsx?|jsx?|vue|json|txt)$/i.test(f.name)) privacy.push(text.toLowerCase());
-    if (!isTest && /\.(html?|php|m?js|tsx|jsx|vue|twig)$/i.test(f.name)) lines.forEach((l, i) => {
+    const isTest = isTestFile(rel, f.name, f.inWebroot, text);
+    if (!keysOnly) read.push({ rel, name: f.name, text, lines, isTest });
+    if (!keysOnly && /privacy/i.test(f.name) && /\.(html?|php|md|tsx?|jsx?|vue|json|txt)$/i.test(f.name)) privacy.push(text.toLowerCase());
+    if (!keysOnly && !isTest && /\.(html?|php|m?js|tsx|jsx|vue|twig)$/i.test(f.name)) lines.forEach((l, i) => {
       if (l.length > 2000 || COMMENT_LINE.test(l)) return;
       for (const m of l.matchAll(LOADS_FROM)) {
         if (m[3] && !/stylesheet/i.test(m[0])) continue;
@@ -363,46 +464,25 @@ function codeAudit(dir, skipList, opts = {}) {
         }
       }
     });
-    for (const r of RULES) {
-      if (r.file && !r.file.test(f.name)) continue;
-      if (isTest && r.sev !== 'Critical') continue;
-      if (r.skipFile && r.skipFile.test(rel)) continue;
-      if (r.path && !r.path.test(rel)) continue;
-      if (r.fileHas && !r.fileHas.test(text)) continue;
-      if (r.fileLacks && r.fileLacks.test(text)) continue;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        // A long line (minified code) is read in slices for keys only: the other rules would take too long on it.
-        if (line.length > 2000 ? r.area !== 'secrets' || !slicesOf(line).some(s => r.re.test(s)) : !r.re.test(line)) continue;
-        if (r.area !== 'secrets' && !r.comments && COMMENT_LINE.test(line)) continue;
-        if (r.except && r.except.test(line)) continue;
-        if (r.test && !r.test(line, ctx, lines, i)) continue;
-        if (r.guardAbove && r.guardAbove.re.test(lines.slice(Math.max(0, i - r.guardAbove.lines), i).join('\n'))) continue;
-        if (r.guardAfter && r.guardAfter.re.test(lines.slice(i, i + 1 + r.guardAfter.lines).join('\n'))) continue;
-        if (r.needAfter && !r.needAfter.re.test(lines.slice(i + 1, i + 1 + r.needAfter.lines).join('\n'))) continue;
-        if (r.needsNear) {
-          const near = lines.slice(Math.max(0, i - 40), i + 40).join('\n');
-          if (r.needsNear.test(near)) continue;
-        }
-        const hit = { rule: r.id, sev: r.sev, area: r.area, title: r.title, where: rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(line) };
-        if (r.confidence) hit.confidence = r.confidence;
-        findings.push(hit);
-        // One finding per rule per file keeps the list readable. A place set aside as not a fault does not count:
-        // the rule goes on, so a real one further down the same file is still found.
-        if (opts.judged && applyJudged([hit], opts.judged).setAside.length) continue;
-        break;
-      }
-    }
+    applyRules(keysOnly ? SECRET_RULES : RULES, { name: f.name, rel, text, lines, isTest, ctx }, opts.judged, findings);
   }
   const notes = [];
-  if (overTotal) notes.push('The scan reads up to ' + (MAX_TOTAL >> 20) + ' MB of code in all: ' + overTotal + ' more files were not read.');
+  if (overTotal.length) notes.push('The scan reads up to ' + (MAX_TOTAL >> 20) + ' MB of code in all: ' + overTotal.length + ' more files were not read.');
   if (unreadable.length) notes.push(unreadable.length + ' code file' + (unreadable.length === 1 ? '' : 's') + ' could not be opened, so ' + (unreadable.length === 1 ? 'it was' : 'they were') + ' not checked: ' + unreadable.slice(0, 5).join(', ') + (unreadable.length > 5 ? '…' : '') + '. Another program may hold ' + (unreadable.length === 1 ? 'it' : 'them') + ', or the antivirus may have blocked ' + (unreadable.length === 1 ? 'it' : 'them') + ' (it does that to files that look like a web shell: look at it first).');
-  if (tooBig.length) notes.push(tooBig.length + ' code file' + (tooBig.length === 1 ? '' : 's') + ' over ' + (MAX_BYTES >> 10) + ' KB ' + (tooBig.length === 1 ? 'was' : 'were') + ' not read: ' + tooBig.slice(0, 5).join(', ') + (tooBig.length > 5 ? '…' : '') + '. Check ' + (tooBig.length === 1 ? 'it' : 'them') + ' by hand, or split ' + (tooBig.length === 1 ? 'it' : 'them') + '.');
-  // Files the scan did not read: the audit is then partly checked, not a clean pass.
+  if (tooBig.length) notes.push(tooBigNote(tooBig));
+  const deep = files.tooDeep.length, links = files.linksOut.length;
+  if (deep) notes.push(deep + ' folder' + (deep === 1 ? ' is' : 's are') + ' more than 12 levels deep and ' + (deep === 1 ? 'was' : 'were') + ' not read.');
+  if (files.closed) notes.push(files.closed + ' folder' + (files.closed === 1 ? '' : 's') + ' could not be opened and ' + (files.closed === 1 ? 'was' : 'were') + ' not read. Another program may hold ' + (files.closed === 1 ? 'it' : 'them') + ', or this account may not be allowed in.');
+  if (links) notes.push(links + ' link' + (links === 1 ? ' leads' : 's lead') + ' to somewhere outside the project and ' + (links === 1 ? 'was' : 'were') + ' not followed. If what is there goes live with the project, add that folder as a project of its own.');
+  // Said as data as well as in the notes: these make the result "Passed, partly checked". Skips made on purpose (old
+  // copies, a person's skip list, build output, minified code, pictures) are not here. Those named by file count only
+  // when git would publish them (runAudit asks): a browser profile under an ignored data/ folder is no gap.
   const notRead = [];
-  if (tooBig.length) notRead.push('Code files over ' + (MAX_BYTES >> 10) + ' KB: ' + tooBig.length);
-  if (overTotal) notRead.push('Code files past the ' + (MAX_TOTAL >> 20) + ' MB read limit: ' + overTotal);
-  if (unreadable.length) notRead.push('Code files that could not be opened: ' + unreadable.length);
+  if (files.full) notRead.push('Only the first ' + MAX_FILES + ' files were looked at; the rest of the folder was not');
+  if (files.closed) notRead.push('Folders that could not be opened: ' + files.closed);
+  const fileGaps = [[overTotal, 'Files past the ' + (MAX_TOTAL >> 20) + ' MB of code one scan reads'], [unreadable, 'Code files that could not be opened'],
+    [tooBig, TOO_BIG_WHY], [files.tooDeep, 'Folders more than 12 levels deep'], [files.linksOut, 'Links to somewhere outside the project, not followed']]
+    .filter(([list]) => list.length).map(([list, why]) => ({ why, list }));
   let has = null;
   for (const e of exposed.values()) {
     // An archive a page of the project links to (a download, an update feed) is published on purpose.
@@ -433,11 +513,16 @@ function codeAudit(dir, skipList, opts = {}) {
     if (unnamed.length) findings.push({ rule: 'PRIV-002', sev: 'Medium', area: 'privacy', title: 'The privacy page does not name ' + unnamed.length + ' outside service' + (unnamed.length === 1 ? '' : 's') + ' the site loads from: ' + unnamed.slice(0, 5).map(u => u.host).join(', ') + (unnamed.length > 5 ? '…' : ''), where: unnamed[0].at, fix: 'Name each service on the privacy page (what it is for, that it receives the visitor\'s address), or serve the file from your own site.' });
   }
   // Cross-file checks: read the files together (lib/cross.js).
-  const cross = crossAudit(read, { docs, dir, loads: outside, blocked: blockedByHtaccess },
-    (r, f, i, title) => ({ rule: r.id, sev: r.sev, area: r.area, title: title || r.title, where: f.rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(f.lines[i] || '') }));
-  findings.push(...cross.findings);
-  notes.push(...cross.notes);
-  return { findings: mergeCopies(findings), notes, notRead, tooBig, filesSeen: files.length, filesScanned: scanned, truncated: files.full === true };
+  // Not on a part of the files: a check that looks for something missing would be wrong about the rest.
+  if (leftByTime) notes.push('The checks across files were left out, because not every file was read.');
+  else {
+    const cross = crossAudit(read, { docs, dir, skip, loads: outside, blocked: blockedByHtaccess },
+      (r, f, i, title) => ({ rule: r.id, sev: r.sev, area: r.area, title: title || r.title, where: f.rel + ':' + (i + 1), fix: r.fix, fp: fingerprint(f.lines[i] || '') }));
+    findings.push(...cross.findings);
+    notes.push(...cross.notes);
+  }
+  return { findings: mergeCopies(findings), notes, notRead, fileGaps, tooBig, filesSeen: files.length, filesScanned: scanned, truncated: files.full === true,
+    ...(leftByTime ? { stopped: { ms: Date.now() - (opts.softAt - opts.budgetMs), left: leftByTime + ' file' + (leftByTime === 1 ? '' : 's') } } : {}) };
 }
 
 // The same line in the same file name across several folders (old release copies: v1.5/, v1.6/ ...) is one fault,
@@ -573,7 +658,7 @@ const ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 // Severity calibration (scanner training T7): rules whose findings are true but rarely harm anyone (accessibility
 // polish, search-engine details, working notes, a test file that checks nothing) are Low, so they sit below the faults
 // that need fixing. Low and Info never change the verdict.
-const LOW_RULES = new Set(['A11Y-001', 'A11Y-002', 'A11Y-003', 'A11Y-004', 'DATA-007', 'NOTE-001', 'REQ-001', 'UX-007',
+const LOW_RULES = new Set(['PAY-004', 'A11Y-001', 'A11Y-002', 'A11Y-003', 'A11Y-004', 'DATA-007', 'NOTE-001', 'REQ-001', 'UX-007',
   'TEST-001', 'CACHE-001', 'LIVE-026', 'LIVE-029', 'LIVE-030', 'LIVE-031']);
 
 // A line's fingerprint (lib/judged.js) is its text, hashed: a judged finding stays set aside while the line is
@@ -585,35 +670,14 @@ const LOW_RULES = new Set(['A11Y-001', 'A11Y-002', 'A11Y-003', 'A11Y-004', 'DATA
 // repository whose settings are safe to read; anywhere else every file could be uploaded, so nothing changes. A
 // finding with copies (also) stays as it is when any copy is published. The live check still asks the live site for
 // the usual leaks (.env, dumps), so an ignored file that was uploaded by hand is found there as its own finding.
-// Only a leak is softer when git ignores the file (it does not go to the remote). Code that runs (injection, missing
-// authorization) is as wrong in an ignored file as in any other.
-const LEAK_AREAS = new Set(['secrets', 'exposed files', 'disclosure', 'AI agent files']);
-// A code file over the size limit that git ignores stays on this PC, so not reading it is no gap (same rule as the
-// leak softening above: only in a git repository whose settings are safe to read). Files git keeps or would take stay.
-async function dropIgnoredGaps(dir, code) {
-  const big = code.tooBig || [];
-  if (!big.length || !fs.existsSync(path.join(dir, '.git')) || gitConfigRisky(dir)) return;
+async function ignoredByGit(dir) {
+  if (!fs.existsSync(path.join(dir, '.git')) || gitConfigRisky(dir)) return null;
   const list = await publishedFiles(dir, true);
-  if (!list) return;
+  if (!list) return null;
   const published = new Set(list.map(f => f.rel.toLowerCase()));
-  const left = big.filter(r => published.has(r.toLowerCase()));
-  if (left.length === big.length) return;
-  const kb = (MAX_BYTES >> 10), one = left.length === 1;
-  const was = code.notes.findIndex(n => / over \d+ KB (was|were) not read: /.test(n));
-  const say = left.length ? left.length + ' code file' + (one ? '' : 's') + ' over ' + kb + ' KB ' + (one ? 'was' : 'were') + ' not read: ' + left.slice(0, 5).join(', ') + (left.length > 5 ? '…' : '') + '. Check ' + (one ? 'it' : 'them') + ' by hand, or split ' + (one ? 'it' : 'them') + '.' : null;
-  if (was >= 0) { if (say) code.notes[was] = say; else code.notes.splice(was, 1); }
-  code.notRead = code.notRead.filter(n => !/^Code files over \d+ KB: /.test(n));
-  if (left.length) code.notRead.push('Code files over ' + kb + ' KB: ' + left.length);
-  code.tooBig = left;
-}
-
-async function softenIgnored(dir, findings) {
-  if (!fs.existsSync(path.join(dir, '.git')) || gitConfigRisky(dir)) return 0;
-  const list = await publishedFiles(dir, true);
-  if (!list) return 0;
-  const published = new Set(list.map(f => f.rel.toLowerCase()));
-  const fileOf = w => String(w || '').replace(/:\d+$/, '').replace(/\/$/, '');
-  const ignored = w => {
+  // a zip's entry ("a.zip > b.php:2") goes where its zip goes
+  const fileOf = w => String(w || '').replace(/:\d+$/, '').split(' > ')[0].replace(/\/$/, '');
+  return w => {
     const rel = fileOf(w);
     // "git history: …", an address, or a summary line ("dir/ (3 files, e.g. …)"): not one file here, so left as it is
     if (!rel || /^(git history|https?:)/i.test(rel) || !fs.existsSync(path.join(dir, rel))) return false;
@@ -623,6 +687,12 @@ async function softenIgnored(dir, findings) {
     for (const p of published) if (p.startsWith(low + '/')) return false;
     return true;
   };
+}
+// Only a leak is softer when git ignores the file ("it does not go to the remote"). Code that runs (injection, missing
+// authorization, a role taken from the request) is as wrong in an ignored file as in any other.
+const LEAK_AREAS = new Set(['secrets', 'exposed files', 'disclosure', 'AI agent files']);
+function softenIgnored(ignored, findings) {
+  if (!ignored) return 0;
   let n = 0;
   for (const f of findings) {
     if (!LEAK_AREAS.has(f.area)) continue;
@@ -649,24 +719,29 @@ function summarise(findings) {
 // opts.liveUrl: where the project is hosted. Then the live site's headers are checked (instead of localhost's), a few
 // fixed files are asked for, and its pages are compared with the local copy's (see lib/live.js compareLive).
 // opts.resolve / opts.gapMs / opts.minGapMs: for the demo and tests only (made-up sites on this PC).
+// opts.budgets ({ code, agents, disclosure, live } in ms), opts.graceMs, opts.inline, opts.workerFile: for tests.
+// Returns, with the findings: partly and notRead (what could not be read), cut (the parts stopped by time or a crash).
 // SEC-012: a key or password taken out of the files that an older version in the git history still holds. Anyone with
 // a copy of the repository has it, so it counts as given away until it is rotated. The disclosure pass reads every
 // past file version once and hands each one here; a key the files still hold is left to its own rule (SEC-001..006).
-const HISTORY_KEYS = { 'SEC-001': 'private key', 'SEC-002': 'Anthropic / OpenAI API key', 'SEC-003': 'live payment, cloud or GitHub key', 'SEC-005': 'service key', 'SEC-006': 'Google API key', 'KEY-002': 'Supabase service-role key', 'SEC-004': 'password' };
-const KEYISH = /PRIVATE KEY|eyJ|sb_secret_|sk-|sk_live_|rk_live_|AKIA|ghp_|github_pat_|xox[baprs]-|whsec_|hooks\.slack|SG\.|key-|SK[0-9a-f]{32}|AIza|passw|db_pass|secret/i;
+const HISTORY_KEYS = { 'SEC-001': 'private key', 'SEC-002': 'AI service API key', 'SEC-003': 'live payment, cloud, GitHub, npm or GitLab key', 'SEC-005': 'service key', 'SEC-006': 'Google API key', 'SEC-004': 'password', 'KEY-002': 'Supabase service-role key' };
+const KEYISH = /PRIVATE KEY|PuTTY-User-Key-File|eyJ|sb_secret_|sk-|gsk_|hf_|r8_|xai-|pplx-|npg_|re_|vercel_blob|sk_live_|rk_live_|AKIA|ghp_|github_pat_|xox[baprs]-|npm_|glpat-|whsec_|hooks\.slack|SG\.|key-|SK[0-9a-f]{32}|AIza|passw|db_pass|secret/i;
 function historySecrets() {
   const rules = RULES.filter(r => HISTORY_KEYS[r.id]);
   const now = new Set(), past = new Map();
   const hook = (text, rel, place, isCurrent) => {
     if (!KEYISH.test(text)) return;
     const lines = text.split(/\r?\n/);
+    const base = path.posix.basename(rel);
     for (const r of rules) for (let i = 0; i < lines.length; i++) {
+      if ((r.file && !r.file.test(base)) || (r.skipFile && r.skipFile.test(rel))) break;
       const line = lines[i];
       if (line.length > 2000) continue;
       const m = r.re.exec(line);
       if (!m || (r.except && r.except.test(line)) || (r.test && !r.test(line, { rel, text, history: true }, lines, i))) continue;
-      // a private key's BEGIN line is the same in every key: the line after it tells two keys apart
-      const k = r.id + '|' + (r.id === 'SEC-001' ? line + (lines[i + 1] || '') : m[0]);
+      // a private key's first line is the same in every key: the lines after it tell two keys apart (a PuTTY key's body
+      // starts a few lines down)
+      const k = r.id + '|' + (r.id === 'SEC-001' ? line + lines.slice(i + 1, i + 6).join('') : m[0]);
       if (isCurrent) { now.add(k); continue; }
       let e = past.get(k);
       if (!e) past.set(k, e = { r, places: [], wheres: [] });
@@ -687,43 +762,208 @@ function historySecrets() {
   return { hook, findings };
 }
 
+// Keys in what would be published but the code rules never read: build folders, and files of a kind they pass over (a
+// .sql dump, a Dockerfile, a key file with no extension). The disclosure pass already decodes all of it, and hands each
+// file here; only the secrets rules run, in the same way as the code rules. d: { dir, codeSkip, judged }.
+// Zip entries come here too (the code rules never open a zip), named "a.zip > b.php" and judged by their path inside it.
+// EXP-008 is by name, so it looks at what the pass lists, not only the folder visitors reach as EXPOSED does.
+const KEY_STORE = /\.(pfx|p12|jks)$/i;
+function publishedKeys(d) {
+  const skip = (d.codeSkip || []).map(s => String(s).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
+  const rootWeb = rootIsWebroot(d.dir);
+  const findings = [], folders = new Set(), overLimit = [];
+  const skippedByCode = low => skip.some(s => low === s || low.startsWith(s + '/'));
+  const innerPath = where => where.split(' > ').pop().replace(/\\/g, '/');
+  // bytes: the file did not read as text, so the code part passed over it and only its plain runs of characters are here.
+  const hook = (text, where, size, inZip, bytes) => {
+    const rel = inZip ? innerPath(where) : where;
+    const name = path.posix.basename(rel), parts = rel.split('/');
+    // Someone else's code inside a zip: its test fixtures are full of made-up keys, and the pass leaves those folders out of
+    // a project itself too.
+    if (parts.slice(0, -1).some(s => /^(node_modules|vendor|bower_components)$/i.test(s))) return;
+    if (!inZip) {
+      const build = parts.slice(0, -1).findIndex(s => SKIP_DIRS.has(s));
+      if (build >= 0) folders.add(parts.slice(0, build + 1).join('/') + '/');
+      // What the code part reads is judged there, and must not be reported twice.
+      else if (!bytes && (CODE_EXT.test(name) || KEYS_ONLY.test(name) || /^\.env/i.test(name)) && !/package-lock\.json$|\.map$/i.test(name)
+        && size <= MAX_BYTES && parts.length <= 13 && !skippedByCode(rel.toLowerCase())) return;
+      if (size > MAX_BYTES && !bytes) overLimit.push(rel);
+    }
+    // Password words turn up by chance in a program's bytes; a key's shape does not.
+    if (bytes) {
+      const keyed = SECRET_RULES.filter(r => r.sev === 'Critical' || r.id === 'SEC-005');
+      applyRules(keyed, { name, rel, where, text, lines: text.split('\n'), isTest: isTestFile(rel, name, rootWeb && !inZip, ''), ctx: { text, rel, abs: path.join(d.dir, rel), dir: d.dir } }, d.judged, findings);
+      return;
+    }
+    const inWebroot = (rootWeb && !inZip) || parts.slice(0, -1).some(s => WEBROOT_NAMES.test(s));
+    // A password line in a note is nearly always how to set one up; a key is a key wherever it is.
+    const rules = /\.(md|markdown)$/i.test(name) ? SECRET_RULES.filter(r => r.id !== 'SEC-004') : SECRET_RULES;
+    applyRules(rules, { name, rel, where, text, lines: text.split(/\r?\n/), isTest: isTestFile(rel, name, inWebroot, text), ctx: { text, rel, abs: path.join(d.dir, rel), dir: d.dir } }, d.judged, findings);
+  };
+  const fileHook = where => {
+    if (!KEY_STORE.test(where)) return;
+    const rel = innerPath(where), name = path.posix.basename(rel);
+    if (isTestFile(rel, name, rel === where && rootWeb, '')) return;
+    findings.push({ rule: 'EXP-008', sev: 'Medium', area: 'exposed files', title: 'Key store (.pfx, .p12, .jks) in what would be published: it can hold a private key', where, fix: 'Keep it out of git and out of the upload, and if it holds a real key, replace that key.', fp: fingerprint(name) });
+  };
+  return { hook, fileHook, findings: () => findings, folders: () => [...folders], overLimit: () => overLimit };
+}
+
+// A file over the code rules' limit that the keys pass read is no gap: its keys were read. Said as that, and the code
+// rules not having run on it stays said.
+function keysReadOverLimit(code, read) {
+  const big = code.tooBig || [], done = big.filter(r => read.includes(r));
+  if (!done.length) return;
+  const left = big.filter(r => !read.includes(r)), one = done.length === 1;
+  const said = done.length + ' code file' + (one ? '' : 's') + ' over ' + (MAX_BYTES >> 10) + ' KB ' + (one ? 'was' : 'were') + ' read for keys only: ' + done.slice(0, 5).join(', ') + (done.length > 5 ? '…' : '') + '. The code rules did not run on ' + (one ? 'it' : 'them') + ': check ' + (one ? 'it' : 'them') + ' by hand, or split ' + (one ? 'it' : 'them') + '.';
+  const at = code.notes.indexOf(tooBigNote(big));
+  if (at >= 0) code.notes.splice(at, 1, ...(left.length ? [tooBigNote(left)] : []), said);
+  for (const g of code.fileGaps || []) if (g.why === TOO_BIG_WHY) g.list = left;
+}
+
+// One part of the audit, as its thread (lib/audit-part.js) runs it, or this thread when no other can be had.
+async function runPart(part, d) {
+  if (part === 'roots') return findRoots(d.dir, { include: d.include });
+  if (part === 'code') return codeAudit(d.dir, d.skip, d);
+  if (part === 'agents') return agentAudit(d.dir, d.skip, d);
+  if (part === 'disclosure') {
+    // These hold functions, which do not cross to a thread, so they are built here.
+    const hs = historySecrets(), keys = publishedKeys(d);
+    const r = await disclosurePass(d.dir, { ...d.ctx, softAt: d.softAt, budgetMs: d.budgetMs, historyHook: hs.hook, keysHook: keys.hook, keyFileHook: keys.fileHook });
+    return { ...r, findings: [...r.findings, ...hs.findings()], keyFindings: keys.findings(), keyFolders: keys.folders(), keysOverLimit: keys.overLimit() };
+  }
+  if (part === 'skill') return checkSkill(d.input);
+  throw new Error('there is no audit part called ' + part);
+}
+
+/** One part by itself on a thread (Check a skill): what Parts.run returns. o: { budgetMs, graceMs? }. */
+async function runAlone(part, data, o) {
+  const parts = new Parts({ runPart, graceMs: o.graceMs });
+  try { return await parts.run(part, data, o.budgetMs); } finally { await parts.close(); }
+}
+
+// How long each part may take. The slowest real project here takes 24 s in all. opts.budgets overrides, for tests.
+const BUDGETS = { roots: 30000, code: 120000, agents: 30000, disclosure: 180000, live: 120000 };
+const PART_NAME = { roots: 'The look for old copies of the app', code: 'The code check', agents: 'The AI agent files check', disclosure: 'The private details check', live: 'The localhost and live site check' };
+const secs = ms => String(ms < 10000 ? Math.round(ms / 100) / 10 : Math.round(ms / 1000));
+// A network part stays on this thread: past the deadline its answer is simply not waited for.
+function byDeadline(start, at) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve({ state: 'stopped' }), Math.max(0, at - Date.now()));
+    Promise.resolve().then(start).then(result => { clearTimeout(timer); resolve({ state: 'done', result }); },
+      e => { clearTimeout(timer); resolve({ state: 'crashed', error: String((e && e.message) || e) }); });
+  });
+}
+
 async function runAudit(dir, url, opts = {}) {
   const started = Date.now();
   // Tests only: hold the thread this long, as reading a big project does.
   const spin = Number(process.env.BRIDGE_TEST_AUDIT_SPIN_MS) || 0;
   while (Date.now() - started < spin) { /* busy */ }
   let ownHost = null; try { ownHost = opts.liveUrl ? new URL(opts.liveUrl).hostname : null; } catch {}
+  const budget = part => (opts.budgets && opts.budgets[part] > 0 ? opts.budgets[part] : BUDGETS[part]);
+  // What was not read, gathered from where each part found it; cut: the parts stopped by time or a crash.
+  const notRead = [], cut = [], partNotes = [];
+  const wasCut = (why, more) => { cut.push(why); notRead.push(why); partNotes.push(why + '. ' + more); };
+  const AGAIN = 'Scan again. If it stops again, this project is too big for the check or a rule is too slow for one of its files: do not take this result as a pass.';
+  const plain = t => String(t).split(/\r?\n/)[0].split(dir).join('<project folder>').split(require('os').homedir()).join('<home folder>').slice(0, 200);
+  const outcome = (part, r, empty) => {
+    if (r.state === 'stopped') wasCut(PART_NAME[part] + ' stopped after ' + secs(r.ms) + ' s, so what it found is lost', AGAIN);
+    else if (r.state === 'crashed') wasCut(PART_NAME[part] + ' crashed, so what it found is lost', 'What went wrong: ' + plain(r.error) + '. ' + AGAIN);
+    if (r.state !== 'done') return empty;
+    const x = r.result;
+    if (x.stopped) wasCut(PART_NAME[part] + ' stopped after ' + secs(x.stopped.ms) + ' s: ' + x.stopped.left + ' not read', 'What it found before that is in this report. ' + AGAIN);
+    notRead.push(...(x.notRead || []));
+    return x;
+  };
+  const parts = new Parts({ runPart, inline: opts.inline, workerFile: opts.workerFile, graceMs: opts.graceMs });
+  const nothing = () => ({ findings: [], notes: [], filesScanned: 0, truncated: false });
+  // A folder that cannot be opened is not an empty project: nothing was read, and that is not a pass.
+  let gone = false;
+  try { fs.readdirSync(dir); } catch { gone = true; }
+  if (gone) wasCut('The project folder could not be opened, so nothing was read', 'Check it is still there and that this account may open it, then scan again.');
+  let code = nothing(), local = null, cmp = null, discFindings = [];
+  const named = list => list.slice(0, 8).join(', ') + (list.length > 8 ? ' and ' + (list.length - 8) + ' more' : '');
   // Old copies of the app inside the project (lib/roots.js): left out of the code rules, and out of the disclosure
   // pass unless git would publish them. opts.root === false scans everything; opts.include brings folders back.
-  const roots = opts.root === false ? { left: [], app: null, notes: [] } : findRoots(dir, { include: opts.include });
-  const skip = [...(opts.skip || []), ...roots.left.map(l => l.rel)];
-  const code = codeAudit(dir, skip, { ownHost, judged: opts.judged });
-  // The AI agent files (lib/agents.js): hidden instructions, hooks, skills' scripts, permissions, MCP servers.
-  const agents = agentAudit(dir, skip);
-  code.findings.push(...agents.findings);
-  code.notes.push(...agents.notes);
-  code.notes.unshift(...roots.notes);
-  // opts.disclosure: { details, others, own } (lib/disclosure.js). What publishing would give away about the maker.
-  if (opts.disclosure) {
-    const hs = historySecrets();
-    const d = await disclosurePass(dir, { ...opts.disclosure, historyHook: hs.hook, skip: [...(opts.skip || []).filter(s => !(opts.skipOwn || []).includes(s)), ...roots.left.filter(l => !l.publishes).map(l => l.rel)] });
-    code.findings.push(...d.findings, ...hs.findings());
-    code.notes.push(...d.notes);
+  let roots = { left: [], app: null, notes: [] }, skip = [...(opts.skip || [])];
+  if (!gone) try {
+    if (opts.root !== false) {
+      roots = outcome('roots', await parts.run('roots', { dir, include: opts.include }, budget('roots')), roots);
+      skip = [...skip, ...roots.left.map(l => l.rel)];
+    }
+    code = outcome('code', await parts.run('code', { dir, skip, ownHost, judged: opts.judged }, budget('code')), nothing());
+    // The AI agent files (lib/agents.js): hidden instructions, hooks, skills' scripts, permissions, MCP servers.
+    const agents = outcome('agents', await parts.run('agents', { dir, skip }, budget('agents')), { findings: [], notes: [] });
+    code.notes.push(...agents.notes);
+    code.notes.unshift(...roots.notes);
+    // opts.disclosure: { details, others, own } (lib/disclosure.js). What publishing would give away about the maker.
+    if (opts.disclosure) {
+      // A thread has its own copy of the module: what only this thread knows goes with the part.
+      const ctx = { ...opts.disclosure, listDamaged: listDamaged(), scratchDir: fs.existsSync(path.join(dir, '.git')) ? null : await scratchGitDir(),
+        skip: [...(opts.skip || []).filter(s => !(opts.skipOwn || []).includes(s)), ...roots.left.filter(l => !l.publishes).map(l => l.rel)] };
+      const d = outcome('disclosure', await parts.run('disclosure', { dir, ctx, codeSkip: skip, judged: opts.judged }, budget('disclosure')), { findings: [], notes: [] });
+      // A key the code rules found in src/ and this pass in the same file under dist/ is one fault with two places.
+      if (d.keyFindings && d.keyFindings.length) code.findings = mergeCopies([...code.findings, ...d.keyFindings]);
+      discFindings = d.findings;
+      code.notes.push(...d.notes);
+      if (d.keyFolders && d.keyFolders.length) code.notes.push('Read for keys only, because the code rules leave build output out: ' + named(d.keyFolders) + '.');
+      keysReadOverLimit(code, d.keysOverLimit || []);
+    }
+    code.findings.push(...agents.findings, ...discFindings);
+  } finally { await parts.close(); }
+  // Left out at the project's own word, or taken for an old copy that goes up with the project: not a clean read.
+  const ownSkips = (opts.skipOwn || []).map(s => String(s).replace(/\\/g, '/').replace(/\/+$/, '')).filter(s => s && fs.existsSync(path.join(dir, s)));
+  if (ownSkips.length) notRead.push('Folders this project\'s own project.json asks to leave out: ' + named(ownSkips));
+  const copies = roots.left.filter(l => l.publishes).map(l => l.rel);
+  if (copies.length) notRead.push('Folders taken as old copies, ' + (opts.disclosure ? 'read for keys only' : 'not read') + ': ' + named(copies));
+  // No file was read at all: the rules had nothing to say, which is not the same as nothing being wrong.
+  if (!gone && !cut.length && !code.filesScanned) notRead.push('No file of a kind the check reads was found, so the code rules checked nothing');
+  if (parts.alone) partNotes.push('A helper thread could not start, so this audit ran on the Bridge\'s own thread: the Bridge did not answer meanwhile, and a stuck check could not be stopped.');
+  // Localhost and the live site share one deadline.
+  const liveAt = Date.now() + budget('live');
+  const liveOut = r => {
+    if (cut.some(c => c.startsWith(PART_NAME.live))) return;
+    outcome('live', r.state === 'stopped' ? { state: 'stopped', ms: budget('live') } : r, null);
+  };
+  if (url) {
+    const r = await byDeadline(() => localAudit(url, dir, { headersOnLive: !!opts.liveUrl }), liveAt);
+    if (r.state === 'done') local = r.result;
+    else { liveOut(r); local = { findings: [], notes: [], reached: null }; }
   }
-  const local = url ? await localAudit(url, dir, { headersOnLive: !!opts.liveUrl }) : null;
-  let cmp = null;
   if (opts.liveUrl) {
-    cmp = await compareLive({ liveUrl: opts.liveUrl, localUrl: local && local.reached ? url : null, resolve: opts.resolve, gapMs: opts.gapMs, minGapMs: opts.minGapMs,
-      projectHas: projectIndex(dir, skip), maxPages: opts.maxPages || 4, maxScripts: 2, httpPaths: privateAreas(dir), dnsTxt: opts.dnsTxt });
+    const r = Date.now() < liveAt
+      ? await byDeadline(() => compareLive({ liveUrl: opts.liveUrl, localUrl: local && local.reached ? url : null, resolve: opts.resolve, gapMs: opts.gapMs, minGapMs: opts.minGapMs,
+        projectHas: projectIndex(dir, skip), maxPages: opts.maxPages || 4, maxScripts: 2, httpPaths: privateAreas(dir), dnsTxt: opts.dnsTxt }), liveAt)
+      : { state: 'stopped' };
+    if (r.state === 'done') {
+      cmp = r.result;
+      if (cmp.report && cmp.report.stopped) notRead.push('The live site was only partly compared: the compare stopped early');
+    } else {
+      liveOut(r);
+      cmp = { findings: [], notes: [], report: { ran: true, liveUrl: opts.liveUrl, localUrl: local && local.reached ? url : null, pages: [], requests: 0, stopped: r.state === 'stopped' ? 'it took longer than ' + secs(budget('live')) + ' s.' : 'the check crashed.', gapSeconds: 0 } };
+    }
   }
   const all = [...code.findings, ...(local ? local.findings : []), ...(cmp ? cmp.findings : [])];
-  await dropIgnoredGaps(dir, code);
-  const softened = await softenIgnored(dir, code.findings);
+  const ignored = await ignoredByGit(dir);
+  // A code file over the limit that git ignores stays on this PC: not reading it is no gap, so the "not read" note names
+  // only the files git keeps (TOMLIN's own fix, 9e4d7b0; Bridge 0.1.17 drops the gap but keeps the note).
+  const bigGap = (code.fileGaps || []).find(g => g.why === TOO_BIG_WHY);
+  if (ignored && bigGap && bigGap.list.length) {
+    const keep = bigGap.list.filter(rel => !ignored(rel)), at = code.notes.indexOf(tooBigNote(bigGap.list));
+    if (keep.length < bigGap.list.length && at >= 0) code.notes.splice(at, 1, ...(keep.length ? [tooBigNote(keep)] : []));
+  }
+  const softened = softenIgnored(ignored, code.findings);
   if (softened) code.notes.push(softened + (softened === 1 ? ' fault is' : ' faults are') + ' in files git ignores, so they stay on this PC: shown as warnings, not "fix first".');
+  for (const { why, list } of code.fileGaps || []) {
+    const n = ignored ? list.filter(rel => !ignored(rel)).length : list.length;
+    if (n) notRead.push(why + ': ' + n);
+  }
   for (const f of all) if (LOW_RULES.has(f.rule) && ORDER[f.sev] < ORDER.Low) f.sev = 'Low';
   all.sort((a, b) => ORDER[a.sev] - ORDER[b.sev]);
   const j = applyJudged(all, opts.judged);
   const findings = j.findings;
+  const gaps = [...new Set(notRead)].filter(n => n && typeof n === 'string');
   return {
     ranAt: new Date().toISOString(),
     seconds: Math.round((Date.now() - started) / 100) / 10,
@@ -734,17 +974,18 @@ async function runAudit(dir, url, opts = {}) {
     copiesLeftOut: roots.left, // [{ rel, why, publishes }]
     liveReached: local ? local.reached : null,
     compare: cmp ? cmp.report : null,
-    notes: [...(opts.notes || []), ...j.notes, ...code.notes, ...(local ? local.notes : []), ...(cmp ? cmp.notes : [])],
-    rules: RULES.length + EXPOSED.length + CROSS_RULES.length + Object.keys(AGENT_RULES).length + 2 + (opts.disclosure ? Object.keys(DISC_RULES).length + 1 : 0) + (url ? PROBES.length + 7 : 0) + (opts.liveUrl ? 30 : 0),
+    notes: [...partNotes, ...(opts.notes || []), ...j.notes, ...code.notes, ...(local ? local.notes : []), ...(cmp ? cmp.notes : [])],
+    rules: RULES.length + EXPOSED.length + CROSS_RULES.length + Object.keys(AGENT_RULES).length + 2 + (opts.disclosure ? Object.keys(DISC_RULES).length + 2 : 0) + (url ? PROBES.length + 7 : 0) + (opts.liveUrl ? 30 : 0),
     filesScanned: code.filesScanned,
     disclosure: !!opts.disclosure, // the disclosure pass ran (private details, other projects' names, AI trail, local paths)
     filesTruncated: code.truncated,
-    notRead: [...code.notRead, ...(code.truncated ? ['Stopped at the file limit: the rest of a big folder was not read'] : [])],
-    partly: code.notRead.length > 0 || code.truncated === true,
+    partly: gaps.length > 0, // not everything was read: "Passed, partly checked" (the verdict itself stays as it is)
+    notRead: gaps,           // short plain reasons
+    cut,                     // those of them that are a part stopped by time or a crash
     ...summarise(findings),
     findings,
     setAside: j.setAside,
   };
 }
 
-module.exports = { runAudit, fingerprint, summarise, mergeCopies, projectIndex, RULES, EXPOSED, PROBES, CROSS_RULES };
+module.exports = { runAudit, runPart, runAlone, fingerprint, summarise, mergeCopies, projectIndex, RULES, EXPOSED, PROBES, CROSS_RULES };

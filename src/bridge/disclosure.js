@@ -18,9 +18,9 @@ const { fingerprint: fp } = require('./judged');
 // Never what a person writes: third-party code and tool caches.
 const SKIP_DIRS = new Set(['node_modules', '.git', 'vendor', 'bower_components', '__pycache__', '.venv', 'venv']);
 // Pictures, sound, fonts and programs: no one writes a detail into them by hand, so they are passed over quietly.
-const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|psd|mp[34]|m4a|wav|ogg|webm|mov|avi|woff2?|ttf|otf|eot|exe|dll|so|dylib|bin|class|jar|pyc|wasm)$/i;
-// Files that can hold text the pass cannot read yet: skipped, and every skip is named in a note.
-const UNREAD_EXT = /\.(pdf|docx?|xlsx?|pptx?|od[tsp]|rtf|sqlite3?|db|7z|rar|gz|tgz|bz2|xz|tar)$/i;
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|psd|mp[34]|m4a|wav|ogg|webm|mov|avi|woff2?|ttf|otf|eot|exe|dll|so|dylib|class|pyc|wasm)$/i;
+// Files that can hold text the pass cannot read yet: skipped, and every skip is named in a note. (An .rtf is plain text.)
+const UNREAD_EXT = /\.(pdf|docx?|xlsx?|pptx?|od[tsp]|sqlite3?|db|7z|rar|gz|tgz|bz2|xz|tar)$/i;
 // Office files are zips of XML: their text is read like a zip's.
 const OFFICE_EXT = /\.(docx|xlsx|pptx|odt|ods|odp)$/i;
 const MAX_FILES = 8000;
@@ -37,13 +37,14 @@ const SLICE = 4000, OVERLAP = 400;       // a very long line (minified code) is 
 // ---------- the private details ----------
 
 const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const SEP = '(?:\\\\\\\\|\\\\|/)+'; // \  \\  or  /  (a path written in code, JSON or a URL)
+const SEP = '[\\\\/]+'; // \  \\  or  /  (a path written in code, JSON or a URL)
 // The text to look for, as a pattern: a path matches with any slash, a phone number with any spacing.
 function valuePattern(value) {
   const v = String(value || '').trim();
   const digits = v.replace(/\D/g, '');
   if (/^[+\d\s().-]+$/.test(v) && digits.length >= 6) return (v.startsWith('+') ? '\\+?' : '') + digits.split('').join('[\\s().-]*');
-  return v.split(/[\\/]+/).map(part => part.split(/\s+/).map(esc).join('\\s+')).join(SEP);
+  // A value that starts with a slash starts at the first of a run: trying every slash of a long run takes minutes.
+  return (/^[\\/]/.test(v) ? '(?<![\\\\/])' : '') + v.split(/[\\/]+/).map(part => part.split(/\s+/).map(esc).join('\\s+')).join(SEP);
 }
 const bounded = src => '(?<![A-Za-z0-9])(?:' + src + ')(?![A-Za-z0-9])';
 // Only written against a path separator or an @ on one side: \<name>, /<name>, @<name>, <name>@, <name>\.
@@ -97,6 +98,7 @@ function autoDetails(workingFolders = [], who = {}) {
 // The person's own list, in the Bridge's ignored data folder: [{ id, label, value }].
 // A damaged file is moved aside (private-details.damaged-<time>.json) and remembered, so the next audit says so.
 let privateListDamaged = null;
+const listDamaged = () => privateListDamaged;
 function readPrivateList(file) {
   const r = require('./settings').readData(file);
   if (r.damaged) privateListDamaged = r.damaged;
@@ -380,6 +382,8 @@ function walkAll(dir) {
 }
 const skipped = (rel, skip) => rel.split('/').slice(0, -1).some(s => SKIP_DIRS.has(s)) || skip.some(s => rel.toLowerCase() === s || rel.toLowerCase().startsWith(s + '/'));
 const looksBinary = buf => buf.subarray(0, 8000).includes(0);
+// A file that does not read as text can still hold a key as plain characters: each run of them, one to a line.
+const bytesText = buf => buf.toString('latin1').replace(/[^\x20-\x7e\t]+/g, '\n');
 // A file's text, whatever it was saved as: UTF-8 (with or without a BOM), or UTF-16 (with a BOM, or plain ASCII text
 // saved by Windows tools with a zero after every letter). null when it is not text.
 function decodeText(buf) {
@@ -468,12 +472,29 @@ function readZip(buf, max = Infinity) {
 
 // ---------- the pass ----------
 
-// ctx: { details, others, own, skip }. Returns { findings, notes, read: { files, zips, commits, versions } }.
+const HISTORY_CHAIN = 'git history: '; // how a zip only the history holds is named, down through its entries
+
+// ctx: { details, others, own, skip }, and from lib/audit.js when the pass runs on a thread of its own (which has its own
+// copy of this module): listDamaged, scratchDir; softAt and budgetMs, its time limit.
+// Returns { findings, notes, read: { files, zips, commits, versions }, notRead: [what it could not read], stopped? }.
 async function disclosurePass(dir, ctx = {}) {
+  if (ctx.scratchDir) scratchGit = ctx.scratchDir;
   const scan = makeMatcher(ctx);
   const skip = (ctx.skip || []).map(s => String(s).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
   const findings = [], notes = [];
-  if (privateListDamaged) notes.push('Your private-details list could not be read, so it was kept aside as ' + path.basename(privateListDamaged) + ' in the Bridge\'s data folder, and this audit looked only for the details it reads from this PC. Add yours again under Audits › Private details.');
+  // What could hold text and was not read: why -> how many (0: nothing to count). Skips made on purpose (pictures and
+  // fonts, older zips beside a newer one) are not here: this list makes the result "Passed, partly checked".
+  const gaps = new Map();
+  const gap = (why, counted = true) => gaps.set(why, counted ? (gaps.get(why) || 0) + 1 : 0);
+  const damaged = ctx.listDamaged || privateListDamaged;
+  if (damaged) {
+    notes.push('Your private-details list could not be read, so it was kept aside as ' + path.basename(damaged) + ' in the Bridge\'s data folder, and this audit looked only for the details it reads from this PC. Add yours again under Audits › Private details.');
+    gap('Your private-details list could not be read, so those details were not looked for', false);
+  }
+  // Past the budget (lib/audit-part.js): stop between files and keep what was found.
+  let stopped = null;
+  const late = () => !!ctx.softAt && Date.now() > ctx.softAt;
+  const halt = left => { if (!stopped) stopped = { ms: Date.now() - (ctx.softAt - ctx.budgetMs), left }; };
   const read = { files: 0, zips: 0, commits: 0, versions: 0 };
   const seen = new Set(); // rule|file|line fingerprint: the same line in history and in the file is reported once
   const report = (h, where, place) => {
@@ -510,6 +531,7 @@ async function disclosurePass(dir, ctx = {}) {
     if (office) text = officeText(text);
     if (text.length < MAX_TEXT && /\.zip\b/i.test(text)) for (const m of text.matchAll(/[\w.+-]+\.zip\b/gi)) zipNames.add(m[0].toLowerCase());
     for (const h of scan(text)) if (trail) fold(trail, h); else report(h, where + ':' + h.line, place);
+    return text;
   };
   // Every file that could hold text and was not read is named, by kind, in one note each.
   const unread = new Map(); // why -> { n, first }
@@ -539,6 +561,7 @@ async function disclosurePass(dir, ctx = {}) {
   const budget = { bytes: 0, entries: 0, listed: 0, hit: false };
   const overBudget = (where, size) => {
     if (!budget.hit && budget.entries < MAX_ENTRIES && budget.listed <= MAX_LISTED && budget.bytes + size <= UNPACK_BUDGET) return false;
+    if (!budget.hit) gap('Zips past the ' + (UNPACK_BUDGET >> 20) + ' MB one pass unpacks: the rest was not read', false);
     if (!budget.hit) notes.push('Zips were read up to ' + (UNPACK_BUDGET >> 20) + ' MB unpacked / ' + MAX_ENTRIES + ' entries (' + MAX_LISTED + ' listed); the rest (from ' + where + ') was not read. A zip that unpacks to far more than its size can be a "zip bomb".');
     budget.hit = true;
     return true;
@@ -546,7 +569,7 @@ async function disclosurePass(dir, ctx = {}) {
 
   const isRepo = fs.existsSync(path.join(dir, '.git'));
   const risky = isRepo && gitConfigRisky(dir);
-  if (risky) notes.push('Git history, commit emails and the list of ignored files were not read: this folder\'s git settings could run a program. Every file in the folder was read instead.');
+  if (risky) { notes.push('Git history, commit emails and the list of ignored files were not read: this folder\'s git settings could run a program. Every file in the folder was read instead.'); gap('Git history and commit emails: this folder\'s git settings could run a program', false); }
 
   // 1. Files that would be published (tracked, or untracked and not ignored).
   const nested = [];
@@ -556,25 +579,30 @@ async function disclosurePass(dir, ctx = {}) {
   if (nested.length) notes.push('Git repositories inside this folder (' + nested.slice(0, 5).join(', ') + (nested.length > 5 ? '…' : '') + '): their files were read, but not their history or commit emails. Add each one as its own project to read those.');
   if (!files) { if (!risky) notes.push('Git could not list what would be published, so every file in the folder was read (ignored files included).'); files = walkAll(dir); }
   files = files.filter(f => !skipped(f.rel, skip));
-  if (files.length > MAX_FILES) { notes.push('Only the first ' + MAX_FILES + ' of ' + files.length + ' files were read.'); files = files.slice(0, MAX_FILES); }
+  if (files.length > MAX_FILES) { notes.push('Only the first ' + MAX_FILES + ' of ' + files.length + ' files were read.'); gap('Only the first ' + MAX_FILES + ' of ' + files.length + ' files were read', false); files = files.slice(0, MAX_FILES); }
   const zipsInList = new Set();
   const officeFiles = [];
-  for (const f of files) {
+  for (const [i, f] of files.entries()) {
+    if (late()) { halt((files.length - i) + ' file' + (files.length - i === 1 ? '' : 's') + ', the zips and the git history'); break; }
     const place = f.untracked ? 'in a file not in git yet (git add would publish it)' : '';
     const trail = trailFile(f.rel, place);
     nameCheck(f.rel, place);
-    if (/\.zip$/i.test(f.rel)) { zipsInList.add(f.rel); continue; }
+    if (ctx.keyFileHook) ctx.keyFileHook(f.rel);
+    if (/\.(?:zip|jar|war|whl|apk)$/i.test(f.rel)) { zipsInList.add(f.rel); continue; }
     if (OFFICE_EXT.test(f.rel)) { officeFiles.push({ rel: f.rel, place }); continue; }
     if (UNREAD_EXT.test(f.rel)) { skippedFile(f.rel, kindOf(f.rel) + ' files (the pass cannot read inside them)'); continue; }
     if (BINARY_EXT.test(f.rel)) continue;
-    let buf; try {
+    let buf, size; try {
       const st = fs.statSync(path.join(dir, f.rel));
+      size = st.size;
       if (!st.isFile()) continue;
       if (st.size > MAX_FILE) { skippedFile(f.rel, 'files over ' + (MAX_FILE >> 20) + ' MB'); continue; }
       buf = fs.readFileSync(path.join(dir, f.rel));
-    } catch { continue; }
+    } catch (e) { if (e.code !== 'ENOENT') gap('Files that could not be opened'); continue; } // ENOENT: tracked, but deleted here
     read.files++;
-    scanText(buf, f.rel, place, trail);
+    const text = scanText(buf, f.rel, place, trail);
+    // ctx.keysHook (lib/audit.js): the same files read for keys when the code rules do not read them. openZip does the same.
+    if (ctx.keysHook) { if (text != null) ctx.keysHook(text, f.rel, size); else ctx.keysHook(bytesText(buf), f.rel, size, false, true); }
     if (read.files % 200 === 0) await new Promise(setImmediate); // let the Bridge answer meanwhile
   }
 
@@ -588,11 +616,21 @@ async function disclosurePass(dir, ctx = {}) {
   zips.push(...linked.filter(l => !zips.some(z => z.rel === l.rel)));
   if (linked.length) notes.push(linked.length + ' older zip' + (linked.length > 1 ? 's were' : ' was') + ' read as well, because a file in the project links to ' + (linked.length > 1 ? 'them' : 'it') + ' (e.g. ' + linked[0].rel + ').');
   if (older > 0) notes.push(older + ' older zip' + (older > 1 ? 's' : '') + ' beside a newer one in the same folder were not read (the newest is taken as the one you share; one a page links to is read).');
+  // A text entry's keys. In a zip that is here now: the key rules, by ctx.keysHook, and ctx.historyHook is told the file
+  // holds it. In a zip only the history holds: ctx.historyHook (SEC-012), as for any past version of a file. The name
+  // is said in a finding, so it goes through scan.redact as every printed name does.
+  const entryKeys = (text, where, size, place) => {
+    const said = scan.redact(where);
+    if (said.startsWith(HISTORY_CHAIN)) { if (ctx.historyHook) ctx.historyHook(text, said.slice(HISTORY_CHAIN.length), place, false); return; }
+    if (ctx.keysHook) ctx.keysHook(text, said, size, true);
+    if (ctx.historyHook) ctx.historyHook(text, said, place, true);
+  };
   // office: an Word/Excel/PowerPoint file read as the zip it is (its XML text only, no file names reported).
   const openZip = async (buf, chain, depth, place = 'inside a zip', office = false) => {
-    let entries; try { entries = readZip(buf, MAX_LISTED - budget.listed + 1); } catch (e) { notes.push(chain + ' could not be read as a zip (' + e.message + ').'); return; }
+    let entries; try { entries = readZip(buf, MAX_LISTED - budget.listed + 1); } catch (e) { notes.push(chain + ' could not be read as a zip (' + e.message + ').'); gap('Zips that could not be opened'); return; }
     for (const e of entries) {
       if (budget.hit) return;
+      if (late()) { halt('some zips and the git history'); return; }
       const where = chain + ' > ' + e.name;
       // Every entry counts as listed, read or passed over, and the Bridge gets a turn now and then.
       budget.listed++;
@@ -601,38 +639,44 @@ async function disclosurePass(dir, ctx = {}) {
       if (office && !/\.xml$/i.test(e.name)) continue;
       const trail = office ? null : trailFile(where, place);
       if (!office) nameCheck(where, place);
-      if (e.encrypted) { notes.push(where + ' is password-protected and was not read.'); continue; }
+      if (!office && ctx.keyFileHook && !where.startsWith(HISTORY_CHAIN)) ctx.keyFileHook(scan.redact(where));
+      if (e.encrypted) { notes.push(where + ' is password-protected and was not read.'); gap('Password-protected files in zips'); continue; }
       const nested = /\.zip$/i.test(e.name), isOffice = !office && OFFICE_EXT.test(e.name);
       if (!nested && !isOffice && UNREAD_EXT.test(e.name)) { skippedFile(where, kindOf(e.name) + ' files (the pass cannot read inside them)'); continue; }
       if (!nested && !isOffice && (BINARY_EXT.test(e.name))) continue;
       if (!nested && !isOffice && e.size > MAX_TEXT) { skippedFile(where, 'zip entries over ' + (MAX_TEXT >> 20) + ' MB'); continue; }
-      if ((nested || isOffice) && (depth >= ZIP_DEPTH || e.size > MAX_ZIP)) { notes.push(where + ' was not opened (too deep or too big).'); continue; }
+      if ((nested || isOffice) && (depth >= ZIP_DEPTH || e.size > MAX_ZIP)) { notes.push(where + ' was not opened (too deep or too big).'); gap('Zips inside zips, too deep or too big to open'); continue; }
       budget.entries++;
       if (overBudget(where, e.size)) return;
-      let data; try { data = e.read(UNPACK_BUDGET - budget.bytes); } catch (err) { notes.push(where + ' could not be read (' + err.message + ').'); continue; }
+      let data; try { data = e.read(UNPACK_BUDGET - budget.bytes); } catch (err) { notes.push(where + ' could not be read (' + err.message + ').'); gap('Files in zips that could not be read'); continue; }
       budget.bytes += data.length;
       await new Promise(setImmediate); // inflating is synchronous: give the Bridge a turn between entries
       if (nested) await openZip(data, where, depth + 1, place);
       else if (isOffice) await openZip(data, where, depth + 1, place, true);
-      else scanText(data, where, place, trail, office);
+      else {
+        const text = scanText(data, where, place, trail, office);
+        if (text != null && !office) entryKeys(text, where, data.length, place);
+      }
     }
   };
   for (const z of zips) {
-    if (z.size > MAX_ZIP) { notes.push(z.rel + ' is over ' + (MAX_ZIP >> 20) + ' MB and was not read.'); continue; }
-    let buf; try { buf = fs.readFileSync(path.join(dir, z.rel)); } catch { continue; }
+    if (stopped || late()) { halt('some zips and the git history'); break; }
+    if (z.size > MAX_ZIP) { notes.push(z.rel + ' is over ' + (MAX_ZIP >> 20) + ' MB and was not read.'); gap('Zips over ' + (MAX_ZIP >> 20) + ' MB'); continue; }
+    let buf; try { buf = fs.readFileSync(path.join(dir, z.rel)); } catch { gap('Zips that could not be opened'); continue; }
     read.zips++;
     await openZip(buf, z.rel, 1);
   }
   for (const o of officeFiles) {
+    if (stopped || late()) { halt('some office files and the git history'); break; }
     let buf; try { const st = fs.statSync(path.join(dir, o.rel)); if (st.size > MAX_ZIP) { skippedFile(o.rel, 'files over ' + (MAX_ZIP >> 20) + ' MB'); continue; } buf = fs.readFileSync(path.join(dir, o.rel)); } catch { continue; }
     read.files++;
     await openZip(buf, o.rel, 1, o.place, true);
   }
 
   // 3. Git: commit emails on every branch, commit messages, and every past version of every file.
-  if (isRepo && !risky) await historyPass(dir, ctx, scan, { findings, notes, read, report, trailFile, fold, skip, nameCheck, openZip, budget });
+  if (isRepo && !risky && !stopped) await historyPass(dir, ctx, scan, { findings, notes, read, report, trailFile, fold, skip, nameCheck, openZip, budget, gap, late, halt });
 
-  for (const [why, u] of unread) notes.push(u.n + ' ' + why + ' were not read' + (u.n > 1 ? ', e.g. ' : ': ') + u.first + '.');
+  for (const [why, u] of unread) { notes.push(u.n + ' ' + why + ' were not read' + (u.n > 1 ? ', e.g. ' : ': ') + u.first + '.'); gaps.set(why, u.n); }
   for (const x of names.values()) {
     const r = RULE[x.rule];
     findings.push({ rule: x.rule, sev: r.sev, area: 'disclosure', fix: r.fix + ' Rename the ' + (x.folder ? 'folder' : 'file') + ' (or keep it out of what you publish).', fp: fp('name|' + x.prefix.toLowerCase()), where: x.prefix + (x.folder ? '/' : ''),
@@ -653,7 +697,8 @@ async function disclosurePass(dir, ctx = {}) {
   const hideDir = t => [dir, dir.replace(/\\/g, '/')].reduce((acc, d) => acc.split(d).join('<project folder>'), String(t));
   const clean = t => scan.redact(hideDir(t));
   for (const x of findings) { x.where = clean(x.where); x.title = clean(x.title); if (x.also) x.also = x.also.map(clean); }
-  return { findings: mergePlaces(findings).map(reachOf), notes: notes.map(clean), read };
+  const notRead = [...gaps].map(([why, n]) => clean(n ? why + ': ' + n : why));
+  return { findings: mergePlaces(findings).map(reachOf), notes: notes.map(clean), read, notRead, ...(stopped ? { stopped } : {}) };
 }
 
 // Ships or repo only (scanner training T7): another project's name, an AI trail or a local path in what visitors are
@@ -697,13 +742,13 @@ function mergePlaces(findings) {
 
 const NOREPLY = /@users\.noreply\.github\.com$|^noreply@|@noreply\.|^no-reply@|@localhost$|^$/i;
 async function historyPass(dir, ctx, scan, out) {
-  const { findings, notes, read, report, trailFile, fold, skip, nameCheck, openZip, budget } = out;
+  const { findings, notes, read, report, trailFile, fold, skip, nameCheck, openZip, budget, gap, late, halt } = out;
   const refsR = await git(dir, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes', 'refs/tags']);
-  if (!refsR.ok) { notes.push('Git history was not read: ' + refsR.err.split('\n')[0].slice(0, 160)); return; }
+  if (!refsR.ok) { notes.push('Git history was not read: ' + refsR.err.split('\n')[0].slice(0, 160)); gap('Git history: git could not read it', false); return; }
   const allRefs = refsR.out.split('\n').filter(r => r && !/\/HEAD$/.test(r));
   if (!allRefs.length) return; // no commits yet
   const refs = allRefs.slice(0, 60);
-  if (allRefs.length > refs.length) notes.push('Commit emails were checked on the first ' + refs.length + ' of ' + allRefs.length + ' branches and tags.');
+  if (allRefs.length > refs.length) { notes.push('Commit emails were checked on the first ' + refs.length + ' of ' + allRefs.length + ' branches and tags.'); gap('Commit emails on the branches and tags past the first ' + refs.length, false); }
   const short = r => r.replace(/^refs\/(heads|remotes|tags)\//, '');
   const remoteRef = r => r.startsWith('refs/remotes/');
   const hasRemote = allRefs.some(remoteRef);
@@ -713,6 +758,7 @@ async function historyPass(dir, ctx, scan, out) {
   const emails = new Map(); // email -> { refs:Set, remote:bool, commits:Set }
   for (const ref of refs) {
     const r = await git(dir, ['log', ref, '--format=%H%x09%ae%x09%ce']);
+    if (!r.ok) gap('Commit emails on a branch git could not read', false);
     for (const line of r.out.split('\n')) {
       const [h, ae, ce] = line.split('\t');
       if (!h) continue;
@@ -744,6 +790,7 @@ async function historyPass(dir, ctx, scan, out) {
 
   // Commit messages: one finding per rule, counting the commits (an AI sign-off can sit on hundreds).
   const msgs = await git(dir, ['log', '--all', '--format=%H%x1f%B%x1e']);
+  if (!msgs.ok) gap('Commit messages: git could not read them', false);
   const RS = String.fromCharCode(0x1e), US = String.fromCharCode(0x1f); // the separators asked for above
   const inMsgs = new Map(); // rule -> { labels:Set, commits, remote, first }
   for (const rec of msgs.out.split(RS)) {
@@ -765,7 +812,10 @@ async function historyPass(dir, ctx, scan, out) {
   }
 
   // Every version of every file on any branch (the file may be gone now, but the history still holds it).
-  const objs = (await git(dir, ['rev-list', '--all', '--objects'])).out.split('\n');
+  if (late()) { halt('the past versions of the files in the git history'); return; }
+  const objsR = await git(dir, ['rev-list', '--all', '--objects']);
+  if (!objsR.ok) gap('Past versions of the files: git could not list them', false);
+  const objs = objsR.out.split('\n');
   const pathOf = new Map();
   for (const l of objs) { const sp = l.indexOf(' '); if (sp === 40) pathOf.set(l.slice(0, 40), l.slice(41)); }
   const candidates = [...pathOf.keys()].filter(hsh => { const rel = pathOf.get(hsh); return rel && !skipped(rel, skip) && !BINARY_EXT.test(rel); });
@@ -781,14 +831,14 @@ async function historyPass(dir, ctx, scan, out) {
     if (/\.zip$/i.test(rel)) {
       nameCheck('git history: ' + rel, placeOf(hsh));
       if (current.has(hsh)) continue;
-      if (+size > MAX_ZIP) notes.push('A zip in the git history (' + rel + ') is over ' + (MAX_ZIP >> 20) + ' MB and was not opened.');
+      if (+size > MAX_ZIP) { notes.push('A zip in the git history (' + rel + ') is over ' + (MAX_ZIP >> 20) + ' MB and was not opened.'); gap('Zips in the git history over ' + (MAX_ZIP >> 20) + ' MB'); }
       else zipBlobs.push(hsh);
       continue;
     }
     trailFile(rel, placeOf(hsh));
     nameCheck('git history: ' + rel, placeOf(hsh));
-    if (+size > MAX_TEXT) continue;
-    if (total + +size > MAX_HISTORY) { overflow++; continue; }
+    if (+size > MAX_TEXT) { gap('Past file versions over ' + (MAX_TEXT >> 20) + ' MB, in the git history'); continue; }
+    if (total + +size > MAX_HISTORY) { overflow++; gap('Past file versions past the ' + (MAX_HISTORY >> 20) + ' MB one pass reads'); continue; }
     total += +size;
     blobs.push(hsh);
   }
@@ -796,17 +846,20 @@ async function historyPass(dir, ctx, scan, out) {
   // Zips that only the history still holds: opened with the same unpacking budget as the folder's zips.
   for (const hsh of zipBlobs) {
     if (budget.hit) break;
+    if (late()) { halt('some zips in the git history and the past versions of the files'); return; }
     const raw = await batch(dir, ['cat-file', '--batch'], hsh + '\n');
     const nl = raw.indexOf(10);
     if (nl < 0) continue;
     const size = +raw.toString('utf8', 0, nl).split(' ')[2];
     read.zips++;
-    await openZip(raw.subarray(nl + 1, nl + 1 + size), 'git history: ' + pathOf.get(hsh), 1, placeOf(hsh));
+    await openZip(raw.subarray(nl + 1, nl + 1 + size), HISTORY_CHAIN + pathOf.get(hsh), 1, placeOf(hsh));
   }
   if (!blobs.length) return;
   const data = await batch(dir, ['cat-file', '--batch'], blobs.join('\n') + '\n');
+  if (!data.length) gap('Past versions of the files: git could not read them', false);
   let p = 0;
   while (p < data.length) {
+    if (late()) { halt((blobs.length - read.versions) + ' past file version' + (blobs.length - read.versions === 1 ? '' : 's')); break; }
     const nl = data.indexOf(10, p);
     if (nl < 0) break;
     const [hsh, , size] = data.toString('utf8', p, nl).split(' ');
@@ -814,7 +867,10 @@ async function historyPass(dir, ctx, scan, out) {
     p = nl + 1 + +size + 1;
     read.versions++;
     const text = decodeText(body);
-    if (text == null) continue;
+    if (text == null) {
+      if (ctx.historyHook) ctx.historyHook(bytesText(body), pathOf.get(hsh), placeOf(hsh), current.has(hsh));
+      continue;
+    }
     const rel = pathOf.get(hsh), trail = trailFile(rel, placeOf(hsh));
     // ctx.historyHook (lib/audit.js, SEC-012): the same past versions read for keys, so the history is read once.
     if (ctx.historyHook) ctx.historyHook(text, rel, placeOf(hsh), current.has(hsh));
@@ -836,4 +892,4 @@ function batch(dir, args, input) {
   });
 }
 
-module.exports = { disclosurePass, publishedFiles, autoDetails, readPrivateList, savePrivateList, listForPage, makeMatcher, readZip, decodeText, projectNamePatterns, RULE };
+module.exports = { disclosurePass, publishedFiles, scratchGitDir, listDamaged, autoDetails, readPrivateList, savePrivateList, listForPage, makeMatcher, readZip, decodeText, projectNamePatterns, RULE };

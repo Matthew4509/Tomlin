@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { usedFromPieces } from '../src/meter.ts';
 import { answerRoom, NoPrefill, readings, streamChat, streamedSpeed } from '../src/engine.ts';
 import { buildChat } from '../src/memory.ts';
 import { Chats } from '../src/chats.ts';
@@ -138,5 +139,32 @@ test('a server that cannot prefill a cut answer says so as NoPrefill (the chat t
     await assert.rejects(streamChat(s.base, 'm', [{ role: 'user', content: 'hi' }], () => undefined, new AbortController().signal), e => !(e instanceof NoPrefill));
   } finally {
     await s.close();
+  }
+});
+
+test('an answer whose timings never come is still counted on the meter, from the streamed pieces and the clock', async () => {
+  assert.equal(usedFromPieces(0, 0, 0), null, 'no pieces: nothing to count');
+  assert.deepEqual(usedFromPieces(12, 1000, 1660), { in: 0, cached: 0, out: 12, ms: 660 });
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', async () => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (let i = 0; i < 12; i++) {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `w${i} ` }, finish_reason: null }] })}\n\n`);
+        await new Promise(r => setTimeout(r, 60));
+      }
+      res.end();
+    });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const counted: Array<{ out: number }> = [];
+  readings.used = (_m, u) => counted.push(u);
+  try {
+    await streamChat(`http://127.0.0.1:${(server.address() as { port: number }).port}`, 'm', [{ role: 'user', content: 'hi' }], () => undefined, new AbortController().signal);
+    assert.equal(counted.length, 1, 'counted once');
+    assert.equal(counted[0].out, 12);
+  } finally {
+    readings.used = null;
+    await new Promise(r => server.close(r));
   }
 });

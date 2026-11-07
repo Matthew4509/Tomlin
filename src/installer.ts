@@ -11,8 +11,8 @@
 // Settings > Apps all point at TOMLIN.exe, which never moves, so they keep working after every update.
 // An install made before the TOMLIN name (Programs\Smart Manager, Smart Manager.exe) keeps its names: see FORMER.
 // Tested in test/installer.test.ts.
-import { existsSync, readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** The program in an install folder made with the TOMLIN name. */
 export const EXE = 'TOMLIN.exe';
@@ -111,6 +111,28 @@ export function currentCopy(root: string): { name: string; dir: string; version:
     return version ? { name, dir, version } : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * current.txt follows the version that started (6 Nov slow-start plan, fix 4): once a copy answers, an existing install's
+ * current.txt names it (its folder name when it sits in the install folder, else its full path), so switching between
+ * versions leaves the one that started last, and the installed program never starts an older one over newer data.
+ * Nothing is written when there is no install (no current.txt) or it already names this copy. Never throws.
+ */
+export function followStarted(dir: string, env: NodeJS.ProcessEnv = process.env): void {
+  try {
+    const root = places(env).root;
+    const file = join(root, CURRENT);
+    if (!existsSync(file)) return;
+    const full = resolve(dir);
+    const inside = resolve(dirname(full)).toLowerCase() === resolve(root).toLowerCase();
+    const value = inside ? basename(full) : full;
+    if (readFileSync(file, 'utf8').trim() === value) return;
+    writeFileSync(`${file}.new`, value);
+    renameSync(`${file}.new`, file);
+  } catch {
+    // The start goes on; the next one tries again.
   }
 }
 

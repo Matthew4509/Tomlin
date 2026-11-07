@@ -46,12 +46,18 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // An older PC cannot make the encrypted link (F7 E1): said plainly, before anything is sent.
     let about: Record<string, unknown>;
     try {
-      about = (await (await fetch(`${url}/worker/whoami`, { signal: AbortSignal.timeout(5000) })).json()) as Record<string, unknown>;
+      const r = await fetch(`${url}/worker/whoami`, { signal: AbortSignal.timeout(5000) });
+      about = (await r.json()) as Record<string, unknown>;
     } catch (e) {
-      return unreachable(e);
+      // Answered, but not with JSON (a web page or another program): not a TOMLIN node. Any other failure (a timeout or a
+      // dropped connection while reading) is "nothing answered", so the Link helper's advice applies.
+      if (!(e instanceof SyntaxError)) return unreachable(e);
+      about = {};
     }
     // "smart-manager": the app's name on the wire since before TOMLIN; every PC, old and new, answers with it.
-    if (about.app !== 'smart-manager') return { status: 400, body: { error: `Something answered at ${url}, but it is not TOMLIN. Check the address and port.` } };
+    // A TOMLIN PC with node mode off does not listen on the link port at all (and its own screen is on another port),
+    // so whatever answers here is not that PC's link part.
+    if (about.app !== 'smart-manager') return { status: 400, body: { error: `Something answered at ${url}, but it is not TOMLIN's link part. If TOMLIN is running on that PC, tick "Enable this PC as a node" there (Settings, Network) and use the address shown there; the port is usually 8741, not the one in the browser address bar.` } };
     if (Number(about.link) !== link.LINK_VERSION) return { status: 400, body: { error: `That PC runs an older TOMLIN (${String(about.version || 'before 2.0.26').slice(0, 20)}), which cannot make the encrypted link. Update TOMLIN there, then link again.` } };
     // The setup code (and the PIN) never cross the network: both PCs prove they know them (src/link.ts).
     const key = await link.pairKey(code, pin);

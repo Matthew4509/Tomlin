@@ -1,6 +1,6 @@
 // Talking to the model: how each family of model is asked, and the streaming client for llama.cpp's server (its
 // OpenAI-style /v1/chat/completions). The plain functions are tested in test/engine.test.ts.
-import { usedFromTimings, type Used } from './meter.ts';
+import { usedFromPieces, usedFromTimings, type Used } from './meter.ts';
 import { runnerHeaders } from './runnerkeys.ts';
 
 export interface ChatTurn {
@@ -539,7 +539,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     }
     if (perSecond > 0 && !readings.quiet.has(model)) readings.answered?.(model, { write: perSecond, tokens, ...(read > 0 ? { read } : {}) });
     // Counted however it ended (done, cut, stopped): the work was done all the same.
-    const used = usedFromTimings(timings);
+    const used = usedFromTimings(timings) ?? usedFromPieces(pieces, firstAt, lastAt);
     if (used) readings.used?.(model, used);
     const all = thoughtSoFar();
     const thought = all.length > THOUGHT_KEPT ? `…${all.slice(-THOUGHT_KEPT)}` : all;

@@ -1,4 +1,4 @@
-// The public copy of one commit of this source, made in the public clone (Tomlin/ in this folder, branch public, whose
+// The public copy of one commit of this source, made in the public clone (Tomlin-public\ beside this folder, or TOMLIN_PUBLIC_CLONE; branch public, whose
 // origin is the GitHub repo):
 //   npm run publish-public                              (HEAD: checks only, the clone is put back as it was)
 //   npm run publish-public -- <commit> --commit "<summary>"   (checks, then commits "TOMLIN <version> (beta): <summary>")
@@ -23,7 +23,7 @@ import { keyHits } from './sign.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Never public: the working notes and the design record. */
-export const DROP = ['docs', 'PLAN.md', 'TOKEN-LOG.md', 'USABILITY-AUDIT*'];
+export const DROP = ['docs', 'PLAN.md', 'TOKEN-LOG.md', 'USABILITY-AUDIT*', '.gitattributes'];
 // Keys GitHub refuses on push, as docs/public-scan.py looked for them. Spelled in parts so this file is not a hit itself.
 const KEY = new RegExp(['sk_live_[0-9A-Za-z]{8,}', 'sk_test_[0-9A-Za-z]{16,}', 'AKIA[0-9A-Z]{16}', 'ghp_[0-9A-Za-z]{30,}', 'github_pat_[0-9A-Za-z_]{30,}',
   'xox[baprs]-[0-9A-Za-z-]{10,}', 'AIza[0-9A-Za-z_-]{35}', 'sk-ant-[0-9A-Za-z_-]{20,}', 'sk-[0-9A-Za-z]{40,}'].join('|'));
@@ -44,6 +44,9 @@ const disclosure = createRequire(import.meta.url)('../src/bridge/disclosure.js')
   readPrivateList: (file: string) => { label: string; value: string }[];
 };
 
+/** Where the public clone is: TOMLIN_PUBLIC_CLONE, else Tomlin-public beside the source folder. */
+export const publicClone = (source = ROOT) => process.env.TOMLIN_PUBLIC_CLONE ?? join(source, '..', 'Tomlin-public');
+
 /** What the disclosure pass looks for in the public copy of `source`. */
 export function publicContext(source = ROOT, privateFile = process.env.TOMLIN_PUBLISH_PRIVATE ?? join(homedir(), 'claude-private', 'private-details.json')) {
   const projects = dirname(source);
@@ -54,7 +57,7 @@ export function publicContext(source = ROOT, privateFile = process.env.TOMLIN_PU
   // The other folders beside this one, as the Bridge lists projects: tool folders (.claude, .agents) and ones named
   // like options or scratch (--help, _unpack-log) are not projects.
   const others = readdirSync(projects, { withFileTypes: true })
-    .filter(e => e.isDirectory() && e.name !== basename(source) && !/^[.\-_]/.test(e.name)).map(e => e.name);
+    .filter(e => e.isDirectory() && e.name !== basename(source) && join(projects, e.name) !== resolve(publicClone(source)) && !/^[.\-_]/.test(e.name)).map(e => e.name);
   return { details: [...own, ...details], others, own: [basename(source), 'TOMLIN'], privateFile, privateCount: own.length };
 }
 
@@ -76,12 +79,12 @@ async function main() {
   const summary = at >= 0 ? args[at + 1] : '';
   if (at >= 0 && !summary) throw new Error('--commit needs the summary: --commit "what this release brings"');
   const commit = args.find((a, i) => !a.startsWith('--') && i !== at + 1) ?? 'HEAD';
-  const clone = join(ROOT, 'Tomlin');
+  const clone = publicClone();
   const git = (dir: string, a: string[], input?: Buffer) => execFileSync(gitExe(), ['-C', dir, ...a], { input, maxBuffer: 1024 ** 3, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
   if (!existsSync(join(clone, '.git'))) throw new Error(`the public clone is not at ${clone}`);
   if (git(clone, ['branch', '--show-current']).toString().trim() !== 'public') throw new Error('the public clone is not on its branch "public"');
-  if (git(clone, ['status', '--porcelain']).length) throw new Error('the public clone has changes of its own: look at them first (git status in Tomlin/)');
+  if (git(clone, ['status', '--porcelain']).length) throw new Error('the public clone has changes of its own: look at them first (git status in the public clone)');
 
   const sha = git(ROOT, ['rev-parse', '--verify', `${commit}^{commit}`]).toString().trim();
   const version = JSON.parse(git(ROOT, ['show', `${sha}:package.json`]).toString()).version as string;

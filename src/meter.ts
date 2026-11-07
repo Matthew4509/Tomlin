@@ -59,6 +59,15 @@ export function usedFromTimings(t: { cache_n?: number; prompt_n?: number; predic
 }
 
 /**
+ * A usage figure from the streamed pieces (one token each) and the clock, for an answer whose timings never came (they ride on
+ * the last chunk, which an answer ended early by Stop, Answer now or the repeat check never gets). The prompt side is unknown
+ * then, so only the tokens written and the time they took are counted. Null for no pieces.
+ */
+export function usedFromPieces(pieces: number, firstAt: number, lastAt: number): Used | null {
+  return cleanUsed({ in: 0, cached: 0, out: pieces, ms: Math.max(0, lastAt - firstAt) });
+}
+
+/**
  * Whose work an answer is: a project here (a chat in a project, a job step), or (`forPc`) a linked PC this one works
  * for. `used` adds up what the answers under it used, so a node can say it on the done line.
  */

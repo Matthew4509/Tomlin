@@ -10,6 +10,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { log } from './log.ts';
 import { takeWaitDoor } from './waitdoor.ts';
+import { followStarted } from './installer.ts';
 import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
 import { refreshTray } from './trayfresh.ts';
@@ -178,6 +179,8 @@ const started = () => {
   console.log(`TOMLIN ${VERSION} is running at http://127.0.0.1:${PORT}  (nothing is loaded until you press Connect; ${process.env.TOMLIN_TRAY === '1' ? 'quit it from its icon by the clock' : 'close this window to stop'})`);
   console.log(`Your chats, staff, pictures and downloaded models are kept in ${HOME.home}`);
   if (TEST_START) return;
+  // An install's current.txt follows the copy that started, so the installed program starts this one next time.
+  followStarted(ROOT);
   // A new copy started by Start TOMLIN.cmd after an update from a linked PC: it answered, so it is kept (no going back).
   if (process.env.TOMLIN_PREV) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
   // Started again after a new copy failed to start: "Start TOMLIN when this PC starts", pointed at that copy, points here again.

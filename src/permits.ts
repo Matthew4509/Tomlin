@@ -78,6 +78,11 @@ export class Gate {
 
 /** What the model is told when a kind was not allowed. */
 export function deniedWords(kind: Kind): string {
-  const name = kind === 'files' ? 'file access' : 'web access';
-  return `The person did not allow ${name} for this answer, so nothing was done. Answer without it, and say they can allow it next time.`;
+  const files = kind === 'files';
+  const name = files ? 'file access' : 'web access';
+  const what = files ? 'file' : 'page';
+  return `The person did not allow ${name} for this answer. It is NOT allowed, so the ${what} was NOT read and nothing was done. `
+    + `You must not state or describe anything as if it came from the ${what}, and do not say "based on the live ${what}". `
+    + `Say plainly that you did not read it, then answer only from what you already know, labelled "from what I already know, not from ${files ? 'a file' : 'the page'}". `
+    + 'Say they can allow it next time.';
 }

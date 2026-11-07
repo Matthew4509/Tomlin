@@ -670,6 +670,11 @@ function drawPeople() {
     b.addEventListener('click', () => startChat(p.who, b));
     return li;
   });
+  if (!list.length && chatUi.nobody) {
+    list.push(el('li', { class: 'person-none', id: 'new-chat-none' },
+      el('p', { class: 'hint', text: chatUi.nobody }),
+      el('button', { class: 'btn primary', type: 'button', text: 'Hire staff', onclick: () => $('#new-chat-team').click() })));
+  }
   $('#new-chat-people').replaceChildren(...list);
 }
 

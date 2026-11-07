@@ -278,7 +278,7 @@
   <section class="home-part" id="node-install" aria-labelledby="node-install-title">
     <h3 id="node-install-title">Update this install</h3>
     <p class="hint" id="node-install-line"></p>
-    <p class="hint"><b>Check git</b> looks for a newer TOMLIN on GitHub and downloads it; it must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, with no internet needed: pick it together with its signature, tomlin-&lt;version&gt;.zip.sig (hold Ctrl to pick both); without one, or with one that fails, you are warned first. Either way TOMLIN checks it is whole and newer, starts it once as a test, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs on <b>Network</b> (Update all linked PCs).</p>
+    <p class="hint" id="node-install-help"><b>Check git</b> looks for a newer TOMLIN on GitHub and downloads it; it must carry TOMLIN's release signature, or it is not opened. <b>Check zip</b> takes a tomlin-&lt;version&gt;.zip you already have, with no internet needed: pick it together with its signature, tomlin-&lt;version&gt;.zip.sig (hold Ctrl to pick both); without one, or with one that fails, you are warned first. Either way TOMLIN checks it is whole and newer, starts it once as a test, then starts it in place of this one; your staff, chats and models stay, and the old copy stays in its folder beside it. Then update your linked PCs on <b>Network</b> (Update all linked PCs).</p>
     <div class="team-actions">
       <button class="btn primary" type="button" id="node-install-git">Check git</button>
       <label class="btn node-install-pick" id="node-install-pick">Check zip<input type="file" id="node-install-file" accept=".zip,.sig,application/zip" multiple hidden></label>
@@ -291,7 +291,7 @@
       <ol class="hint">
         <li>On a PC with internet, open <a id="node-install-releases" target="_blank" rel="noopener noreferrer">TOMLIN's releases on GitHub</a> and download tomlin-&lt;version&gt;.zip and tomlin-&lt;version&gt;.zip.sig. Or copy both from a PC that has them (a USB stick will do).</li>
         <li>Bring both files to this PC, in one folder.</li>
-        <li>Press <b>Check zip</b>, pick the zip and its .sig together (hold Ctrl), then <b>Update now</b>. No internet is needed for this.</li>
+        <li id="node-install-hand-zip">Press <b>Check zip</b>, pick the zip and its .sig together (hold Ctrl), then <b>Update now</b>. No internet is needed for this.</li>
         <li>Or wholly by hand: close TOMLIN, unzip the zip into a new folder beside this one (not over the top of it), and run <b>Install TOMLIN.cmd</b> in the new folder. Your staff, chats and models stay where they are: the new version finds them.</li>
         <li>Linked PCs: <b>Update all linked PCs</b> on <b>Network</b>, or the same steps on each PC.</li>
       </ol>

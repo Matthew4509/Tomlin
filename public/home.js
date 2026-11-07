@@ -1366,6 +1366,9 @@ async function drawInstall() {
   // A copy started another way (node src/server.ts) cannot start the new one: said, and neither way is offered.
   $('#node-install-pick').hidden = !v.restarts;
   $('#node-install-git').hidden = !v.restarts || !v.repo;
+  // The explanation names the Check git and Check zip buttons: not shown when they are not (a copy started by npm start).
+  $('#node-install-help').hidden = !v.restarts;
+  $('#node-install-hand-zip').hidden = !v.restarts;
   if (v.repo) $('#node-install-releases').href = `https://github.com/${v.repo}/releases`;
   // A download from git still going (the page was left and opened again): followed again.
   if (v.git && ['downloading', 'checking', 'opening'].includes(v.git.state) && !gitFollowing) followGit();

@@ -548,12 +548,14 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 .home-head { display: flex; align-items: center; gap: 10px; }
 .home-head h2 { margin: 0; font-size: var(--fs-xl); }
 .home-part h3, .home-setup h3 { margin: 0 0 8px; font-size: var(--fs-lg); }
-.home-list { display: grid; gap: 8px; }
+.home-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .home-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .home-item.k-result { border-left: 4px solid var(--accent); }
 .home-item.k-working { border-left: 4px solid var(--good); }
 .home-item-actions { flex: none; display: flex; flex-wrap: wrap; gap: 6px; }
-.home-item-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.home-item { min-width: 0; }
+.home-item-text { flex: 1; min-width: 0; display: grid; gap: 3px; overflow-wrap: anywhere; }
+.home-item-text strong { overflow-wrap: anywhere; }
 .home-goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-track { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; margin: 4px 0 2px; }
 .home-fill { height: 100%; background: var(--accent); transition: width .5s; }
@@ -2502,3 +2504,8 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .msg .permit .permit-now summary { cursor: pointer; }
 .msg .permit .perm-rows { margin-top: 6px; }
 @media (max-width: 520px) { .perm-row { grid-template-columns: 4.5em auto 1fr; } .perm-row .hint { grid-column: 1 / -1; } }
+
+/* Jobs: the error banner scrolled into view stops below the sticky heading, not under it */
+#jobs-fault { scroll-margin-top: 72px; }
+.mp-filters input[aria-invalid="true"] { border: 2px solid var(--bad); }
+.mp-filters .fault-line { grid-column: 1 / -1; margin: 0; }

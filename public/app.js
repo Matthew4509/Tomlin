@@ -462,13 +462,18 @@ async function loadModels() {
     const list = app.models[name];
     const keep = p.model.value || app.models.settings[name].model;
     p.model.replaceChildren();
-    if (!list.length) p.model.append(el('option', { value: '', text: name === 'chat' ? 'No chat models found' : 'No image models installed' }));
     // A hidden model is offered once "Show hidden" is ticked (beside the list), or while it is the one picked.
     const tick = hiddenTick(`show-hidden-${name}`, list.some(m => m.hidden));
     if (!tick.isConnected) (p.model.closest('label') ?? p.model).after(tick);
     for (const m of visibleModels(list, keep)) {
       const extra = m.installed === false ? ' (not downloaded)' : m.fit?.level === 'no' ? ' (too big now)' : m.fit?.level === 'tight' ? ' (tight)' : '';
       p.model.append(el('option', { value: m.id, text: `${m.name} · ${gb(m.bytes)}${extra}`, disabled: m.installed === false }));
+    }
+    // Never a blank list: nothing on the PC, or only models that are hidden or not downloaded, is said in the list itself.
+    if (![...p.model.options].some(o => o.value && !o.disabled)) {
+      const text = !list.length ? (name === 'chat' ? 'No chat models found' : 'No image models installed') : name === 'chat' ? 'No chat model downloaded' : 'No picture model downloaded';
+      p.model.prepend(el('option', { value: '', text }));
+      p.model.value = '';
     }
     if (keep && list.some(m => m.id === keep && m.installed !== false)) p.model.value = keep;
     const st = app.models.settings[name];

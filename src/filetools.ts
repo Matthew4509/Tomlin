@@ -13,7 +13,7 @@ export const filesFit = (model: string): boolean => (paramsB(model) ?? FILES_MIN
 
 /** The person's answer to "may this chat use your files?" (src/permits.ts: always is Auto in Settings). */
 export { cleanPermit, type Permit } from './permits.ts';
-import type { Permit } from './permits.ts';
+import { deniedWords, type Permit } from './permits.ts';
 
 export const FILE_TOOLS: ToolDef[] = [
   {
@@ -51,7 +51,7 @@ export const FILE_ROUNDS = 6;
 /** Added to the system turn when the file tools are on. */
 export const FILES_LINE = 'You can work on the person\'s files yourself, in the folder this chat works in: list_files shows them, read_file reads one, save_file writes one to the drive. The person is asked to allow it the first time. Read a file before you change it, save the whole file, and say which files you saved.';
 
-const DENIED = 'The person did not allow file access for this answer, so nothing was read or saved. Answer without it, and say they can allow it next time.';
+const DENIED = deniedWords('files');
 
 /**
  * The turns with FILES_LINE at the end of the system turn (one is put first when there is none), and a hire's lines that

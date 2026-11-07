@@ -13,8 +13,6 @@ const { disclosurePass, autoDetails, savePrivateList, readPrivateList, listForPa
 const { runAudit, fingerprint } = require('../../src/bridge/audit');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-disclosure-test-'));
-// Removed however the test ends (a failed check or a crash too); a folder something still holds gets a few tries.
-process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch {} });
 const w = (rel, text) => { const p = path.join(tmp, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); return p; };
 let failures = 0;
 const check = (name, fn) => { try { fn(); console.log('ok   ' + name); } catch (e) { failures++; console.log('FAIL ' + name + ': ' + e.message); } };
@@ -350,6 +348,82 @@ async function main() {
     git(tmp, 'init', '-q', '--bare', kremote); git(kr, 'remote', 'add', 'origin', kremote); git(kr, 'push', '-q', 'origin', 'main');
     const h2 = (await runAudit(kr, null, { disclosure: ctx, root: false })).findings.filter(f => f.rule === 'SEC-012');
     check('SEC-012: once pushed it is Critical and says so', () => assert(h2.length === 1 && h2[0].sev === 'Critical' && /already on the remote/.test(h2[0].title), JSON.stringify(h2)));
+  }
+
+  // Keys inside a published zip: the same rules and placeholders as a file, named by the zip and the entry.
+  {
+    const rnd = n => require('crypto').randomBytes(n * 2).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, n);
+    const key = () => 'sk_' + 'live_' + rnd(24);
+    const php = k => '<?php\n$k = "' + k + '";\n';
+    const hook = 'whsec_' + rnd(30);
+    const zctx = { details: [{ label: 'my email', value: EMAIL }], others: [], own: [] };
+    const repo = name => { const d = path.join(tmp, name); git(d, 'init', '-q'); git(d, 'add', '-A'); commitAs(d, '1+p@users.noreply.github.com', 'one'); return d; };
+    const list = a => a.findings.map(f => f.rule + '@' + f.where).join(', ');
+    const docx = k => makeZip([{ name: 'word/document.xml', data: '<w:p><w:t>' + k + '</w:t></w:p>', deflate: true }]);
+    w('zk/index.js', 'let a = 1;\n');
+    w('zk/releases/app-1.0.zip', makeZip([
+      { name: 'config.php', data: php(key()), deflate: true },
+      { name: 'readme.txt', data: 'hello\n' },
+      { name: 'place.csv', data: 'k,' + 'sk_' + 'live_' + 'x'.repeat(24) + '\n' },
+      { name: 'tests/data.csv', data: 'k,' + hook + '\n' },
+      { name: 'seen.csv', data: 'k,' + hook + '\n' },
+      { name: 'compose.yaml', data: 'db:\n  password: Hu7kQ2mZp' + '9x\n' },
+      { name: EMAIL + '.csv', data: 'k,' + key() + '\n' },
+      { name: 'cert.pfx', data: Buffer.from([0x30, 0x82, 0, 1, 0, 0]) },
+      { name: 'inner.zip', data: makeZip([{ name: 'deep/env.txt', data: 'k=' + key() + '\n' }]), deflate: true },
+      { name: 'letter.docx', data: docx(key()) },
+    ]));
+    fs.writeFileSync(w('zk/top.docx', ''), docx(key()));
+    const zd = repo('zk');
+    const Z = await runAudit(zd, null, { disclosure: zctx });
+    check('a key in a tracked zip is found, Critical, by the zip, the entry and the line', () => assert(Z.findings.some(f => f.rule === 'SEC-003' && f.sev === 'Critical' && f.where === 'releases/app-1.0.zip > config.php:2'), list(Z)));
+    check('so a zip that holds one is fix-first', () => assert.strictEqual(Z.verdict, 'fix-first'));
+    check('a key in a zip inside a zip is found', () => assert(Z.findings.some(f => f.rule === 'SEC-003' && f.where === 'releases/app-1.0.zip > inner.zip > deep/env.txt:1'), list(Z)));
+    check('a placeholder in a zip stays quiet', () => assert(!Z.findings.some(f => /place\.csv/.test(f.where)), list(Z)));
+    check('a zip\'s entries are judged by their path inside it: a test folder, a dev file', () => assert(!Z.findings.some(f => /tests\/data\.csv|compose\.yaml/.test(f.where)) && Z.findings.some(f => f.rule === 'SEC-005' && /seen\.csv:1$/.test(f.where)), list(Z)));
+    check('an office file, in a zip or by itself, stays out of this', () => assert(!Z.findings.some(f => f.area === 'secrets' && /docx/.test(f.where)), list(Z)));
+    check('an entry\'s name never carries a private detail into a key finding', () => {
+      assert(Z.findings.some(f => f.rule === 'SEC-003' && /\[my email\]\.csv:1$/.test(f.where)), list(Z));
+      assert(!JSON.stringify(Z.findings).includes(EMAIL), 'the address came back out');
+    });
+    check('a key store in a zip is named', () => assert(Z.findings.some(f => f.rule === 'EXP-008' && f.sev === 'Medium' && f.where === 'releases/app-1.0.zip > cert.pfx'), list(Z)));
+    check('a zip read in full leaves no gap', () => assert.strictEqual(Z.partly, false, JSON.stringify(Z.notRead)));
+    const given = [];
+    await disclosurePass(zd, { ...zctx, keysHook: (t, where, size, inZip) => { if (inZip) given.push(where); } });
+    check('the hook gets each text entry once, and no office entry', () => {
+      assert.strictEqual(given.filter(g => g === 'releases/app-1.0.zip > readme.txt').length, 1, given.join(', '));
+      assert(!given.some(g => /docx|document\.xml|cert\.pfx/.test(g)), given.join(', '));
+    });
+
+    // Without the hook the pass is as it was, and a zip it cannot open is said by the pass as before.
+    w('zk2/index.js', 'let a = 1;\n'); w('zk2/broken.zip', 'PK');
+    const Z2 = await runAudit(repo('zk2'), null, { disclosure: zctx });
+    check('a zip that cannot be opened is still said', () => assert(Z2.partly && Z2.notRead.some(n => /could not be opened/i.test(n)), JSON.stringify(Z2.notRead)));
+
+    // A zip git ignores goes no further by git: a warning, as for any ignored file.
+    w('zk3/index.js', 'let a = 1;\n'); w('zk3/.gitignore', 'shipped/\n');
+    w('zk3/shipped/app.zip', makeZip([{ name: 'config.php', data: php(key()) }]));
+    const Z3 = await runAudit(repo('zk3'), null, { disclosure: zctx });
+    check('a key in a zip git ignores is a warning that says why', () => {
+      const f = Z3.findings.find(x => x.rule === 'SEC-003' && x.where === 'shipped/app.zip > config.php:2');
+      assert(f && f.sev === 'Medium' && f.ignored && /git ignores/.test(f.title), list(Z3));
+    });
+
+    // A zip only the history still holds: SEC-012, not a key in the files. One whose key a current zip still holds is
+    // left to that zip's own finding.
+    const gone = key(), kept = key();
+    w('zk4/index.js', 'let a = 1;\n');
+    w('zk4/old.zip', makeZip([{ name: 'config.php', data: php(gone) }]));
+    w('zk4/both.zip', makeZip([{ name: 'config.php', data: php(kept) }, { name: 'note.txt', data: 'one\n' }]));
+    const zh = repo('zk4');
+    fs.rmSync(path.join(zh, 'old.zip'));
+    fs.writeFileSync(path.join(zh, 'both.zip'), makeZip([{ name: 'config.php', data: php(kept) }, { name: 'note.txt', data: 'two\n' }]));
+    git(zh, 'add', '-A'); commitAs(zh, '1+p@users.noreply.github.com', 'two');
+    const Z4 = await runAudit(zh, null, { disclosure: zctx });
+    const past = Z4.findings.filter(f => f.rule === 'SEC-012');
+    check('a key in a zip only the history holds is found as history', () => assert.deepStrictEqual(past.map(f => [f.sev, f.where]), [['High', 'git history: old.zip > config.php:2']], list(Z4)));
+    check('a key a current zip still holds is its own finding, not history too', () => assert(Z4.findings.some(f => f.rule === 'SEC-003' && f.where === 'both.zip > config.php:2'), list(Z4)));
+    check('the key itself never reaches the audit', () => assert(!JSON.stringify(Z4).includes(gone.slice(8)) && !JSON.stringify(Z4).includes(kept.slice(8))));
   }
 
   // A zip that lists far more entries than the pass looks at: every entry counts as listed, read or passed over.
