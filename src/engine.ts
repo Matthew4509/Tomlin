@@ -2,6 +2,7 @@
 // OpenAI-style /v1/chat/completions). The plain functions are tested in test/engine.test.ts.
 import { usedFromPieces, usedFromTimings, type Used } from './meter.ts';
 import { runnerHeaders } from './runnerkeys.ts';
+import { withRules } from './rules.ts';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -413,7 +414,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
       // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word. Asked
       // always, not only when it is shown: a line now and then keeps the stream from going quiet on a long prompt.
-      body: runnerJson({ messages: [...turnsFor(turns, style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, return_progress: true }),
+      body: runnerJson({ messages: [...turnsFor(withRules(turns), style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, return_progress: true }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {

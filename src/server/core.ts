@@ -18,6 +18,7 @@ import { PcProfileStore } from '../pcprofile.ts';
 import * as mute from '../mute.ts';
 import * as notes from '../notes.ts';
 import * as notify from '../notify.ts';
+import { loadRules } from '../rules.ts';
 import { Chats, whoKind } from '../chats.ts';
 import * as memory from '../memory.ts';
 import { ChatLogs } from '../layers.ts';
@@ -99,6 +100,8 @@ if (ready.state === 'too-new') {
 
 export const store = new Store(HOME.data);
 await store.settings();
+// Standing rules (src/rules.ts): data/rules.md, written with the defaults the first time.
+await loadRules(HOME.data);
 // Every conversation is its own chat (src/chats.ts). The first time, the old one-file-per-person chats move in.
 export const chats = new Chats(store);
 /** Set once every part of the server is in place: what follows a saved chat file (its notification). */

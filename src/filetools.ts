@@ -6,6 +6,7 @@
 import type { ToolDef } from './webtools.ts';
 import * as ws from './workspace.ts';
 import { paramsB, withFileTools } from './staff.ts';
+import { checkSave } from './rules.ts';
 
 /** Offered to a model of 4B or more (or of a size its name does not tell): a 0.8B offered them stopped answering what was asked. */
 export const FILES_MIN_B = 4;
@@ -138,7 +139,11 @@ export class FileTurn {
       return `${r.path}, part ${part} of ${parts}${more}:\n${r.text.slice((part - 1) * this.perCall, part * this.perCall)}`;
     }
     if (name === 'save_file') {
-      const r = await ws.save(this.root, a.path, a.text);
+      // Standing rules, checked in code (src/rules.ts): no empty or gutted save, no keys or passwords.
+      const was = await ws.read(this.root, a.path);
+      const refused = typeof a.text === 'string' ? checkSave('error' in was ? null : was.text, a.text) : null;
+      if (refused) return refused;
+      const r = await ws.save(this.root, a.path, a.text, true, true);
       if ('error' in r) return r.error;
       this.saved.push(r.path);
       return r.created ? `Saved ${r.path} (new file).` : `Saved ${r.path} (the old one is kept as ${r.path}.bak).`;

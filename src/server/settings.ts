@@ -8,9 +8,10 @@ import { log, logFile } from '../log.ts';
 import { toneOf } from '../persona.ts';
 import { roleOf } from '../staff.ts';
 import * as claude from '../claude.ts';
+import { DEFAULT_RULES, PROJECT_RULES_MAX, RULES_MAX, getRules, readProjectRules, saveProjectRules, rulesBlock, resetRules, saveRules } from '../rules.ts';
 import * as keep from '../keep.ts';
 import { clearDamaged, damaged } from '../atomic.ts';
-import { HOME, PORT, ROOT, type Routes, VERSION, chatModels, json, publicSettings, ready, staff, store } from './core.ts';
+import { HOME, PORT, ROOT, type Routes, VERSION, chatModels, json, publicSettings, ready, staff, store, workspaceDir } from './core.ts';
 import { backupRunning } from './bridge.ts';
 import { askedOf, chatList, cleanRun, images, runOf, threadsOf } from './panes.ts';
 import { setWho, whoId } from './people.ts';
@@ -52,6 +53,7 @@ async function claudeView() {
     port: PORT,
     pcName: node.name !== 'Worker PC' ? node.name : 'This PC',
     node: { on: node.on, port: node.port },
+    rules: rulesBlock(),
   });
   return { prompt };
 }
@@ -175,6 +177,12 @@ async function keepAction(res: ServerResponse, b: Record<string, unknown>) {
 export const settingsGet: Routes = {
   '/api/keep': async ({ res }) => json(res, 200, await keepView()),
   '/api/claude': async ({ res }) => json(res, 200, await claudeView()),
+  '/api/rules': async ({ res }) => json(res, 200, { ...getRules(), defaults: DEFAULT_RULES, max: RULES_MAX }),
+  // ?project=<id>: that project's own rules (jobs/<id>/rules.md), on top of the standing ones.
+  '/api/rules/project': async ({ res, url }) => {
+    const id = url.searchParams.get('project');
+    return json(res, 200, { project: id, text: await readProjectRules(await workspaceDir(), id), max: PROJECT_RULES_MAX });
+  },
 };
 
 /** POST requests answered here, by path (the body is read already). */
@@ -215,6 +223,15 @@ export const settingsPost: Routes = {
     // The chat gear sends what it shows; a setup the speed finder chose (its other fields) is kept.
     if (typeof b.runModel === 'string' && chatModels.path(b.runModel)) await store.saveSettings({ run: { [b.runModel]: cleanRun({ ...runOf(await store.settings(), b.runModel), ...(b.run && typeof b.run === 'object' ? b.run : {}) }, b.runModel) } });
     return json(res, 200, { ...publicSettings(await store.saveSettings({ [pane]: change })), ...(opened !== null ? { opened } : {}) });
+  },
+  // {text?, on?} saves the person's rules; {reset: true} puts the 12 defaults back (src/rules.ts).
+  '/api/rules': async ({ res, b }) => {
+    const r = b.reset === true ? await resetRules(HOME.data) : await saveRules(HOME.data, { ...('text' in b ? { text: b.text } : {}), ...('on' in b ? { on: b.on } : {}) });
+    return json(res, 200, { ...r, defaults: DEFAULT_RULES, max: RULES_MAX });
+  },
+  '/api/rules/project': async ({ res, b }) => {
+    const text = await saveProjectRules(await workspaceDir(), b.project, b.text);
+    return text === null ? json(res, 400, { error: 'There is no such project.' }) : json(res, 200, { project: b.project, text, max: PROJECT_RULES_MAX });
   },
   '/api/keep': async ({ res, b }) => keepAction(res, b),
 };

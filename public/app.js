@@ -1399,6 +1399,35 @@ app.permissionsBox = () => el('fieldset', { class: 'colours-pick permissions' },
   el('p', { class: 'hint', text: 'What a chat\'s model may do on its own. Manual: it asks in the chat the first time in each answer (Allow once, Auto for this chat, Auto always, or Don\'t allow). Auto: it goes ahead without asking. Pages on this PC or your home network are never opened, and files outside the chat\'s folder are never touched, whatever is chosen here.' }),
   app.permissionRows());
 
+/** Settings, Rules: the standing rules added to every request a model gets (data/rules.md). A request, not a lock: the notes say which are also checked in code. */
+app.rulesBox = () => {
+  const said = el('p', { class: 'hint', role: 'status' });
+  const text = el('textarea', { rows: 14, spellcheck: 'true', 'aria-label': 'Standing rules', maxlength: 4000 });
+  const on = el('input', { type: 'checkbox' });
+  const fill = r => { text.value = r.text; on.checked = r.on; };
+  api('/api/rules').then(fill).catch(error => { said.textContent = `Could not read the rules: ${error.message}`; });
+  const save = async body => {
+    try {
+      fill(await api('/api/rules', body));
+      said.textContent = 'Saved. The rules go with the next message.';
+    } catch (error) {
+      said.textContent = `Not saved: ${error.message}`;
+    }
+  };
+  const saveBtn = el('button', { type: 'button', class: 'btn', text: 'Save rules' });
+  saveBtn.addEventListener('click', () => save({ text: text.value, on: on.checked }));
+  const resetBtn = el('button', { type: 'button', class: 'btn', text: 'Reset to the 12 defaults' });
+  resetBtn.addEventListener('click', () => { if (confirm('Replace your rules with the 12 defaults?')) save({ reset: true }); });
+  on.addEventListener('change', () => save({ on: on.checked }));
+  return el('fieldset', { class: 'colours-pick rules' },
+    el('legend', { text: 'Rules' }),
+    el('p', { class: 'hint', text: 'Standing rules added to every message a model gets, and to the Connect Claude prompt. One rule per line. A rule here is a request, not a lock. Checked in code as well: files outside the chat folder are never touched, no tool can delete a file, a save that would empty or gut a file (or hold a password or key) is refused, and the previous backup is kept. Rules like "plan first" or "say when unsure" depend on the model following them.' }),
+    el('label', { class: 'check' }, on, ' Rules on'),
+    text,
+    el('div', { class: 'row' }, saveBtn, resetBtn),
+    said);
+};
+
 /** Settings, Web search: which engine a chat with Web on searches with, and its key or address. */
 app.webSearchBox = () => {
   const now = app.models?.settings?.webSearch ?? { provider: 'duckduckgo' };

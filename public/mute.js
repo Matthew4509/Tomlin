@@ -161,6 +161,7 @@ function openDataLock() {
   $('#settings-lock').replaceChildren(app.appLockBox?.() ?? '');
   $('#settings-notify').replaceChildren(app.notifyBox?.() ?? '');
   $('#settings-permissions').replaceChildren(app.permissionsBox?.() ?? '');
+  $('#settings-rules').replaceChildren(app.rulesBox?.() ?? '');
   $('#settings-web').replaceChildren(app.webSearchBox?.() ?? '');
   showSettingsPage('data', '#settings-data');
 }

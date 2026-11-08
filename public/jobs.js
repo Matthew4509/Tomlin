@@ -157,7 +157,10 @@ function projectCards(id, cards, after) {
     await after?.();
     return r.text;
   };
-  return [cardBox('Scope card', cards.scope, save('scope')), cardBox('Design brief', cards.design, save('design'))];
+  // Rules for this project (jobs/<id>/rules.md): added, on top of the standing rules, to every chat and step of the project.
+  const rules = el('section', { class: 'card-box' }, el('p', { class: 'hint', text: 'Project rules…' }));
+  api(`/api/rules/project?project=${encodeURIComponent(id)}`).then(r => rules.replaceWith(cardBox('Project rules', r.text, async text => (await api('/api/rules/project', { project: id, text })).text)), () => rules.remove());
+  return [cardBox('Scope card', cards.scope, save('scope')), cardBox('Design brief', cards.design, save('design')), rules];
 }
 app.projectCards = projectCards;
 

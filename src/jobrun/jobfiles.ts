@@ -10,6 +10,7 @@ import * as memory from '../memory.ts';
 import * as seats from '../seats.ts';
 import type { StaffMember } from '../staff.ts';
 import { writeAtomic } from '../atomic.ts';
+import { projectBlock, readProjectRules } from '../rules.ts';
 import { type NewEvent, d } from './shared.ts';
 import { teamOf, teamWords } from './sizing.ts';
 import type { Brain, StepResult } from '../jobrun.ts';
@@ -231,7 +232,14 @@ async function jobCards(id: string): Promise<{ scope: string; design: string } |
  */
 export async function packetFront(id: string, ctx: number, hire: StaffMember | null, topic: string, cards?: { scope: string; design: string } | null): Promise<memory.Front> {
   const [c, team, own] = await Promise.all([cards !== undefined ? cards : jobCards(id), d.notebooks.read('team'), hire ? d.notebooks.read(`staff:${hire.id}`) : null]);
-  return memory.jobFront(ctx, c, team, own, topic, hire ? `${hire.name.split(/\s+/)[0]}'s memory` : undefined);
+  const front = memory.jobFront(ctx, c, team, own, topic, hire ? `${hire.name.split(/\s+/)[0]}'s memory` : undefined);
+  // The project's own rules (src/rules.ts), fitted to the model: a small context gets the first lines only.
+  const mine = projectBlock(await readProjectRules(await d.workspaceDir(), id));
+  if (!mine) return front;
+  const text = memory.fitLines(mine, ctx <= 4096 ? 500 : 1500);
+  return { text: front.text ? `${front.text}
+
+${text}` : text, parts: [...front.parts, { key: 'rules', label: 'Project rules', chars: text.length, tokens: Math.ceil(text.length / memory.CHARS_PER_TOKEN), state: text.length < mine.length ? 'cut' : 'whole' }] };
 }
 
 /**

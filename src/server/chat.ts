@@ -13,7 +13,7 @@ import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { cleanFrom, cleanWritten, markSent, promptFor } from '../sendto.ts';
 import { cleanFoldWait, findInChat, FOLD_WAIT_MAX, isBigRead, LOG_KINDS, recallLine, sentLines, startIn, type LogKind } from '../layers.ts';
-import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, staff, staffId, store } from './core.ts';
+import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, staff, staffId, store, workspaceDir } from './core.ts';
 import { chat, lastUsed, main, runOn, runnerUsed } from './panes.ts';
 import { answeringBusy, askOnce, chatAnswering, chatContext, endAnswer, lastContext, layerAsk, notebooksOf, reserve, setPhase, startAnswer, stopChats, takeChat, takeTurn, workOn } from './answering.ts';
 import { artistPointer, chatPeople, chatPersonHere, chatToSend, openChat, previewsTake, sendTarget, type SendTarget } from './people.ts';
@@ -28,6 +28,7 @@ import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, type ToolUse } from '../webt
 import { FILE_ROUNDS, FILE_TOOLS, FileTurn, fileCallWords, filesFit, isFileTool, withFilesLine } from '../filetools.ts';
 import { Gate, cleanPermit, deniedWords, type Kind, type Permit } from '../permits.ts';
 import { chatFilesRoot } from './places.ts';
+import { readProjectRules, withProjectRules } from '../rules.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Pane } from '../pane.ts';
 import * as Q from '../queue.ts';
@@ -380,7 +381,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   }
   lastContext.set(openId, { ctx: built.ctx, at: Date.now(), model: ran });
   await keepSent();
-  let turns = built.turns;
+  // The chat's project's own rules (jobs/<id>/rules.md), on top of the standing rules.
+  const projectRules = await readProjectRules(await workspaceDir(), info?.project).catch(() => '');
+  let turns = withProjectRules(built.turns, projectRules);
   // Continue: the cut answer is the last turn, so the model goes on from inside it.
   const before = mode === 'continue' ? history.at(-1)?.content ?? '' : '';
   if (mode === 'continue' && (turns.at(-1)?.role !== 'assistant' || turns.at(-1)?.content !== before)) {
@@ -589,7 +592,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
           // alphabet): built again once, smaller by what llama.cpp counted, and asked again.
           built = await build((0.95 * (built.used / memory.CHARS_PER_TOKEN)) / error.tokens);
           await keepSent();
-          turns = built.turns;
+          turns = withProjectRules(built.turns, projectRules);
           try {
             r = await ask();
           } catch (again) {

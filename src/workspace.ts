@@ -163,7 +163,7 @@ export async function read(root: string, rel: unknown): Promise<{ path: string; 
 }
 
 /** Saves a file (new or changed). The file as it was is kept once as "name.ext.bak" next to it. */
-export async function save(root: string, rel: unknown, text: unknown, mayCreate = true): Promise<{ path: string; created: boolean } | { error: string }> {
+export async function save(root: string, rel: unknown, text: unknown, mayCreate = true, keepOlder = false): Promise<{ path: string; created: boolean } | { error: string }> {
   const full = await inside(root, rel);
   if (!full) return { error: 'Use a plain file name with a text or code ending (.md, .txt, .html, .css, .js, .ts, .py, .php, .sql, .json, .java, .cs, .go and the like), inside the workspace.' };
   if (typeof text !== 'string') return { error: 'There is no text to save.' };
@@ -171,6 +171,8 @@ export async function save(root: string, rel: unknown, text: unknown, mayCreate 
   const exists = await stat(full).then(s => s.isFile(), () => false);
   if (!exists && !mayCreate) return { error: 'There is no such file.' };
   await mkdir(dirname(full), { recursive: true });
+  // keepOlder (a model's save): the .bak the last save left is not lost to this one, it is kept under a time stamp.
+  if (exists && keepOlder && (await stat(`${full}.bak`).then(s => s.isFile(), () => false))) await copyFile(`${full}.bak`, `${full}.${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}.bak`);
   if (exists) await copyFile(full, `${full}.bak`);
   await writeAtomic(full, text);
   return { path: cleanPath(rel)!, created: !exists };

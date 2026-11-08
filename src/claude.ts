@@ -11,6 +11,8 @@ export interface ClaudeInfo {
   port: number;
   pcName: string;
   node: { on: boolean; port: number };
+  /** The person's standing rules block (src/rules.ts rulesBlock); '' or unset when off. */
+  rules?: string;
 }
 
 /** The version a handover's name carries ("...-SNIPPETS-2.0.42.md" -> [2, 0, 42]), [0, 0, 0] when none. */
@@ -62,5 +64,6 @@ export function claudePrompt(i: ClaudeInfo): string {
     '4. A model run for a test goes on a linked PC above when there is one; on this PC only when I say so.',
     '5. Run npm test and npm run check before you say something works, and tell me what you ran and what you did not.',
     '6. Ask me before committing, baking a zip or uploading anything.',
+    ...(i.rules ? ['', i.rules] : []),
   ].join('\n');
 }
