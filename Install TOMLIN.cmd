@@ -14,6 +14,25 @@ set "SM_NODE=node"
 where node >nul 2>nul || goto no_node
 node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)" || goto no_node
 :run
+rem The setup window (tools\setup.cs) is built here with the compiler that comes with Windows. Without that compiler,
+rem or with --console, the text setup below runs instead.
+if /i "%~1"=="--console" goto console
+set "SM_CSC=%windir%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if not exist "%SM_CSC%" set "SM_CSC=%windir%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+if not exist "%SM_CSC%" goto console
+if not exist "tools\setup.cs" goto console
+set "SM_WIN=%TEMP%\tomlin-setup-%RANDOM%"
+mkdir "%SM_WIN%" >nul 2>nul
+"%SM_CSC%" -nologo -target:winexe -optimize+ "-win32icon:%~dp0public\icon.ico" "-out:%SM_WIN%\TOMLIN Setup.exe" "-win32manifest:%~dp0tools\setup.manifest" -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.IO.Compression.dll -r:System.IO.Compression.FileSystem.dll "%~dp0tools\setup.cs" >nul 2>nul
+if errorlevel 1 goto console_clean
+start "" /wait "%SM_WIN%\TOMLIN Setup.exe" --node "%SM_NODE%" --src "%~dp0."
+set "SM_CODE=%errorlevel%"
+rd /s /q "%SM_WIN%" >nul 2>nul
+if "%SM_CODE%"=="9" goto console
+exit /b %SM_CODE%
+:console_clean
+rd /s /q "%SM_WIN%" >nul 2>nul
+:console
 "%SM_NODE%" tools\install.ts install %*
 if errorlevel 1 (echo. & pause & exit /b 1)
 echo.

@@ -141,7 +141,7 @@ test('data already in the home (a test copy) is adopted without a question, afte
     assert.equal(backups.length, 2);
     assert.match(backups[0].name, /before 2\.0\.28\.zip$/);
     assert.equal(r.state === 'ready' ? r.noteTitle : '', 'Update Successful!');
-    assert.equal(r.state === 'ready' ? r.note : '', `You have successfully updated to TOMLIN 2.0.28.\nYour former account data was backed up as: ${backups[0].name.replace(/\.zip$/, '')}`);
+    assert.equal(r.state === 'ready' ? r.note : '', `You have successfully updated to TOMLIN 2.0.28.\nYour former account data was backed up as:\n${backups[0].name.replace(/\.zip$/, '')}`);
     assert.equal(keep.readVersion(w.home)?.app, '2.0.28');
     // The note and its heading go together once the page has shown them.
     await keep.noteShown(w.home);

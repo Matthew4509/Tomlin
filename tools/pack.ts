@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { repoOf } from '../src/release.ts';
 import { PARTS, SKIP } from '../src/update.ts';
 import { ensureKey, keyHits, nativeGaps, nextSteps, signZip } from './sign.ts';
+import { buildSetupExe } from './setupexe.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
@@ -63,5 +64,16 @@ try {
   await rm(`${zip}.sig`, { force: true });
   console.error(`The zip was made but NOT signed: ${(e as Error).message}.`);
   process.exit(1);
+}
+// The one-file installer: the setup window with this zip inside it.
+const setupExe = join(ROOT, 'build', `TOMLIN-Setup-${version}.exe`);
+if (process.platform === 'win32') {
+  await rm(setupExe, { force: true });
+  try {
+    const size = await buildSetupExe(zip, setupExe);
+    console.log(`Made ${setupExe} (${(size / 1048576).toFixed(0)} MB): the one file to hand out for a new install.`);
+  } catch (e) {
+    console.error(`The one-file installer was NOT made: ${(e as Error).message}. The zip and its .sig are fine.`);
+  }
 }
 console.log(nextSteps(version, repoOf(pkg.repository)));

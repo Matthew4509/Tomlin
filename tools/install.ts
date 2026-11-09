@@ -1,7 +1,7 @@
 // Installs TOMLIN for this Windows user (2.0.34), started by "Install TOMLIN.cmd" in the unzipped folder.
 // No administrator needed. Nothing is downloaded, except Microsoft's Visual C++ Runtime when this PC lacks it and the
 // answer is Yes (src/vcrt.ts; Windows asks for permission to install it). See src/installer.ts for where everything goes.
-//   node tools/install.ts install [--yes] [--no-start] [--desktop|--no-desktop] [--autostart|--no-autostart]
+//   node tools/install.ts install [--dir "D:\Apps\TOMLIN"] [--yes] [--no-start] [--desktop|--no-desktop] [--autostart|--no-autostart]
 //                                 [--firewall|--no-firewall] [--vcrt|--no-vcrt] [--dry-run]
 //   node tools/install.ts uninstall [--yes] [--firewall|--no-firewall] [--dry-run]   (Settings > Apps > TOMLIN > Uninstall runs it)
 //   node tools/install.ts repair [--yes] [--dry-run]          (the icon's Repair install; My PC has the same, src/repair.ts)
@@ -31,7 +31,7 @@ const argv = process.argv.slice(2);
 const has = (f: string) => argv.includes(f);
 const YES = has('--yes');
 const DRY = has('--dry-run');
-const P = inst.places();
+let P = inst.places();
 const say = (s = '') => console.log(s ? ` ${s}` : '');
 
 const rl = process.stdin.isTTY && !YES ? createInterface({ input: process.stdin, output: process.stdout }) : null;
@@ -165,6 +165,49 @@ async function runtimeCheck() {
   );
 }
 
+/**
+ * Where TOMLIN goes. Shown every time; a new install may change it (--dir "D:\Apps\TOMLIN" answers it, Enter keeps the
+ * one offered). An install that is already there stays where it is: an update never moves it.
+ */
+async function chooseFolder(update: boolean) {
+  say();
+  if (update) {
+    say(`Installed in: ${P.root}`);
+    return;
+  }
+  const flag = argv.indexOf('--dir');
+  for (let typed = flag >= 0 ? argv[flag + 1] ?? '' : null; ; typed = null) {
+    say(`Install to: ${P.root}`);
+    if (typed === null) {
+      if (!rl) return;
+      typed = await rl.question(' Press Enter to use this folder, or type another full path: ');
+    }
+    const r = inst.chooseRoot(typed, P.root, SRC);
+    if ('root' in r) {
+      if (r.root !== P.root) say(`Install to: ${r.root}`);
+      P = { ...P, root: r.root };
+      return;
+    }
+    say(r.error);
+    if (flag >= 0 || !rl) throw new Error(r.error);
+  }
+}
+
+/** The pointer file that lets the app, updates, repair and uninstall find a folder chosen in setup (src/installer.ts). */
+const programsDir = () => join(process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? '', 'AppData', 'Local'), 'Programs');
+const locationFile = () => join(programsDir(), inst.LOCATION_FILE);
+
+/** Written for a folder other than the default one, removed for the default (and when uninstalling). */
+async function writeLocation() {
+  if (process.env.TOMLIN_INSTALL_ROOT) return;
+  const file = locationFile();
+  if ([join(programsDir(), 'TOMLIN'), join(programsDir(), inst.FORMER.folder)].some(d => d.toLowerCase() === P.root.toLowerCase())) await rm(file, { force: true });
+  else {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, P.root);
+  }
+}
+
 function folderKb(files: { bytes: number }[]): number {
   return files.reduce((n, f) => n + f.bytes, 0) / 1024;
 }
@@ -192,6 +235,7 @@ async function install() {
     say();
     return repair();
   }
+  await chooseFolder(!!was);
   if (!(await closeRunning())) return 1;
   await runtimeCheck();
 
@@ -225,6 +269,7 @@ async function install() {
   });
   const name = dest.slice(P.root.length).replace(/^[\\/]+/, '');
   await step(`point current.txt at ${name}`, () => writeFile(join(P.root, inst.CURRENT), name));
+  await step('remember the install folder', writeLocation);
 
   // Shortcuts: the Start menu always; the desktop if wanted.
   await step(`add ${inst.NAME} to the Start menu`, () => powershell(inst.shortcutScript(join(P.startMenu, inst.LINK), exe)));
@@ -315,6 +360,7 @@ async function uninstall() {
   await step(`remove ${P.root}`, async () => {
     if (!DRY) await new Promise(r => setTimeout(r, 1000));
     await rm(P.root, { recursive: true, force: true });
+    if (!process.env.TOMLIN_INSTALL_ROOT) await rm(locationFile(), { force: true });
   });
   say();
   say(`Your chats, staff, pictures and models are kept in ${home}.`);
@@ -382,8 +428,47 @@ async function repair() {
   return r.failed.length ? 1 : 0;
 }
 
+/**
+ * For the setup window (tools/setup.cs): what is installed and what this PC lacks, as key=value lines. Nothing is changed.
+ * `check --dir X` says "ok" or why the folder is not allowed.
+ */
+async function status() {
+  const was = await installed();
+  const flag = argv.indexOf('--dir');
+  if (argv[0] === 'check') {
+    const r = inst.chooseRoot(flag >= 0 ? argv[flag + 1] ?? '' : '', P.root, SRC);
+    console.log('root' in r ? 'ok' : r.error);
+    return 0;
+  }
+  const missing = vcrtMissing();
+  let vcrt = missing.length ? 'missing' : 'ok';
+  if (!missing.length && process.platform === 'win32') {
+    const old = (await powershell(inst.fileVersionScript(join(systemDir(), 'msvcp140.dll'))).catch(() => ({ stdout: '' }))).stdout.trim();
+    if (vcrtTooOld(old)) vcrt = 'old';
+  }
+  const rule = process.platform === 'win32' && (await firewallRules()) > 0;
+  const sdir = startupDir();
+  const lines: Record<string, string> = {
+    version: (await versionOf(SRC)) ?? '',
+    installed: was?.version ?? '',
+    root: P.root,
+    exe: inst.exeIn(P.root),
+    home: resolveHome().home,
+    vcrt,
+    rule: rule ? 'yes' : 'no',
+    autostart: sdir && existsSync(startupFileIn(sdir)) ? 'yes' : 'no',
+    user: process.env.USERNAME ?? '',
+  };
+  for (const [k, v] of Object.entries(lines)) console.log(`${k}=${v}`);
+  return 0;
+}
+
 let code = 1;
 try {
+  if (argv[0] === 'status' || argv[0] === 'check') {
+    process.exitCode = await status();
+    process.exit();
+  }
   code = argv[0] === 'uninstall' ? await uninstall() : argv[0] === 'install' ? await install() : argv[0] === 'repair' ? await repair() : (say('Use: node tools/install.ts install | uninstall | repair'), 1);
 } catch (e) {
   say();

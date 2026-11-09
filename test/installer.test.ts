@@ -4,10 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as inst from '../src/installer.ts';
+import { buildSetupExe, setupCscArgs } from '../tools/setupexe.ts';
 import { installedExe, startupScript } from '../src/autostart.ts';
 import { PARTS } from '../src/update.ts';
 import { refreshTray, STAMP, traySum } from '../src/trayfresh.ts';
@@ -213,4 +214,100 @@ test('a real install into a test folder: the app, the program built here, curren
   assert.deepEqual(readdirSync(env.TOMLIN_START_MENU_DIR), []);
   assert.deepEqual(readdirSync(env.TOMLIN_DESKTOP_DIR), []);
   assert.ok(existsSync(join(env.TOMLIN_HOME, 'data', 'settings.json')), 'the data is kept');
+});
+
+test('a folder chosen in setup is remembered, found again by installRoot, and checked first', () => {
+  const local = tmp();
+  const apps = tmp();
+  const mine = join(apps, 'My TOMLIN');
+  // nothing chosen: the default
+  assert.equal(inst.installRoot(local), join(local, 'Programs', 'TOMLIN'));
+  // a pointer to a folder with no install in it is ignored
+  mkdirSync(join(local, 'Programs'), { recursive: true });
+  writeFileSync(join(local, 'Programs', inst.LOCATION_FILE), mine);
+  assert.equal(inst.installRoot(local), join(local, 'Programs', 'TOMLIN'));
+  // once that folder holds an install (current.txt), the app, updates and uninstall all find it there
+  mkdirSync(mine, { recursive: true });
+  writeFileSync(join(mine, inst.CURRENT), 'tomlin-9.9.9');
+  assert.equal(inst.installRoot(local), mine);
+  assert.equal(inst.places({ LOCALAPPDATA: local }).root, mine);
+  // not a drive path: ignored
+  writeFileSync(join(local, 'Programs', inst.LOCATION_FILE), 'relative\\folder');
+  assert.equal(inst.installRoot(local), join(local, 'Programs', 'TOMLIN'));
+});
+
+test('chooseRoot: Enter keeps the offered folder; a typed one must be a drive path, outside setup, and empty or new', () => {
+  const offered = 'C:\\Users\\A\\AppData\\Local\\Programs\\TOMLIN';
+  const setup = tmp();
+  const empty = tmp();
+  const full = tmp();
+  writeFileSync(join(full, 'a.txt'), 'x');
+  assert.deepEqual(inst.chooseRoot('  ', offered, setup), { root: offered });
+  assert.deepEqual(inst.chooseRoot(`"${empty}"`, offered, setup), { root: empty });
+  assert.deepEqual(inst.chooseRoot(join(empty, 'new', 'TOMLIN'), offered, setup), { root: join(empty, 'new', 'TOMLIN') });
+  assert.ok('error' in inst.chooseRoot('apps\\TOMLIN', offered, setup), 'needs a drive');
+  assert.ok('error' in inst.chooseRoot('C:\\', offered, setup), 'not a whole drive');
+  assert.ok('error' in inst.chooseRoot(setup, offered, setup), 'not the setup folder');
+  assert.ok('error' in inst.chooseRoot(join(setup, 'inside'), offered, setup), 'not inside the setup folder');
+  assert.ok('error' in inst.chooseRoot(full, offered, setup), 'not a folder with other things in it');
+  writeFileSync(join(full, inst.CURRENT), 'tomlin-1.0.0');
+  assert.deepEqual(inst.chooseRoot(full, offered, setup), { root: full }, 'a folder that already holds TOMLIN is fine');
+});
+
+test('the setup window asks the installer: status says what is there, check says ok or why not, --dir is shown and used', { skip: !onWindows }, () => {
+  const t = tmp();
+  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'TOMLIN'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home') };
+  mkdirSync(env.TOMLIN_STARTUP_DIR);
+  const version = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf8')).version;
+  const s = Object.fromEntries(run(['status'], env).split(/\r?\n/).filter(l => l.includes('=')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  assert.equal(s.version, version);
+  assert.equal(s.installed, '', 'nothing installed in a new folder');
+  assert.equal(s.root, env.TOMLIN_INSTALL_ROOT);
+  assert.ok(s.exe.endsWith('TOMLIN.exe'));
+  assert.equal(run(['check', '--dir', join(t, 'new', 'place')], env).trim(), 'ok');
+  assert.match(run(['check', '--dir', 'relative\\place'], env), /full folder path/);
+  assert.match(run(['check', '--dir', rootPath], env), /inside the folder this setup is running from/);
+  const out = run(['install', '--yes', '--dry-run', '--no-firewall', '--dir', join(t, 'D apps', 'TOMLIN')], env);
+  assert.match(out, /Install to: .*Programs.TOMLIN/, 'the offered folder is shown first');
+  assert.match(out, /Install to: .*D apps.TOMLIN/, 'then the chosen one');
+  assert.match(out, /\(would\) copy \d+ files to .*D apps.TOMLIN/);
+});
+
+test('the setup window builds with the compiler that comes with Windows, and the .cmd falls back to the text setup', { skip: !onWindows || !inst.places().csc.some(existsSync) }, () => {
+  const t = tmp();
+  const csc = inst.places().csc.find(existsSync)!;
+  const out = join(t, 'TOMLIN Setup.exe');
+  execFileSync(csc, setupCscArgs({ out, icon: join(rootPath, 'public', 'icon.ico') }), { encoding: 'utf8', windowsHide: true });
+  assert.ok(existsSync(out));
+  const cmd = readFileSync(join(rootPath, 'Install TOMLIN.cmd'), 'utf8');
+  assert.match(cmd, /tools\\setup\.cs/);
+  assert.match(cmd, /--console/);
+  assert.match(cmd, /"%SM_CODE%"=="9"\s+goto console/, 'a window that cannot start falls back to the text setup');
+  const setup = readFileSync(join(rootPath, 'tools', 'setup.cs'), 'utf8');
+  for (const flag of ['--yes', '--no-start', '--dir', '--desktop', '--no-desktop', '--autostart', '--no-autostart', '--firewall', '--no-firewall', '--vcrt', '--no-vcrt']) assert.ok(setup.includes(flag), `${flag} is passed by the window`);
+});
+
+test('the one-file installer carries the zip, checks it, unpacks it, and refuses a damaged one', { skip: !onWindows || !inst.places().csc.some(existsSync) }, async () => {
+  const t = tmp();
+  const stage = join(t, 'stage', 'tomlin-0.0.1');
+  mkdirSync(join(stage, 'sub'), { recursive: true });
+  writeFileSync(join(stage, 'a.txt'), 'one');
+  writeFileSync(join(stage, 'sub', 'b.txt'), 'two');
+  const zip = join(t, 'tomlin-0.0.1.zip');
+  execFileSync(join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zip, '-C', join(t, 'stage'), 'tomlin-0.0.1']);
+  const exe = join(t, 'TOMLIN-Setup-0.0.1.exe');
+  const size = await buildSetupExe(zip, exe);
+  assert.ok(size > statSync(zip).size + 80, 'the exe is the program, the zip and the 80-byte trailer');
+  const tail = readFileSync(exe).subarray(-80);
+  assert.equal(tail.subarray(72).toString('ascii'), 'TOMLPAY1');
+  const ok = join(t, 'out');
+  assert.doesNotThrow(() => execFileSync(exe, ['--extract', ok], { windowsHide: true }));
+  assert.equal(readFileSync(join(ok, 'tomlin-0.0.1', 'a.txt'), 'utf8'), 'one');
+  assert.equal(readFileSync(join(ok, 'tomlin-0.0.1', 'sub', 'b.txt'), 'utf8'), 'two');
+  // one byte of the zip changed: its check number no longer matches
+  const bad = Buffer.from(readFileSync(exe));
+  bad[bad.length - 80 - 30] ^= 0xff;
+  const damaged = join(t, 'TOMLIN-Setup-damaged.exe');
+  writeFileSync(damaged, bad);
+  assert.throws(() => execFileSync(damaged, ['--extract', join(t, 'out2')], { windowsHide: true }), (e: { status?: number }) => e.status === 3);
 });

@@ -726,7 +726,7 @@ export async function prepare(home: Home, root: string, appVersion: string, star
     // Going back to an older version is not an update, so it is not called one.
     const up = newer(appVersion, v.app);
     const note = !name ? v.note
-      : up ? `You have successfully updated to TOMLIN ${appVersion}.\nYour former account data was backed up as: ${kept}`
+      : up ? `You have successfully updated to TOMLIN ${appVersion}.\nYour former account data was backed up as:\n${kept}`
         : `TOMLIN ${appVersion} is using your data for the first time; the data as ${v.app} left it is kept as the backup "${kept}".`;
     const noteTitle = !name ? v.noteTitle : up ? 'Update Successful!' : undefined;
     await writeVersion(home, { data: DATA_VERSION, app: appVersion, note, noteTitle });

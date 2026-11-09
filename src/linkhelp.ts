@@ -168,6 +168,12 @@ export function nodeChecklist(f: NodeFacts): NodeReport {
     const before = lines.length;
     const manual = h.dhcp === false;
     const routerHere = !!h.gateway && sameNet(h.gateway, h.address, h.prefix);
+    const other = home.find(x => x !== h && !apipa(x.address));
+    if (apipa(h.address) && other) {
+      // A spare card (an unplugged second Ethernet port, a Wi-Fi card that is off) has no address, while another connection works: not a fault.
+      lines.push({ state: 'info', text: `Ignoring ${h.alias}: it has no address from a router (${h.address}), and ${other.alias} is connected. If ${h.alias} is a cable you meant to use, check it.` });
+      continue;
+    }
     if (apipa(h.address)) {
       lines.push({ state: 'bad', text: `${h.alias} did not get an address from your router (${h.address}).`, steps: ['Check the cable or the Wi-Fi, then restart the router or this PC.', ...automaticSteps(h.alias)] });
     } else if (manual && (!routerHere || h.gatewayAnswers === false)) {

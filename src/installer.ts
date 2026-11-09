@@ -11,7 +11,7 @@
 // Settings > Apps all point at TOMLIN.exe, which never moves, so they keep working after every update.
 // An install made before the TOMLIN name (Programs\Smart Manager, Smart Manager.exe) keeps its names: see FORMER.
 // Tested in test/installer.test.ts.
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
 /** The program in an install folder made with the TOMLIN name. */
@@ -51,11 +51,52 @@ export interface Places {
   csc: string[];
 }
 
-/** The install folder: Programs\TOMLIN, or Programs\Smart Manager when only that one holds an install. */
+/**
+ * A one-line file beside the default install folder that names the folder a person chose in setup (3.0 installer, 9 Nov).
+ * Absent = the default. Every part that finds the install (the app, updates, repair, uninstall) goes through installRoot,
+ * so a chosen folder is found the same way as the default one.
+ */
+export const LOCATION_FILE = 'TOMLIN-location.txt';
+
+/** The folder the person chose in setup, when it still holds an install; null otherwise. */
+export function chosenRoot(local: string): string | null {
+  try {
+    const dir = readFileSync(join(local, 'Programs', LOCATION_FILE), 'utf8').trim();
+    return /^[A-Za-z]:\\/.test(dir) && existsSync(join(dir, CURRENT)) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The install folder: the one chosen in setup, else Programs\TOMLIN, or Programs\Smart Manager when only that one holds an install. */
 export function installRoot(local: string): string {
+  const chosen = chosenRoot(local);
+  if (chosen) return chosen;
   const now = join(local, 'Programs', 'TOMLIN');
   const old = join(local, 'Programs', FORMER.folder);
   return !existsSync(join(now, CURRENT)) && existsSync(join(old, CURRENT)) ? old : now;
+}
+
+/**
+ * Checks the folder typed in setup. Empty = the one offered. It must be a full path on a drive, not inside the unzipped
+ * setup folder (which a person deletes afterwards), and either new, empty or already holding a TOMLIN install.
+ */
+export function chooseRoot(typed: string, offered: string, setupDir: string): { root: string } | { error: string } {
+  const text = typed.trim().replace(/^"(.*)"$/, '$1');
+  if (!text) return { root: offered };
+  if (!/^[A-Za-z]:[\\/]/.test(text)) return { error: 'Type a full folder path that starts with a drive, for example D:\\Apps\\TOMLIN.' };
+  const root = resolve(text);
+  const low = (p: string) => resolve(p).toLowerCase().replace(/[\\/]+$/, '');
+  if (low(root) === low(setupDir) || low(root).startsWith(`${low(setupDir)}\\`)) return { error: 'That is inside the folder this setup is running from. Pick another folder: this one is deleted when you tidy up.' };
+  if (root.length < 4) return { error: 'Pick a folder, not a whole drive.' };
+  if (existsSync(root) && !existsSync(join(root, CURRENT))) {
+    try {
+      if (readdirSync(root).length) return { error: 'That folder is not empty and holds no TOMLIN. Pick an empty folder, or a new name (it is made for you).' };
+    } catch {
+      return { error: 'That folder cannot be read.' };
+    }
+  }
+  return { root };
 }
 
 /** Where everything goes, for this Windows user. Tests move each one with a TOMLIN_* setting. */

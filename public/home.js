@@ -363,8 +363,8 @@ function drawRail() {
     const asleep = p.activity === 'available' && p.state === 'asleep' && !p.backupsOnly;
     // Behind this PC: the yellow (!) on its card; its window (press the card) has Update it. Ahead of it, and it lets
     // this PC take its TOMLIN: the same mark, and its window has Update this PC from it.
-    const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update it` : `Outdated: ${p.outdated.version} (this PC ${p.outdated.mine}): press to update it`)
-      : p.newer ? (p.newer.other ? `Runs ${p.newer.version} with different files from this PC: press to update this PC from it` : `Runs a newer TOMLIN, ${p.newer.version} (this PC ${p.newer.mine}): press to update this PC from it`) : '';
+    const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update "${p.name}"` : `This PC runs ${p.outdated.mine}; "${p.name}" runs ${p.outdated.version}: press to update "${p.name}"`)
+      : p.newer ? (p.newer.other ? `Runs ${p.newer.version} with different files from this PC: press to update this PC to it` : `This PC runs ${p.newer.mine}; "${p.name}" runs ${p.newer.version}: press to update this PC to ${p.newer.version}`) : '';
     const full = p.activity !== 'offline' ? fullWords(p.ramUsed, p.ram, `on "${p.name}"`) : '';
     const flag = [old, full].filter(Boolean).join('\n');
     const mem = homeUi.pcMem[p.id];
@@ -953,7 +953,23 @@ async function updatePcWithPin(pc) {
 }
 
 /**
- * "Update this PC from it" for linked PC `pc` ({ id, name, version, build }): said plainly first (the files come from
+ * The words for a linked PC whose TOMLIN differs from this PC's (p.update when it is behind, p.pull when it is ahead):
+ * both versions named, and a button that says which PC changes. `line` has no full stop at the end.
+ */
+function pcVersionWords(p, behind) {
+  const x = behind ? p.update : p.pull;
+  const them = `"${p.name}"`;
+  const mine = x.other ? `${x.mine}, build ${x.build}` : x.mine;
+  const theirs = x.other ? `${p.version}, build ${p.build}` : p.version;
+  const line = `This PC runs ${mine}; ${them} runs ${theirs}`;
+  const button = behind
+    ? (x.other ? `Update ${them} to this PC's files` : `Update ${them} to ${x.mine}`)
+    : (x.other ? `Update this PC to ${them}'s files` : `Update this PC to ${p.version}`);
+  return { line, button };
+}
+
+/**
+ * Update this PC from linked PC `pc` ({ id, name, version, build }): said plainly first (the files come from
  * that PC, not from TOMLIN's maker; this PC restarts into them), then started. The pull as started, or null on Cancel.
  */
 async function pullWithAsk(pc) {
@@ -1223,8 +1239,8 @@ function drawOthers(pcs) {
       // Behind this PC (a lower version, or the same one with different files): "Update it" sends this PC's TOMLIN there
       // (it starts the new version by itself), or why not.
       p.ok && p.update ? el('div', { class: 'node-update' },
-        el('span', { class: 'hint', text: `${p.update.other ? `Runs ${p.version} but different files from this PC (build ${p.build} there, ${p.update.build} here)` : `Outdated: ${p.version} (this PC ${p.update.mine})`}.${p.update.why ? ` ${p.update.why.charAt(0).toUpperCase()}${p.update.why.slice(1)}.` : ''}` }),
-        p.update.why ? null : el('button', { class: 'btn primary', type: 'button', text: 'Update it', 'data-key': `update:${p.id}`, onclick: async e => {
+        el('span', { class: 'hint', text: `${pcVersionWords(p, true).line}.${p.update.why ? ` ${p.update.why.charAt(0).toUpperCase()}${p.update.why.slice(1)}.` : ''}` }),
+        p.update.why ? null : el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(p, true).button, 'data-key': `update:${p.id}`, onclick: async e => {
           e.target.disabled = true;
           try {
             const r = await updatePcWithPin(p);
@@ -1241,8 +1257,8 @@ function drawOthers(pcs) {
       // Ahead of this PC (a newer version, or the same one with different files): "Update this PC from it" takes its
       // TOMLIN here (no PIN there: nothing changes on that PC), or why not.
       p.ok && p.pull ? el('div', { class: 'node-update' },
-        el('span', { class: 'hint', text: `${p.pull.other ? `Runs ${p.version} with different files from this PC (build ${p.build} there, ${p.pull.build} here)` : `Newer: ${p.version} (this PC ${p.pull.mine})`}.${p.pull.why ? ` ${p.pull.why.charAt(0).toUpperCase()}${p.pull.why.slice(1)}.` : ''}` }),
-        p.pull.why ? null : el('button', { class: 'btn primary', type: 'button', text: 'Update this PC from it', 'data-key': `pull:${p.id}`, onclick: async e => {
+        el('span', { class: 'hint', text: `${pcVersionWords(p, false).line}.${p.pull.why ? ` ${p.pull.why.charAt(0).toUpperCase()}${p.pull.why.slice(1)}.` : ''}` }),
+        p.pull.why ? null : el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(p, false).button, 'data-key': `pull:${p.id}`, onclick: async e => {
           e.target.disabled = true;
           try {
             const r = await pullWithAsk(p);
