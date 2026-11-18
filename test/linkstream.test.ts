@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, connect, type Socket } from 'node:net';
 import { randomBytes } from 'node:crypto';
+import { Duplex } from 'node:stream';
 import { FRAME, joinWhenOpen, newNonce, Opener, Sealer, sealedPipe, streamKeys } from '../src/linkstream.ts';
 
 const linkKeys = randomBytes(64);
@@ -194,4 +195,76 @@ test('both of a sealed pipe\'s connections send small writes at once (no Nagle d
   plain.destroy();
   await ended;
   assert.deepEqual(said.sort(), ['plain true', 'wire true']);
+});
+
+/** An in-memory stream for sealedPipe: what is written to it is kept, one entry per write. */
+function memory(): Duplex & { writes: Buffer[] } {
+  const writes: Buffer[] = [];
+  const d = new Duplex({
+    read() {},
+    write(chunk: Buffer, _enc, cb) {
+      writes.push(Buffer.from(chunk));
+      cb();
+    },
+  }) as Duplex & { writes: Buffer[] };
+  d.writes = writes;
+  return d;
+}
+
+test('an RPC message written in small pieces (command byte, size, data) crosses as ONE frame in ONE write', async () => {
+  const keys = streamKeys(linkKeys, newNonce(), newNonce(), 'host');
+  const plain = memory();
+  const wire = memory();
+  const ended = sealedPipe(plain, wire, keys, 'host', { beatMs: 60_000 });
+  const pieces = [Buffer.from([7]), Buffer.alloc(8, 1), randomBytes(10_240)];
+  // The way llama.cpp's RPC client sends a message: several writes, read here as several chunks in one turn.
+  for (const p of pieces) plain.emit('data', p);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+  assert.equal(wire.writes.length, 1, 'one write on the wire, not one per piece');
+  const opened = new Opener(keys.send, 'max|host').push(wire.writes[0]);
+  assert.equal(opened.length, 1, 'one frame');
+  assert.deepEqual(opened[0], Buffer.concat(pieces));
+  plain.destroy();
+  await ended;
+});
+
+test('several frames read off the wire at once reach the runner in one write, and the frames of an older peer still open', async () => {
+  const h = newNonce();
+  const n = newNonce();
+  const host = streamKeys(linkKeys, h, n, 'host');
+  const node = streamKeys(linkKeys, h, n, 'node');
+  const plain = memory();
+  const wire = memory();
+  const ended = sealedPipe(plain, wire, host, 'host', { beatMs: 60_000 });
+  // An older TOMLIN on the other end sealed each piece as its own frame and wrote length and body apart: the same bytes.
+  const old = new Sealer(node.send, 'max|node');
+  const pieces = [Buffer.alloc(8, 2), randomBytes(300), Buffer.from('answer')];
+  const bytes = Buffer.concat(pieces.flatMap(p => old.frames(p)));
+  wire.emit('data', bytes);
+  await new Promise(r => setImmediate(r));
+  assert.equal(plain.writes.length, 1);
+  assert.deepEqual(plain.writes[0], Buffer.concat(pieces));
+  plain.destroy();
+  await ended;
+});
+
+test('a big write is still cut into frames of FRAME bytes, and nothing is sealed after the pipe ends', async () => {
+  const keys = streamKeys(linkKeys, newNonce(), newNonce(), 'host');
+  const plain = memory();
+  const wire = memory();
+  const ended = sealedPipe(plain, wire, keys, 'host', { beatMs: 60_000 });
+  const big = randomBytes(2 * FRAME + 5);
+  plain.emit('data', big.subarray(0, FRAME));
+  plain.emit('data', big.subarray(FRAME));
+  await new Promise(r => setImmediate(r));
+  const opened = new Opener(keys.send, 'max|host').push(Buffer.concat(wire.writes));
+  assert.equal(opened.length, 3);
+  assert.deepEqual(Buffer.concat(opened), big);
+  const before = wire.writes.length;
+  plain.emit('data', Buffer.from('late'));
+  plain.destroy();
+  await ended;
+  await new Promise(r => setImmediate(r));
+  assert.equal(wire.writes.length, before, 'bytes gathered as the pipe ended are dropped with it');
 });

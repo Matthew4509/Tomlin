@@ -523,6 +523,20 @@ export function pcState(r: { ok: boolean; model?: string | null; image?: { name:
   return r.model || r.image?.name ? { state: 'on', text: 'On' } : { state: 'asleep', text: 'Asleep: no model loaded' };
 }
 
+/** The short word for a PC's state, as the left panel shows it (public/home.js ACTIVITY_WORD). */
+const PC_WORD = { available: 'Available', asleep: 'Asleep', owner: 'In use by its owner', offline: 'Offline' } as const;
+
+/**
+ * A linked PC's state, the one source for the left panel and its window: pcState, how free it is for work, and the
+ * one word both show (Available, Asleep, In use by its owner, Offline). Answering with no model loaded is Asleep.
+ */
+export function pcLook(r: Parameters<typeof pcState>[0] & { backupsOnly?: boolean }): { state: State; text: string; activity: 'available' | 'owner' | 'offline'; word: string } {
+  const st = pcState(r);
+  const activity = r.ok ? (r.away ? 'owner' : 'available') : 'offline';
+  const word = activity === 'available' && st.state === 'asleep' && !r.backupsOnly ? PC_WORD.asleep : PC_WORD[activity];
+  return { ...st, activity, word };
+}
+
 // ---- Job rooms: one group chat per job, every line made by code from the job's events ----
 
 /**

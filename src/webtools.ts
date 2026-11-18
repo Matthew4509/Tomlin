@@ -493,6 +493,49 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * A fetch at a person's pace (PACE): waits its turn at the site (or the search engine), saying so while it waits, and
+ * waits once more when the site answers 429 or 503; a second no, or a wait of over a minute, is thrown as a reason
+ * (the site is then left alone for the rest of the answer). `name`: the site as said; `words`: the line put back
+ * after a wait.
+ */
+export function politeFetcher(kind: 'page' | 'search', name: string, words: string, deps: { pace?: Pacer; get?: Fetcher; say?: (words: string) => void; slowed: Set<string> }): Fetcher {
+  const pace = deps.pace ?? POLITE;
+  const get = deps.get ?? fetchPublic;
+  const say = (w: string) => deps.say?.(w);
+  return async (url, o) => {
+    const key = kind === 'search' ? 'search' : siteOf(url);
+    const turn = async () => {
+      const gap = kind === 'search' ? pace.gaps.search : pace.pageGap();
+      const wait = pace.book(key, gap);
+      if (wait >= 1000) say(`Waiting ${Math.ceil(wait / 1000)} s before the next ${kind === 'search' ? 'search' : `page on ${name}`}…`);
+      if (wait > 0) await pause(wait, o.signal);
+      if (wait >= 1000) say(words);
+      try {
+        return await get(url, o);
+      } finally {
+        // The gap counts from the end of a slow answer too.
+        pace.hold(key, gap);
+      }
+    };
+    const r = await turn();
+    if (r.status !== 429 && r.status !== 503) return r;
+    const what = r.status === 429 ? `asked to slow down (${r.status})` : `said it is busy (${r.status})`;
+    const asked = retryAfterMs(r.retryAfter);
+    if (asked === null || asked <= PACE.waitMost) {
+      const ms = asked ?? PACE.waitDefault;
+      pace.hold(key, ms);
+      say(`${name} ${what}: waiting ${Math.max(1, Math.ceil(ms / 1000))} s…`);
+      await pause(ms, o.signal);
+      say(words);
+      const again = await turn();
+      if (again.status !== 429 && again.status !== 503) return again;
+    }
+    deps.slowed.add(key);
+    throw new Error(`${name} ${what}${asked !== null && asked > PACE.waitMost ? ' and asked for a wait of over a minute' : ' and still said no after a wait'}, so it is not asked again in this answer`);
+  };
+}
+
 // ---- One answer's use of the tools ----
 
 /** Rounds of tool calls in one answer before it is asked for with the tools off (a search, two pages, one more). */
@@ -538,12 +581,17 @@ export function cleanWebAsk(raw: unknown): WebAsk | null {
 
 /** One tool call, as the chat shows and keeps it under the answer. */
 export interface ToolUse {
-  name: 'web_search' | 'open_page';
+  /** The web's two; the newer tools' uses (src/toolkit.ts) are kept in the same list under their own names. */
+  name: 'web_search' | 'open_page' | 'window_list' | 'screen_look' | 'window_focus' | 'click' | 'press_key' | 'cam_menus' | 'cam_window_state' | 'git_read' | 'run_command' | 'save_note' | 'suggest_finding';
   /** The query, or the address. */
   input: string;
   ok: boolean;
   /** What came of it, in a few words: "8 results", "Example Domain, 1,234 words", or why not. */
   said: string;
+  /** How long a step took (the newer tools); for a look at a window, the picture and the reading apart. */
+  ms?: number;
+  captureMs?: number;
+  ocrMs?: number;
 }
 
 /** What was used, in a line: "searched “cuda 13” (8 results); read Releases, 802 words". */
@@ -569,6 +617,8 @@ export interface WebTurnOpts {
   get?: Fetcher;
   /** This PC's pacer unless given (tests give one with no waits). */
   pace?: Pacer;
+  /** Pages one answer may read (PACE.pagesPerAnswer unless given: the research role reads more, src/notetools.ts). */
+  pagesPerAnswer?: number;
   /** A line for the answer's place while the tools wait ("Waiting 6 s before the next page on github.com…"). */
   onStatus?: (words: string) => void;
 }
@@ -599,6 +649,14 @@ export class WebTurn {
   private allow(u: string): void {
     const n = normalUrl(u);
     if (n) for (const v of variants(n)) if (!this.allowed.has(v)) this.allowed.set(v, n);
+  }
+
+  /** The whole text of a page this answer opened, by its address as the model gives it (the research tools look in it). */
+  pageOf(raw: string): { url: string; title: string; text: string } | null {
+    const asked = normalUrl(raw);
+    const url = asked ? this.allowed.get(asked) ?? asked : '';
+    const page = this.pages.get(url) ?? [...this.pages.values()].find(p => p.url === url);
+    return page ? { url, title: page.title, text: page.text } : null;
   }
 
   private use(u: ToolUse): void {
@@ -670,10 +728,11 @@ export class WebTurn {
     let page = this.pages.get(url);
     if (!page) {
       const site = siteOf(url);
+      const most = this.o.pagesPerAnswer ?? PACE.pagesPerAnswer;
       const no = this.slowed.has(site)
         ? ['the site asked to slow down earlier in this answer', `Not opened: ${site} asked to slow down earlier in this answer, so it is not asked again until the next one. Use what you have, or a page on another site.`]
-        : this.pagesRead >= PACE.pagesPerAnswer
-          ? [`${PACE.pagesPerAnswer} pages read in this answer already`, `Not opened: ${PACE.pagesPerAnswer} pages have been read for this answer, the most one answer reads. Answer now with what you have, and say what you could not check.`]
+        : this.pagesRead >= most
+          ? [`${most} pages read in this answer already`, `Not opened: ${most} pages have been read for this answer, the most one answer reads. Answer now with what you have, and say what you could not check.`]
           : this.roundPages >= PACE.pagesPerRound
             ? [`${PACE.pagesPerRound} pages asked for in one go already`, `Not opened yet: ${PACE.pagesPerRound} pages are being read in this go, the most at once. Read those first; if you still need this one, ask for it again.`]
             : null;
@@ -703,47 +762,9 @@ export class WebTurn {
     return this.give([`Page: ${page.title || '(no title)'}`, `Address: ${page.url}`, parts > 1 ? `Part ${n} of ${parts}${n < parts ? `: ask open_page with part ${n + 1} for the next part` : ''}.` : '', '', text || '(The page has no text to read: it may be built by scripts, or be a picture.)', ...links].filter((l, i) => l !== '' || i > 2).join('\n'));
   }
 
-  /**
-   * A fetch at a person's pace (PACE): waits its turn at the site (or the search engine), saying so while it waits, and
-   * waits once more when the site answers 429 or 503; a second no, or a wait of over a minute, is thrown as a reason
-   * (the site is then left alone for the rest of the answer). `name`: the site as said; `words`: the line put back
-   * after a wait.
-   */
+  /** A fetch at a person's pace (politeFetcher), with this answer's list of sites that asked to slow down. */
   private polite(kind: 'page' | 'search', name: string, words: string): Fetcher {
-    const pace = this.o.pace ?? POLITE;
-    const get = this.o.get ?? fetchPublic;
-    const say = (w: string) => this.o.onStatus?.(w);
-    return async (url, o) => {
-      const key = kind === 'search' ? 'search' : siteOf(url);
-      const turn = async () => {
-        const gap = kind === 'search' ? pace.gaps.search : pace.pageGap();
-        const wait = pace.book(key, gap);
-        if (wait >= 1000) say(`Waiting ${Math.ceil(wait / 1000)} s before the next ${kind === 'search' ? 'search' : `page on ${name}`}…`);
-        if (wait > 0) await pause(wait, o.signal);
-        if (wait >= 1000) say(words);
-        try {
-          return await get(url, o);
-        } finally {
-          // The gap counts from the end of a slow answer too.
-          pace.hold(key, gap);
-        }
-      };
-      const r = await turn();
-      if (r.status !== 429 && r.status !== 503) return r;
-      const what = r.status === 429 ? `asked to slow down (${r.status})` : `said it is busy (${r.status})`;
-      const asked = retryAfterMs(r.retryAfter);
-      if (asked === null || asked <= PACE.waitMost) {
-        const ms = asked ?? PACE.waitDefault;
-        pace.hold(key, ms);
-        say(`${name} ${what}: waiting ${Math.max(1, Math.ceil(ms / 1000))} s…`);
-        await pause(ms, o.signal);
-        say(words);
-        const again = await turn();
-        if (again.status !== 429 && again.status !== 503) return again;
-      }
-      this.slowed.add(key);
-      throw new Error(`${name} ${what}${asked !== null && asked > PACE.waitMost ? ' and asked for a wait of over a minute' : ' and still said no after a wait'}, so it is not asked again in this answer`);
-    };
+    return politeFetcher(kind, name, words, { pace: this.o.pace, get: this.o.get, say: w => this.o.onStatus?.(w), slowed: this.slowed });
   }
 
   /** A page fetched and turned into text: HTML, plain text, JSON, XML or a PDF (its text; a scanned one has none). */

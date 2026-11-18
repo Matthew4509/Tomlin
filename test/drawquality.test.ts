@@ -31,7 +31,7 @@ test('they go all the way: the page, this PC, the door of that PC, and the pictu
   assert.match(door, /drawShared\(models\.find\(m => m\.id === want\)!, \{ prompt, style, width: size\(b\.width\), height: size\(b\.height\), \.\.\.choices \}/, 'a picture model asked for by name');
   assert.match(door, /d\.draw\(\{ prompt, mode: [^}]*forPc, \.\.\.choices \}/, 'what is connected there');
   const shared = /async function drawShared\([\s\S]*?\n\}/.exec(node)![0];
-  assert.match(shared, /d\.draw\(\{ prompt: ask\.prompt, mode: [^}]*forPc, quality: ask\.quality, seed: ask\.seed \}/);
+  assert.match(shared, /d\.draw\(\{ prompt: ask\.prompt, mode: [^}]*forPc, quality: ask\.quality, seed: ask\.seed, negative: ask\.negative \}/);
 
   const forPc = /export async function drawForPc\([\s\S]*?\n\}/.exec(pictures)![0];
   assert.match(forPc, /images\.generate\(\{ prompt: o\.prompt, [^}]*quality: o\.quality as Quality, seed: o\.seed/);

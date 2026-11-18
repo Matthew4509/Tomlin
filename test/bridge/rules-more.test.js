@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('assert');
+const { quick } = require('./pace');
 const { runAudit, RULES } = require('../../src/bridge/audit');
 const { RULES_MORE } = require('../../src/bridge/rules-more');
 
@@ -437,7 +438,7 @@ async function main() {
     for (let i = 0; i < lines.length; i++) if (payRule.re.test(lines[i])) payRule.test(lines[i], ctx, lines, i);
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     worstPay = Math.max(worstPay, ms);
-    check('PAY-006 reads a hostile file in well under a second: ' + name + ' (' + Math.round(body.length / 1024) + ' KB, ' + Math.round(ms) + ' ms)', () => assert(ms < 500, Math.round(ms) + ' ms'));
+    check('PAY-006 reads a hostile file in well under a second: ' + name + ' (' + Math.round(body.length / 1024) + ' KB, ' + Math.round(ms) + ' ms)', () => quick(ms, 500));
   }
   // Every new rule has a pair here; ids are unique across the whole list.
   check('every rule in rules-more.js has a pair', () => {

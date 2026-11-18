@@ -43,7 +43,11 @@
     await seen(x.ids);
     if ((x.kind === 'documents' || x.kind === 'needs') && x.job) return app.openJob(x.job);
     if (x.kind === 'reply' && x.chat) return app.openChat(x.chat);
-    $('#home-queue-title').scrollIntoView({ block: 'nearest' });
+    // The line pressed is gone once seen: the keyboard goes to the queue it pointed at, not back to the top of the page.
+    const head = $('#home-queue-title');
+    if (!head.hasAttribute('tabindex')) head.setAttribute('tabindex', '-1');
+    head.scrollIntoView({ block: 'nearest' });
+    head.focus({ preventScroll: true });
   }
 
   /** The photos that came back, side by side; Reviewed takes the line off Home. */
@@ -143,7 +147,7 @@
     keep($('#home-queue-tools'), tools);
     let n = 0;
     const rows = [...open.map(x => row(x, x.state === 'waiting' ? ++n : 0)), ...done.slice(-8).reverse().map(x => row(x, 0))];
-    keep($('#home-queue'), rows.length ? rows : [el('li', { class: 'home-empty', text: 'Nothing in line. Add pictures from the Images window, a project from Jobs, or a message when a PC is busy.' })]);
+    keep($('#home-queue'), rows.length ? rows : [el('li', { class: 'home-empty', text: 'Add pictures from the Images window, a project from Jobs, or a message when a PC is busy.' })]);
   }
   app.drawQueue = async () => {
     try {

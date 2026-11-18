@@ -1,5 +1,6 @@
 // Work that survives the host. A node finishes what a linked PC asked even when that PC goes away (it was closed, went
-// to sleep or lost the network): each answer asked with a request id ("rid") runs to its end on the node, and what it
+// to sleep or lost the network): each answer, project step or picture asked with a request id ("rid") runs to its end
+// on the node, and what it
 // wrote waits in an outbox on the node's own disk, sealed with that link's keys, until the linked PC collects it or
 // three days pass. Asking again with the same id joins the answer still running, or gets the finished one at once:
 // the work is never done twice. The host keeps a list of the answers it is still owed (`Owed`) and puts each one into
@@ -25,9 +26,26 @@ export const ridOf = (payload: unknown) => createHash('sha256').update(JSON.stri
 export interface Kept {
   state: 'done' | 'error';
   text: string;
+  /** The last line as sent: the done line of an answer, or the picture itself (png, model, seconds) of a drawing. */
   done?: Record<string, unknown>;
+  /** The event that ended it when it was not "done": "picture" for a drawing (2.0.89 on). */
+  event?: 'picture';
   error?: string;
+  /** A fault's record sent with its error (a runner crash: the crash notice), kept so a late collection still shows it. */
+  fault?: unknown;
   at: string;
+}
+
+/** The events that end a piece of work and are kept: an answer's done line, a drawing's picture, or a fault. */
+const FINAL = new Set(['done', 'picture', 'error']);
+
+/** A kept piece of work as the events it was first sent as: its words (an answer), then its last line or its fault. */
+export function replayOf(k: Kept): [string, unknown][] {
+  const out: [string, unknown][] = [];
+  if (k.text) out.push(['text', { text: k.text }]);
+  if (k.state === 'done') out.push([k.event ?? 'done', k.done ?? {}]);
+  else out.push(['error', { text: k.error ?? 'it stopped part-way.', ...(k.fault ? { fault: k.fault } : {}) }]);
+  return out;
 }
 
 /** One page or PC following an answer: its events, and the end of its stream. */
@@ -53,11 +71,24 @@ interface Running {
   stopped: boolean;
 }
 
+/** How much one link may have kept here at once: answers and bytes. Past it, that link's oldest go first. */
+export interface KeptCap {
+  count: number;
+  bytes: number;
+}
+/** A host's own link: generous. */
+export const HOST_KEPT: KeptCap = { count: 500, bytes: 500 * 2 ** 20 };
+/** A guest's link: small (a guest has one request in the line at a time, and collects as it goes). */
+export const GUEST_KEPT: KeptCap = { count: 20, bytes: 20 * 2 ** 20 };
+
 export class Outbox {
   private readonly running = new Map<string, Running>();
   private readonly dir: string;
-  constructor(dir: string) {
+  private readonly capOf: (owner: string) => KeptCap;
+  /** `capOf`: how much the link `owner` may have kept here (HOST_KEPT unless said). */
+  constructor(dir: string, capOf: (owner: string) => KeptCap = () => HOST_KEPT) {
     this.dir = dir;
+    this.capOf = capOf;
   }
 
   private key = (owner: string, rid: string) => `${owner}-${rid}`;
@@ -73,8 +104,8 @@ export class Outbox {
   }
 
   /**
-   * Starts an answer that runs to its end even when everyone following it leaves. `work` writes through `send`;
-   * a done or error event ends it, and what it came to is kept (sealed) until taken. Stop (`stop`) ends it and keeps
+   * Starts an answer (or a drawing) that runs to its end even when everyone following it leaves. `work` writes through
+   * `send`; a done, picture or error event ends it, and what it came to is kept (sealed) until taken. Stop (`stop`) ends it and keeps
    * nothing.
    */
   start(owner: string, rid: string, lock: Lock, first: Follower, work: (send: (event: string, data: unknown) => void, signal: AbortSignal) => Promise<void>): void {
@@ -100,8 +131,9 @@ export class Outbox {
       if (LATEST.has(event)) r.said.set(event, data);
       if (event === 'text') r.text = String(d.text ?? '');
       if (event === 'done') kept = { state: 'done', text: r.text, done: d, at: new Date().toISOString() };
-      if (event === 'error') kept = { state: 'error', text: r.text, error: String(d.text ?? 'it stopped part-way'), at: new Date().toISOString() };
-      if (event === 'done' || event === 'error') last = { event, data };
+      if (event === 'picture') kept = { state: 'done', text: '', done: d, event: 'picture', at: new Date().toISOString() };
+      if (event === 'error') kept = { state: 'error', text: r.text, error: String(d.text ?? 'it stopped part-way'), ...(d.fault && typeof d.fault === 'object' ? { fault: d.fault } : {}), at: new Date().toISOString() };
+      if (FINAL.has(event)) last = { event, data };
       else tell(event, data);
     };
     void (async () => {
@@ -142,6 +174,24 @@ export class Outbox {
     return this.kept(owner, rid, lock);
   }
 
+  /**
+   * The PC that asked comes back for work asked with this id: it follows the work still running, or is given the kept
+   * result at once (`replay`). `follow` is made only when the work is running (it starts the reply). False when neither is here: the work is to be started (or refused) as new. Checked
+   * before anything else on the door, so a busy or away node still hands back what it already did.
+   */
+  async collect(owner: string, rid: string, lock: Lock, follow: () => Follower, replay: (k: Kept) => void): Promise<boolean> {
+    if (this.isRunning(owner, rid)) return this.join(owner, rid, follow());
+    const had = await this.kept(owner, rid, lock);
+    if (!had) return false;
+    replay(had);
+    return true;
+  }
+
+  /** Something is here for that id: running, or kept and not yet taken. */
+  async holds(owner: string, rid: string, lock: Lock): Promise<boolean> {
+    return this.isRunning(owner, rid) || !!(await this.kept(owner, rid, lock));
+  }
+
   async kept(owner: string, rid: string, lock: Lock): Promise<Kept | null> {
     if (!OWNER.test(owner) || !RID.test(rid)) return null;
     const raw = await readFile(this.file(owner, rid)).catch(() => null);
@@ -157,6 +207,28 @@ export class Outbox {
 
   private async keep(owner: string, rid: string, lock: Lock, k: Kept): Promise<void> {
     await writeAtomic(this.file(owner, rid), lock.seal(Buffer.from(JSON.stringify(k)), `outbox|${rid}`));
+    await this.trim(owner, `${owner}-${rid}.box`).catch(() => undefined);
+  }
+
+  /** One link's kept answers over its cap (count or bytes): its oldest are removed first; the one just kept stays. */
+  private async trim(owner: string, newest: string): Promise<void> {
+    const cap = this.capOf(owner);
+    const mine: { name: string; at: number; bytes: number }[] = [];
+    for (const name of await readdir(this.dir).catch(() => [] as string[])) {
+      if (!name.startsWith(`${owner}-`) || !name.endsWith('.box') || !RID.test(name.slice(owner.length + 1, -4))) continue;
+      const s = await stat(join(this.dir, name)).catch(() => null);
+      if (s) mine.push({ name, at: name === newest ? Infinity : s.mtimeMs, bytes: s.size });
+    }
+    mine.sort((a, b) => a.at - b.at);
+    let count = mine.length;
+    let bytes = mine.reduce((n, x) => n + x.bytes, 0);
+    for (const x of mine) {
+      if (count <= cap.count && bytes <= cap.bytes) break;
+      if (x.name === newest) break;
+      await rm(join(this.dir, x.name), { force: true }).catch(() => undefined);
+      count--;
+      bytes -= x.bytes;
+    }
   }
 
   /** The PC has it now: the kept answer is removed. */

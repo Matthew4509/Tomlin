@@ -78,7 +78,8 @@ async function gone(port, ms) {
 // in DevToolsActivePort is how the real browser is found. Only an Edge: one that answers as a DevTools browser, or an
 // msedge.exe that holds the port without answering (a busy PC: an Edge that did not answer in time was left running
 // before, holding the profile, and the next picture failed). Done when nothing listens on the port any more.
-async function stopBrowser(port) {
+// o.ms: how long it tries in all (20 s unless given; the tests give more on a busy PC).
+async function stopBrowser(port, o = {}) {
   if (!port || !(await listening(port))) return;
   const edges = async () => (await portOwners([Number(port)]).catch(() => [])).filter(o => /^msedge(\.exe)?$/i.test(o.name || ''));
   let devtools = false;
@@ -88,8 +89,10 @@ async function stopBrowser(port) {
     if (await gone(port, 3000)) return;
   }
   // At most 20 s in all, so Quit is never held long.
-  const until = Date.now() + 20000;
-  for (let i = 0; i < 3 && Date.now() < until; i++) {
+  const until = Date.now() + (o.ms > 0 ? o.ms : 20000);
+  // Tried again for as long as the time allows, not a set number of times: on a PC under load the lookup came back empty
+  // three times in a row, and a busy Edge was left holding the profile with most of the time unused.
+  while (Date.now() < until) {
     const held = await edges();
     // Nobody found while the port is still held: on a PC under load the lookup can come back empty, so look again.
     if (!held.length) {

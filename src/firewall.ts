@@ -4,6 +4,7 @@
 // answers "Access is denied" without admin, which used to read as "no rules".
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { psQuote } from './psquote.ts';
 
 const run = promisify(execFile);
 
@@ -51,8 +52,8 @@ export interface FirewallCheck {
   networks: { alias: string; category: string }[];
 }
 
-/** PowerShell quoting: inside '...' a ' is written twice. */
-const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** PowerShell quoting: inside '...' a ' (or a curly single quote) is written twice (src/psquote.ts). */
+const q = psQuote;
 
 /**
  * PowerShell lines as one command for either window: Command Prompt does not know PowerShell's commands, and pasted

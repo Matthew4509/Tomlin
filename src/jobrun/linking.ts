@@ -10,8 +10,12 @@ import * as netfacts from '../netfacts.ts';
 import { restored, whenReleased } from '../staff.ts';
 import { d } from './shared.ts';
 import type { Remote } from '../store.ts';
-import { hello, seen, workerPost } from './links.ts';
+import { hello, pullOf, seen, sendPassAsk, workerPost } from './links.ts';
+import * as guestpass from '../guestpass.ts';
 import { setup } from './sizing.ts';
+import { clusterGaps, labelOf, lendersInUse, membersFacts, setBorrow } from './maxhost.ts';
+import { heldFor, withHere, withMembers, withOn, without } from '../cluster/members.ts';
+import { chooseLoader, loaderWhy } from '../cluster/loader.ts';
 import { lanAddresses, lanList, shareState } from './node.ts';
 
 /** The link request with as many extra proofs as fit: a node reads only 4 KB of it (and an older one cuts the rest). */
@@ -25,6 +29,8 @@ function pairBody(ask: Record<string, unknown>, proofs: string[]): string {
 
 export async function remotes(b: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
   const s = await d.store.settings();
+  /** What an action says beside its answer (the page shows it). */
+  let note = '';
   if (b.action === 'add') {
     // What was typed, read the way the link helper reads it (2.0.64): 192.178 for 192.168, the router's address, this
     // PC's own. The router is known only from Windows' own list, read when the address could be one of those.
@@ -93,7 +99,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // The same PC (its own id) linked again: only the address and keys are new; what this PC set for it (Backups only)
     // and its last known models stay. Another PC that took over an address starts fresh.
     const same = now.find(r => r.id === id);
-    const made: Remote = { ...(same?.backupsOnly ? { backupsOnly: true } : {}), ...(same?.models ? { models: same.models } : {}), id, name, url, token: done.token, key: link.keysText(done.keys) };
+    const made: Remote = { ...(same?.backupsOnly ? { backupsOnly: true } : {}), ...(same?.noBorrow ? { noBorrow: true } : {}), ...(same?.mac ? { mac: same.mac } : {}), ...(same?.models ? { models: same.models } : {}), id, name, url, token: done.token, key: link.keysText(done.keys) };
     await d.store.saveSettings({ remotes: [...others, made] });
     // A PC released for now, back: its hires go back on it.
     for (const m of d.staff.list()) {
@@ -105,9 +111,28 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // Another PC (another id) already linked under this name: linked all the same, and said, so two cards called
     // "Worker PC" are not read as one PC that is both off and on.
     const twin = others.find(r => r.name.toLowerCase() === name.toLowerCase());
-    if (twin) return { status: 200, body: { ...(await setup()), sameName: `Linked. "${twin.name}" at ${twin.url} has the same name, so both cards show their address. To tell them apart, press one in the left panel and give it a Name.` } };
+    // The page asks what to call it now (its own name, and the computer's, are offered): a name given here shows in
+    // every list in place of the one it gives itself, so two PCs never share one again (public/home.js linkPc).
+    const computer = brains.cleanComputer((seen.get(id)?.memory as { computer?: unknown } | null | undefined)?.computer) || same?.computer || '';
+    // The node told which it was: a setup code links as its admin, a pass code as a guest (its hello says so).
+    const h = seen.get(id);
+    const role = h?.guest ? 'guest' : 'admin';
+    // A guest network with a newer TOMLIN: offered at once (never older; over a home network only when chosen).
+    const p = h && role === 'guest' ? pullOf(h, name) : null;
+    const pull = h && p && p.why === '' && !guestpass.guestPullWhy({ id, role: 'guest' }, (await d.store.settings()).remotes, h.version, d.version, true) ? { version: h.version, choose: !!guestpass.guestPullWhy({ id, role: 'guest' }, (await d.store.settings()).remotes, h.version, d.version, false) } : null;
+    const linked = { id, name, computer, twin: twin ? twin.name : null, role, expires: h?.guest?.expires ?? null, pull };
+    if (twin) return { status: 200, body: { ...(await setup()), linked, sameName: `Linked. "${twin.name}" at ${twin.url} has the same name. Give this one a name of its own below, so the two are told apart everywhere.` } };
+    return { status: 200, body: { ...(await setup()), linked } };
   } else if (b.action === 'diagnose') {
     return { status: 200, body: await diagnose(b) };
+  } else if (b.action === 'pass-ask') {
+    // A request to the host of a guest pass that ended there (sent now, or kept here until that PC answers).
+    const r = s.remotes.find(x => x.id === String(b.id ?? ''));
+    if (!r) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+    if (r.role !== 'guest' || r.passEnd?.state !== 'expired') return { status: 400, body: { error: `This PC's pass on "${r.name}" has not expired, so there is nothing to ask for.` } };
+    const text = guestpass.cleanAskText(b.text);
+    if (!text) return { status: 400, body: { error: 'Write a few words for the host first.' } };
+    return sendPassAsk(r, text);
   } else if (b.action === 'scan') {
     return { status: 200, body: { found: await scan(Number(b.port) || share.DEFAULT_SHARE.port), own: lanList() } };
   } else if (b.action === 'answer') {
@@ -152,6 +177,8 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
       return { status: 409, body: { needConfirm: true, error: `${names.length === 1 ? names[0] + ' works' : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + ' work'} on "${r.name}". Backups only takes them off it: each one moves to their second model, or has no model until you pick one (Hire staff, Change).` } };
     }
     await d.store.saveSettings({ remotes: (await d.store.settings()).remotes.map(x => (x.id === id ? { ...x, backupsOnly: on || undefined } : x)) });
+    // A Backups only PC cannot be in the cluster (the cluster refuses it the other way round): it leaves the set.
+    if (on) await d.store.saveSettings({ cluster: without((await d.store.settings()).cluster, id) });
     if (on) {
       const jm = (await d.store.settings()).jobModels;
       if (Object.values(jm).some(v => onIt(v))) await d.store.saveSettings({ jobModels: Object.fromEntries(Object.entries(jm).map(([k, v]) => [k, onIt(v) ? '' : v])) });
@@ -161,6 +188,85 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
       }
     }
     await hello((await d.store.settings()).remotes.find(x => x.id === id)!, 4000).catch(() => undefined);
+  } else if (b.action === 'borrow-max') {
+    // Max mode: "Don't borrow from it" (on: false) or borrow again (on: true). A linked PC whose owner ticked "Allow to be
+    // used as part of a cluster" is borrowed from with no tick here; this is only the way out. Saved on this PC; the
+    // environment variable TOMLIN_MAX, when it names PCs, still overrides it.
+    const next = setBorrow(s.remotes, String(b.id ?? ''), b.on === true);
+    if (!next) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+    await d.store.saveSettings({ remotes: next });
+  } else if (b.action === 'cluster') {
+    // The cluster entry (src/cluster/members.ts): `members` rebuilds the set (ids of linked PCs), `on` switches it on or off;
+    // either or both. While it is on its members are held for borrowing: their hires are taken off them (asked first, and
+    // put back when it is switched off). `takesPart`: this PC loads the model itself (true, as always before) or stays out
+    // and only sends the chat, with the strongest member that can loading it (false; src/cluster/loader.ts). Refused, in
+    // plain words, when no member can load it now: never switched on when it could not run a model.
+    const was = s.cluster;
+    let next = was;
+    if (Array.isArray(b.members)) next = withMembers(next, b.members, s.remotes.map(r => r.id));
+    const loose = next.members.map(id => s.remotes.find(r => r.id === id)).filter(r => r?.backupsOnly === true);
+    if (loose.length) return { status: 400, body: { error: `${loose.map(r => `"${labelOf(r!)}"`).join(' and ')} ${loose.length === 1 ? 'is' : 'are'} set to Backups only, so ${loose.length === 1 ? 'it' : 'they'} cannot be in the cluster. Untick Backups only on ${loose.length === 1 ? 'its' : 'their'} card first (Network, Linked PCs).` } };
+    if (typeof b.on === 'boolean') {
+      const set = withOn(next, b.on);
+      if (!set) return { status: 400, body: { error: 'The cluster has no PC in it yet. Pick the PCs for it first (Network, Cluster).' } };
+      next = set;
+    }
+    const said: string[] = [];
+    const wantOut = typeof b.takesPart === 'boolean' ? !b.takesPart : next.out === true;
+    if (!wantOut && next.out) next = withHere(next, true)!;
+    if (wantOut) {
+      // Each member asked now, so the choice reads what they say this moment (on, its links, its network).
+      await Promise.all(s.remotes.filter(r => next.members.includes(r.id)).map(r => hello(r, 4000).catch(() => undefined)));
+      const facts = membersFacts(next, (await d.store.settings()).remotes);
+      // A loader already chosen stays while it still can (the set changed around it); switching out picks afresh.
+      const kept = typeof b.takesPart !== 'boolean' && facts.length >= 2 ? facts.find(f => f.id === next.loader && !loaderWhy(f, facts).length) : undefined;
+      const chosen = kept ? { loader: kept, notes: [] as string[] } : chooseLoader(facts);
+      if ('why' in chosen) {
+        if (typeof b.takesPart === 'boolean') return { status: 400, body: { error: `This PC cannot stay out of the cluster yet: ${chosen.why.replace(/\.$/, '')}.` } };
+        next = withHere(next, true)!;
+        said.push(`This PC takes part in the cluster again (it loads the model): ${chosen.why.replace(/\.$/, '')}.`);
+      } else {
+        next = withHere(next, false, chosen.loader.id)!;
+        if (next.loader !== was.loader || !was.out) said.push(`This PC now connects to the cluster and sends the chat. "${chosen.loader.name}" loads the model from its own disk and borrows from the other PCs in the cluster.`, ...chosen.notes);
+      }
+    }
+    const changed = next.on !== was.on || next.members.join() !== was.members.join() || next.loader !== was.loader;
+    // A model loaded with Max mode holds the members' cards and RAM through open streams: changing the cluster under it
+    // would say "Off" while they are still in use, or hold PCs the model does not use. It is unloaded first.
+    const busy = changed ? lendersInUse() : [];
+    if (busy.length) return { status: 409, body: { error: `A model loaded here is using ${busy.map(n => `"${n}"`).join(' and ')} through Max mode now. Unload it first, then change the cluster.` } };
+    // PCs that become held now: their staff come off them first. PCs let go: their staff go back.
+    const taken = next.on ? next.members.filter(id => heldFor(next, id) && !heldFor(was, id)) : [];
+    const freed = was.members.filter(id => heldFor(was, id) && !heldFor(next, id));
+    const refOn = (pc: string) => (ref: string | null | undefined) => { const x = brains.parseRef(ref); return x.kind === 'remote' && x.pc === pc; };
+    const hires = taken.length ? d.staff.list().filter(m => taken.some(pc => refOn(pc)(m.model) || refOn(pc)(m.fallback))) : [];
+    if (hires.length && b.confirm !== true) {
+      const names = hires.map(m => m.name);
+      const where = taken.map(id => `"${labelOf(s.remotes.find(r => r.id === id)!)}"`).join(' and ');
+      return { status: 409, body: { needConfirm: true, error: `${names.length === 1 ? names[0] + ' works' : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + ' work'} on ${where}. A cluster that is on holds those PCs for big models: each one moves to their second model, or has no model until you pick one (Hire staff, Change). They go back when the cluster is switched off.` } };
+    }
+    // Staff first, then the set: a chat running on a PC that is about to be held has moved before the hold begins.
+    for (const pc of taken) {
+      const on = refOn(pc);
+      if ((await d.store.settings()).jobModels && Object.values((await d.store.settings()).jobModels).some(v => on(v))) await d.store.saveSettings({ jobModels: Object.fromEntries(Object.entries((await d.store.settings()).jobModels).map(([k, v]) => [k, on(v) ? '' : v])) });
+      for (const m of d.staff.list()) {
+        const change = whenReleased(m, pc, on);
+        if (change) await d.staff.change(m.id, change);
+      }
+    }
+    await d.store.saveSettings({ cluster: next });
+    for (const pc of freed) {
+      for (const m of d.staff.list()) {
+        const back = restored(m, pc);
+        if (back) await d.staff.change(m.id, back);
+      }
+    }
+    // Each PC whose state changed answers again now, so its models show or hide at once.
+    const touched = new Set([...was.members, ...next.members]);
+    await Promise.all((await d.store.settings()).remotes.filter(r => touched.has(r.id)).map(r => hello(r, 4000).catch(() => undefined)));
+    if (next.on && !was.on && !next.out && d.chat?.view.state === 'connected') said.push('The model loaded now keeps running on this PC alone. Load it again to use the cluster.');
+    if (next.on) said.push(...clusterGaps());
+    if (said.length) note = said.join(' ');
   } else if (b.action === 'on-it' || b.action === 'remove') {
     const id = String(b.id ?? '');
     if (!s.remotes.some(r => r.id === id)) return { status: 404, body: { error: 'That PC is no longer linked.' } };
@@ -176,7 +282,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     await d.store.saveSettings({ remotes: (await d.store.settings()).remotes.filter(r => r.id !== id) });
     seen.delete(id);
   } else return { status: 400, body: { error: 'Unknown worker action.' } };
-  return { status: 200, body: await setup() };
+  return { status: 200, body: note ? { ...(await setup()), note } : await setup() };
 }
 
 /** This PC's home connections with their routers (Windows' own list), or its addresses alone when that cannot be read. */
@@ -231,22 +337,31 @@ async function diagnose(b: Record<string, unknown>): Promise<linkhelp.Verdict> {
  * sharing on. Each answers only its name and whether it asks for a PIN; linking still needs its setup code. A PC
  * linked before is "broken" when its saved link cannot work (made before links were encrypted): it needs linking again.
  */
-async function scan(port: number): Promise<{ url: string; name: string; pin: boolean; linked: boolean; broken: boolean; version: string }[]> {
+async function scan(port: number): Promise<{ url: string; name: string; pin: boolean; linked: boolean; broken: boolean; version: string; id: string | null; state: string; stateText: string; canAsk: boolean; ask: unknown }[]> {
   const own = new Set(lanAddresses().map(a => `http://${a}:${shareState.port}`));
   const saved = new Map((await d.store.settings()).remotes.map(r => [r.url, r]));
   const linked = new Set(saved.keys());
   const broken = (url: string) => linked.has(url) && !link.keysOf(saved.get(url)!.key);
-  const targets = share.scanTargets(lanAddresses());
-  const found: { url: string; name: string; pin: boolean; linked: boolean; broken: boolean; version: string }[] = [];
+  // Every address on the home network beside this PC's, and the PCs this one is linked to wherever they are (another
+  // range or port): a network this PC is a guest on always shows what it is there.
+  const targets = [...new Set([...share.scanTargets(lanAddresses()).map(ip => `http://${ip}:${port}`), ...linked])];
+  const found: Awaited<ReturnType<typeof scan>> = [];
+  // What this PC is to each one found: its admin, a guest (and until when), a guest whose pass expired, or nothing yet.
+  const standing = (url: string) => {
+    const r = saved.get(url);
+    const f = guestpass.foundState(r && !broken(url) ? r : undefined);
+    return { id: r?.id ?? null, state: f.state, stateText: f.text, canAsk: f.state === 'expired' && r?.passEnd?.canAsk === true && !r?.askOut, ask: r?.askOut ? { state: 'waiting', held: true } : r?.passEnd?.ask ?? null };
+  };
   // 64 at a time, a short wait each: a home network of 254 addresses takes a few seconds.
   for (let i = 0; i < targets.length; i += 64) {
-    await Promise.all(targets.slice(i, i + 64).map(async ip => {
-      const url = `http://${ip}:${port}`;
+    await Promise.all(targets.slice(i, i + 64).map(async url => {
       if (own.has(url)) return;
+      // A linked PC saved by name: checked to be on the home network first, as before every request to it.
+      if (linked.has(url) && (await share.homeNetworkWhy(url))) return;
       try {
         const r = await fetch(`${url}/worker/whoami`, { signal: AbortSignal.timeout(1500) });
         const j = (await r.json()) as Record<string, unknown>;
-        if (r.ok && j.app === 'smart-manager') found.push({ url, name: String(j.name ?? 'Worker PC').replace(/[^\w .'-]/g, '').slice(0, 40), pin: j.pin === true, linked: linked.has(url), broken: broken(url), version: String(j.version ?? '').slice(0, 20) });
+        if (r.ok && j.app === 'smart-manager') found.push({ url, name: String(j.name ?? 'Worker PC').replace(/[^\w .'-]/g, '').slice(0, 40), pin: j.pin === true, linked: linked.has(url), broken: broken(url), version: String(j.version ?? '').slice(0, 20), ...standing(url) });
       } catch {
         // Nothing there.
       }

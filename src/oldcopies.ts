@@ -1,5 +1,5 @@
 // Other copies of TOMLIN in the same parent folder (each version unzips into its own folder, e.g.
-// tomlin-2.0.44 beside shelby-2.0.43): their models/ folders are used in place, so a new version does not download
+// tomlin-2.0.45 beside tomlin-2.0.44): their models/ folders are used in place, so a new version does not download
 // the same multi-gigabyte files again. Nothing is copied or moved; a copy is known by its package.json name.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -20,7 +20,7 @@ export function otherModelDirs(root: string): string[] {
     if (resolve(dir).toLowerCase() === here) continue;
     try {
       const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: string };
-      if (pkg.name !== 'tomlin' && pkg.name !== 'shelby') continue; // shelby: copies made before the TOMLIN name
+      if (pkg.name !== 'tomlin') continue;
       const models = join(dir, 'models');
       if (statSync(models).isDirectory()) found.push({ dir: models, at: statSync(dir).mtimeMs });
     } catch {

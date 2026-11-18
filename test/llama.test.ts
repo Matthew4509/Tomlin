@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chatArgs, listModels, modelPath, TEMPLATE_FAULT, whyItFailed } from '../src/llama.ts';
+import { readFileSync } from 'node:fs';
+import { chatArgs, listModels, modelPath, PROMPT_CACHE_MB, TEMPLATE_FAULT, whyItFailed } from '../src/llama.ts';
 
 test('models in folders and in parts are found, each once, and nothing outside the folder', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tomlin-models-'));
@@ -20,7 +21,7 @@ test('models in folders and in parts are found, each once, and nothing outside t
     assert.deepEqual(listModels(dir), [
       { file: 'small.gguf', bytes: 1 },
       { file: 'lmstudio-community/Big-GGUF/Big-Q4_K_M.gguf', bytes: 4 },
-      { file: 'split/Huge-Q4_K_M-00001-of-00002.gguf', bytes: 10 },
+      { file: 'split/Huge-Q4_K_M-00001-of-00002.gguf', bytes: 10, parts: 2 },
     ]);
     assert.equal(modelPath(dir, 'lmstudio-community/Big-GGUF/Big-Q4_K_M.gguf'), join(dir, 'lmstudio-community', 'Big-GGUF', 'Big-Q4_K_M.gguf'));
     assert.equal(modelPath(dir, '../outside.gguf'), null);
@@ -40,18 +41,31 @@ test('a model that will not load is explained in plain words, by what the runner
 
 test('the runner is started with the model\'s own context, cache and expert placement', () => {
   const base = chatArgs('m.gguf', 9000, 'cpu', 0);
-  assert.deepEqual(base, ['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9000', '-c', '8192', '--no-webui', '-lv', '4', '-ngl', '0']);
+  assert.deepEqual(base, ['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9000', '-c', '8192', '--no-webui', '--cache-ram', '2048', '-lv', '4', '-ngl', '0']);
   const big = chatArgs('m.gguf', 9000, 'cuda', 4, false, { ctx: 32768, cache: 'q8_0', place: 'ram' }, true);
-  assert.deepEqual(big.slice(6), ['-c', '32768', '--no-webui', '-lv', '4', '-ngl', '999', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cpu-moe', '-t', '4']);
+  assert.deepEqual(big.slice(6), ['-c', '32768', '--no-webui', '--cache-ram', '2048', '-lv', '4', '-ngl', '999', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cpu-moe', '-t', '4']);
   // Experts in RAM means nothing on the CPU (everything is in RAM already).
   assert.ok(!chatArgs('m.gguf', 9000, 'cpu', 0, true, { ctx: 4096, cache: 'f16', place: 'ram' }).includes('--cpu-moe'));
   // Auto on a card of its own: no layer count, so llama.cpp's fit fills the card(s) and puts the rest in RAM.
   const auto = chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, true);
   assert.ok(!auto.includes('-ngl') && !auto.includes('--cpu-moe'));
   // Auto on a chip built into the processor (shared RAM): every layer on it, as before.
-  assert.deepEqual(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, false).slice(11), ['-ngl', '999']);
+  assert.deepEqual(chatArgs('m.gguf', 9000, 'vulkan', 0, false, { ctx: 8192, cache: 'f16', place: 'auto' }, false).slice(13), ['-ngl', '999']);
   // All on the card: every layer, even with a card of its own.
-  assert.deepEqual(chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'card' }, true).slice(11), ['-ngl', '999']);
+  assert.deepEqual(chatArgs('m.gguf', 9000, 'cuda', 0, false, { ctx: 8192, cache: 'f16', place: 'card' }, true).slice(13), ['-ngl', '999']);
+});
+
+test('the runner keeps at most 2 GB of earlier prompts in RAM, on every device and with lenders too', () => {
+  // llama.cpp keeps up to 8 GB by itself; a 2B model grew from 2.8 GB to over 4 GB in a 15-minute soak without the cap.
+  const runs = [{ ctx: 8192, cache: 'f16' as const, place: 'auto' as const }, { ctx: 32768, cache: 'q8_0' as const, place: 'ram' as const, slots: 2 }, { ctx: 8192, cache: 'f16' as const, place: 'auto' as const, rpc: ['127.0.0.1:1'] }];
+  for (const device of ['cpu', 'vulkan', 'cuda'] as const) {
+    for (const run of runs) {
+      const a = chatArgs('m.gguf', 9000, device, 0, false, run, device !== 'cpu');
+      assert.equal(a.filter(x => x === '--cache-ram').length, 1);
+      assert.equal(a[a.indexOf('--cache-ram') + 1], String(PROMPT_CACHE_MB));
+    }
+  }
+  assert.ok(PROMPT_CACHE_MB > 0 && PROMPT_CACHE_MB <= 2048);
 });
 
 test('every chat start logs at level 4, the only level at which the runner says which devices it used', () => {
@@ -123,4 +137,15 @@ test('a mixture-of-experts model on a graphics card reads prompts in bigger chun
   // Dense, or on the CPU: llama.cpp's own default.
   assert.ok(!chatArgs('dense.gguf', 9000, 'vulkan', 0, false, run, true).includes('-ub'));
   assert.ok(!chatArgs('a3b.gguf', 9000, 'cpu', 0, false, { ...run, moe: true }).includes('-ub'));
+});
+
+test('a runner build with the expert-matrix padding fault is not given 2048-token chunks (the Z820 illegal memory access)', () => {
+  const run = { ctx: 8192, cache: 'f16' as const, place: 'ram' as const, moe: true };
+  assert.ok(chatArgs('a3b.gguf', 9000, 'cuda', 0, false, run, true).includes('-ub'));
+  assert.ok(!chatArgs('a3b.gguf', 9000, 'cuda', 0, false, { ...run, smallBatch: true }, true).includes('-ub'));
+  // Expert parallel sets its own small chunks; they stay.
+  assert.deepEqual(chatArgs('a3b.gguf', 9000, 'cuda', 0, false, { ...run, smallBatch: true, batch: 256 }, true).filter((_, i, a) => a[i - 1] === '-ub'), ['256']);
+  // Which builds carry the fault: the pinned b11284 (both CUDA families) and b10750, not b12250, which has the upstream fix.
+  const pins = JSON.parse(readFileSync(new URL('../runtimes.json', import.meta.url), 'utf8')).runtimes;
+  assert.deepEqual(Object.keys(pins).filter(id => pins[id].cuda?.mmqIdsFault), ['llama-cuda', 'llama-cuda13', 'llama-cuda2']);
 });

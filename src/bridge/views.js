@@ -6,18 +6,22 @@ const path = require('path');
 const cfg = require('./config');
 const Sensors = require('./sensors');
 const { keyOf } = require('./projects');
-const { gitState } = require('./gitstate');
+const Git = require('./gitstate');
 const { state, saveSettings, refreshProjects, refreshProjectsAsync, projectDirs, refreshTokens, demoTokens, ownPortUser, commandPorts } = require('./state');
 const { busyPorts } = require('./ports');
 const { live, liveOf, everyMin } = require('./live-state');
 const { lastAudit, auditSummary } = require('./audit-store');
 const hooks = require('./hooks');
 
+// The git state last known for each folder, kept between runs (gitstate.js): the list shows it at once.
+Git.useStore(path.join(cfg.DATA, 'git-state.json'));
+
 async function listView(fresh) {
-  // Git state per folder, read only (a folder with no .git costs one file check; a repository a few git commands),
-  // kept a minute (Refresh reads again). Started first, so it runs while the folders are walked.
-  const dirs = projectDirs();
-  const gitJob = Promise.all(dirs.map(d => gitState(d, fresh)));
+  // Git state per folder, read only. The list does not wait for it: git for every folder took 9 s (one slow
+  // repository alone 8 s), so each row carries what was last known, marked checking, and git is read again in the
+  // background a few folders at a time (Refresh reads every folder again). The page asks /api/projects/git until
+  // nothing is being checked.
+  Git.refresh(projectDirs(), fresh);
   const projects = await refreshProjectsAsync(fresh);
   if (cfg.DEMO) demoTokens();
   const { settings, running, tokens } = state;
@@ -26,9 +30,7 @@ async function listView(fresh) {
   const order = new Map(settings.order.map((d, i) => [keyOf(d), i]));
   const portsOf = c => c.alts ? c.alts.map(a => a.port) : [c.port];
   const ports = [...new Set(projects.flatMap(p => running.has(p.id) ? [] : p.commands.flatMap(portsOf)).filter(Boolean))];
-  const [busy, gitList] = await Promise.all([busyPorts(ports), gitJob]);
-  const gitOf = new Map(dirs.map((d, i) => [keyOf(d), gitList[i]]));
-  const gits = await Promise.all(projects.map(p => gitOf.get(keyOf(p.dir)) || gitState(p.dir)));
+  const busy = await busyPorts(ports, 250);
   // Copies on linked PCs (inside TOMLIN only): ticked projects carry their newest copy; the rest say "off".
   const nodes = hooks.nodeBackup ? hooks.nodeBackup.rows() : null;
   return projects.map((p, i) => {
@@ -54,12 +56,20 @@ async function listView(fresh) {
       portInUse: busyElsewhere, portSharedWith,
       audit: auditSummary(lastAudit(p.id)),
       live: liveOf(p),
-      git: gits[i],
+      git: Git.peek(p.dir),
       node: nodes ? nodes.projects[keyOf(p.dir)] || { on: false } : null,
       // Its zips on a backup drive (backup.js): on the list, the last checked one, changed since, running now.
       backup: state.backups.rowOf(p),
     };
   });
+}
+
+// Git for the rows on the list, as known now, for the page to ask while rows say checking: { id: state }, how many
+// folders are still waiting for git, and a number that moves each time one is read.
+function gitView() {
+  const git = {};
+  for (const p of state.projects) git[p.id] = Git.peek(p.dir);
+  return { git, checking: Git.pending(), rev: Git.rev() };
 }
 
 // The Folders page: working folders (with how many projects each holds), projects added one by one, and projects
@@ -136,7 +146,8 @@ function laptopStats() {
     const s = fs.statfsSync(settings.workingFolders.find(f => fs.existsSync(f)) || cfg.DATA);
     disk = { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
   } catch {}
-  const cpus = os.cpus();
+  // The processor's name and count, read once: os.cpus() waited 300 to 500 ms on a busy PC, at every ask of the page.
+  const cpus = lastCpu;
   // Inside TOMLIN, its own readings (one reader for both pages); the stand-alone test copy reads its own.
   const pc = hooks.pc ? hooks.pc() : null;
   return {
@@ -146,6 +157,7 @@ function laptopStats() {
     mem, disk, workingFolders: settings.workingFolders, version: cfg.VERSION, dryRun: cfg.DRY, welcomed: !!settings.welcomed,
     home: cfg.HERE, bridgeUp: Math.round((Date.now() - cfg.STARTED) / 1000),
     tokensAt: tokens.at, tokensBusy: tokens.busy, tokensError: tokens.error,
+    gitChecking: Git.pending(), gitRev: Git.rev(),
     liveRev: live.rev, liveBusy: live.busy, liveEvery: everyMin(), rowsRev: rowsRev(), backupRev: state.backups.revOf(),
     // Linked PCs that take project backups now (inside TOMLIN; null in the tests' stand-alone copy).
     nodes: nodeSummary(),
@@ -154,4 +166,4 @@ function laptopStats() {
   };
 }
 
-module.exports = { listView, settingsView, scanFolders, laptopStats };
+module.exports = { listView, gitView, settingsView, scanFolders, laptopStats };

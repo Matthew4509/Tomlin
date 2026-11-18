@@ -182,10 +182,10 @@ test('Windows says what this test\'s own process is: Node, started before now', 
 async function homeWithOldCopy() {
   const top = tmp('keep');
   const parent = join(top, 'apps');
-  const root = join(parent, 'shelby-2.0.35');
-  const old = join(parent, 'shelby-2.0.30');
-  put(join(root, 'package.json'), JSON.stringify({ name: 'shelby', version: '2.0.35' }));
-  put(join(old, 'package.json'), JSON.stringify({ name: 'shelby', version: '2.0.30' }));
+  const root = join(parent, 'tomlin-2.0.35');
+  const old = join(parent, 'tomlin-2.0.30');
+  put(join(root, 'package.json'), JSON.stringify({ name: 'tomlin', version: '2.0.35' }));
+  put(join(old, 'package.json'), JSON.stringify({ name: 'tomlin', version: '2.0.30' }));
   put(join(old, 'data', 'settings.json'), '{"from":"old"}');
   const home = keep.resolveHome({ TOMLIN_HOME: join(top, 'TOMLIN') });
   put(join(home.data, 'settings.json'), '{"from":"home"}');
@@ -341,11 +341,11 @@ test('the model list is kept a moment when asked (a slow folder is walked once),
 // ---- B9: the workspace ----
 
 test('a workspace is never TOMLIN\'s own folder, inside it, or a folder that holds it', () => {
-  const kept = ['C:\\Apps\\TOMLIN\\shelby-2.0.35', 'C:\\Users\\you\\TOMLIN'];
+  const kept = ['C:\\Apps\\TOMLIN\\tomlin-2.0.35', 'C:\\Users\\you\\TOMLIN'];
   assert.equal(overlaps('C:\\Users\\you\\TOMLIN', kept), true);
   assert.equal(overlaps('C:\\Users\\you\\TOMLIN\\data', kept), true);
   assert.equal(overlaps('C:\\Users\\you', kept), true);
-  assert.equal(overlaps('c:\\apps\\tomlin\\shelby-2.0.35\\src\\', kept), true);
+  assert.equal(overlaps('c:\\apps\\tomlin\\tomlin-2.0.35\\src\\', kept), true);
   assert.equal(overlaps('C:\\Users\\you\\Documents\\Writing', kept), false);
   assert.equal(overlaps('C:\\Users\\you\\TOMLIN 2', kept), false, 'a name that only starts the same');
 });
@@ -355,17 +355,17 @@ test('a workspace is never TOMLIN\'s own folder, inside it, or a folder that hol
 test('an older copy kept beside the current one never builds the program again', async () => {
   const root = tmp('tray');
   try {
-    for (const v of ['shelby-1.0.0', 'shelby-2.0.0']) put(join(root, v, 'tools', 'tray.cs'), `class V { /* ${v} */ }`);
-    writeFileSync(join(root, CURRENT), 'shelby-2.0.0');
+    for (const v of ['tomlin-1.0.0', 'tomlin-2.0.0']) put(join(root, v, 'tools', 'tray.cs'), `class V { /* ${v} */ }`);
+    writeFileSync(join(root, CURRENT), 'tomlin-2.0.0');
     writeFileSync(join(root, EXE), 'the program');
     const built: string[] = [];
     const fake: Build = async o => {
       built.push(o.source);
       writeFileSync(o.out, 'built');
     };
-    assert.equal(await refreshTray(join(root, 'shelby-1.0.0'), fake), 'same');
+    assert.equal(await refreshTray(join(root, 'tomlin-1.0.0'), fake), 'same');
     assert.deepEqual(built, []);
-    assert.equal(await refreshTray(join(root, 'shelby-2.0.0'), fake), 'built');
+    assert.equal(await refreshTray(join(root, 'tomlin-2.0.0'), fake), 'built');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

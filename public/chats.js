@@ -38,11 +38,61 @@ app.loadChats = loadChats;
 /** The project a chat is under in the Chats tab: its own, or Default (none, or one no longer in the workspace). */
 const chatGroup = c => chatUi.projects.find(p => p.id === c.project) ?? null;
 
+// ---- Chats with people who left the team: "Name (left the team)" with their picture; they can be hidden (kept in this
+// browser) or cleared together, which asks first. ----
+const HIDE_LEFT_KEY = 'tomlin.hideLeftChats';
+chatUi.hideLeft = (() => { try { return localStorage.getItem(HIDE_LEFT_KEY) === '1'; } catch { return false; } })();
+/** Whether a chat shows in the lists now (a leaver's is hidden while the switch is on; the open one always shows). */
+const chatShown = c => !(chatUi.hideLeft && c.left && c.id !== chatUi.current);
+/** Their round picture, a little faded when they left the team. */
+function chatAvatar(c) {
+  const a = app.avatar(c.who, c.avatar);
+  if (c.left) a.classList.add('left-team');
+  return a;
+}
+
+/** Above the Chats tab's list when any chat is with someone who left: the Hide switch and Clear them. */
+function leftChatsBar() {
+  const n = chatUi.list.filter(c => c.left).length;
+  if (!n) return null;
+  const tick = el('input', { type: 'checkbox', checked: chatUi.hideLeft });
+  tick.addEventListener('change', () => {
+    chatUi.hideLeft = tick.checked;
+    try { localStorage.setItem(HIDE_LEFT_KEY, tick.checked ? '1' : '0'); } catch { /* a private window: not kept */ }
+    drawChats();
+  });
+  const clear = el('button', { class: 'link', type: 'button', text: `Clear them (${n})`, title: 'Delete every chat with someone who left the team: it asks first' });
+  clear.addEventListener('click', () => clearLeftChats(n));
+  return el('li', { class: 'side-left-bar', 'data-key': 'left-bar' },
+    el('label', { class: 'check' }, tick, ` Hide chats from people who left (${n})`), ' ', clear);
+}
+
+async function clearLeftChats(n) {
+  const ask = typeof askPopup === 'function' ? askPopup : (t, x) => Promise.resolve(confirm(`${t}\n\n${x}`));
+  const yes = await ask(`Clear ${n} chat${n === 1 ? '' : 's'} from people who left?`,
+    `Every chat with someone no longer on the team is deleted for good, with their photos. Pictures drawn in those chats stay in the gallery.`,
+    'Clear them', 'Keep them');
+  if (!yes) return;
+  try {
+    const d = await api('/api/chats/delete-left', {});
+    chatUi.list = d.chats;
+    chatUi.recent = d.recent ?? [];
+    chatUi.people = d.people;
+    if (chatUi.open && !d.chats.some(c => c.id === chatUi.open.id)) showChat(await app.chatAgain());
+    await app.loadFaces?.();
+    drawChats();
+    app.chatNote?.(`${d.removed} chat${d.removed === 1 ? '' : 's'} from people who left ${d.removed === 1 ? 'was' : 'were'} cleared.`);
+  } catch (e) {
+    app.chatNote?.(`Nothing was cleared: ${e.message}`);
+  }
+}
+
 function drawChats() {
   // faces.js (which draws the photos) may still be loading when the first list arrives: draw once the page has loaded.
   if (!app.avatar) { window.addEventListener('load', drawChats, { once: true }); return; }
   const inChat = homeUi.view === 'chat';
-  const shown = chatUi.all ? chatUi.list : chatUi.list.slice(0, CHATS_SHOWN);
+  const visible = chatUi.list.filter(chatShown);
+  const shown = chatUi.all ? visible : visible.slice(0, CHATS_SHOWN);
   const row = c => {
     const pics = c.pictures ? `${c.pictures} picture${c.pictures > 1 ? 's' : ''}` : '';
     // Muted: the chat itself, the person it is with, or everything (mute.js).
@@ -52,7 +102,7 @@ function drawChats() {
       class: 'rail-row', type: 'button', 'data-key': `chat:${c.id}`, 'aria-current': inChat && c.id === chatUi.current ? 'true' : null,
       title: `${c.title}\nWith ${c.name}${c.role ? ` (${c.role})` : ''}\n${c.messages} message${c.messages === 1 ? '' : 's'}${pics ? ` · ${pics}` : ''}\n${muted ? `Muted ${muted.text}` : 'Right-click to mute'}`,
     },
-    app.avatar(c.who, c.avatar),
+    chatAvatar(c),
     el('span', { class: 'rail-text' },
       // [staff] subject
       el('span', { class: 'rail-name' }, el('span', { class: 'side-who', text: c.name }), ` ${c.title}`),
@@ -75,11 +125,12 @@ function drawChats() {
   }
   const order = [...groups.keys()].sort((x, y) => Number(x === '') - Number(y === ''));
   const rows = order.flatMap(k => [el('li', { class: 'side-group', 'data-key': `group:${k}` }, el('h3', { text: groups.get(k).name })), ...groups.get(k).chats.map(row)]);
-  if (!rows.length) rows.push(el('li', { class: 'rail-empty hint', text: 'No chats yet. Press "New chat" to start one.' }));
-  keepFocus($('#rail-chats'), rows);
+  if (!rows.length) rows.push(el('li', { class: 'rail-empty hint', text: visible.length < chatUi.list.length ? 'Only chats from people who left: untick Hide above to see them.' : 'No chats yet. Press "New chat" to start one.' }));
+  const bar = leftChatsBar();
+  keepFocus($('#rail-chats'), bar ? [bar, ...rows] : rows);
   const more = $('#rail-chats-more');
-  more.hidden = chatUi.list.length <= CHATS_SHOWN;
-  more.textContent = chatUi.all ? 'Show fewer' : `Show all chats (${chatUi.list.length})`;
+  more.hidden = visible.length <= CHATS_SHOWN;
+  more.textContent = chatUi.all ? 'Show fewer' : `Show all chats (${visible.length})`;
   drawSubjects();
   drawRecent();
 }
@@ -90,6 +141,8 @@ app.drawChats = drawChats;
 // recentEntries). Five besides the pinned ones; See all lists every chat. ----
 
 const RAIL_RECENT_SHOWN = 5;
+/** The most rows the list shows in all, pinned ones counted: many pinned chats once pushed it to 13 and more. */
+const RAIL_RECENT_MOST = 8;
 const MORE_RAIL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 /** A small pin beside a pinned entry (not colour alone). */
 const pinMark = () => el('span', { class: 'rail-pin', title: 'Pinned to the top', 'aria-label': 'Pinned' }, app.lineIcon(...app.PIN_ICON));
@@ -98,7 +151,7 @@ function drawRecent() {
   const byId = new Map(chatUi.list.map(c => [c.id, c]));
   const row = (c, inProject = false) => {
     const b = el('button', { class: `rail-row rail-recent-row${inProject ? ' rail-in-project' : ''}`, type: 'button', 'data-key': `recent:${c.id}`, 'aria-current': inChat && c.id === chatUi.current ? 'true' : null, title: `${c.title}\nWith ${c.name}\n${timeText(c.updated)}` },
-      app.avatar(c.who, c.avatar),
+      chatAvatar(c),
       el('span', { class: 'rail-text' }, el('span', { class: 'rail-name', text: c.title }), el('span', { class: 'rail-sub', text: c.name })),
       c.pinned ? pinMark() : null);
     // The picture: their window (New chat, Edit staff, Resume chat, their recent chats); the rest of the row opens the chat.
@@ -139,8 +192,13 @@ function drawRecent() {
     ]));
     return [el('li', { class: 'rail-staff-item' }, b, more), ...(open ? e.chats.map(id => byId.get(id)).filter(Boolean).map(c => row(c, true)) : [])];
   };
-  const entries = chatUi.recent ?? [];
-  const shown = entries.slice(0, entries.filter(e => e.pinned).length + RAIL_RECENT_SHOWN);
+  // A leaver's chat is left out while Hide is on (a project keeps the chats still shown, and goes when none are).
+  const entries = (chatUi.recent ?? []).flatMap(e => {
+    if (e.kind !== 'project') return !byId.has(e.id) || chatShown(byId.get(e.id)) ? [e] : [];
+    const kept = e.chats.filter(id => !byId.has(id) || chatShown(byId.get(id)));
+    return kept.length ? [{ ...e, chats: kept, newest: kept.includes(e.newest) ? e.newest : kept[0] }] : [];
+  });
+  const shown = entries.slice(0, Math.min(RAIL_RECENT_MOST, entries.filter(e => e.pinned).length + RAIL_RECENT_SHOWN));
   const rows = shown.flatMap(e => (e.kind === 'project' ? projectRows(e) : byId.has(e.id) ? [row(byId.get(e.id))] : []));
   keepFocus($('#rail-recent'), rows.length ? rows : [el('li', { class: 'rail-empty hint', text: 'No chats yet.' })]);
   $('#rail-recent-all').hidden = entries.length <= shown.length;
@@ -297,6 +355,31 @@ $('#rail-chats-more').addEventListener('click', () => {
   drawChats();
 });
 
+/**
+ * A chat kept to read (`chat` given: its person left the team, or was a linked PC's hire) or not (null). Send, Connect,
+ * Quick/Think, Web, Add a document and Memory are hidden (style.css #pane-chat.read-only), the box cannot be typed in,
+ * and one line above the buttons says why.
+ */
+function readOnly(chat) {
+  const on = !!chat;
+  $('#pane-chat').classList.toggle('read-only', on);
+  $('#chat-input').readOnly = on;
+  $('#chat-send').disabled = on;
+  let line = $('#read-only-line');
+  if (!line && on) {
+    line = el('p', { class: 'hint read-only-line', id: 'read-only-line', role: 'status' });
+    $('#chat-form .chat-actions').before(line);
+  }
+  if (!line) return;
+  line.hidden = !on;
+  if (!on) return;
+  const who = String(chat.name ?? '').replace(/ \(left the team\)$/, '');
+  line.textContent = String(chat.who ?? '').startsWith('node:')
+    ? 'Kept to read: this hire worked on a linked PC, which no longer lends staff, so nothing can be sent here. Press New chat to talk to someone.'
+    : chat.who === 'manager' ? 'Kept to read: the host is off for now, so nothing can be sent here. Press New chat to talk to someone.'
+    : `Kept to read: ${who && who !== 'Someone who left the team' ? who : 'this person'} left the team, so nothing can be sent here. Press New chat to talk to someone.`;
+}
+
 /** The chat whose name is being changed in the head now (titleEdit, below), or ''. */
 let titleEditing = '';
 /** The head's words: the chat's name, who it is with and where their last answer ran ("Rowan · Coder · on laptop 9B"). */
@@ -312,10 +395,17 @@ function drawHead() {
   if (!titleEditing || titleEditing !== chat?.id) titleEdit(false);
   // Like a Staff overview card: name · software, the PC under it; the speed, then the chat's name, in the next column.
   const gone = chat && !chat.here;
-  const software = !person || gone ? '' : person.model === 'no model given' ? 'The model connected here' : person.model;
+  const software = !person || gone ? '' : modelWords(person);
   const pc = !person || gone ? '' : person.pc === 'this PC' ? 'This PC' : person.pc;
-  $('#chat-name').textContent = gone ? 'They are no longer on the team: this chat can be read, not carried on.' : person ? person.name : '';
-  $('#chat-software').textContent = software ? ` · ${software}` : '';
+  // Kept to read: their name as it was ("Cy Holt (left the team)"), and nothing that sends, loads or answers (readOnly).
+  const listed = gone ? chatUi.list.find(c => c.id === chat.id) : null;
+  $('#chat-name').textContent = gone ? listed?.name ?? 'Someone who left the team' : person ? person.name : '';
+  readOnly(gone ? listed ?? chat : null);
+  // Their model was deleted (or is no longer lent): said plainly, with Fix, which opens Edit staff at their model.
+  const deleted = !gone && person?.use?.state === 'missing' && String(person.who).startsWith('staff:');
+  $('#chat-software').textContent = deleted ? ' · model was deleted ' : software ? ` · ${software}` : '';
+  $('#chat-fix')?.remove();
+  if (deleted) $('#chat-software').after(el('button', { class: 'btn pick-model', type: 'button', id: 'chat-fix', text: 'Fix', title: `Give ${person.name} a model: it loads when you send the first message`, onclick: () => app.editStaff?.(person.who.slice('staff:'.length), { pick: true }) }));
   $('#chat-pc').textContent = pc;
   $('#chat-who-box').title = software ? `${person.name} · ${person.role}: ${software} on ${pc}${app.lastRan ? `. The last answer ran on ${app.lastRan}.` : ''}` : $('#chat-name').textContent;
   drawChatProject(chat);
@@ -627,6 +717,27 @@ app.showOpened = showOpened;
 
 // ---- New chat: who with? ----
 
+/** A hire's model in words, as the server decides it for every screen (src/hiremodel.ts); the host's as before. */
+function modelWords(p) {
+  // A model on a linked PC: its name alone (the card's own "Runs on" line names the PC).
+  if (p.use?.state === 'pc' && p.use.name) return p.use.name;
+  return p.use ? (p.use.state === 'none' ? 'No model is loaded here' : p.use.text) : p.model === 'no model given' ? 'the model loaded here' : p.model;
+}
+
+/**
+ * Under a hire's card when they cannot answer as they are: one plain line and a button to Edit staff's First choice
+ * (there a model is given; it loads when the first message is sent).
+ */
+function pickModelLine(p) {
+  const first = p.name.split(/\s+/)[0];
+  const say = p.use.state === 'none' ? `No model is loaded here, and ${first} has none of their own.` : `${first}'s model is no longer here.`;
+  return el('p', { class: 'pick-model-line' }, `${say} `,
+    el('button', { class: 'btn pick-model', type: 'button', text: p.use.state === 'none' ? 'Load a model' : 'Pick a model', title: `Give ${first} a model: it loads when you send the first message`, onclick: () => {
+      $('#new-chat').close();
+      app.editStaff?.(p.who.slice('staff:'.length), { pick: true });
+    } }));
+}
+
 function drawPeople() {
   const list = chatUi.people.map(p => {
     // A profile card: photo, name, role, model, node.
@@ -634,7 +745,7 @@ function drawPeople() {
       app.avatar(p.who, p.avatar),
       el('span', { class: 'person-name', text: p.name }),
       el('span', { class: 'person-role', text: p.role }),
-      el('span', { class: 'person-line' }, el('span', { class: 'person-label', text: 'Model' }), el('span', { text: p.model === 'no model given' ? 'the model connected here' : p.model })),
+      el('span', { class: 'person-line' }, el('span', { class: 'person-label', text: 'Model' }), el('span', { class: p.use?.pick ? 'model-gone' : '', text: modelWords(p) })),
       el('span', { class: 'person-line' }, el('span', { class: 'person-label', text: 'Runs on' }), el('span', { text: p.pc })),
       el('span', { class: 'person-go', text: p.kind === 'image' ? 'Draw' : 'Chat' }));
     const li = el('li', {}, b);
@@ -668,6 +779,8 @@ function drawPeople() {
       li.append(form);
     }
     b.addEventListener('click', () => startChat(p.who, b));
+    // They cannot answer as they are (no model loaded and none of their own, or theirs is gone): say so, and offer the fix.
+    if (p.use?.pick && p.who.startsWith('staff:')) li.append(pickModelLine(p));
     return li;
   });
   if (!list.length && chatUi.nobody) {

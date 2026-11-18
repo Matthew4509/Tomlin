@@ -7,6 +7,16 @@ const netDlg = $('#net-dlg');
 const netSize = n => (n >= GB ? gb(n) : n >= 2 ** 20 ? `${Math.round(n / 2 ** 20)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const netUp = w => `${w.charAt(0).toUpperCase()}${w.slice(1)}`;
 let netTimer = null;
+/** Tiles opened by the person stay open while the window is drawn again (a copy ending, a refresh). */
+const netOpen = new Set();
+function netFold(key, details) {
+  details.open = netOpen.has(key);
+  details.addEventListener('toggle', () => {
+    if (details.open) netOpen.add(key);
+    else netOpen.delete(key);
+  });
+  return details;
+}
 /** Copies that were running at the last look: when one ends, the lists are read again (what is here has changed). */
 let netRunning = new Set();
 
@@ -36,8 +46,8 @@ let netLast = [];
 function drawNetTransfers(list) {
   netLast = list;
   const verb = t => (t.state === 'done'
-    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, pull: `Took ${t.what} from "${t.pcName}" for this PC`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
-    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
+    ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, move: `Moved ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, pull: `Took ${t.what} from "${t.pcName}" for this PC`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
+    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, move: `Moving ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
   $('#net-transfers').replaceChildren(...list.map(t => {
     const fill = el('div', { class: 'p-fill' });
     const frac = t.bytes ? t.done / t.bytes : 0;
@@ -53,7 +63,13 @@ function drawNetTransfers(list) {
     const runner = t.kind === 'runner' && working && t.bytes
       ? (t.stage === 'get' ? `Downloading it here first: ${netSize(t.done)} of ${netSize(t.bytes)}` : t.done < t.bytes ? `Sent ${netSize(t.done)} of ${netSize(t.bytes)}` : `Sent. "${t.pcName}" is checking and unpacking it…`)
       : null;
-    const line = sent ?? runner ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`);
+    // A move: sent, then checked byte for byte (this PC and that one read the same ranges), and only then removed here.
+    const moveLine = t.kind === 'move' && working && t.bytes
+      ? (t.stage === 'check' ? `Sent. Checking the copy on "${t.pcName}" byte for byte: ${netSize(t.done)} of ${netSize(t.bytes)}. Nothing is removed from this PC until it matches.` : `Sent ${netSize(t.done)} of ${netSize(t.bytes)}. This PC keeps its copy until the one on "${t.pcName}" is checked.`)
+      : null;
+    // Waiting its turn: a few run at a time (src/carry.ts Transfers.AT_ONCE), the rest start as those finish.
+    const queued = working && t.queued ? 'Waiting its turn: it starts when one of the others finishes.' : null;
+    const line = queued ?? sent ?? runner ?? moveLine ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`);
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: verb(t) })),
       working ? el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: () => netDo('/api/network/stop', { id: t.id }) }) : null,
@@ -66,19 +82,28 @@ function drawNet(v) {
   const running = new Set(v.transfers.filter(t => t.state === 'working').map(t => `${t.kind}|${t.pc}|${t.what}`));
   const busyPc = pc => v.transfers.some(t => t.pc === pc && t.state === 'working');
 
-  // Shared by linked PCs: each model once, with where it can be copied from.
-  $('#net-rows').replaceChildren(...(v.rows.length ? v.rows.map(r => {
-    const from = r.on.find(o => o.copy);
-    const about = [r.kind === 'image' ? 'picture model' : 'chat model', netSize(r.bytes), `on ${r.on.map(o => `"${o.pcName}"`).join(' and ')}`].join(' · ');
-    let action;
-    if (r.here) action = el('span', { class: 'hint', text: 'On this PC' });
-    else if (from && running.has(`copy|${from.pc}|${r.name}`)) action = el('span', { class: 'hint', text: 'Copying…' });
-    else if (from) action = el('button', { class: 'btn primary', type: 'button', text: `Get a copy from ${from.pcName}`, disabled: busyPc(from.pc), onclick: e => { e.target.disabled = true; netDo('/api/network/copy', { pc: from.pc, kind: r.kind, model: from.model }); } });
-    else action = null;
-    const why = !r.here && !from ? `${netUp(r.on[0].why)}.` : '';
-    return el('div', { class: 'net-row' },
-      el('span', { class: 'net-name' }, el('strong', { text: r.name }), el('br'), el('span', { class: 'hint', text: about }), why ? el('br') : null, why ? el('span', { class: 'hint', text: why }) : null),
-      action);
+  // Shared by linked PCs: one tile for each PC, its models behind "See models installed" (a tile stays open while the window redraws).
+  const modelsOn = p => v.rows.filter(r => r.on.some(o => o.pc === p.id));
+  $('#net-rows').replaceChildren(...(v.rows.length ? v.pcs.map(p => {
+    const mine = modelsOn(p);
+    const total = mine.reduce((n, r) => n + (r.bytes || 0), 0);
+    const list = mine.map(r => {
+      const o = r.on.find(x => x.pc === p.id);
+      const about = [r.kind === 'image' ? 'picture model' : 'chat model', netSize(r.bytes)].join(' · ');
+      let action = null;
+      if (r.here) action = el('span', { class: 'hint', text: 'On this PC' });
+      else if (o.copy && running.has(`copy|${p.id}|${r.name}`)) action = el('span', { class: 'hint', text: 'Copying…' });
+      else if (o.copy) action = el('button', { class: 'btn primary', type: 'button', text: 'Get a copy', title: `Copies it from "${p.name}" to this PC`, disabled: busyPc(p.id), onclick: e => { e.target.disabled = true; netDo('/api/network/copy', { pc: p.id, kind: r.kind, model: o.model }); } });
+      // A PC that is off says so once on its tile, not under every model.
+      const why = !r.here && !o.copy && p.ok && o.why ? `${netUp(o.why)}.` : '';
+      return el('div', { class: 'net-row' },
+        el('span', { class: 'net-name' }, el('strong', { text: r.name }), el('br'), el('span', { class: 'hint', text: about }), why ? el('br') : null, why ? el('span', { class: 'hint', text: why }) : null),
+        action);
+    });
+    return el('article', { class: `net-tile${p.ok ? '' : ' is-off'}` },
+      el('div', { class: 'net-tile-head' }, el('strong', { text: p.name }), el('span', { class: 'hint', text: p.ok ? `${mine.length} model${mine.length === 1 ? '' : 's'}${mine.length ? ` · ${netSize(total)}` : ''}` : 'Off or not answering now' })),
+      mine.length ? netFold(`models:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: `See models installed (${mine.length})` }), el('div', { class: 'net-list' }, ...list)))
+        : el('p', { class: 'hint', text: p.ok ? 'Shares no models.' : '' }));
   }) : [el('p', { class: 'hint', text: v.pcs.length ? 'No shared models yet. Each node has to select "yes" to sharing. It will then display here.' : 'No PCs are linked to this one yet: link one under Network.' })]));
 
   drawKept(v.pcs);
@@ -103,7 +128,9 @@ function drawNet(v) {
     // Projects: a git repository there, backed up every 10 minutes when something changed (src/gitstore.ts).
     const d = p.projectsDone;
     const projLine = p.projects ? `Projects: ${p.projects}.` : d ? `Projects: last backed up ${new Date(d.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} (${d.files} file${d.files === 1 ? '' : 's'}). Backed up every 10 minutes when something changed.` : 'Projects: not backed up there yet. Backed up every 10 minutes when something changed.';
-    return el('div', {},
+    return el('article', { class: `net-tile${p.ok ? '' : ' is-off'}` },
+      el('div', { class: 'net-tile-head' }, el('strong', { text: p.name }), el('span', { class: 'hint', text: p.ok ? '' : 'Off or not answering now' })),
+      netFold(`backups:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: 'See backups and restore points' }),
       el('div', { class: 'net-row' },
         el('span', { class: 'net-name' }, el('strong', { text: p.name }), p.backup ? el('br') : null, p.backup ? el('span', { class: 'hint', text: `${netUp(p.backup)}.` }) : null),
         p.backup ? null : el('button', { class: 'btn', type: 'button', text: 'Back up to it now', disabled: busyPc(p.id), onclick: e => { e.target.disabled = true; netDo('/api/network/backup', { pc: p.id }); } }),
@@ -114,7 +141,7 @@ function drawNet(v) {
         el('span', { class: 'net-name hint', text: projLine }),
         p.projects ? null : el('button', { class: 'btn', type: 'button', text: 'Back up projects now', disabled: busyPc(p.id), onclick: e => { e.target.disabled = true; netDo('/api/network/projects', { pc: p.id }); } }),
         d || !p.projects ? el('button', { class: 'btn quiet', type: 'button', text: 'Bring projects back', disabled: !p.ok || busyPc(p.id), title: 'Copies the newest backup into a new folder on this PC ("restored projects"); nothing in your workspace is changed', onclick: e => { e.target.disabled = true; netDo('/api/network/projects-back', { pc: p.id }); } }) : null),
-      list);
+      list)));
   }) : [el('p', { class: 'hint', text: 'No PCs are linked to this one yet.' })]));
 }
 
@@ -228,6 +255,7 @@ function drawUpd(t, shown) {
   line.className = failed ? 'fault-line' : 'hint';
   line.textContent = failed ? `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`
     : t.state === 'done' && shown >= UPD_STEPS.length ? t.said
+    : t.queued ? 'Waiting its turn: it starts when one of the other copies or updates finishes.'
     : shown === 2 && t.wait ? (pull ? `This PC is busy (${t.wait}): the new version starts when that is done.` : `${pc} is busy (${t.wait}): the new version starts there when that is done.`) : '';
   const over = failed || (t.state === 'done' && shown >= UPD_STEPS.length);
   $('#upd-keep').hidden = over;

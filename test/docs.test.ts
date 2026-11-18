@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanDocName, docKind, docSection, Docs, findParts, pagesAsked, ranges, readDoc, sourcesLine, splitText, textParts, wholeText, words, type Doc } from '../src/docs.ts';
+import { cleanDocName, docKind, docSection, Docs, findParts, pagesAsked, pdfPages, PDF_MEMORY_MB, PDF_TIME_MS, ranges, readDoc, sourcesLine, splitText, textParts, wholeText, words, type Doc } from '../src/docs.ts';
 
 /** A plain PDF with one page per entry (each entry's lines in Helvetica), written by hand: enough for a reader test. */
 export function makePdf(pages: string[][]): Uint8Array {
@@ -111,6 +111,16 @@ test('a very long line (minified code) cut into parts keeps true line numbers, a
   assert.doesNotMatch(sourcesLine(found), /3-2/);
   const d: Doc = { id: 'a', name: 'app.min.js', kind: 'text', pages: 4, chars: text.length, at: '', parts };
   assert.equal(wholeText(d), text, 'read whole, the file is exactly as it was: the long line whole, nothing added');
+});
+
+test('a PDF is read in a thread of its own: one that takes too long or needs too much memory is stopped and said so, and this thread goes on', async () => {
+  // Read with a normal limit, it works as before.
+  assert.equal((await pdfPages(manual())).length, 40);
+  // A time limit too short to read it: stopped, said plainly (read in this thread, it could not have been stopped).
+  await assert.rejects(pdfPages(manual(), false, { ms: 1 }), /it took longer than \d+ seconds to read/);
+  // A memory limit too small for the reader: stopped in that thread, said plainly.
+  await assert.rejects(pdfPages(manual(), false, { memoryMb: 6 }), /it needs more memory to read than is allowed here/);
+  assert.ok(PDF_MEMORY_MB >= 256 && PDF_TIME_MS >= 10_000);
 });
 
 test('a file a chat cannot read says why in plain words', async () => {

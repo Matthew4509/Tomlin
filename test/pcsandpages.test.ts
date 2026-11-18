@@ -25,7 +25,7 @@ test('a message in the PC window is scrolled into sight', () => {
 test('Update all\'s failures stay until the next press, whatever refreshes the page', () => {
   const home = read('public/home.js');
   assert.match(home, /let updateAllFaults = '';/);
-  assert.match(home, /b\.onclick = async \(\) => \{\s*b\.disabled = true;\s*updateAllFaults = '';/);
+  assert.match(home, /async function updateAllLinked\(\) \{\s*const buttons = [^\n]*\n\s*for \(const x of buttons\) x\.disabled = true;\s*updateAllFaults = '';/);
   assert.match(home, /updateAllFaults = failed\.length \?/);
   // What the refresh writes keeps them.
   const lines = [...home.matchAll(/\$\('#node-update-all-line'\)\.textContent = (.*)/g)].map(m => m[1]);

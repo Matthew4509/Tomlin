@@ -12,6 +12,7 @@ const { execFileSync } = require('child_process');
 const { runAudit } = require('../../src/bridge/audit');
 const { makeMatcher } = require('../../src/bridge/disclosure');
 const { makeZip } = require('./museum/kit');
+const { quick } = require('./pace');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-walk-'));
 const j = (...parts) => parts.join('');
@@ -72,7 +73,7 @@ async function main() {
     for (const run of ['\\'.repeat(16000), '//'.repeat(8000)]) {
       const t0 = Date.now();
       assert.strictEqual(scan(run).length, 0);
-      assert(Date.now() - t0 < 1500, (Date.now() - t0) + ' ms');
+      quick(Date.now() - t0, 1500);
     }
     assert.strictEqual(scan('see /' + ['', 'c', 'Users', 'Wren', 'notes'].join('/') + '\n').length, 1, 'a path after two slashes is still found');
     assert.strictEqual(scan('see \\' + ['', 'c', 'Users', 'Wren', 'notes'].join('\\') + '\n').length, 1, 'a path after two backslashes is still found');
@@ -175,7 +176,7 @@ async function main() {
   await check('a long line of fallbacks is read quickly', async () => {
     const t0 = Date.now();
     await audit({ 'a.js': "const a = x || 'abcd1234' ".repeat(70) + '\n' + "const secret_a = b ? c : 'abcd1234' ".repeat(50) + '\n' });
-    assert(Date.now() - t0 < 1000, (Date.now() - t0) + ' ms');
+    quick(Date.now() - t0, 1000);
   });
 
   // ---- the amount to charge ----

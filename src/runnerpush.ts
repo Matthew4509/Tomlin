@@ -7,7 +7,7 @@
 import { rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { sha256 } from './download.ts';
-import { addPiece, finish, freeBytes, partOf, readPiece, roomWhy, sizeOf, type NodeAnswer, type Progress, type Wire } from './carry.ts';
+import { addPiece, afterStop, finish, freeBytes, partOf, readPiece, roomWhy, sizeOf, type NodeAnswer, type Progress, type Wire } from './carry.ts';
 import type { Device, Engine, RuntimePin, Runtimes } from './runtimes.ts';
 
 /** Where a runner is with a node, as its hello says it. */
@@ -30,10 +30,21 @@ export interface RunnerHello {
    */
   pins?: Record<string, { state: RunnerState; why: string }>;
   best?: string;
+  /** The llama.cpp builds it can lend with in Max mode ("b12250"), the one it would use first listed first. Unset: an older TOMLIN. */
+  rpc?: string[];
+  /**
+   * Every way it can run the chat runner SAFELY, best first (src/runnermatch.ts), so Max mode can pick one llama.cpp build
+   * for every PC. Unset: an older TOMLIN (only `rpc` above).
+   */
+  can?: { build: string; device: 'cuda' | 'vulkan' | 'cpu'; pin: string; have: boolean; tested: boolean }[];
+  /** Where its first-run runner test stands. Unset: an older TOMLIN. */
+  check?: 'none' | 'due' | 'passed' | 'failed' | 'skipped';
   /** The last word about it (ready, or why it failed). */
   said: string;
   /** The last chat model start there: on which device, how long it took, and the runner's own lines about the card. */
   last: { device: string; seconds: number | null; lines: string[] } | null;
+  /** The last few chat model loads there and who asked for each (src/loadlog.ts). */
+  loads?: { at: string; line: string }[];
 }
 
 /** The unpacked runners' share of the room needed, against their zips (a CUDA build is about 1.6 times its zips). */
@@ -70,6 +81,9 @@ export function cleanRunner(raw: unknown): RunnerHello | null {
     why: text(o.why, 300),
     cuda: STATES.includes(o.cuda as RunnerState) ? (o.cuda as RunnerState) : 'none',
     ...cleanPins(o.pins, o.best),
+    ...(Array.isArray(o.rpc) ? { rpc: o.rpc.filter((x): x is string => typeof x === 'string' && /^b\d{3,6}$/.test(x)).slice(0, 8) } : {}),
+    ...(Array.isArray(o.can) ? { can: cleanCan(o.can) } : {}),
+    ...(['none', 'due', 'passed', 'failed', 'skipped'].includes(o.check as string) ? { check: o.check as NonNullable<RunnerHello['check']> } : {}),
     said: text(o.said, 300),
     last: l
       ? {
@@ -78,7 +92,23 @@ export function cleanRunner(raw: unknown): RunnerHello | null {
         lines: (Array.isArray(l.lines) ? l.lines : []).filter((x): x is string => typeof x === 'string').slice(0, 12).map(x => x.slice(0, 200)),
       }
       : null,
+    loads: (Array.isArray(o.loads) ? o.loads : []).flatMap((x: unknown) => {
+      const v = x as Record<string, unknown> | null;
+      return v && typeof v.line === 'string' && typeof v.at === 'string' ? [{ at: v.at.slice(0, 40), line: v.line.slice(0, 300) }] : [];
+    }).slice(-10),
   };
+}
+
+/** A hello's `can` list, each entry checked (at most 12, anything that is not a build, device and runner id dropped). */
+function cleanCan(raw: unknown[]): NonNullable<RunnerHello['can']> {
+  const out: NonNullable<RunnerHello['can']> = [];
+  for (const x of raw.slice(0, 12)) {
+    const o = x && typeof x === 'object' ? (x as Record<string, unknown>) : {};
+    if (typeof o.build !== 'string' || !/^b\d{3,6}$/.test(o.build) || (o.device !== 'cuda' && o.device !== 'vulkan' && o.device !== 'cpu')) continue;
+    if (typeof o.pin !== 'string' || !/^llama-(cpu|vulkan|cuda\d{0,2})$/.test(o.pin)) continue;
+    out.push({ build: o.build, device: o.device, pin: o.pin, have: o.have === true, tested: o.tested === true });
+  }
+  return out;
 }
 
 /** A CUDA build's id as a hello may name it. */
@@ -289,11 +319,18 @@ export async function pushRunner(w: Wire, o: { id: string; files: { path: string
     if (at > f.bytes) at = 0;
     while (at < f.bytes) {
       if (o.signal.aborted) {
-        await w.ask('/worker/runner-drop', ask).catch(() => undefined);
+        await afterStop(() => w.ask('/worker/runner-drop', ask)).catch(() => undefined);
         throw new Error('Stopped.');
       }
       o.progress({ done: before + at, bytes });
-      const r = await w.putPiece('/worker/runner-put', { ...ask, file: k, from: at }, await readPiece(f.path, at));
+      // Stop pressed while the piece was on its way ends it at once: the tidy-up still goes.
+      const r = await w.putPiece('/worker/runner-put', { ...ask, file: k, from: at }, await readPiece(f.path, at)).catch(async e => {
+        if (o.signal.aborted) {
+          await afterStop(() => w.ask('/worker/runner-drop', ask)).catch(() => undefined);
+          throw new Error('Stopped.');
+        }
+        throw e;
+      });
       at = int(r.at);
       if (at < 0) throw new Error('that PC did not say how much it has.');
     }

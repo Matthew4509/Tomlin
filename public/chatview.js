@@ -40,9 +40,9 @@ app.writeHandoff = writeHandoff;
  */
 const chatKey = () => `${app.chatId ?? ''}|${app.chatWho?.() ?? ''}`;
 app.askFor = (box, cancel) => {
-  if (box.id !== 'chat-ask') return;
-  box.askKey = chatKey();
+  // Any box keeps how to call its question off (a window that closes calls it off); only the chat's belongs to one chat.
   box.cancelAsk = cancel;
+  if (box.id === 'chat-ask') box.askKey = chatKey();
 };
 function dropOtherAsk() {
   const box = $('#chat-ask');
@@ -56,6 +56,7 @@ function showChat(r) {
   drawChat(r.lines, r.chat);
   setThink(!!r.chat?.think);
   setWeb(!!r.chat?.web);
+  setMax(!!r.chat?.max);
   // Where this chat's last answer ran, for the chat head ("Rowan · Coder · on laptop 9B").
   app.lastRan = [...r.lines].reverse().find(l => l.ran && !l.picture)?.ran ?? '';
   app.onChat?.(r.chat ?? null);
@@ -132,16 +133,78 @@ function syncSend() {
 }
 /** A message from the Send to card (sendto.js): where it came from, and that Send was the ask to load a model. */
 const sentWith = { from: '', asked: false };
-function send(message, from = '', agree = false, now = false) {
+/** `retry`: the failed answer's bubble when the same message is asked again from its card: it goes, and the message stays once. */
+function send(message, from = '', agree = false, now = false, scanOk = false, room = 0, retry = null) {
   log.querySelector('.empty')?.remove();
-  const mine = userBubble(message);
-  if (from) mine.append(sentLine({ from }));
-  log.append(mine);
+  if (retry) retry.remove();
+  const mine = retry ? null : userBubble(message);
+  if (mine && from) mine.append(sentLine({ from }));
+  if (mine) log.append(mine);
   const out = el('div', { class: 'msg assistant' }, typingNote());
   log.append(out);
   log.scrollTop = log.scrollHeight;
   large.hidden = true;
-  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}) }, out, message, from);
+  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(scanOk ? { scanOk: true } : {}), ...(room ? { room } : {}), ...(retry ? { retry: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}), ...(maxOn() ? { max: true } : {}) }, out, message, from);
+}
+
+/**
+ * Under an answer with Max on, from a model that fits this PC and is loaded here alone: what a Max load needs and about how
+ * long (the server's words), with "Reload with linked PCs" and "Not now". Nothing loads by itself: the press is the ask.
+ */
+function maxCard(text, model) {
+  const said = el('span', { class: 'hint', role: 'status' });
+  const go = el('button', { class: 'btn primary', type: 'button', text: 'Reload with linked PCs' });
+  const no = el('button', { class: 'btn quiet', type: 'button', text: 'Not now' });
+  const card = el('div', { class: 'tier-card max-card' }, el('p', { text }), el('div', { class: 'row' }, go, no), said);
+  no.addEventListener('click', () => card.remove());
+  go.addEventListener('click', async () => {
+    if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then reload.');
+    go.disabled = no.disabled = true;
+    said.textContent = 'Unloading it and loading it again with the linked PCs…';
+    try {
+      await loadModel(model, { device: panes.chat.device.value, threads: Number(panes.chat.threads.value) || 0, max: true });
+      said.textContent = 'Loading with the linked PCs: the top of this chat shows how far it is. Send your next message once it says Connected.';
+    } catch (err) {
+      said.textContent = `Not reloaded: ${err.message}`;
+      go.disabled = no.disabled = false;
+    }
+  });
+  return card;
+}
+
+/**
+ * Under an answer whose working filled its room: a drop-down of the bigger sizes and a button that asks the same
+ * message again with the one picked. `room`: { now, sizes } as the server sent it (tokens).
+ */
+function roomCard(room, message, from, failed) {
+  const pick = el('select', { 'aria-label': 'Room for the working' }, ...room.sizes.map(s => el('option', { value: String(s), text: `${Math.round(s / 1024)}k word-pieces` })));
+  const go = el('button', { class: 'btn primary', type: 'button', text: 'Give it more room and ask again' });
+  go.addEventListener('click', () => {
+    if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then ask again.');
+    go.disabled = true;
+    send(message, from, false, false, false, Number(pick.value), failed);
+  });
+  return el('div', { class: 'row room-card' }, el('span', { class: 'hint', text: `Room now ${Math.round(room.now / 1024)}k:` }), pick, go);
+}
+
+/**
+ * Under an answer given with Web off when the message asked for it: says so, offers the switch (turned on, then the
+ * same message asked again), and shows the web permission rows (Manual or Auto) so they can be set from here.
+ */
+function webOffCard(text, message, from) {
+  const go = el('button', { class: 'btn primary', type: 'button', text: 'Turn Web on and ask again' });
+  go.addEventListener('click', () => {
+    if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then ask again.');
+    go.disabled = true;
+    setWeb(true);
+    api('/api/chat/web', { chatId: app.chatId ?? '', on: true }).catch(() => undefined);
+    send(message, from);
+  });
+  const rows = app.permissionRows?.();
+  return el('div', { class: 'tier-card web-off-card' },
+    el('p', { text }),
+    el('div', { class: 'row' }, go),
+    rows ? el('details', { class: 'permit-now' }, el('summary', { text: 'Web permissions (Manual asks each time, Auto goes ahead)' }), rows) : '');
 }
 
 /**
@@ -181,6 +244,53 @@ app.agreeImpact = text => new Promise(resolve => {
   dlg.onclose = () => end(false);
   dlg.showModal();
 });
+/**
+ * Characters nobody can see that change what a model reads or how text looks: the same list as src/promptscan.ts
+ * INVISIBLE_CLASS (test/promptscan.test.ts holds them equal). Shown in the warning as [U+XXXX], so they can be seen.
+ */
+const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
+/**
+ * The message looks like a pasted attempt to take a model over (the server read it, src/promptscan.ts): the whole text in
+ * a box that scrolls, the flagged parts marked and what was found in words. True only when "I understand the risks of
+ * harm" is ticked and Continue pressed; Continue cannot be pressed before the tick. Cancel (or Escape) is false.
+ */
+app.scanWarn = (scan, message) => new Promise(resolve => {
+  const dlg = $('#scan-dlg');
+  const agree = $('#scan-agree');
+  const go = $('#scan-go');
+  agree.checked = false;
+  go.disabled = true;
+  agree.onchange = () => { go.disabled = !agree.checked; };
+  $('#scan-reasons').replaceChildren(...(scan.reasons ?? []).map(r => el('li', { text: r })));
+  // The text in pieces: plain, and marked where flagged (overlapping marks are joined). Invisible characters show as [U+XXXX].
+  const seen = text => [...text].map(c => (INVISIBLE.test(c) ? el('span', { class: 'scan-hidden', title: 'A character you cannot see', text: `[U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}]` }) : c));
+  const pieces = [];
+  let at = 0;
+  for (const h of [...(scan.hits ?? [])].sort((a, b) => a.start - b.start)) {
+    const start = Math.max(h.start, at);
+    if (h.end <= start) continue;
+    if (start > at) pieces.push(...seen(message.slice(at, start)));
+    pieces.push(el('mark', { title: h.why }, ...seen(message.slice(start, h.end))));
+    at = h.end;
+  }
+  if (at < message.length) pieces.push(...seen(message.slice(at)));
+  $('#scan-text').replaceChildren(...pieces);
+  $('#scan-text').scrollTop = 0;
+  let done = false;
+  const end = v => {
+    if (done) return;
+    done = true;
+    if (dlg.open) dlg.close();
+    resolve(v);
+  };
+  $('#scan-form').onsubmit = e => {
+    e.preventDefault();
+    if (agree.checked) end(true);
+  };
+  $('#scan-cancel').onclick = () => end(false);
+  dlg.onclose = () => end(false);
+  dlg.showModal();
+});
 /** Send to…: the text goes into this chat's box and is sent at once, as if typed and sent here. */
 app.sendNow = (text, from) => {
   input.value = text;
@@ -203,6 +313,8 @@ async function talk(url, body, out, message, from = '') {
   let first = 0;
   // Agreed after "Using this can impact connected users": sent again once this stream has ended.
   let again = false;
+  // Shown as risky and he ticked the risk and pressed Continue: sent again with that said (scanOk).
+  let scanned = false;
   // The model's working before its answer (Think): folded above the answer as it streams. While it works, Answer now
   // stops the working and asks for the answer with what it has worked out so far.
   let thought = null;
@@ -269,6 +381,11 @@ async function talk(url, body, out, message, from = '') {
         } else if (ev === 'status') {
           hurry = null;
           out.replaceChildren(data.text);
+        } else if (ev === 'permit' && PERMIT_WORDS[data.kind]) {
+          // A newer kind (the screen, the laptop helper, git, notes, a click, a key, a command): its own card.
+          hurry = null;
+          out.replaceChildren(tierCard(data, a => api('/api/chat/permit', { chatId: streams.get(key)?.liveId ?? chatId, answer: a })));
+          scroll();
         } else if (ev === 'permit') {
           // "May this chat use your files / the web?" (src/permits.ts): the answer waits for it. Allow once lasts this
           // answer; Auto for this chat is kept on the chat; Auto always is saved in Settings. The card also shows where
@@ -284,6 +401,8 @@ async function talk(url, body, out, message, from = '') {
               said.textContent = a === 'no' ? `Not allowed: answering without ${kind === 'web' ? 'the web' : 'your files'}…` : 'Allowed. Working…';
             } catch (err) {
               said.textContent = err.message;
+              // Not answered: the answer still waits, so the buttons can be pressed again.
+              for (const b of card.querySelectorAll('.permit-answers button')) b.disabled = false;
             }
           };
           const answer = (a, words, primary) => el('button', { class: primary ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: () => answered(a) });
@@ -303,6 +422,7 @@ async function talk(url, body, out, message, from = '') {
               answer('thread', 'Auto: this chat only'),
               answer('always', 'Auto: always'),
               answer('no', 'Don\'t allow')),
+            data.wait ? el('p', { class: 'hint', text: `If nobody answers within ${Math.round(data.wait / 60000)} minutes, it is taken as Don't allow and the answer goes on without it.` }) : '',
             said,
             el('details', { class: 'permit-now', open: true },
               el('summary', { text: `Your permissions now${threadOn.length ? ` (Auto in this chat: ${threadOn.join(', ')})` : ''}` }),
@@ -351,6 +471,7 @@ async function talk(url, body, out, message, from = '') {
           const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', webLine(data.tools), data.note]);
           if (stats) out.append(stats);
           if (data.unsaved) out.append(saveAnswerAgain(chatId, message, data.text));
+          if (data.findings?.length) out.append(findingsCard(streams.get(key)?.liveId ?? chatId, data.findings));
           if (data.text && !data.saved && !data.continued) {
             // A chat made by this first message is not open in the list yet: the person picked for it is.
             const acts = msgActs(data.text, true, who);
@@ -363,6 +484,26 @@ async function talk(url, body, out, message, from = '') {
         } else if (ev === 'error') {
           out.className = 'msg system';
           out.textContent = data.text;
+          if (data.room?.sizes?.length && message && here()) out.append(roomCard(data.room, message, from, out));
+          scroll();
+        } else if (ev === 'weboff') {
+          if (message && here()) out.append(webOffCard(data.text, message, from));
+          scroll();
+        } else if (ev === 'maxload') {
+          if (here()) out.append(maxCard(data.text, data.model));
+          scroll();
+        } else if (ev === 'permit-end') {
+          // Nobody answered the card in time: its buttons go, and why is said on it (crash.js).
+          app.permitEnded?.(out, data.text);
+          scroll();
+        } else if (ev === 'tools' && app.toolsNotice) {
+          // The model has no Tools mark: which PC and model, and models that have it. It only offers (crash.js).
+          out.append(app.toolsNotice(data));
+          scroll();
+        } else if (ev === 'fault' && app.crashNotice) {
+          // The runner crashed: the notice names the PC and the fault, and offers what to try (crash.js). It asks first.
+          out.append(app.crashNotice(data));
+          scroll();
         } else if (ev === 'impact') {
           // A linked PC is using that model on this PC: the message comes out of the chat (nothing was saved), and is
           // sent again only when he agrees.
@@ -372,6 +513,16 @@ async function talk(url, body, out, message, from = '') {
           if (message && here() && (await app.agreeImpact(data.text))) {
             input.value = '';
             again = true;
+          }
+        } else if (ev === 'scan') {
+          // The message looks like a pasted attempt to take a model over: it comes out of the chat (nothing was saved) and
+          // is shown whole with what was flagged; it goes again only when he ticks the risk and presses Continue.
+          out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
+          out.remove();
+          if (here()) input.value = message;
+          if (message && here() && (await app.scanWarn(data, message))) {
+            input.value = '';
+            scanned = true;
           }
         } else if (ev === 'queue') {
           // The hire's PC is busy with the queue: the message comes out of the chat (nothing was saved), and he picks:
@@ -413,9 +564,9 @@ async function talk(url, body, out, message, from = '') {
     scroll();
     // The first message names a new chat, and a message moves it to the top of the list. Sent again (agreed, or "send
     // now anyway"): the chat the first try made is taken up first, so the message goes into it, not a second new chat.
-    if (again === true || again === 'now') {
+    if (again === true || again === 'now' || scanned) {
       await app.afterSend?.(sentTo, chatId, who);
-      send(message, from, again === true, again === 'now');
+      send(message, from, again === true, again === 'now', scanned || body.scanOk === true);
     } else {
       if (again === 'reload') api(chatUrl(chatId)).then(r => { if (here()) showChat(r); }).catch(() => undefined);
       app.afterSend?.(sentTo, chatId, who);
@@ -476,8 +627,11 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   const m = (app.models?.chat ?? []).find(x => x.id === p.model.value && x.installed !== false);
   if (!m) return app.chatNote('No chat model is on this PC yet, so nobody can answer. Get one under Settings, Models, then press Connect beside it.');
   const tight = m.fit?.level === 'no' ? ` It needs about ${gb(m.fit.need)} and only ${gb(m.fit.free)} is free, so it may make the PC very slow, or fail.` : '';
-  // Send in the Send to card was the ask (it said a model loads first), unless the model does not fit: that is asked.
-  if (!(card.asked && !tight) && !(await askHere($('#chat-ask'), `No model is loaded for this chat yet (nothing loads by itself).${tight} Load ${m.name} and send your message?`, `Load ${m.name} and send`, 'Not now', !!tight))) return;
+  // Max on in this chat and it can run: the load asks the linked PCs too, which takes minutes, so that is said and asked.
+  const withMax = maxOn() && !maxWhy();
+  const maxSaid = withMax ? ` Max is on in this chat, so it loads with the linked PCs lending when Max mode can use them for it (loads over the link took 3 to 16 minutes; else it loads as with Max off).` : '';
+  // Send in the Send to card was the ask (it said a model loads first), unless the model does not fit or Max is on: that is asked.
+  if (!(card.asked && !tight && !withMax) && !(await askHere($('#chat-ask'), `No model is loaded for this chat yet (nothing loads by itself).${tight}${maxSaid} Load ${m.name} and send your message?`, `Load ${m.name} and send`, 'Not now', !!tight))) return;
   input.value = '';
   const typedIn = chatKey();
   await app.chatModelPicked?.(m.id);
@@ -492,11 +646,14 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
     input.value = message;
   };
   try {
-    await loadModel(m.id, { device: p.device.value, threads: Number(p.threads.value) || 0 });
+    // Max on in this chat: asked for with the load (only a model that fits this PC alone is given Max mode; the server says why not).
+    await loadModel(m.id, { device: p.device.value, threads: Number(p.threads.value) || 0, ...(withMax ? { max: true } : {}) });
   } catch (err) {
     return back(`${m.name} did not load: ${err.message} Your message is back in the box.`);
   }
-  for (let i = 0; i < 1800; i++) {
+  // Waits on the chat pane's own state, however long the load takes (a Max load over the link can pass 15 minutes): the
+  // message is sent only once it says Connected, never to a model still loading.
+  for (let i = 0; ; i++) {
     await new Promise(r => setTimeout(r, 500));
     await poll();
     const v = app.status?.panes.chat;
@@ -565,13 +722,91 @@ for (const table of document.querySelectorAll('.help-table')) {
   for (const row of table.querySelectorAll('tbody tr')) [...row.children].forEach((cell, i) => cell.setAttribute('data-label', names[i] ?? ''));
 }
 /** Help is a page, like Models (it was a window): it opens at the part asked for, or at the top. */
+/** What each newer kind's card says the model wants (src/permits.ts). */
+const PERMIT_WORDS = {
+  screen: 'wants to look at a window on your list',
+  machine: 'wants to read the laptop helper',
+  git: 'wants to read git in this chat\'s folder',
+  notes: 'wants to keep notes in this chat\'s folder',
+  subagent: 'asks',
+  focus: 'wants to bring a window to the front',
+  input: 'wants to click or type',
+  run: 'wants to run a command',
+  edit: 'wants to change a file',
+  download: 'wants to download a file',
+};
+
+/**
+ * The card for a newer kind. Ask each time (`data.each`): this one action, Allow once or Don't allow, nothing kept.
+ * Otherwise: once for this answer, always (Allowed in Settings), or no. A click shows the last look at the window
+ * with a ring where it would land; a command shows its exact text.
+ */
+function tierCard(data, answerWith) {
+  const said = el('span', { class: 'hint', role: 'status' });
+  const card = el('div', { class: 'permit' });
+  const answered = async (a) => {
+    for (const b of card.querySelectorAll('.permit-answers button')) b.disabled = true;
+    try {
+      await answerWith(a);
+      said.textContent = a === 'no' ? 'Not allowed: nothing was done.' : 'Allowed. Working…';
+    } catch (err) {
+      said.textContent = err.message;
+    }
+  };
+  const answer = (a, words, primary) => el('button', { class: primary ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: () => answered(a) });
+  card.append(el('p', { text: `${data.who} ${PERMIT_WORDS[data.kind]}: ${data.what}.` }));
+  if (data.detail) card.append(el('pre', { class: 'permit-detail', text: String(data.detail) }));
+  if (data.image && data.mark) {
+    // The picture is the last look at that window; the ring is where the click would land.
+    const mark = el('span', { class: 'permit-mark' });
+    mark.style.left = `${(100 * data.mark.x / data.mark.w).toFixed(2)}%`;
+    mark.style.top = `${(100 * data.mark.y / data.mark.h).toFixed(2)}%`;
+    card.append(el('div', { class: 'permit-shot' }, el('img', { src: `data:image/png;base64,${data.image}`, alt: 'The window as it was last looked at, with a ring where the click would land' }), mark));
+  }
+  card.append(
+    el('div', { class: 'row permit-answers' },
+      answer('once', data.each ? 'Allow this once' : 'Allow for this answer', true),
+      ...(data.each ? [] : [answer('always', 'Allowed: always')]),
+      answer('no', 'Don\'t allow')),
+    said,
+    el('p', { class: 'hint', text: data.each ? 'Asked for every action of this kind. Change it in Settings, Permissions.' : 'Asked once in each answer. Change it in Settings, Permissions.' }));
+  return card;
+}
+
+/** Findings the answer suggested: each is kept only when its Save is pressed (research/findings.md in the chat's folder). */
+function findingsCard(chatId, findings) {
+  const card = el('div', { class: 'permit findings' }, el('p', { text: 'Suggested findings (not saved unless you press Save):' }));
+  for (const f of findings) {
+    const said = el('span', { class: 'hint', role: 'status' });
+    const btn = el('button', { class: 'btn quiet', type: 'button', text: 'Save', onclick: async () => {
+      btn.disabled = true;
+      try {
+        const r = await api('/api/chat/finding', { chatId, id: f.id });
+        said.textContent = `Saved in ${r.path}.`;
+      } catch (err) {
+        said.textContent = err.message;
+        btn.disabled = false;
+      }
+    } });
+    card.append(el('div', { class: 'row' }, el('span', { text: f.source ? `${f.text} (${f.source})` : f.text }), btn, said));
+  }
+  return card;
+}
+
 function openHelp(part) {
   // A window open over the page would cover it (the ? buttons in windows open Help too).
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   setView('help');
   const at = part && part !== 'help-title' ? document.getElementById(part) : null;
-  if (at) at.scrollIntoView({ block: 'start' });
-  else $('#help').scrollTop = 0;
+  if (at) {
+    at.scrollIntoView({ block: 'start' });
+    // A keyboard goes to the part too: it was left on the "On this page" line pressed, so Tab went on through the list.
+    // After the page's own focus (its title, home.js focusPage), which is queued first.
+    setTimeout(() => {
+      if (!at.hasAttribute('tabindex')) at.setAttribute('tabindex', '-1');
+      at.focus({ preventScroll: true });
+    }, 0);
+  } else $('#help').scrollTop = 0;
 }
 app.openHelp = openHelp;
 document.addEventListener('click', e => {
@@ -585,6 +820,54 @@ $('#log-open').addEventListener('click', async () => {
     $('#log-said').textContent = (await api('/api/keep', { do: 'open-log' })).said;
   } catch (err) {
     $('#log-said').textContent = err.message;
+  }
+});
+
+// "Report a problem" (src/report.ts): the text is made on this PC and shown whole; nothing is sent. Open on GitHub only
+// opens the project's new-issue page in the browser (the person signs in and presses Submit there).
+const reportDlg = $('#report-dlg');
+let reportTitle = '';
+const reportSay = text => { $('#report-said').textContent = text; };
+app.openReport = (fault = '', model = '') => {
+  reportDlg.dataset.fault = fault;
+  reportDlg.dataset.model = model;
+  $('#report-text-row').hidden = true;
+  $('#report-actions').hidden = true;
+  reportSay('');
+  reportDlg.showModal();
+};
+$('#report-open').addEventListener('click', () => app.openReport());
+$('#report-make').addEventListener('click', async () => {
+  reportSay('Making the report...');
+  try {
+    const r = await api('/api/report', { note: $('#report-note').value, fault: reportDlg.dataset.fault || '', model: reportDlg.dataset.model || '' });
+    reportTitle = r.title;
+    $('#report-text').value = r.body;
+    $('#report-text-row').hidden = false;
+    $('#report-actions').hidden = false;
+    $('#report-github').disabled = !r.repo;
+    reportSay(r.repo ? 'Read it, change anything you like, then send it from here.' : 'This copy of TOMLIN does not know the project page, so use Copy.');
+  } catch (err) {
+    reportSay(err.message);
+  }
+});
+$('#report-github').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/report', { edited: { title: reportTitle, body: $('#report-text').value } });
+    if (!r.url) return reportSay('This copy of TOMLIN does not know the project page, so use Copy.');
+    window.open(r.url, '_blank', 'noopener');
+    reportSay(r.cut ? 'The page opened with the start of the report. Press Copy and paste the whole report into it.' : 'The page opened in your browser. Press Submit there to send it.');
+  } catch (err) {
+    reportSay(err.message);
+  }
+});
+$('#report-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('#report-text').value);
+    reportSay('Copied.');
+  } catch {
+    $('#report-text').select();
+    reportSay('Press Ctrl+C to copy the selected text.');
   }
 });
 

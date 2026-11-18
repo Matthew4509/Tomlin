@@ -17,6 +17,7 @@ import { chatHires, seatBrain, teamOf, workersFor } from './sizing.ts';
 import { addEvent, allJobs, clearBeforeRepair, clearWaiting, jobView, left, jobRoot, loadBeforeRepair, loadEvents, loadJob, loadWaiting, packetFront, projectCards, saveBeforeRepair, saveJob, saveWaiting, webFiles } from './jobfiles.ts';
 import { acceptStep, doStep, reviewStep } from './steps.ts';
 import * as verify from '../verify.ts';
+import { pictureOnlyPlan, plainPictureAsk, tieUnmadeFiles } from '../picturestep.ts';
 
 let busy = false;
 /** A job action is running here (a step, Run the rest, a plan, tests, or a change to a plan being saved). */
@@ -119,6 +120,17 @@ async function planNow(a: { fromProject: Awaited<ReturnType<typeof projectCards>
   const { goal, team, folder } = a;
   const st = { send, signal };
   try {
+    // A plain picture request ("a helicopter over a forest in the rain, photo") is one picture step: no planner is
+    // asked, so it never becomes a project of several steps.
+    if (plainPictureAsk(goal)) {
+      const steps = pictureOnlyPlan(goal);
+      const now = new Date();
+      const job: Job = { id: fromProject ? fromProject.id : jobs.jobId(now), goal, created: now.toISOString(), updated: '', notes: '', steps, team, ...(fromProject?.name ? { name: fromProject.name } : {}), ...(folder ? { folder } : {}) };
+      await saveJob(job);
+      await addEvent(job.id, { type: 'plan', steps: steps.length, worker: 'TOMLIN (a picture alone is one step)' });
+      st.send('done', { ...(await jobView(job)), planner: 'TOMLIN (a picture alone is one step)' });
+      return;
+    }
     const got = await seatBrain(team, 'pm', 'the project manager', text => st.send('stage', { text }), st.signal);
     const brain = got.brain;
     const all = (await ws.list(await jobRoot({ folder }))).filter(f => (folder || !f.path.startsWith('jobs/')) && !folders.keptFromModels(f.path));
@@ -137,7 +149,9 @@ async function planNow(a: { fromProject: Awaited<ReturnType<typeof projectCards>
     const ask = `${front.text ? `${front.text}\n\n` : ''}The goal: ${goal}${fns ? '\nPlan the functions F1, F2, … in order, name the F-number in each step\'s title, and follow the design brief for every page.' : cards ? '\nFollow the design brief for every page.' : ''}`;
     const text = await brain.ask(jobs.planSystem(listed.map(f => `${f.path} (${f.bytes.toLocaleString()} characters)`), workers.text, folders.handedInLines(handed)), ask, 1500, t => st.send('text', { text: t }), st.signal);
     // A writer's new text files go in specialists/writer, named with the date and time, by code (small models forget).
-    const parsed = folders.writerHandIn(jobs.parsePlan(text), new Set(all.map(f => f.path))).steps;
+    const there = new Set(all.map(f => f.path));
+    // No brief may name a file no step makes (a picture's name the planner made up, a page nobody writes).
+    const parsed = tieUnmadeFiles(folders.writerHandIn(jobs.parsePlan(text), there).steps, there).steps;
     if (!parsed.length) throw new Error('The model did not give a plan in steps. Try again, say the goal more plainly, or choose a bigger model for the planner.');
     // Steps whose files already exist and are too big for their worker are split now, by code.
     const sizes = Object.fromEntries(listed.map(f => [f.path, f.bytes]));

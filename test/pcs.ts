@@ -30,6 +30,37 @@ export async function until<T>(what: string, check: () => Promise<T | null | und
   throw new Error(`Waited ${Math.round(ms / 1000)} s for ${what}${last ? ` (last fault: ${(last as Error).message})` : ''}`);
 }
 
+/**
+ * How long a copy may take to start. Alone it starts in a few seconds; on a PC busy with other tests and programs it took
+ * more than three minutes, so the wait is long. It ends as soon as the copy says it is running, or stops.
+ */
+export const START_MS = 420_000;
+
+/**
+ * Waits for a started copy's "is running at" line, read as its output comes in (not on a clock): 'up' when it says it
+ * is running, 'ended' when it stops first, 'late' after `ms`. `said` gives everything it printed so far.
+ */
+export function startLine(proc: ChildProcess, said: () => string, ms = START_MS): Promise<'up' | 'ended' | 'late'> {
+  return new Promise(resolve => {
+    const done = (how: 'up' | 'ended' | 'late') => {
+      clearTimeout(timer);
+      proc.stdout?.off('data', look);
+      proc.stderr?.off('data', look);
+      proc.off('exit', gone);
+      resolve(how);
+    };
+    // The listeners run after the caller's own (added first), so `said` already holds the new piece.
+    const look = () => { if (/is running at/.test(said())) done('up'); };
+    const gone = () => done(/is running at/.test(said()) ? 'up' : 'ended');
+    const timer = setTimeout(() => done('late'), ms);
+    proc.stdout?.on('data', look);
+    proc.stderr?.on('data', look);
+    proc.once('exit', gone);
+    if (/is running at/.test(said())) done('up');
+    else if (proc.exitCode !== null || proc.signalCode !== null) done('ended');
+  });
+}
+
 export interface Pc {
   base: string;
   home: string;
@@ -45,10 +76,7 @@ export interface Pc {
   stop(): Promise<void>;
 }
 
-/**
- * Starts the copy in `root` (its src/server.ts) on `home`. Both names of each setting are given: a copy from before the
- * TOMLIN name (2.0.44 and older) reads SHELBY_*, a newer one TOMLIN_*.
- */
+/** Starts the copy in `root` (its src/server.ts) on `home`, with its TOMLIN_* settings. */
 export async function startPc(o: { root: string; home: string; env?: Record<string, string> }): Promise<Pc> {
   mkdirSync(join(o.home, 'startup'), { recursive: true });
   writeFileSync(join(o.home, 'models-folder.txt'), '');
@@ -59,8 +87,8 @@ export async function startPc(o: { root: string; home: string; env?: Record<stri
     INSTALL_ROOT: join(o.home, 'install'), UNINSTALL_KEY: 'none', ...o.env,
   };
   const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const k of Object.keys(env)) if (/^(TOMLIN|SHELBY)_/.test(k)) delete env[k];
-  for (const [k, v] of Object.entries(set)) env[`TOMLIN_${k}`] = env[`SHELBY_${k}`] = v;
+  for (const k of Object.keys(env)) if (/^TOMLIN_/.test(k)) delete env[k];
+  for (const [k, v] of Object.entries(set)) env[`TOMLIN_${k}`] = v;
   const proc = spawn(process.execPath, [join(o.root, 'src', 'server.ts')], { cwd: o.root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let said = '';
   proc.stdout!.on('data', d => (said += d));
@@ -84,11 +112,9 @@ export async function startPc(o: { root: string; home: string; env?: Record<stri
       await exited;
     },
   };
-  for (let i = 0; i < 300 && !/is running at/.test(said); i++) {
-    if (proc.exitCode !== null) throw new Error(`The copy in ${o.root} ended at start (code ${proc.exitCode}):\n${said}`);
-    await sleep(200);
-  }
-  if (!/is running at/.test(said)) {
+  const how = await startLine(proc, () => said);
+  if (how === 'ended') throw new Error(`The copy in ${o.root} ended at start (code ${proc.exitCode}):\n${said}`);
+  if (how === 'late') {
     await pc.stop();
     throw new Error(`The copy in ${o.root} did not start:\n${said}`);
   }
@@ -128,7 +154,7 @@ export async function link(host: Pc, workerPort: number, code = NODE_CODE): Prom
   const r = await until('the node\'s worker door to open', async () => {
     const a = await host.post('/api/remotes', { action: 'add', url: `127.0.0.1:${workerPort}`, code });
     return a.status === 200 ? a : null;
-  }, 30_000, 1000);
+  }, 120_000, 1000);
   const remotes = (await host.get('/api/remotes')).body?.remotes ?? r.body?.remotes ?? [];
   const id = remotes.find((x: { url: string }) => x.url.endsWith(`:${workerPort}`))?.id;
   if (!id) throw new Error(`Linked, but the host does not list the node: ${JSON.stringify(remotes)}`);

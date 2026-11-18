@@ -12,7 +12,7 @@ test('the holding page for a browser, 503 "starting" for the API, 403 for anothe
   assert.equal(page.status, 503);
   assert.match(page.type, /text\/html/);
   assert.match(page.body, /http-equiv="refresh"/);
-  assert.match(page.body, /keeps a copy of your data/);
+  assert.match(page.body, /recently updated, so it is backing up your data before it starts/);
   const api = waitAnswer('/api/status?x=1', 'localhost:8740', 8740);
   assert.equal(api.status, 503);
   assert.equal(JSON.parse(api.body).busy, 'starting');

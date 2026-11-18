@@ -5,7 +5,7 @@
 // trick wrote the same words (sameWords) and how long a test takes (estimateMinutes). The run itself is in
 // src/server/finder.ts.
 import { guessersFor, type Listed } from './runset.ts';
-import type { RunnerName } from './runtimes.ts';
+import { RUNNER_NAMES, type RunnerName } from './runtimes.ts';
 import type { RunOptions } from './store.ts';
 
 const GB = 2 ** 30;
@@ -143,7 +143,7 @@ export function describeRun(run: RunOptions, names: (id: string) => string = id 
     run.threads ? `${run.threads} threads` : '',
     run.draft ? `guessing model ${names(run.draft)}${run.draftOn === 'ram' ? ' in RAM' : ''}` : run.spec === 'ngram' ? 'copy-ahead' : run.spec === 'mtp' ? 'built-in guesser (MTP)' : '',
     run.draftMax ? `guesses of up to ${run.draftMax} words` : '',
-    run.runner ? `${RUNNER_NAME[run.runner]} runner` : '',
+    run.runner ? `${RUNNER_NAME[run.runner as RunnerName] ?? run.runner} runner` : '',
     run.cards?.length ? `only on the ${cardNames(run.cards)}` : '',
     run.draft && run.draftCard?.length ? `guessing model on the ${cardNames(run.draftCard)}` : '',
   ].filter(Boolean).join(', ');
@@ -256,7 +256,9 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
   // 30, CUDA read 54 against 40). The one in use is the model's own, else the first Auto tries.
   // A CUDA build is tried only on cards it has code for (each card's `runners`): on a mixed PC (a GTX 1060 and an RTX
   // 5080) CUDA 13 is tried on the RTX 5080 alone; a build with code for none of the cards the model uses is not tried.
-  const inUse = r.runner && pc.runners?.includes(r.runner) ? r.runner : pc.runners?.[0];
+  // A model held to a runner by its id ("llama-cuda2", the crash notice's Runner setting) has no row name here: Auto's first is the yardstick.
+  const held = r.runner && (RUNNER_NAMES as string[]).includes(r.runner) ? (r.runner as RunnerName) : undefined;
+  const inUse = held && pc.runners?.includes(held) ? held : pc.runners?.[0];
   if (card && inUse && pc.runners && pc.runners.length > 1) {
     const using = r.cards?.length ? pc.cards.filter(c => c.ids?.some(id => r.cards!.includes(id))) : pc.cards;
     const names = (cs: PcFacts['cards']) => cs.map(c => c.name).join(' + ');
@@ -278,8 +280,8 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
   for (const c of cand) if (!picked.includes(c)) left.push({ name: c.name, why: size === 'quick' && !c.quick ? 'tried in Full only' : size === 'quick' ? 'Quick tries the 3 most likely: tried in Full' : 'no room in Full (8 rows at most)' });
   const cardNames = (ids: string[]) => pc.cards.filter(c => c.ids?.some(id => ids.includes(id))).map(c => c.name).join(' + ') || 'chosen cards';
   // A runner saved for the model that this PC cannot use (CUDA 13 on a Pascal card) is not what it starts on: said so.
-  const off = r.runner && pc.runners && !pc.runners.includes(r.runner) ? r.runner : undefined;
-  const a: Setup = { id: 'a', name: `Now: ${describeRun(off ? { ...r, runner: undefined } : r, undefined, cardNames)}${off ? ` (set to the ${RUNNER_NAME[off]} runner, which cannot run here: Auto's runner is used)` : ''}`, why: 'The setup in use now: the yardstick.', run: r };
+  const off = r.runner && pc.runners && !pc.runners.includes(r.runner as RunnerName) ? r.runner : undefined;
+  const a: Setup = { id: 'a', name: `Now: ${describeRun(off ? { ...r, runner: undefined } : r, undefined, cardNames)}${off ? ` (set to the ${RUNNER_NAME[off as RunnerName] ?? off} runner, which cannot run here: Auto's runner is used)` : ''}`, why: 'The setup in use now: the yardstick.', run: r };
   const rows: Setup[] = [a, ...picked.map(({ quick: _q, ...s }) => s)];
   for (const n of [...new Set(contexts)]) {
     if (n !== r.ctx) rows.push({ id: `ctx-${n}`, name: `Context ${n.toLocaleString('en')} tokens`, why: 'You ticked this size to test.', run: { ...r, ctx: n } });

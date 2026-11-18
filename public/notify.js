@@ -82,7 +82,7 @@ app.afterHome = () => {
 /** The Notifications part of the Settings page. */
 app.notifyBox = () => {
   const s = { ...(homeUi.data?.notify?.settings ?? { windows: true, sound: true, volume: 60 }) };
-  const note = el('p', { class: 'hint', role: 'status' });
+  const note = app.setSaid();
   const save = async change => {
     try {
       const r = await api('/api/notify', change);
@@ -93,29 +93,21 @@ app.notifyBox = () => {
       note.textContent = err.message;
     }
   };
-  const tick = (key, text) => {
-    const box = el('input', { type: 'checkbox' });
-    box.checked = !!s[key];
-    box.addEventListener('change', () => save({ [key]: box.checked }));
-    return el('label', { class: 'check' }, box, ` ${text}`);
-  };
-  const vol = el('input', { type: 'range', min: '0', max: '100', step: '5', value: String(s.volume), 'aria-label': 'Sound volume' });
+  const vol = el('input', { type: 'range', min: '0', max: '100', step: '5', value: String(s.volume), 'aria-label': 'Sound volume', class: 'set-vol' });
   vol.addEventListener('change', () => save({ volume: Number(vol.value) }));
-  const tryIt = (kind, text) => el('button', { class: 'btn quiet', type: 'button', text, onclick: () => play(kind, Number(vol.value)) });
-  const test = el('button', { class: 'btn quiet', type: 'button', text: 'Send a test notification', onclick: async () => {
+  const tryIt = (kind, text) => app.setButton(text, () => play(kind, Number(vol.value)));
+  const test = app.setButton('Send a test', async () => {
     try {
       await api('/api/notify/test', {});
       note.textContent = 'Sent: it shows in the corner of the screen (Windows may hide it while Focus assist is on).';
     } catch (err) {
       note.textContent = err.message;
     }
-  } });
-  return el('div', { class: 'notify-box' },
-    el('h3', { text: 'Notifications' }),
-    el('p', { class: 'hint', text: 'When a step is finished, a plan or picture needs you, or a job is stuck. They name the person and what happened, never what was written. Mute silences them.' }),
-    tick('windows', 'A Windows notification when this page is not in front (silent; a click opens it here)'),
-    tick('sound', 'A short sound in this page'),
-    el('label', { class: 'field notify-vol' }, el('span', { text: 'Volume' }), vol),
-    el('div', { class: 'team-actions' }, tryIt('finished', '▶ Finished'), tryIt('question', '▶ Needs you'), tryIt('stuck', '▶ Stuck'), test),
+  });
+  // Each its own row with a switch: on Data and lock, under Notifications. Never shows what was written.
+  return app.setPart('Notifications', app.setCard(
+    app.setRow({ icon: 'bell', name: 'Windows notification', about: 'When a step finishes, needs you or is stuck, and this page is not in front. Silent; a click opens it here.', side: app.setSwitch(!!s.windows, 'Windows notification', on => save({ windows: on })) }),
+    app.setRow({ icon: 'sound', name: 'Sound', about: 'A short sound in this page', side: [vol, app.setSwitch(!!s.sound, 'Sound', on => save({ sound: on }))] }),
+    app.setRow({ name: 'Try them', about: 'Never shows what was written', side: [tryIt('finished', '▶ Finished'), tryIt('question', '▶ Needs you'), tryIt('stuck', '▶ Stuck'), test] })),
     note);
 };

@@ -20,6 +20,7 @@ import { STARTUP_FILE, startupDir, startupFileIn, writeStartup } from './autosta
 import { cscBuild, oldExe, renameSoon, STAMP, traySum, type Build } from './trayfresh.ts';
 import { appFiles, launcherIn, newFolder } from './update.ts';
 import { systemDir, VCRT_URL, vcrtMissing } from './vcrt.ts';
+import { psQuote } from './psquote.ts';
 
 /** The Windows parts, passed in (tests use stand-ins). */
 export interface RepairDeps {
@@ -71,7 +72,8 @@ export interface RepairPlan {
 const same = (a: string, b: string) => resolve(a).toLowerCase() === resolve(b).toLowerCase();
 /** PowerShell's path for a reg.exe key ("HKCU\..." -> "Registry::HKEY_CURRENT_USER\..."). */
 const regPath = (key: string) => `Registry::${key.replace(/^HKCU\\/i, 'HKEY_CURRENT_USER\\').replace(/^HKLM\\/i, 'HKEY_LOCAL_MACHINE\\')}`;
-const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** PowerShell quoting: inside '...' a ' (or a curly single quote) is written twice (src/psquote.ts). */
+const q = psQuote;
 
 /** Where a shortcut points ('' when there is none, or Windows does not say). */
 async function shortcutTarget(d: RepairDeps, lnk: string): Promise<string> {

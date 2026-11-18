@@ -39,6 +39,27 @@ test('it locks by itself after the idle minutes; polling does not count as use, 
   assert.ok(lock.secondsLeft() > 0);
 });
 
+test('the PC clock put back an hour does not keep the app open past its idle minutes, nor does a PIN wait grow', async () => {
+  const realNow = Date.now;
+  const lock = new AppLock();
+  // A few hundred milliseconds stand in for the idle minutes.
+  lock.idleMinutes = 0.002;
+  const t = lock.open();
+  const { PinGuard } = await import('../src/share.ts');
+  const guard = new PinGuard();
+  for (let k = 0; k < 5; k++) guard.wrong('desk');
+  assert.equal(guard.lockedFor('desk'), 10);
+  try {
+    // Windows sets the clock right: an hour back.
+    Date.now = () => realNow() - 3_600_000;
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(lock.check(t), false, 'locked after its idle time, whatever the PC clock says');
+    assert.equal(guard.lockedFor('desk'), 10, 'the wait is still 10 minutes, not 70');
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test('idle 0 never locks by itself; idle choices are cleaned', () => {
   let now = 0;
   const lock = new AppLock(() => now);

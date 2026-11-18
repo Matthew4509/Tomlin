@@ -1,8 +1,11 @@
 // This PC and the linked ones: memory now, the Nodes page, reading speeds and the calculator.
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { modelParts } from '../carry.ts';
+import { hostname } from 'node:os';
+import { diskOf, modelParts, removeWhy } from '../carry.ts';
+import * as cleanup from '../cleanup.ts';
+import { assignedTo, staffLines } from '../assigned.ts';
 import { nowModel } from '../staff.ts';
 import { writeAtomic } from '../atomic.ts';
 import { readings, streamChat } from '../engine.ts';
@@ -12,10 +15,15 @@ import { memoryBar } from '../nodes.ts';
 import * as nodestaff from '../nodestaff.ts';
 import { hereKey, pcKey } from '../speed.ts';
 import { keepBig, type ReadFigure } from '../layers.ts';
-import { DATA_DIR, type Routes, chatModels, hardware, hidden, json, sampler, shortName, speeds, staff, store } from './core.ts';
+import { DATA_DIR, type Routes, chatModels, modelsHome, hardware, hidden, json, lastUsed, sampler, shortName, speeds, staff, store } from './core.ts';
+import { drawings } from '../images.ts';
 import { chatList, images, main, runnerFor, runners, watchedPids } from './panes.ts';
 import { answeringBusy, endAnswer, takeChat } from './answering.ts';
 import { jobRoutes } from './jobs.ts';
+import { hostPinsHere } from './locks.ts';
+import { memoryLow } from '../jobrun/maxnode.ts';
+import { copiesWords, onShow, sameFiles } from '../models.ts';
+import { diskFacts } from './slowdisk.ts';
 
 // ---- Nodes: this PC and the linked ones, their memory, and which models stay loaded ----
 
@@ -23,7 +31,9 @@ import { jobRoutes } from './jobs.ts';
 export function memoryNow() {
   // The sampler measures only the processes it is told to watch (a worker PC may have no page open to tell it).
   sampler.watch(watchedPids());
-  const snap = sampler.latest;
+  // As last read: a linked PC's hello asks for this once a minute, which is no reason to read the card every second (a
+  // page open here reads `latest` once a second, which does).
+  const snap = sampler.last;
   // Every chat runner (two or more chat models can be loaded) and the image pane.
   const held = [...runners.map(p => ['chat', p] as const), ['image', images.pane] as const].flatMap(([name, pane]) => {
     const v = pane.view;
@@ -38,7 +48,12 @@ export function memoryNow() {
   // Every graphics card with memory of its own (the bar above shows one): a model can be spread over two or more.
   const own = hardware.gpus.filter(g => !g.integrated && (g.total ?? 0) > 0);
   return {
-    cards: { count: own.length, total: own.reduce((n, g) => n + (g.total ?? 0), 0) },
+    // Lending with free RAM under the aim: told in the hello, for the host's next load (src/maxlend.ts MemoryWatch).
+    ...(memoryLow() ? { low: true } : {}),
+    // `list`: each card by name, the one TOMLIN uses first (src/hardware.ts strongestFirst), for the PC window.
+    cards: { count: own.length, total: own.reduce((n, g) => n + (g.total ?? 0), 0), list: own.map(g => ({ name: g.name, total: g.total ?? 0 })) },
+    // The computer's own name (Windows'), sent in the hello: two linked PCs both called "Worker PC" are told apart by it.
+    computer: hostname().slice(0, 40),
     ram: { total: snap.ram.total, used: snap.ram.used, bar: memoryBar(snap.ram.total, snap.ram.used, held.map(h => ({ name: h.name, bytes: h.ram }))) },
     gpu: gpu ? { ...gpu, bar: memoryBar(gpu.total, gpu.used, held.map(h => ({ name: h.name, bytes: h.gpu }))) } : null,
     held,
@@ -49,6 +64,7 @@ export function memoryNow() {
 
 /** This PC as the calculator reads it: RAM, the graphics card and its own memory, physical cores. */
 function thisPcHardware(): calc.Hardware {
+  // The strongest card: the list is kept strongest first (src/hardware.ts strongestFirst).
   const card = hardware.gpus.find(g => !g.integrated && (g.vendor === 'nvidia' || g.vendor === 'amd'));
   const builtin = hardware.gpus.some(g => g.integrated);
   return { ram: hardware.ram, vram: card?.total ?? 0, card: card ? (card.vendor as 'nvidia' | 'amd') : builtin ? 'builtin' : 'none', cores: hardware.cores };
@@ -78,6 +94,7 @@ readings.answered = (model, s) => {
   // The model's name from its file (a model entry has no name of its own), as everywhere else on the page.
   if (entry) speeds.add(hereKey(model), shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), 'this PC', s, 'answer');
 };
+drawings.drawn = model => lastUsed.touch(model);
 readings.seen = (model, tokens, perSecond) => {
   if (tokens < 128 || !(perSecond > 0) || !chatModels.list().some(m => m.id === model)) return;
   const all = readSpeedsNow();
@@ -173,11 +190,16 @@ async function calcTest() {
  * speed, Hide, and who works on it.
  */
 export function modelsHere() {
-  const chats = chatList();
+  const loadedNow = (id: string) => runnerFor(id)?.view.state === 'connected';
+  // The same file found twice (TOMLIN's folder and the other folder): one row, the one loaded or worked on if either is.
+  const twins = sameFiles(chatModels.list(), ids => ids.find(loadedNow) ?? ids.find(id => usersOf(id).length > 0));
+  const chats = chatList().filter(m => onShow(m.id, twins));
   const pictures = images.list().filter(x => x.installed);
+  // Every id of a model shown once: its hires are counted over all of them.
+  const idsOf = (id: string) => twins.get(id)?.ids ?? [id];
   return [
-    ...chats.map(m => ({ id: m.id, name: m.name.replace(/\s*[(+].*$/, ''), kind: 'chat' as const, bytes: m.bytes, need: Math.round(calc.chatNeed(m.bytes)), fit: m.fit.level, loaded: runnerFor(m.id)?.view.state === 'connected', speed: speeds.get(hereKey(m.id)), hidden: hidden.has(m.id), ollama: m.where === 'ollama', usedBy: usersOf(m.id) })),
-    ...pictures.map(m => ({ id: m.id, name: m.name, kind: 'image' as const, bytes: m.bytes, need: m.bytes, fit: m.fit.level, loaded: images.pane.view.model === m.id && images.pane.view.state === 'connected', speed: null, hidden: hidden.has(m.id), ollama: false, usedBy: usersOf(m.id) })),
+    ...chats.map(m => ({ id: m.id, name: m.name.replace(/\s*[(+].*$/, ''), kind: 'chat' as const, bytes: m.bytes, need: Math.round(calc.chatNeed(m.bytes)), fit: m.fit.level, loaded: idsOf(m.id).some(loadedNow), speed: speeds.get(hereKey(m.id)), hidden: hidden.has(m.id), ollama: m.where === 'ollama', usedBy: [...new Set(idsOf(m.id).flatMap(usersOf))], staffNote: staffLines({ mine: idsOf(m.id).flatMap(id => assignedTo(staff.list(), id)) }).note, copiesNote: copiesWords(twins.get(m.id)?.ids ?? [], m.id, chatModels.other()), incomplete: m.incomplete, disk: diskFacts('chat', m.id, m.bytes) })),
+    ...pictures.map(m => ({ id: m.id, name: m.name, kind: 'image' as const, bytes: m.bytes, need: m.bytes, fit: m.fit.level, loaded: images.pane.view.model === m.id && images.pane.view.state === 'connected', speed: null, hidden: hidden.has(m.id), ollama: false, usedBy: usersOf(m.id), staffNote: staffLines({ mine: assignedTo(staff.list(), m.id) }).note, disk: diskFacts('image', m.id, m.bytes) })),
   ];
 }
 
@@ -194,6 +216,8 @@ async function nodesView() {
     idle: { chat: s.chat.idleMinutes, image: s.image.idleMinutes },
     // This PC as a node: whether it is shared, its setup and the models it lets linked PCs use.
     share,
+    // The linked hosts that gave this PC a host PIN (src/hostpin.ts), by the ids of the links shown: its owner can take one away.
+    hostPins: hostPinsHere(share.paired.map(x => x.id)),
   };
 }
 
@@ -231,13 +255,104 @@ function filesOf(kind: unknown, id: string): { name: string; files: string[] } |
   return { name, files: modelParts(basename(path), names).map(n => join(dirname(path), n)) };
 }
 
+/** Why a model of this PC cannot be deleted now (hidden, loaded, kept by Ollama, not here); '' when it can. Changes nothing. */
+export function removeBlock(kind: unknown, id: string): string {
+  if (hidden.has(id)) return 'That model is hidden, which keeps it from being removed. Press Unhide first.';
+  const got = filesOf(kind, id);
+  return 'error' in got ? got.error : '';
+}
+
+/**
+ * Deletes a model's files from this PC: for its own Models page and for a linked PC that asks over the link (src/jobrun/node.ts,
+ * after the owner's "Accept models from linked PCs" tick). A hidden model, a loaded one and one Ollama keeps are refused,
+ * with the reason; nothing but ids crosses, and the files come from this PC's own model list.
+ */
+export async function deleteModelHere(kind: unknown, id: string): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (hidden.has(id)) return { status: 409, body: { error: 'That model is hidden, which keeps it from being deleted. Press Unhide first, then Delete.' } };
+  const got = filesOf(kind, id);
+  if ('error' in got) return { status: got.status, body: { error: got.error } };
+  try {
+    for (const f of got.files) await rm(f, { force: true });
+  } catch (e) {
+    chatModels.forget();
+    return { status: 500, body: { error: `${got.name} could not be deleted: ${(e as Error).message}. Close any program using it, then try again.` } };
+  }
+  chatModels.forget();
+  lastUsed.forget(id);
+  return { status: 200, body: { ok: true, said: `${got.name} was deleted from this PC.` } };
+}
+
+// ---- Free up space (src/cleanup.ts, public/cleanup.js) ----
+
+/**
+ * The models of this PC (or a linked PC) as Free up space lists them: ranked least used first, by category, with what
+ * would be offered for a model `wanted` that does not fit. Deleting goes through /api/models/delete, one model at a time.
+ */
+async function cleanupView(pcId: unknown, wanted: { name: string; bytes: number } | null) {
+  const here = !pcId || pcId === 'here';
+  let inputs: cleanup.CleanInput[];
+  let disk: { total: number; free: number } | null;
+  let name = 'This PC';
+  let canDelete = true;
+  let why = '';
+  let drive = '';
+  const drives: { drive: string; total: number; free: number }[] = [];
+  if (here) {
+    const entries = chatModels.list();
+    inputs = await Promise.all(modelsHere().map(async m => {
+      const got = filesOf(m.kind, m.id);
+      const files = 'files' in got ? got.files : [];
+      let size = 0;
+      let at: number | null = null;
+      for (const f of files) {
+        try {
+          const s = await stat(f);
+          size += s.size;
+          at = Math.max(at ?? 0, s.mtimeMs);
+        } catch {
+          // A part gone from the disk: the size counts what is there.
+        }
+      }
+      return { id: m.id, name: m.name, kind: m.kind, file: m.kind === 'chat' ? entries.find(e => e.id === m.id)?.file : undefined, bytes: size || m.bytes, usedAt: lastUsed.get(m.id), installedAt: at, loaded: m.loaded, hidden: m.hidden, ollama: m.ollama, usedBy: m.usedBy, files: files.map(f => basename(f)), ...(cleanup.driveOf(files[0] ?? '') ? { drive: cleanup.driveOf(files[0]) } : {}) };
+    }));
+    // The drive new models go to (Where models are kept), and each drive that holds models: a model on D: frees
+    // nothing on C:, so each is told with its own free space (it showed C: only, beside models all on D:).
+    const target = modelsHome.dir();
+    disk = await diskOf(target);
+    drive = cleanup.driveOf(target);
+    for (const d of [...new Set([drive, ...inputs.map(x => x.drive ?? '')])].filter(Boolean).sort()) {
+      const got = d === drive ? disk : await diskOf(`${d}\\`);
+      if (got) drives.push({ drive: d, ...got });
+    }
+  } else {
+    const r = (await store.settings()).remotes.find(x => x.id === pcId);
+    if (!r) return { status: 404, body: { error: 'That PC is no longer linked to this one. Close this window: the list on the left has the PCs linked now.' } };
+    name = r.name;
+    const h = await jobRoutes.hello(r, 3000).catch(() => null);
+    const list = (h?.models ?? r.models ?? []) as { id: string; name: string; kind: 'chat' | 'image'; bytes: number; loaded?: boolean; busy?: boolean; hidden?: boolean; usedAt?: number }[];
+    inputs = list.map(m => ({ id: m.id, name: shortName(m.name) || m.name, kind: m.kind === 'image' ? 'image' : 'chat', file: m.name, bytes: m.bytes || 0, usedAt: m.usedAt ?? null, installedAt: null, loaded: !!h && !!m.loaded, busy: !!h && !!m.busy, hidden: m.hidden === true, usedBy: [...assignedTo(staff.list(), `remote:${r.id}:${m.id}`), ...((m as { assigned?: { name: string }[] }).assigned ?? [])].map(a => a.name) }));
+    disk = h?.disk ?? null;
+    // Removed over the link (POST /api/network/model-remove), with that PC's own tick and its app lock PIN, asked when Remove
+    // is pressed. Only a real block is said, in one line: off, busy with its owner, too old, or the tick not set there.
+    why = !h ? `"${r.name}" is off or not answering: its list is as last seen.`
+      : h.allow && h.can.includes('model-remove') && !h.allow.receive ? `Tick "Accept models from linked PCs" on "${r.name}" (Network) to remove models there.`
+        : removeWhy({ id: r.id, name: r.name, ok: true, away: h.away, can: h.can, allow: h.allow, models: [] });
+    if (why) why = `${why.charAt(0).toUpperCase()}${why.slice(1).replace(/.$/, '')}.`;
+    canDelete = !why;
+  }
+  const rows = cleanup.prepare(inputs);
+  const short = wanted && disk ? cleanup.shortBy(wanted.bytes, disk.free) : 0;
+  // A model to install needs room on its drive: only models there are offered for it.
+  return { status: 200, body: { pc: here ? 'here' : pcId, name, rows, disk, drive, drives, spare: cleanup.SPARE, now: Date.now(), canDelete, why, wanted, short, ...cleanup.suggest(rows, short, wanted ? drive : '') } };
+}
+
 // ---- Routes ----
 
 /** GET requests answered here, by path. */
 export const thispcGet: Routes = {
   '/api/nodes': async ({ res }) => json(res, 200, await nodesView()),
   '/api/calc': async ({ res }) => json(res, 200, await calcView()),
-  '/api/nodes/others': async ({ res }) => json(res, 200, { pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null })) }),
+  '/api/nodes/others': async ({ res }) => json(res, 200, { cluster: jobRoutes.clusterView(), pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null })) }),
   // The meters of the linked PC an open chat's hire works on (the chat head asks every 3 s while it is on screen). The
   // hire's model there is named, so that PC keeps only it loaded, not every model it loaded for this PC.
   '/api/node/stats': async ({ res, url }) => {
@@ -246,9 +361,12 @@ export const thispcGet: Routes = {
     const m = who.startsWith('staff:') ? staff.get(who.slice(6)) : undefined;
     return json(res, 200, await jobRoutes.nodeStats(pc, nodestaff.statsModel(m ? nowModel(m) ?? m.model : null, pc)));
   },
-  // A linked PC's log today, its last lines (?pc= its id or name, &lines= up to 1000): for tests across PCs.
+  // A linked PC's log, its last lines (?pc= its id or name, &lines= up to 1000, &day= one of the 7 days it keeps written
+  // 2026-11-17, &find= a word): for tests across PCs and the Log part of its window. A day not in that form is refused.
   '/api/node/log': async ({ res, url }) => {
-    const got = await jobRoutes.nodeLog(String(url.searchParams.get('pc') ?? ''), Number(url.searchParams.get('lines')) || 300);
+    const day = String(url.searchParams.get('day') ?? '');
+    if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return json(res, 400, { error: 'Write the day as 2026-11-17.' });
+    const got = await jobRoutes.nodeLog(String(url.searchParams.get('pc') ?? ''), Number(url.searchParams.get('lines')) || 300, { day, find: String(url.searchParams.get('find') ?? '') });
     return json(res, got.state === 'gone' ? 404 : 200, got.state === 'gone' ? { ...got, error: 'There is no linked PC by that id or name.' } : got);
   },
 };
@@ -262,6 +380,12 @@ export const thispcPost: Routes = {
   },
   // Hide or show one model: a hidden model stays on the disk (and shared, when ticked), out of the lists a model is
   // picked from until "Show hidden" is ticked, and cannot be deleted while it is hidden.
+  '/api/cleanup': async ({ res, b }) => {
+    const w = b.wanted && typeof b.wanted === 'object' ? (b.wanted as Record<string, unknown>) : null;
+    const bytes = Number(w?.bytes);
+    const r = await cleanupView(b.pc, w && Number.isFinite(bytes) && bytes > 0 ? { name: String(w.name ?? 'the new model').slice(0, 120), bytes: Math.round(bytes) } : null);
+    return json(res, r.status, r.body);
+  },
   '/api/models/hide': async ({ res, b }) => {
     const id = typeof b.id === 'string' ? b.id : '';
     const known = b.kind === 'image' ? images.list().some(m => m.id === id) : chatModels.list().some(m => m.id === id);
@@ -271,18 +395,8 @@ export const thispcPost: Routes = {
   },
   // Deletes a model's files from this PC (the page asks first, naming the hires who use it).
   '/api/models/delete': async ({ res, b }) => {
-    const id = typeof b.id === 'string' ? b.id : '';
-    if (hidden.has(id)) return json(res, 409, { error: 'That model is hidden, which keeps it from being deleted. Press Unhide first, then Delete.' });
-    const got = filesOf(b.kind, id);
-    if ('error' in got) return json(res, got.status, { error: got.error });
-    try {
-      for (const f of got.files) await rm(f, { force: true });
-    } catch (e) {
-      chatModels.forget();
-      return json(res, 500, { error: `${got.name} could not be deleted: ${(e as Error).message}. Close any program using it, then try again.` });
-    }
-    chatModels.forget();
-    return json(res, 200, { ok: true, said: `${got.name} was deleted from this PC.` });
+    const r = await deleteModelHere(b.kind, typeof b.id === 'string' ? b.id : '');
+    return json(res, r.status, r.body);
   },
   // A linked PC's own hires are retired (2.0.31): a page from before asking to switch one is told why.
   '/api/nodes/switch': async ({ res }) => {

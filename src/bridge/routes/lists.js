@@ -6,7 +6,7 @@ const cfg = require('../config');
 const Settings = require('../settings');
 const { keyOf } = require('../projects');
 const { state, saveSettings, refreshProjects } = require('../state');
-const { listView, settingsView, scanFolders, laptopStats } = require('../views');
+const { listView, gitView, settingsView, scanFolders, laptopStats } = require('../views');
 const desktop = require('../desktop');
 
 const has = (list, p) => list.some(x => keyOf(x) === keyOf(p));
@@ -16,6 +16,8 @@ const pathOf = v => (typeof v === 'string' ? v.trim() : '');
 
 const get = {
   '/api/projects': async ({ url }) => ({ projects: await listView(url.searchParams.get('fresh') === '1'), stats: laptopStats() }),
+  // Each row's git while the list says checking (the list itself answers before git has been read).
+  '/api/projects/git': () => gitView(),
   '/api/settings': () => { refreshProjects(); return settingsView(); },
 };
 

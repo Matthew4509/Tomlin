@@ -5,7 +5,49 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chatStyle, everyFew, plainStyle, streamChat, thinkingLoops, thinkingText, thinksOf, withWorking } from '../src/engine.ts';
+import { chatStyle, everyFew, plainStyle, streamChat, thinkingLoops, thinkingText, thinkRoomFit, thinkRoomOf, THINK_ROOM, THINK_SIZES, thinksOf, withWorking } from '../src/engine.ts';
+import { readFileSync } from 'node:fs';
+
+test('the working has a default room and bigger sizes to expand to; anything else is the default', () => {
+  assert.equal(THINK_SIZES[0], THINK_ROOM);
+  assert.ok(THINK_ROOM > 4096, 'raised from the first default (4096), which a hybrid model\'s working could fill on a short question');
+  assert.deepEqual([...THINK_SIZES].sort((a, b) => a - b), [...THINK_SIZES]);
+  assert.equal(thinkRoomOf(undefined), THINK_ROOM);
+  assert.equal(thinkRoomOf(123), THINK_ROOM);
+  assert.equal(thinkRoomOf(THINK_SIZES[2]), THINK_SIZES[2]);
+});
+
+
+test('the working is never given more room than the context leaves', () => {
+  // A 16k context with a short prompt: the whole default room fits.
+  assert.deepEqual(thinkRoomFit(THINK_ROOM, 16384, 3000, 4096), { room: THINK_ROOM, free: 16384 - 1000 - 4096 });
+  // An 8k context: even a short prompt leaves less than the default 6k, so the working is cut to what is left.
+  assert.deepEqual(thinkRoomFit(THINK_ROOM, 8192, 3000, 2048), { room: 8192 - 1000 - 2048, free: 8192 - 1000 - 2048 });
+  // A long chat at 8k: the prompt fills most of it, so the working gets what is left (never under 512), not the default.
+  const long = thinkRoomFit(THINK_ROOM, 8192, 12000, 2048);
+  assert.equal(long.free, 8192 - 4000 - 2048);
+  assert.equal(long.room, long.free);
+  assert.ok(long.room < THINK_ROOM);
+  // Prompt plus answer already past the context: the floor, and nothing bigger is offered (free is 0).
+  assert.deepEqual(thinkRoomFit(THINK_ROOM, 8192, 30000, 2048), { room: 512, free: 0 });
+  // A big context: asking for a bigger size is honoured up to what fits.
+  assert.equal(thinkRoomFit(THINK_SIZES[3], 65536, 20000, 4096).room, THINK_SIZES[3]);
+  assert.ok(THINK_SIZES.filter(s => s > THINK_ROOM && s <= long.free).length === 0, 'no bigger size is offered when it would not fit');
+});
+
+test('a working that fills its room offers the bigger sizes on a card; Web off offers its own card', () => {
+  const root = join(import.meta.dirname, '..');
+  const chat = readFileSync(join(root, 'src/server/chat.ts'), 'utf8');
+  const view = readFileSync(join(root, 'public/chatview.js'), 'utf8');
+  assert.match(chat, /THINK_SIZES\.filter\(s => s > thinkAsked && s <= ctxFree\)/);
+  assert.match(chat, /bigger\.length && !away \? \{ room:/);
+  assert.match(chat, /room: \{ now: thinkRoom, sizes: bigger \}/);
+  assert.match(chat, /send\('weboff', \{ text: webOffWords\(message\) \}\)/);
+  assert.match(chat, /thinkRoomOf\(b\.room\)/);
+  assert.match(view, /data\.room\?\.sizes\?\.length/);
+  assert.match(view, /ev === 'weboff'/);
+  assert.match(view, /Turn Web on and ask again/);
+});
 import { Chats } from '../src/chats.ts';
 import { Store } from '../src/store.ts';
 
@@ -19,6 +61,16 @@ test('which models think: Qwen 3 and 3.5 when asked, reasoning models always, th
   assert.equal(thinksOf('QwQ-32B-Q4_K_M.gguf'), 'always');
   assert.equal(thinksOf('gemma-2-2b-it-Q4_K_M.gguf'), 'never');
   assert.equal(thinksOf('Huihui-Ministral-3B-Abliterated-Q4_K_M.gguf'), 'never');
+  // GLM 4.5 and later think by default and can be switched off; GLM-4 and 4.1 do not think.
+  assert.equal(thinksOf('GLM-4.7-Flash-UD-Q4_K_XL.gguf'), 'switch');
+  assert.equal(thinksOf('GLM-4.5-Air-Q4_K_M.gguf'), 'switch');
+  assert.equal(thinksOf('GLM-5.3-Flash-Q2_K.gguf'), 'switch');
+  assert.equal(thinksOf('GLM-4-9B-0414-Q4_K_M.gguf'), 'never');
+  assert.equal(thinksOf('GLM-4.1V-9B-Q4_K_M.gguf'), 'never');
+  assert.equal(thinksOf('glm-4-5-air-Q4_K_M.gguf'), 'switch', 'a dashed version number');
+  for (const other of ['xglm-5.8B-Q4_K_M.gguf', 'chatglm-6.2b-Q4_K_M.gguf', 'ChatGLM3-6B-Q4_K_M.gguf', 'GLM-4.10-Q4_K_M.gguf']) assert.equal(thinksOf(other), 'never', other);
+  assert.deepEqual(chatStyle('GLM-4.7-Flash-UD-Q4_K_XL.gguf').sampling.chat_template_kwargs, { enable_thinking: false });
+  assert.deepEqual(chatStyle('GLM-4.7-Flash-UD-Q4_K_XL.gguf', true).sampling.chat_template_kwargs, { enable_thinking: true });
 });
 
 test('Think asks a Qwen model to think, with its thinking sampling; Quick and other models are as before', () => {
@@ -142,13 +194,13 @@ test('working that goes round in circles is stopped, and the answer is asked for
   const seen: Array<Record<string, unknown>> = [];
   const s = await loopingServer(seen);
   try {
-    const r = await streamChat(s.base, 'Qwen3.5-2B.gguf', [{ role: 'user', content: '12 pens?' }], () => undefined, new AbortController().signal, 6000, { think: true });
+    const r = await streamChat(s.base, 'Qwen3.5-2B.gguf', [{ role: 'user', content: '12 pens?' }], () => undefined, new AbortController().signal, 10_000, { think: true });
     assert.equal(r.text, '8 euros.');
     assert.equal(r.thoughtStopped, 'loop');
     assert.match(r.thought, /looking at the first turn again/);
     assert.equal(seen.length, 2, 'asked once thinking, once straight away');
     assert.deepEqual(seen[1].chat_template_kwargs, { enable_thinking: false });
-    assert.equal(seen[1].max_tokens, 6000 - 4096, 'without the thinking room');
+    assert.equal(seen[1].max_tokens, 10_000 - THINK_ROOM, 'without the thinking room');
     const asked = (seen[1].messages as Array<{ role: string; content: string }>).at(-1)!.content;
     assert.match(asked, /^12 pens\?[\s\S]*Your working so far[\s\S]*looking at the first turn again[\s\S]*Now write only the answer\.$/, 'the working goes with the question');
     // A model that always thinks cannot be asked not to: it ends with no answer, and says the working looped.
@@ -199,7 +251,7 @@ test('working past its room is stopped, and the answer asked for with it', async
     const r = await streamChat(s.base, 'Qwen3.5-2B.gguf', [{ role: 'user', content: '12 pens?' }], () => undefined, new AbortController().signal, 6000, { think: true });
     assert.equal(r.thoughtStopped, 'long');
     assert.equal(r.text, '8 euros.');
-    assert.ok(r.thought.length > 12_000 && r.thought.length < 13_000, `stopped just past the room (${r.thought.length} characters)`);
+    assert.ok(r.thought.length > THINK_ROOM * 3 && r.thought.length < THINK_ROOM * 3 + 1000, `stopped just past the room (${r.thought.length} characters)`);
   } finally {
     await s.close();
   }

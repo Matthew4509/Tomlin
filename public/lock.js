@@ -74,9 +74,15 @@ function showAppLock(view, keepPages = false) {
   document.body.classList.add('app-locked');
   $('#applock').hidden = false;
   const wait = view?.waitMinutes ?? 0;
-  $('#applock-about').hidden = !wait;
-  $('#applock-about').textContent = wait ? `Too many wrong tries. Wait ${wait} minute${wait > 1 ? 's' : ''}, then try again.` : '';
   const kind = view?.kind ?? 'pin';
+  // Straight after "Save pin and lock" (and its recovery codes) the lock screen says why it is there, so a lock that
+  // shuts at once, as that button says, is not a surprise.
+  const justSet = store('applock-just-set') === '1';
+  const about = wait ? `Too many wrong tries. Wait ${wait} minute${wait > 1 ? 's' : ''}, then try again.`
+    : justSet ? `The app lock is on. Type the ${lockWord(kind)} you just made to open TOMLIN.${store('node-on-after-lock') === '1' ? ' Then this PC turns on as a node.' : ''}`
+    : '';
+  $('#applock-about').hidden = !about;
+  $('#applock-about').textContent = about;
   const box = $('#applock-open-pin');
   fitSecret(box, kind);
   box.placeholder = kind === 'password' ? 'Password' : 'PIN';
@@ -202,6 +208,7 @@ async function lockKeepingWork() {
 
 /** The lock opened again: a page kept through it carries on where it was; otherwise it starts again, as it does on opening. */
 async function appLockOpened() {
+  store('applock-just-set', '');
   const kept = appLockUi.kept;
   if (!kept) return location.reload();
   appLockUi.kept = null;
@@ -304,8 +311,10 @@ $('#applock-new-form').addEventListener('submit', async e => {
     $('#applock-pin').value = '';
     $('#applock-pin2').value = '';
     appNew.close();
-    // A2: the first lock's recovery codes, shown once; the page locks once one is typed back.
-    if (r.recoveryCodes) await showCodes(r.recoveryCodes);
+    // A2: the first lock's recovery codes, shown once; the page locks once one is typed back, and the lock screen then
+    // says the lock is on and which PIN opens it.
+    store('applock-just-set', '1');
+    if (r.recoveryCodes) await showCodes(r.recoveryCodes, newKind());
     location.reload();
   } catch (err) {
     appLockUi.showingCodes = false;
@@ -376,9 +385,14 @@ $('#applock-recover').addEventListener('submit', async e => {
 
 // ---- A2: the codes window: shown once, with Copy / Save as text file / Print; one typed back closes it ----
 
-/** Shows the codes until one of them is typed back (Escape does not close it); ends once it is closed. */
-function showCodes(codes) {
+/**
+ * Shows the codes until one of them is typed back (Escape does not close it); ends once it is closed. `locks`: the kind
+ * of a lock just made (the first lock), which shuts TOMLIN once the window closes: the window says so first.
+ */
+function showCodes(codes, locks) {
   const dlg = $('#codes-dlg');
+  $('#codes-next').hidden = !locks;
+  $('#codes-next').textContent = locks ? `The app lock is on now. Once you press I've saved them, TOMLIN locks: open it with the ${lockWord(locks)} you just made.` : '';
   const nl = '\r\n';
   const text = [`TOMLIN recovery codes (made ${new Date().toLocaleString()})`, 'Each code works once, to set a new PIN or password on the lock screen (Use a recovery code).', '', ...codes.map((c, i) => `${String(i + 1).padStart(2)}. ${c}`), ''].join(nl);
   const said = t => ($('#codes-said').textContent = t);
@@ -450,24 +464,26 @@ for (const type of ['pointerdown', 'keydown', 'wheel']) {
 /** sd-server takes no key (src/picturelock.ts): what the lock does and does not do for picture models, said plainly. */
 const PICTURE_WORDS = 'Picture models: while TOMLIN is locked, a picture model you loaded is unloaded once it has had nothing to draw for 2 minutes (a linked PC drawing here loads one for its pictures, kept 10 minutes after its last one). While TOMLIN is open, a loaded picture model can be used by any program on this PC: its runner takes no key, so TOMLIN cannot lock it. Chat models take a key.';
 
+/**
+ * Lock, on Data and lock: the App lock row (On or Off, and the recovery codes left), its change, recovery codes and
+ * turn-off folded under it; then Lock by itself on a row of its own. Off: one row with Set a PIN.
+ */
 app.appLockBox = () => {
   const v = appLockUi.view;
   if (!v) return null;
-  const note = el('p', { class: 'hint', role: 'status' });
+  const note = app.setSaid();
   const say = text => {
     note.textContent = text;
   };
+  const tag = on => el('span', { class: `set-tag${on ? '' : ' off'}`, text: on ? 'On' : 'Off' });
   if (!v.on) {
-    return el('div', { class: 'notify-box' },
-      el('h3', { text: 'App lock' }),
-      el('p', { class: 'hint', text: 'Off. A PIN for the whole app: while it is locked, nobody at this PC can open the chats, jobs or files here.' }),
-      el('div', { class: 'team-actions' }, el('button', { class: 'btn quiet', type: 'button', text: 'Set a PIN…', onclick: () => {
-        document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();
-        openAppLockNew();
-      } })));
+    return app.setPart('Lock', app.setCard(app.setRow({ icon: 'lock', name: 'App lock', about: 'A PIN that locks chats, jobs and files on this PC', side: [tag(false), app.setButton('Set a PIN…', () => {
+      document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();
+      openAppLockNew();
+    }, { main: true })] })));
   }
   const idle = el('select', { 'aria-label': 'Lock by itself' });
-  for (const m of v.idleChoices) idle.append(el('option', { value: String(m), text: m ? `After ${m} minutes with nothing done` : 'Never (only the padlock locks it)' }));
+  for (const m of v.idleChoices) idle.append(el('option', { value: String(m), text: m ? `After ${m} minutes` : 'Never (only the padlock)' }));
   idle.value = String(v.idleMinutes);
   idle.addEventListener('change', async () => {
     try {
@@ -486,14 +502,14 @@ app.appLockBox = () => {
   const current = pinBox(`Current app lock ${w}`, 'current-password', v.kind);
   const pin = pinBox('New PIN or password', 'new-password', v.kind);
   const pin2 = pinBox('The new one again', 'new-password', v.kind);
-  const field = (text, input) => el('label', { class: 'field' }, el('span', { text }), input);
+  const field = (label, input) => el('label', { class: 'field' }, label, input);
   // A1: the new one may be the other kind (PIN to password or back).
   const kindBox = el('div', { class: 'lock-kind', role: 'radiogroup', 'aria-label': 'Open TOMLIN with' },
     el('button', { type: 'button', role: 'radio', 'aria-checked': 'false', 'data-kind': 'pin', text: 'PIN' }),
     el('button', { type: 'button', role: 'radio', 'aria-checked': 'false', 'data-kind': 'password', text: 'Password' }));
-  const strong = el('p', { class: 'hint lock-strength', role: 'status', hidden: true });
-  const genWords = el('span', { class: 'hint', role: 'status' });
-  const genRow = el('div', { class: 'team-actions' });
+  const strong = el('p', { class: 'set-note lock-strength', role: 'status', hidden: true });
+  const genWords = el('span', { class: 'set-note', role: 'status' });
+  const genRow = el('div', { class: 'set-line' });
   const pinLabel = el('span');
   const pin2Label = el('span');
   const kindNow = kindSwitch(kindBox, v.kind, k => {
@@ -502,14 +518,14 @@ app.appLockBox = () => {
       i.value = '';
     }
     pinLabel.textContent = `New ${lockWord(k)}`;
-    pin2Label.textContent = `The new ${lockWord(k)} again`;
+    pin2Label.textContent = `New ${lockWord(k)} again`;
     genRow.hidden = k !== 'password';
     genWords.textContent = '';
     strong.hidden = true;
   });
   const draw = strengthLine(pin, strong, kindNow);
-  genRow.append(el('button', { class: 'btn quiet', type: 'button', text: 'Generate', onclick: () => generateInto(pin, pin2, genWords, draw) }), genWords);
-  const change = el('button', { class: 'btn quiet', type: 'button', text: 'Change it', onclick: async () => {
+  genRow.append(app.setButton('Generate', () => generateInto(pin, pin2, genWords, draw)), genWords);
+  const change = app.setButton(`Change ${w}`, async () => {
     try {
       appLockUi.view = await api('/api/applock', { action: 'change', current: current.value, kind: kindNow(), pin: pin.value, pin2: pin2.value });
       current.value = pin.value = pin2.value = '';
@@ -518,15 +534,15 @@ app.appLockBox = () => {
     } catch (err) {
       say(err.message);
     }
-  } });
+  }, { main: true });
   // A2: the recovery codes: how many are left, a nudge below 3, and New set (the current lock or a current code).
   const c = v.codes;
-  const codesLine = v.codesDamaged ? 'The recovery codes file is damaged, so no code works. Make a new set.'
+  const codesWords = v.codesDamaged ? 'the recovery codes file is damaged' : !c ? 'no recovery codes yet' : `${c.left} of ${c.total} recovery codes left`;
+  const nudge = v.codesDamaged ? 'The recovery codes file is damaged, so no code works. Make a new set.'
     : !c ? 'No recovery codes yet. Make a set: each code can set a new PIN or password once if you forget yours.'
-    : `Recovery codes: ${c.left} of ${c.total} left.`;
-  const nudge = c && c.left < 3 ? el('p', { class: 'applock-warn', role: 'note', text: c.left ? `Only ${c.left} recovery code${c.left > 1 ? 's' : ''} left. Make a new set.` : 'No recovery codes left. Make a new set.' }) : null;
-  const newSet = el('button', { class: 'btn quiet', type: 'button', text: c ? 'New set…' : 'Make recovery codes…', onclick: async () => {
-    if (!current.value) return say(`Type your current ${w} (or one of your recovery codes) in the box above first.`);
+    : c.left < 3 ? (c.left ? `Only ${c.left} recovery code${c.left > 1 ? 's' : ''} left. Make a new set.` : 'No recovery codes left. Make a new set.') : '';
+  const newSet = app.setButton(c ? 'New recovery codes…' : 'Make recovery codes…', async () => {
+    if (!current.value) return say(`Type your current ${w} (or one of your recovery codes) in Current ${w} first.`);
     try {
       const { recoveryCodes, ...view } = await api('/api/applock', { action: 'codes-new', current: current.value });
       current.value = '';
@@ -536,8 +552,8 @@ app.appLockBox = () => {
     } catch (err) {
       say(err.message);
     }
-  } });
-  const off = el('button', { class: 'btn quiet', type: 'button', text: 'Turn the app lock off', onclick: async () => {
+  });
+  const off = app.setButton('Turn the app lock off', async () => {
     try {
       appLockUi.view = await api('/api/applock', { action: 'off', current: current.value });
       current.value = pin.value = pin2.value = '';
@@ -546,22 +562,20 @@ app.appLockBox = () => {
     } catch (err) {
       say(err.message);
     }
-  } });
-  return el('div', { class: 'notify-box' },
-    el('h3', { text: 'App lock' }),
-    el('p', { class: 'hint', text: `On, with a ${w}. The padlock in the top bar locks TOMLIN at once; a restart or a new browser also starts locked. It locks the app, not the files on disk.` }),
-    el('p', { class: 'hint', text: PICTURE_WORDS }),
-    field('Lock by itself', idle),
-    field(`Current app lock ${w} (to change it, turn the lock off or make new recovery codes)`, current),
-    el('div', { class: 'field' }, el('span', { text: 'Open TOMLIN with' }), kindBox),
-    el('div', { class: 'team-actions' }, el('label', { class: 'field' }, pinLabel, pin), el('label', { class: 'field' }, pin2Label, pin2)),
+  }, { danger: true });
+  const lock = app.setRow({ icon: 'lock', name: 'App lock', about: `Opens with a ${w} · ${codesWords}`, side: tag(true), open: !!nudge, inside: [
+    nudge ? el('p', { class: 'applock-warn', role: 'note', text: nudge }) : null,
+    el('div', { class: 'set-line' }, field(el('span', { text: `Current ${w}` }), current), el('div', { class: 'field' }, el('span', { text: 'Open TOMLIN with' }), kindBox)),
+    el('div', { class: 'set-line' }, field(pinLabel, pin), field(pin2Label, pin2), change),
     strong,
     genRow,
-    el('div', { class: 'team-actions' }, change, off),
-    el('p', { class: 'hint', role: 'status', text: codesLine }),
-    nudge,
-    el('div', { class: 'team-actions' }, newSet),
-    note);
+    el('p', { class: 'set-note', text: `Changing it, new recovery codes and turning it off each need the current ${w} (or a recovery code).` }),
+    el('div', { class: 'set-line' }, newSet, off),
+    el('details', { class: 'set-more' }, el('summary', { text: 'What the lock does and does not cover' }),
+      el('p', { class: 'set-note', text: 'The padlock in the top bar locks TOMLIN at once; a restart or a new browser also starts locked. It locks the app, not the files on disk.' }),
+      el('p', { class: 'set-note', text: PICTURE_WORDS })),
+  ] });
+  return app.setPart('Lock', app.setCard(lock, app.setRow({ icon: 'timer', name: 'Lock by itself', about: 'After this long with nothing done', side: idle })), note);
 };
 
 void appLockBoot();

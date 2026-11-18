@@ -11,7 +11,29 @@ async function load(fresh) {
     loadHomeProjects();
     if (!$('page-audits').hidden) renderAudits();
     if (stats.tokensBusy) setTimeout(load, 4000);
+    if (rows.some(r => r.git && r.git.checking)) pollGit();
   } catch (e) { info(e.message, true); }
+}
+// The list comes back before git has been read (rows say checking); each row's git is asked for every second until
+// none is being checked, and the list is redrawn only when something was read.
+let gitPolling = false;
+async function pollGit() {
+  if (gitPolling) return;
+  gitPolling = true;
+  let seen = null;
+  try {
+    for (let i = 0; i < 600; i++) {
+      await new Promise(res => setTimeout(res, 1000));
+      const d = await api('/api/projects/git');
+      if (d.rev !== seen) {
+        seen = d.rev;
+        for (const r of rows) if (d.git[r.id]) r.git = d.git[r.id];
+        renderList(); renderStatus();
+      }
+      if (!d.checking && !rows.some(r => r.git && r.git.checking)) break;
+    }
+  } catch { /* not answering: the 5 s status poll reloads the list when the Bridge is back */ }
+  gitPolling = false;
 }
 // Recount: the button says "Counting…" from the click until the new count is in (up to half a minute on the server),
 // then a message gives the new total.

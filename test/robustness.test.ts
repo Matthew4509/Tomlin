@@ -175,3 +175,65 @@ test('a linked PC sends a long answer as it grows without resending all of it fo
   p2.flush();
   assert.deepEqual(few, ['a', 'abc']);
 });
+
+test('a request body with a key named toString, valueOf or toJSON cannot make a route throw (API fuzzer, /api/names)', async () => {
+  const { parseBody } = await import('../src/safejson.ts');
+  const { cleanName } = await import('../src/persona.ts');
+  const b = parseBody('{"name":{"toString":1},"a":{"b":{"valueOf":2,"toJSON":3,"keep":4}},"toString":5}') as Record<string, unknown>;
+  assert.doesNotThrow(() => String(b.name));
+  assert.doesNotThrow(() => cleanName(b.name));
+  assert.deepEqual(b.a, { b: { keep: 4 } });
+  assert.equal(Object.hasOwn(b, 'toString'), false);
+});
+
+test('code is not mistaken for a loop, and a loop inside code is still cut (a game page was cut mid-file, 17 Nov)', async () => {
+  const { repeatCut, repeatWatch } = await import('../src/engine.ts');
+  const fn = (name: string) => `function ${name}(pipe) {\n  const pipeBottomY = pipe.top + pipe.gap;\n  const pipeBottomX = pipe.left + pipe.width;\n  return pipeBottomY + pipeBottomX + ${name.length};\n}\n`;
+  const page = '```html title=index.html\n<script>\n' + ['draw', 'hit', 'score', 'reset'].map(fn).join('\n') + '</script>\n```';
+  assert.equal(repeatCut(page), null, 'a sentence-like fragment of code three times is not a loop');
+  const w = repeatWatch();
+  assert.equal(w(page), null);
+  // The same eight lines over and over in a code block: a loop, cut where the second began.
+  const block = Array.from({ length: 8 }, (_, i) => `  total += computeSomethingLong(items[${i}], options.depth, options.width);`).join('\n');
+  const looped = `Here it is:\n\n\`\`\`js\nlet total = 0;\n${block}\n${block}\n${block}\n${block}\n\`\`\``;
+  const cut = repeatCut(looped);
+  assert.ok(cut !== null && cut.includes('let total = 0;'));
+  assert.equal(cut!.split('computeSomethingLong').length - 1, 8, 'kept up to where the second copy began');
+  // Prose loops are still cut.
+  const prose = 'The same sentence is written here again and again and again. '.repeat(4);
+  assert.ok(repeatCut(prose) !== null);
+});
+
+test('a body over the limit is read out and refused, and the next request on the same connection is answered (API fuzzer: 3 MB to a 4 KB door hung 30 s)', async () => {
+  const { readBody, TooLarge } = await import('../src/bodyread.ts');
+  const { request, createServer } = await import('node:http');
+  const { Agent } = await import('node:http');
+  const server = createServer(async (req, res) => {
+    try {
+      const b = await readBody(req, 4096);
+      res.writeHead(200).end(String(b.length));
+    } catch (e) {
+      res.writeHead(e instanceof TooLarge ? 413 : 500).end('no');
+    }
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as { port: number }).port;
+  const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+  const post = (body: Buffer) => new Promise<number>((resolve, reject) => {
+    const q = request({ host: '127.0.0.1', port, method: 'POST', agent, timeout: 10_000 }, res => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
+    q.on('timeout', () => { q.destroy(); reject(new Error('timed out')); });
+    q.on('error', reject);
+    q.end(body);
+  });
+  try {
+    const big = Buffer.alloc(3_000_000, 97);
+    for (let i = 0; i < 4; i++) {
+      assert.equal(await post(big), 413, `big ${i}`);
+      assert.equal(await post(Buffer.from('{}')), 200, `small ${i}`);
+    }
+  } finally {
+    agent.destroy();
+    server.closeAllConnections();
+    server.close();
+  }
+});

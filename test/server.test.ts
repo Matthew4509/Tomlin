@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { testEnv } from './env.ts';
 
 const freePort = () => new Promise<number>(resolve => {
   const s = createServer().listen(0, '127.0.0.1', () => {
@@ -26,7 +27,7 @@ test('the server starts on an empty home, serves the page, and the stops answer 
   writeFileSync(join(home, 'data', 'workspace', 'demo-site', 'index.html'), '<p>made-up site</p>');
   const port = await freePort();
   const server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';
@@ -71,6 +72,8 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     const hire = async (name: string) => {
       const r = await post('/api/staff', { action: 'hire', name, role: 'writer', level: 'junior' });
       assert.equal(r.status, 200, await r.clone().text());
+      // The hire call names the new hire by id (a benchmark picked an older hire of the same name by the name alone).
+      assert.equal(((await r.clone().json()) as { hired?: string }).hired, name.toLowerCase());
       return `staff:${name.toLowerCase()}`;
     };
     const maya = await hire('Maya');

@@ -9,9 +9,13 @@ import { readFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import { writeAtomic } from './atomic.ts';
 import { paramsFromName } from './download.ts';
+import { VISION_TASK } from './capabilities.ts';
 
-/** One model: repo, downloads last month, likes, parameters from its name (null when the name does not say). */
-export type ListedModel = [repo: string, downloads: number, likes: number, params: number | null];
+/**
+ * One model: repo, downloads last month, likes, parameters from its name (null when the name does not say), and a 1 when
+ * Hugging Face's task for it is pictures with text (left off otherwise, so a list costs a few bytes more, not one per model).
+ */
+export type ListedModel = [repo: string, downloads: number, likes: number, params: number | null, vision?: 1];
 export interface HfListFile { scannedAt: string; floor: number; models: ListedModel[] }
 
 /** Fewer downloads than this last month and a model is left off the list. */
@@ -30,7 +34,8 @@ export function listed(page: unknown, floor = FLOOR): ListedModel[] {
     if (r.pipeline_tag && !CHAT_TASKS.has(String(r.pipeline_tag))) return [];
     const downloads = Number(r.downloads) || 0;
     if (downloads < floor) return [];
-    return [[repo, downloads, Number(r.likes) || 0, paramsFromName(repo.split('/')[1])] as ListedModel];
+    const vision = r.pipeline_tag === VISION_TASK;
+    return [[repo, downloads, Number(r.likes) || 0, paramsFromName(repo.split('/')[1]), ...(vision ? [1 as const] : [])] as ListedModel];
   });
 }
 
@@ -63,17 +68,27 @@ export function ordered(models: ListedModel[], order: string): ListedModel[] {
   return by[order] ? [...models].sort(by[order]) : models;
 }
 
+const flagged = new WeakMap<ListedModel[], boolean>();
+/** Whether a list carries the picture flag at all (a list scanned before it did not: then the task is judged when a repo is opened). */
+export function hasVisionFlags(models: ListedModel[]): boolean {
+  let got = flagged.get(models);
+  if (got === undefined) flagged.set(models, (got = models.some(m => m[4] === 1)));
+  return got;
+}
+
 /**
  * The listed models matching a search, most downloaded first: every word in the repo's owner/name ("all": every model),
  * any one of the ticked terms (abliterated, uncensored), only mixtures of experts when `moe` is ticked, and the size in
- * billions when the name gives one (a name that does not say is kept; its size is checked when its sizes are read).
+ * billions when the name gives one (a name that does not say is kept; its size is checked when its sizes are read). With
+ * `vision`, only the models flagged as taking pictures: the caller asks for it only when the list carries the flag (hasVisionFlags).
  */
-export function pick(models: ListedModel[], s: { q: string; terms?: string[]; moe?: boolean; minB?: number | null; maxB?: number | null }): ListedModel[] {
+export function pick(models: ListedModel[], s: { q: string; terms?: string[]; moe?: boolean; minB?: number | null; maxB?: number | null; vision?: boolean }): ListedModel[] {
   const words = /^all$/i.test(s.q.trim()) ? [] : s.q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8).map(wordStart);
   const terms = (s.terms ?? []).map(t => wordStart(t.toLowerCase()));
   const minB = Number(s.minB) > 0 ? Number(s.minB) : null;
   const maxB = Number(s.maxB) > 0 ? Number(s.maxB) : null;
-  return models.filter(([repo, , , params]) => {
+  return models.filter(([repo, , , params, vision]) => {
+    if (s.vision && vision !== 1) return false;
     const name = repo.toLowerCase();
     if (!words.every(w => w.test(name))) return false;
     if (terms.length && !terms.some(t => t.test(name))) return false;

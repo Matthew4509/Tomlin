@@ -99,6 +99,16 @@ test('two PCs: the node\'s front door, and project backups through it (the round
     assert.equal(await link(host, workerPort, codeIn(nodeDir)), pc, 'the same PC keeps its id');
     assert.equal(remoteOf()?.backupsOnly, true, 'linking the same PC again keeps Backups only');
     assert.equal((await host.post('/api/remotes', { action: 'backups-only', id: pc, on: false })).status, 200);
+    // Max mode: "Don't borrow from it" (borrow-max off), saved on this PC, kept when linked again, and refused for a PC not linked.
+    const noBorrowOf = () => (JSON.parse(readFileSync(join(hostDir, 'data', 'settings.json'), 'utf8')).remotes as { id: string; noBorrow?: boolean }[]).find(r => r.id === pc)?.noBorrow;
+    assert.equal(noBorrowOf(), undefined, "borrowed from by default: the lending PC's own tick is the permission");
+    assert.equal((await host.post('/api/remotes', { action: 'borrow-max', id: pc, on: false })).status, 200);
+    assert.equal(noBorrowOf(), true);
+    assert.equal(await link(host, workerPort, codeIn(nodeDir)), pc);
+    assert.equal(noBorrowOf(), true, "linking the same PC again keeps Don't borrow from it");
+    assert.equal((await host.post('/api/remotes', { action: 'borrow-max', id: pc, on: true })).status, 200);
+    assert.equal(noBorrowOf(), undefined);
+    assert.equal((await host.post('/api/remotes', { action: 'borrow-max', id: 'nope', on: true })).status, 404);
 
     // ---- The front door ----
     const whoami = await (await fetch(`${door}/worker/whoami`)).json() as Record<string, unknown>;

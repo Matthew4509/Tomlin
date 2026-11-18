@@ -56,7 +56,9 @@ export class AppLock {
   private now: () => number;
   idleMinutes = DEFAULT_APP_IDLE;
 
-  constructor(now = () => Date.now()) {
+  // A clock that only goes forward (the time since TOMLIN started), not the PC's clock: a PC clock put back (by hand, or
+  // by Windows setting it right) never keeps the app open longer than the idle minutes.
+  constructor(now = () => performance.now()) {
     this.now = now;
   }
 

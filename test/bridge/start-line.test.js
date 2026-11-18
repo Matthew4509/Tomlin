@@ -19,7 +19,28 @@ let failures = 0;
 const check = async (name, fn) => { try { await fn(); console.log('ok   ' + name); } catch (e) { failures++; console.log('FAIL ' + name + ': ' + e.message); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
-const portOpen = port => new Promise(r => { const s = net.connect(port, '127.0.0.1'); s.setTimeout(1000, () => { s.destroy(); r(false); }); s.on('connect', () => { s.destroy(); r(true); }); s.on('error', () => r(false)); });
+// Starts the test copy of the Bridge and waits for it to say it listens on its port (its own line, so a port taken by
+// another program between picking and listening is never mistaken for it). A port taken first ends it with "in use":
+// a new port is picked, up to 5 times. Up to 60 s a try: a busy PC starts a Node process slowly.
+async function startBridge(env) {
+  let last = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const port = await freePort();
+    const srv = spawn(NODE, [SERVER, '--dry-run'], { env: { ...env, BRIDGE_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let said = '';
+    srv.stdout.on('data', d => { said += d; });
+    srv.stderr.on('data', d => { said += d; });
+    const ended = new Promise(r => srv.once('exit', r));
+    const mark = 'on http://127.0.0.1:' + port + '/';
+    for (let i = 0; i < 300 && srv.exitCode === null && !said.includes(mark); i++) await sleep(200);
+    if (said.includes(mark) && srv.exitCode === null) return { srv, port, ended };
+    try { process.kill(srv.pid); } catch {}
+    await Promise.race([ended, sleep(10000)]);
+    last = said;
+    if (!/is in use/.test(said)) break;
+  }
+  throw new Error('the test copy of the Bridge did not start: ' + last.slice(-500));
+}
 
 const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-start-line-'));
 function make(folder, files) {
@@ -107,12 +128,8 @@ async function main() {
   make('no-start', { 'README.md': '# A made-up project with no start line\n' });
   make('bad-start', { 'project.json': '{"start":{"exe":"node","args":"server.js","port":5000}}' });
   const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-start-line-data-'));
-  const PORT = await freePort();
-  const srv = spawn(NODE, [SERVER, '--dry-run'], { env: { ...process.env, BRIDGE_PORT: String(PORT), BRIDGE_DATA: DATA, BRIDGE_ROOT: WS }, stdio: 'ignore' });
+  const { srv, port: PORT, ended } = await startBridge({ ...process.env, BRIDGE_DATA: DATA, BRIDGE_ROOT: WS });
   try {
-    // Wait for the port to open (up to 60 s: a busy PC starts a Node process slowly), or for the server to end before it did.
-    for (let i = 0; i < 300 && srv.exitCode === null && !(await portOpen(PORT)); i++) await sleep(200);
-    assert(srv.exitCode === null, 'the test copy of the Bridge ended before it listened');
     const BASE = 'http://127.0.0.1:' + PORT;
     const key = ((await (await fetch(BASE + '/')).text()).match(/name="bridge-key" content="([0-9a-f]+)"/) || [])[1];
     const get = async p => (await fetch(BASE + p, { headers: { 'X-Bridge-Key': key } })).json();
@@ -128,7 +145,6 @@ async function main() {
     });
   } finally {
     // Wait for the test copy to end and let go of its data folder (not a fixed time), up to 10 s.
-    const ended = new Promise(r => srv.once('exit', r));
     try { process.kill(srv.pid); } catch {}
     await Promise.race([ended, sleep(10000)]);
   }

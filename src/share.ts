@@ -11,6 +11,7 @@
 // wrong PINs are limited, and the worker keeps only a hash of each paired manager's token.
 // The plain functions are tested in test/share.test.ts.
 import type { Allow } from './carry.ts';
+import type { GuestPass, PassAsk, RenewLength } from './guestpass.ts';
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
@@ -50,7 +51,9 @@ export class PinGuard {
   private tries = new Map<string, number[]>();
   private all: number[] = [];
   private now: () => number;
-  constructor(now = () => Date.now()) {
+  // Kept in memory only, so timed by a clock that only goes forward, not the PC's clock: one put back never makes a
+  // wait longer, nor one put forward a wait shorter.
+  constructor(now = () => performance.now()) {
     this.now = now;
   }
   private recent(ip: string): number[] {
@@ -177,7 +180,25 @@ export interface ShareState {
   /** Whether a PIN is asked for as well as the setup code (off by default). */
   pinOn: boolean;
   pin: string;
-  paired: { name: string; hash: string; at: string; /** The linking PC's own id (newer copies send it), so linking again replaces its old link. */ from?: string; /** The encrypted link's keys (src/link.ts); a link from before has none and must be made again. */ key?: string; /** Where this link's restore points and update are kept here: made at linking, never said by the linking PC (links made before use `from`). */ keep?: string }[];
+  paired: { name: string; hash: string; at: string; /** The linking PC's own id (newer copies send it), so linking again replaces its old link. */ from?: string; /** The encrypted link's keys (src/link.ts); a link from before has none and must be made again. */ key?: string; /** Where this link's restore points and update are kept here: made at linking, never said by the linking PC (links made before use `from`). */ keep?: string; /** 'guest': linked with a guest pass (src/guestpass.ts), not the setup code. Absent: a link as it always was. */ role?: 'guest'; /** The guest pass it was made with. */ passId?: string; /** When a guest link ends (its pass's end then); null or absent: no end. */ expires?: string | null; /** Renewed after a request: its own end counts. */ renewed?: boolean; /** Its requests are not taken (Block). */ blocked?: boolean; /** Its pass was removed then: it may collect work for a while. */ endedAt?: string }[];
+  /** Guest passes made here (src/guestpass.ts): never their codes, only the keys they are proven with. */
+  passes?: GuestPass[];
+  /** This PC as a host: the generation of its own passes (src/guestpass.ts nextGen), up at each change. */
+  passGen?: number;
+  /** This PC as a host: the generation each linked node (by its id) said it holds. */
+  passAcks?: Record<string, number>;
+  /** This PC as a node: the last generation taken from each host (by its link's keep id). */
+  passGens?: Record<string, number>;
+  /** This PC as a node: requests from guest links whose pass expired, until answered (src/guestpass.ts PassAsk). */
+  passAsks?: PassAsk[];
+  /** At once (src/slots.ts): answers one chat model writes together for linked PCs, 1 to 4 (1: one at a time). */
+  atOnce?: number;
+  /** The node's line (src/nodeline.ts): the host's own links go before guests (on unless unticked). */
+  hostFirst?: boolean;
+  /** The caps on a guest's answer (tokens) and prompt (characters) here; the defaults unless the owner changed them. */
+  guestCaps?: { answer: number; prompt: number };
+  /** The length last picked when renewing a guest's link (the next answer offers it first). */
+  passLastLength?: RenewLength;
   /** Someone at this PC pressed "I need to use the pc" (F7 E5): when, and the models loaded then (they load again at the restart). */
   away?: { since: string; held: { chat: string[]; image: string | null }; /** Logged out for the hours the main PC agreed to: it starts again by itself then. */ until?: string } | null;
   /** Someone at this PC sent the main PC "I need to use the pc, please log out for N hours" from the lock screen: the main PC answers it. */
@@ -238,12 +259,17 @@ export function pairedByHash(state: ShareState, hash: string | undefined): Share
 }
 
 /** Reads a worker's event stream (text, then done or error) and calls onText with the text so far; any other event goes to onEvent. */
-export async function readStream(res: Response, onText: (text: string) => void, onEvent?: (event: string, data: Record<string, unknown>) => void, idleMs = 75_000): Promise<string> {
+export async function readStream(res: Response, onText: (text: string) => void, onEvent?: (event: string, data: Record<string, unknown>) => void, idleMs = 75_000, quietMs = 60_000): Promise<string> {
   if (!res.body) throw new Error('The worker sent nothing back.');
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
   let text = '';
+  // Heartbeat lines keep it from being given up on, but say nothing: every `quietMs` with no real event, 'quiet' is
+  // reported (loading the model, reading the prompt, or not answering), so the chat can say so instead of hanging.
+  let lastReal = Date.now();
+  const nag = setInterval(() => { if (Date.now() - lastReal >= quietMs) onEvent?.('quiet', { seconds: Math.round((Date.now() - lastReal) / 1000) }); }, quietMs);
+  try {
   for (;;) {
     // The worker writes a line every 20 s even while it thinks: this long with nothing means it is gone.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -262,8 +288,10 @@ export async function readStream(res: Response, onText: (text: string) => void, 
       buf = buf.slice(i + 2);
       const ev = /^event: (\w+)/m.exec(block)?.[1];
       const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? '{}');
+      if (ev) lastReal = Date.now();
       if (ev === 'text') onText((text = data.text));
-      else if (ev === 'error' || ev === 'refused') throw new Error(`The worker said: ${data.text}`);
+      // A runner fault there (src/faults.ts) rides on the error, for the crash notice; it is checked where it is used.
+      else if (ev === 'error' || ev === 'refused') throw Object.assign(new Error(`The worker said: ${data.text}`), data.fault ? { fault: data.fault } : {});
       else if (ev === 'done') {
         onEvent?.('done', data);
         return text;
@@ -272,6 +300,9 @@ export async function readStream(res: Response, onText: (text: string) => void, 
     }
   }
   throw new Error('The worker stopped before it finished (it may have been closed or disconnected).');
+  } finally {
+    clearInterval(nag);
+  }
 }
 
 // ---- "Send host": someone at a node asks the main PC to log out for a while (the main PC decides) ----

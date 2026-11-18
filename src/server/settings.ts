@@ -3,15 +3,21 @@ import type { ServerResponse } from 'node:http';
 import { cleanSearch } from '../webtools.ts';
 import { cleanPermissions } from '../permits.ts';
 import { existsSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { log, logFile } from '../log.ts';
+import { readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import * as inst from '../installer.ts';
+import { installedExe } from '../autostart.ts';
+import { hostname, release, userInfo } from 'node:os';
+import { lastLines, log, logFile } from '../log.ts';
+import { buildReport, issueLink, scrub } from '../report.ts';
+import { repoOf } from '../release.ts';
 import { toneOf } from '../persona.ts';
 import { roleOf } from '../staff.ts';
 import * as claude from '../claude.ts';
 import { DEFAULT_RULES, PROJECT_RULES_MAX, RULES_MAX, getRules, readProjectRules, saveProjectRules, rulesBlock, resetRules, saveRules } from '../rules.ts';
 import * as keep from '../keep.ts';
 import { clearDamaged, damaged } from '../atomic.ts';
-import { HOME, PORT, ROOT, type Routes, VERSION, chatModels, json, publicSettings, ready, staff, store, workspaceDir } from './core.ts';
+import { BUILD, HOME, PORT, ROOT, type Routes, VERSION, chatModels, hardware, json, publicSettings, ready, runtimes, staff, store, workspaceDir } from './core.ts';
 import { backupRunning } from './bridge.ts';
 import { askedOf, chatList, cleanRun, images, runOf, threadsOf } from './panes.ts';
 import { setWho, whoId } from './people.ts';
@@ -45,6 +51,12 @@ async function claudeView() {
   };
   const kept = claude.newestHandoff(listed(join(ROOT, 'docs', 'handoffs')));
   const handoff = kept ? `docs\\handoffs\\${kept}` : claude.newestHandoff(listed(ROOT));
+  // Read on each ask, so it is right after an update, a move or a repair: the app folder is this running copy; the
+  // install folder is the one it sits in, else this PC's install (when there is one), as the Startup file finds it.
+  const inInstall = installedExe(ROOT) !== null;
+  const folder = inInstall ? dirname(ROOT) : inst.places().root;
+  const install = existsSync(join(folder, inst.CURRENT)) ? { folder, current: inst.currentCopy(folder) } : null;
+  const kind = claude.copyKind({ inInstall, git: existsSync(join(ROOT, '.git')) });
   const prompt = claude.claudePrompt({
     version: VERSION,
     appFolder: ROOT,
@@ -54,8 +66,13 @@ async function claudeView() {
     pcName: node.name !== 'Worker PC' ? node.name : 'This PC',
     node: { on: node.on, port: node.port },
     rules: rulesBlock(),
+    kind,
+    install,
   });
-  return { prompt };
+  return {
+    prompt,
+    where: { appFolder: ROOT, kind, version: VERSION, homeFolder: HOME.home, installFolder: install?.folder ?? null, current: install?.current?.dir ?? null, port: PORT },
+  };
 }
 
 /**
@@ -232,6 +249,36 @@ export const settingsPost: Routes = {
   '/api/rules/project': async ({ res, b }) => {
     const text = await saveProjectRules(await workspaceDir(), b.project, b.text);
     return text === null ? json(res, 400, { error: 'There is no such project.' }) : json(res, 200, { project: b.project, text, max: PROJECT_RULES_MAX });
+  },
+  // "Report a problem": the scrubbed text of a report for the project's GitHub issues, and the new-issue link that carries it.
+  // {note?, fault?, model?}. Nothing is sent from here: the page shows the text and the person opens the link or copies it.
+  '/api/report': async ({ res, b }) => {
+    const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as { repository?: unknown };
+    const repo = repoOf(process.env.TOMLIN_RELEASE_REPO ?? pkg.repository);
+    let who = '';
+    try {
+      who = userInfo().username;
+    } catch {
+      // No user name to hide on this PC.
+    }
+    const names = [who, hostname(), ...(await store.settings()).remotes.map(r => r.name)];
+    const gpus = hardware.gpus.filter(g => !g.integrated || (g.total ?? 0) > 0);
+    const edited = b.edited && typeof b.edited === 'object' ? (b.edited as Record<string, unknown>) : null;
+    const r = edited && typeof edited.body === 'string' ? { title: scrub(String(edited.title ?? '').slice(0, 120), names), body: scrub(edited.body.slice(0, 20000), names) } : buildReport({
+      version: VERSION,
+      build: BUILD || undefined,
+      os: `Windows ${release()}`,
+      ram: hardware.ram,
+      cards: gpus.map(g => ({ name: g.name, total: g.total })),
+      driver: hardware.nvidiaDriver ?? null,
+      runners: Object.entries(runtimes.pins).map(([id, p]) => `${p.name}: ${runtimes.installedPin(id) ? 'installed' : 'not installed'}`),
+      model: typeof b.model === 'string' ? b.model.slice(0, 200) : undefined,
+      fault: typeof b.fault === 'string' ? b.fault.slice(0, 1000) : undefined,
+      note: typeof b.note === 'string' ? b.note : undefined,
+      log: lastLines(60).lines,
+    }, names);
+    if (!repo) return json(res, 200, { ...r, url: null, cut: false, repo: null });
+    return json(res, 200, { ...r, ...issueLink(repo, r), repo });
   },
   '/api/keep': async ({ res, b }) => keepAction(res, b),
 };

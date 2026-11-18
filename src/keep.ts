@@ -78,6 +78,8 @@ export interface VersionFile {
   note?: string;
   /** The note's heading on the page; without one it is "Your data". */
   noteTitle?: string;
+  /** The version a note is for, when it is only for that one (an older copy started on newer data). */
+  noteFor?: string;
 }
 
 export interface Source {
@@ -137,7 +139,7 @@ export function findSources(root: string, home: Home): Source[] {
   const found: Source[] = [];
   for (const dir of dirs) {
     const pkg = readJson<{ name?: string; version?: string }>(join(dir, 'package.json'));
-    if (pkg?.name !== 'tomlin' && pkg?.name !== 'shelby') continue; // shelby: copies made before the TOMLIN name
+    if (pkg?.name !== 'tomlin') continue;
     const data = join(dir, 'data');
     if (resolve(data).toLowerCase() === resolve(home.data).toLowerCase()) continue;
     let at = 0;
@@ -189,6 +191,8 @@ const stamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1)
 export const SNAP_PROFILE = 'bridge/snaps/profile';
 /** Also left out: Push live's connections, secrets and push records (sealed for this Windows account, and they stay in place). */
 export const HOSTING = 'bridge/hosting';
+/** And the Bridge's run logs (a project's program output goes straight there, with no cap): they are not data to put back. */
+export const BRIDGE_LOGS = 'bridge/logs';
 /** Never in a restore point sent from here (since 2.0.5x): a brought-back one that carries them was made elsewhere. */
 const NEVER_SENT = ['share.json', 'app-lock.json'];
 /**
@@ -222,9 +226,12 @@ export async function listBackups(home: Home): Promise<Backup[]> {
   return out.sort((a, b) => b.name.localeCompare(a.name));
 }
 
+/** A backup's name as backup() makes it: the date and time it was made first ("2026-10-04 101500 ..."). */
+const STAMPED = /^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d)(\d\d) /;
+
 /** When a backup was made: the date and time its name starts with ("2026-10-04 101500 ..."), else its file time. */
 function madeAt(b: Backup): Date {
-  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d)(\d\d) /.exec(b.name);
+  const m = STAMPED.exec(b.name);
   return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : new Date(b.at);
 }
 
@@ -257,6 +264,36 @@ export function keptByAge(backups: Backup[], now = new Date()): Set<string> {
     }
   }
   return kept;
+}
+
+/** All the backups together take at most this share of their drive ... */
+export const BACKUPS_SHARE = 0.1;
+/** ... and at most this many times the newest backup (3 GB of data kept as 20 zips would be 60 GB). */
+export const BACKUPS_TIMES = 5;
+/** The newest backups that stay whatever their size. */
+export const KEEP_ALWAYS = 2;
+
+/**
+ * The backups to keep once their size is counted: of those `kept` names (keptByAge), newest first, as many as fit in the
+ * smaller of BACKUPS_SHARE of the drive (`driveTotal` bytes; null: not known) and BACKUPS_TIMES the newest backup; the
+ * oldest go first, and the newest KEEP_ALWAYS always stay. Pure.
+ */
+export function keptBySize(backups: Backup[], kept: Set<string>, driveTotal: number | null): Set<string> {
+  const newest = [...backups].filter(b => kept.has(b.name)).sort((a, b) => b.name.localeCompare(a.name));
+  if (!newest.length) return new Set();
+  // The newest backup this PC made (its name starts with its date): a small zip of another name (put there by hand, or
+  // brought back from a linked PC) sorts first by name, and 5 times its size once let every backup but one go.
+  const made = newest.find(b => STAMPED.test(b.name)) ?? newest[0];
+  // A tenth more than 5 times the newest: zips of much the same data differ a little in size, and 5 of them still fit.
+  const cap = Math.min(driveTotal && driveTotal > 0 ? driveTotal * BACKUPS_SHARE : Infinity, made.bytes * BACKUPS_TIMES * 1.1);
+  const out = new Set<string>();
+  let total = 0;
+  for (const [i, b] of newest.entries()) {
+    total += b.bytes;
+    if (i >= KEEP_ALWAYS && total > cap) break;
+    out.add(b.name);
+  }
+  return out;
 }
 
 /** settings.json without the keys to the linked PCs (each keeps its name and address; its token is empty). */
@@ -319,7 +356,7 @@ export async function backupSaying(home: Home, label: string, o: { forOtherPc?: 
     // junction is not followed (data/ holds none of its own).
     const top = new Set(o.forOtherPc ? ['settings.json', 'runners.json', ELSEWHERE_MARK, ...NOT_ELSEWHERE] : []);
     const { items, links } = await listFolder(home.data, (rel, dir) => {
-      return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || rel === MAX_CACHE || (!rel.includes('/') && top.has(rel));
+      return (!dir && rel === 'runners.json') || (!dir && rel.endsWith('.tmp') && !rel.startsWith('workspace/')) || rel === SNAP_PROFILE || rel === HOSTING || rel === BRIDGE_LOGS || rel === MAX_CACHE || (!rel.includes('/') && top.has(rel));
     });
     leftOut = links;
     const noRoom = noRoomWhy(items.reduce((n, it) => n + (it.size ?? 0), 0), await statfs(home.backups).then(s => s.bavail * s.bsize, () => null));
@@ -355,8 +392,12 @@ export async function backupSaying(home: Home, label: string, o: { forOtherPc?: 
     await rmdir(making).catch(() => undefined);
   }
   const all = await listBackups(home);
-  const kept = keptByAge(all);
+  // By age, then by size: a large data folder kept twenty times over would fill the drive.
+  const kept = keptBySize(all, keptByAge(all), await statfs(home.backups).then(s => s.blocks * s.bsize, () => null));
+  // The backup just made always stays, whatever its date or size says (a PC with a wrong clock names it older).
+  kept.add(name);
   // One open in another program goes at a later backup: the backup just made is good either way.
+  // May delete: only the .zip files directly in backups\ that listBackups names and neither rule keeps.
   for (const old of all) if (!kept.has(old.name)) await rm(join(home.backups, old.name), { force: true }).catch(() => undefined);
   return { name, links: leftOut };
 }
@@ -411,7 +452,7 @@ async function swapData(home: Home, fresh: string): Promise<void> {
  * old goes, unless the new data brought its own.
  */
 async function carryKept(old: string, data: string): Promise<void> {
-  for (const rel of [HOSTING.split('/'), [MAX_CACHE], ...NOT_ELSEWHERE.map(f => [f])]) {
+  for (const rel of [HOSTING.split('/'), BRIDGE_LOGS.split('/'), [MAX_CACHE], ...NOT_ELSEWHERE.map(f => [f])]) {
     const from = join(old, ...rel);
     const to = join(data, ...rel);
     if (!existsSync(from) || existsSync(to)) continue;
@@ -710,6 +751,9 @@ export async function prepare(home: Home, root: string, appVersion: string, star
     // the data stays marked as the newer one's, so going back to it is not a version change either. Before this, each
     // switch between versions made another full backup before localhost answered (12 GB, about 7 minutes on a test PC).
     const note = `TOMLIN ${appVersion} is older than the version that last used your data (${v.app}), so no backup was made. Start ${v.app} or newer when you can.`;
+    // Kept in the version file, which is where the page reads its note: returned only, it was never shown. It is for
+    // this older copy only: the newer one, started again, does not show it.
+    if (v.note !== note) await writeVersion(home, { ...v, note, noteTitle: 'Your data', noteFor: appVersion });
     return { state: 'ready', note, noteTitle: 'Your data' };
   }
   if (v.app !== appVersion) {
@@ -731,6 +775,11 @@ export async function prepare(home: Home, root: string, appVersion: string, star
     const noteTitle = !name ? v.noteTitle : up ? 'Update Successful!' : undefined;
     await writeVersion(home, { data: DATA_VERSION, app: appVersion, note, noteTitle });
     return { state: 'ready', note, noteTitle };
+  }
+  // A note left for an older copy (it was started, and closed before its page was opened) is not this version's.
+  if (v.noteFor && v.noteFor !== appVersion) {
+    await writeVersion(home, { ...v, note: undefined, noteTitle: undefined, noteFor: undefined });
+    return { state: 'ready' };
   }
   return { state: 'ready', note: v.note, noteTitle: v.noteTitle };
 }
@@ -763,6 +812,22 @@ export async function startEmpty(home: Home, appVersion: string): Promise<void> 
 export async function noteShown(home: Home): Promise<void> {
   const v = readVersion(home);
   if (v?.note) await writeVersion(home, { ...v, note: undefined, noteTitle: undefined });
+}
+
+/**
+ * Which folder to start TOMLIN from, said once Start TOMLIN.cmd has moved on to a new copy (an update made in the app,
+ * or one sent from a linked PC). The new copy sits beside the old one, which stays for going back, so the window,
+ * shortcut or folder someone used before would start the old version again.
+ */
+export const startFromWords = (root: string) => `From now on, start TOMLIN with Start TOMLIN.cmd in this folder:\n${root}\nThe folder of the version before it is kept for going back.`;
+
+/** Adds those words to the note the page shows next (only once), or makes them the note. */
+export async function noteStartFrom(home: Home, root: string): Promise<void> {
+  const v = readVersion(home);
+  if (!v) return;
+  const words = startFromWords(root);
+  if (v.note?.includes(words)) return;
+  await writeVersion(home, { ...v, note: v.note ? `${v.note}\n${words}` : words, noteTitle: v.noteTitle || 'Where TOMLIN is now' });
 }
 
 /** Bytes of a folder, for the page. */

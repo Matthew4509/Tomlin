@@ -15,6 +15,8 @@ export interface ModelShape {
   valueLength: number;
   trainedContext: number;
   experts: number;
+  /** Experts chosen for each word (a mixture-of-experts model; unset when the file does not say). */
+  expertsUsed?: number;
   /** Sliding-window models: the window in tokens, and one full layer in every `swaEvery` (the others keep only the window). 0 = none. */
   swaWindow: number;
   swaEvery: number;
@@ -208,6 +210,135 @@ export async function expertWeights(path: string): Promise<{ layers: number; per
   }
 }
 
+/**
+ * The kind of quantisation a model's weights mostly use, by bytes: 'iq' (the i-quants, IQ1 to IQ4: slow to unpack on a
+ * processor), 'k' (Q2_K to Q8_K), 'legacy' (Q4_0, Q5_0, Q8_0 and the like), 'float' (F16, BF16, F32), 'other'. A
+ * processor's speed through weights depends on it: 14 Nov 2026 on DeepSeek's i-quants the Z240 (i7-6700K, DDR4) read
+ * about 4 GB/s and the Z820 (Xeon E5-2640, DDR3) about 6.2, the other way round from their memory speeds.
+ */
+export type QuantFamily = 'iq' | 'k' | 'legacy' | 'float' | 'other';
+export const QUANT_FAMILIES: QuantFamily[] = ['iq', 'k', 'legacy', 'float', 'other'];
+export function familyOfType(type: number): QuantFamily {
+  if ((type >= 16 && type <= 23) || type === 29) return 'iq';
+  if (type >= 10 && type <= 15) return 'k';
+  if ([2, 3, 6, 7, 8, 9].includes(type)) return 'legacy';
+  if (type === 0 || type === 1 || type === 30) return 'float';
+  return 'other';
+}
+
+/** The parts of a split file ("-00001-of-00003.gguf": all three, in order), or the file alone. */
+export function partsOf(path: string): string[] {
+  const m = /^(.*-)(\d{5})-of-(\d{5})(\.gguf)$/i.exec(path);
+  if (!m) return [path];
+  const n = Number(m[3]);
+  return Array.from({ length: n }, (_, i) => `${m[1]}${String(i + 1).padStart(5, '0')}-of-${m[3]}${m[4]}`);
+}
+
+/** The tensor list of a model over all its parts (the first part of a split file may hold only the header: DeepSeek-V4-Flash's does). */
+async function tensorsOf(path: string): Promise<Tensor[]> {
+  const out: Tensor[] = [];
+  for (const part of partsOf(path)) out.push(...(await readFile(part, () => false, true)).tensors);
+  return out;
+}
+
+/**
+ * The bytes a model reads for each word it writes, from its tensor list: every tensor, except that the token embedding
+ * table gives one row a word (unless the output reuses it: no output.weight), and a mixture-of-experts layer reads only
+ * its chosen experts (`used` of `experts`). Null when the file cannot be read.
+ */
+export async function wordBytes(path: string, moe?: { experts: number; used: number } | null): Promise<number | null> {
+  try {
+    const tensors = await tensorsOf(path);
+    if (!tensors.length) return null;
+    const tied = !tensors.some(t => t.name === 'output.weight');
+    const share = moe && moe.experts > 0 && moe.used > 0 ? Math.min(1, moe.used / moe.experts) : 1;
+    let sum = 0;
+    for (const t of tensors) {
+      const size = TYPE_SIZE[t.type];
+      if (!size) return null;
+      const bytes = (t.dims.reduce((a, b) => a * b, 1) / size[1]) * size[0];
+      if (t.name === 'token_embd.weight' && !tied) sum += bytes / Math.max(1, t.dims[1] ?? 1);
+      else if (/^blk\.\d+\.ffn_\w*_exps\./.test(t.name)) sum += bytes * share;
+      else sum += bytes;
+    }
+    return Math.round(sum);
+  } catch {
+    return null;
+  }
+}
+
+/** A mixture-of-experts model's parts as expert parallel places them (bytes; src/cluster/eplayout.ts). */
+export interface TensorParts {
+  /** Each block layer's weights outside its experts (attention, shared expert, router, norms), in layer order. */
+  layerRest: number[];
+  /** All the experts of one layer (the average over the layers that have experts). */
+  expertLayer: number;
+  /** `output.weight` (0 when the output reuses the token table). */
+  output: number;
+  /** The token table (read a row a word, so it stays in this PC's RAM). */
+  tokenTable: number;
+  /** Other tensors outside the layers of 1 GiB or more (Qwen3.8's `per_layer_token_embd`, 26.8 GiB): they may go to another PC. */
+  tables: { name: string; bytes: number }[];
+  /** Everything else outside the layers (norms and small tables). */
+  other: number;
+}
+
+/** A model's parts from its tensor list over all its parts; null when it cannot be read or has no expert tensors. */
+export async function tensorParts(path: string): Promise<TensorParts | null> {
+  try {
+    return partsFrom(await tensorsOf(path));
+  } catch {
+    return null;
+  }
+}
+
+/** The arithmetic of tensorParts, on a tensor list (tested on its own). */
+export function partsFrom(tensors: { name: string; dims: number[]; type: number }[]): TensorParts | null {
+  const rest = new Map<number, number>();
+  const expertLayers = new Set<number>();
+  let experts = 0;
+  const out: TensorParts = { layerRest: [], expertLayer: 0, output: 0, tokenTable: 0, tables: [], other: 0 };
+  for (const t of tensors) {
+    const size = TYPE_SIZE[t.type];
+    if (!size) return null;
+    const bytes = (t.dims.reduce((a, b) => a * b, 1) / size[1]) * size[0];
+    const m = /^blk\.(\d+)\./.exec(t.name);
+    if (m) {
+      const layer = Number(m[1]);
+      if (/^blk\.\d+\.ffn_\w*_exps\./.test(t.name)) {
+        experts += bytes;
+        expertLayers.add(layer);
+        rest.set(layer, rest.get(layer) ?? 0);
+      } else rest.set(layer, (rest.get(layer) ?? 0) + bytes);
+    } else if (t.name === 'output.weight') out.output += bytes;
+    else if (t.name === 'token_embd.weight') out.tokenTable += bytes;
+    else if (bytes >= 2 ** 30) out.tables.push({ name: t.name, bytes });
+    else out.other += bytes;
+  }
+  if (!expertLayers.size) return null;
+  const top = Math.max(...rest.keys());
+  out.layerRest = Array.from({ length: top + 1 }, (_, i) => Math.round(rest.get(i) ?? 0));
+  out.expertLayer = Math.round(experts / expertLayers.size);
+  return out;
+}
+
+/** The family most of a file's weight bytes are in (the 1-D tensors, norms and biases, left out); null when it cannot be read. */
+export async function quantFamily(path: string): Promise<QuantFamily | null> {
+  try {
+    const tensors = await tensorsOf(path);
+    const bytes = new Map<QuantFamily, number>();
+    for (const t of tensors) {
+      const size = TYPE_SIZE[t.type];
+      if (!size || t.dims.length < 2) continue;
+      const f = familyOfType(t.type);
+      bytes.set(f, (bytes.get(f) ?? 0) + (t.dims.reduce((a, b) => a * b, 1) / size[1]) * size[0]);
+    }
+    return [...bytes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const num = (v: Value | undefined): number => (typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : 0);
 
 /** The model's shape from its header values. Null when the numbers needed are missing. */
@@ -243,7 +374,7 @@ export function shapeOf(h: Map<string, Value>): ModelShape | null {
   const words = h.get('tokenizer.ggml.tokens');
   const kind = h.get('tokenizer.ggml.model');
   const vocab = typeof kind === 'string' && kind && typeof words === 'string' && /^\d+:[0-9a-f]+$/.test(words) ? `${String(h.get('tokenizer.ggml.model') ?? '')}|${words.split(':')[0]}|${num(h.get('tokenizer.ggml.bos_token_id'))}|${num(h.get('tokenizer.ggml.eos_token_id'))}|${words.split(':')[1]}` : '';
-  return { arch, layers, attentionLayers, kvHeads, keyLength, valueLength, trainedContext: num(g('context_length')), experts: num(g('expert_count')), swaWindow: swaEvery ? swaWindow : 0, swaEvery, ...(mtp > 0 ? { mtp } : {}), ...(vocab ? { vocab } : {}) };
+  return { arch, layers, attentionLayers, kvHeads, keyLength, valueLength, trainedContext: num(g('context_length')), experts: num(g('expert_count')), ...(num(g('expert_used_count')) > 0 ? { expertsUsed: num(g('expert_used_count')) } : {}), swaWindow: swaEvery ? swaWindow : 0, swaEvery, ...(mtp > 0 ? { mtp } : {}), ...(vocab ? { vocab } : {}) };
 }
 
 export const CACHE_BYTES: Record<string, number> = { f16: 2, q8_0: 34 / 32, q4_0: 18 / 32 };
@@ -264,7 +395,7 @@ export async function modelShape(path: string): Promise<ModelShape | null> {
   if (!s) return null;
   const key = `${path}|${s.size}|${s.mtimeMs}`;
   if (!cache.has(key)) {
-    const archKeys = /^(general\.architecture|[\w.]+\.(block_count|attention\.head_count(_kv)?|attention\.(key|value)_length|embedding_length|context_length|expert_count|full_attention_interval|attention\.sliding_window(_pattern)?|nextn_predict_layers)|tokenizer\.ggml\.(model|tokens|bos_token_id|eos_token_id))$/;
+    const archKeys = /^(general\.architecture|[\w.]+\.(block_count|attention\.head_count(_kv)?|attention\.(key|value)_length|embedding_length|context_length|expert_count|expert_used_count|full_attention_interval|attention\.sliding_window(_pattern)?|nextn_predict_layers)|tokenizer\.ggml\.(model|tokens|bos_token_id|eos_token_id))$/;
     cache.set(key, readHeader(path, k => archKeys.test(k)).then(shapeOf).catch(() => null));
   }
   return cache.get(key)!;

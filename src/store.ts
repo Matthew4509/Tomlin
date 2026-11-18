@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { POLITE, cleanSearch, type SearchSetting, type ToolUse } from './webtools.ts';
 import { cleanPermissions, type Permissions } from './permits.ts';
 import type { Asked } from './worker.ts';
+import type { HeldRunner } from './runtimes.ts';
 import { cleanShared, type SharedModel } from './nodestaff.ts';
+import { cleanCluster, onlyLinked, type ClusterSet } from './cluster/members.ts';
 import { readData, updateData, writeAtomic } from './atomic.ts';
 
 export interface PaneSettings {
@@ -45,6 +47,8 @@ export interface Settings {
   jobModels: Record<string, string>;
   /** Worker PCs this one has paired with (the token is this PC's key to that worker). */
   remotes: Remote[];
+  /** The cluster entry: a saved set of linked PCs with one on/off switch (src/cluster/members.ts). */
+  cluster: ClusterSet;
   /** Retired in 2.0.30 ("Keep loaded" was dropped): kept in the file for older copies, read by nothing. */
   keep: string[];
   /** The chat open now (an id from src/chats.ts); '' = none yet: the first message starts one. */
@@ -88,9 +92,15 @@ export interface RunOptions {
   draftMax?: number;
   /**
    * The card runner it starts on, on a PC with more than one (unset: Auto, the CUDA build that suits the card first):
-   * 'cuda' is the CUDA 12.4 build, 'cuda13' the CUDA 13.4 one. Not installed there, or not usable there: Auto.
+   * 'cuda' is the CUDA 12.4 build, 'cuda13' the CUDA 13.4 one, or any pinned chat card runner by its id ('llama-cuda2').
+   * Not installed there, or not usable there: Auto.
    */
-  runner?: 'cuda' | 'cuda13' | 'vulkan';
+  runner?: HeldRunner;
+  /**
+   * After a crash of this model's runner here, move it to the next runner that can run it, without asking each time
+   * (src/faults.ts fallbackPick). Only set by a yes in the crash notice; unset: the notice asks.
+   */
+  fallback?: true;
   /**
    * The graphics cards it runs on, as every runner names them (src/devices.ts: "CUDA0", "Vulkan1"); unset: Auto, every
    * card. A card none of the runner's names match is not used; none left: Auto.
@@ -123,6 +133,24 @@ export interface Remote {
   /** "Backups only": a PC kept for backups (a storage box). No hire, chat, job or picture is sent to it, no model is
    * copied to it, and it is first in line for project backups. Set here, on this PC; that PC is not told. */
   backupsOnly?: boolean;
+  /** That PC's network card address, learned while it was awake and kept so it can be woken (wake-on-LAN) when it sleeps. */
+  mac?: string;
+  /** The computer's own name (Windows'), as it said in its hello: tells apart two PCs that both call themselves "Worker PC". */
+  computer?: string;
+  /**
+   * "Don't borrow from it" (Max mode): this PC never borrows that PC's card and RAM, even when its owner ticked "Allow to
+   * be used as part of a cluster" there. Off unless ticked: that one tick on the lending PC is the permission. Set here;
+   * TOMLIN_MAX, when it names PCs, overrides. (2.0.89 and before saved `borrowMax`, a tick needed as well: now ignored.)
+   */
+  noBorrow?: boolean;
+  /** 'guest': this PC is linked there with a guest pass (that PC said so in its hello). Absent: as its admin. */
+  role?: 'guest';
+  /** When the guest pass there ends, as that PC said (null: no end). */
+  expires?: string | null;
+  /** The guest pass there ended (expired: this PC may ask its host for more) or was removed; what that PC said of a request. */
+  passEnd?: { state: 'expired' | 'removed'; at: string; canAsk?: boolean; ask?: { state: string; at: string; reason: string } | null } | null;
+  /** A request to the host typed here while that PC did not answer: sent when it does. */
+  askOut?: { text: string; at: string } | null;
 }
 
 export const DEFAULT_RUN: RunOptions = { ctx: 8192, cache: 'f16', place: 'auto' };
@@ -165,7 +193,7 @@ export interface ChatLine {
   recalled?: boolean;
 }
 
-const DEFAULT_PANE: PaneSettings = { model: null, asked: 'auto', threads: 0, idleMinutes: 0 };
+const DEFAULT_PANE: PaneSettings = { model: null, asked: 'auto', threads: 0, idleMinutes: 10 };
 
 export class Store {
   readonly dir: string;
@@ -207,7 +235,8 @@ export class Store {
     // A file that is not an object (null, a list) holds no settings: it reads as none, so TOMLIN still starts.
     const s = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Partial<Settings>;
     // Fields this version does not know (written by a newer copy) are carried through, so going back never erases them.
-    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), permissions: cleanPermissions(s.permissions), jobModels: s.jobModels ?? {}, remotes: (Array.isArray(s.remotes) ? s.remotes : []).filter(r => r && typeof r === 'object').map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    this.cache ??= { ...s, chat: { ...DEFAULT_PANE, ...s.chat }, image: { ...DEFAULT_PANE, ...s.image }, loadSeconds: s.loadSeconds ?? {}, timings: s.timings ?? {}, draftDays: s.draftDays ?? 0, who: s.who && s.who !== 'partner' ? s.who : 'standard', tone: s.tone ?? 'natural', imageAs: s.imageAs ?? '', workspace: s.workspace ?? '', run: s.run ?? {}, foldWait: s.foldWait && typeof s.foldWait === 'object' ? s.foldWait : {}, webSearch: cleanSearch(s.webSearch), permissions: cleanPermissions(s.permissions), jobModels: s.jobModels ?? {}, remotes: (Array.isArray(s.remotes) ? s.remotes : []).filter(r => r && typeof r === 'object').map(({ staff: _retired, ...r }: Remote & { staff?: unknown }) => ({ ...r, ...(Array.isArray(r.models) ? { models: cleanShared(r.models) } : {}) })), cluster: cleanCluster(s.cluster), keep: Array.isArray(s.keep) ? s.keep.filter(x => typeof x === 'string') : [], chatId: typeof s.chatId === 'string' ? s.chatId : '', managerName: typeof s.managerName === 'string' ? s.managerName : '', hostModel: typeof s.hostModel === 'string' ? s.hostModel : s.chat?.model ?? '', bigReads: s.bigReads === 'picked' ? 'picked' : 'biggest' };
+    this.cache.cluster = onlyLinked(this.cache.cluster, this.cache.remotes.map(r => r.id));
     POLITE.delay = this.cache.permissions.webDelay;
     return this.cache;
   }
@@ -218,11 +247,11 @@ export class Store {
   }
 
   /** `run` and `jobModels` are merged key by key; `remotes` is replaced whole. */
-  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; foldWait?: Record<string, number>; webSearch?: SearchSetting; permissions?: Permissions; jobModels?: Record<string, string>; remotes?: Remote[]; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
+  async saveSettings(change: { chat?: Partial<PaneSettings>; image?: Partial<PaneSettings>; loadSeconds?: Record<string, number>; timings?: Settings['timings']; draftDays?: number; who?: string; tone?: string; imageAs?: string; workspace?: string; run?: Record<string, RunOptions>; foldWait?: Record<string, number>; webSearch?: SearchSetting; permissions?: Permissions; jobModels?: Record<string, string>; remotes?: Remote[]; cluster?: ClusterSet; keep?: string[]; chatId?: string; managerName?: string; hostModel?: string; bigReads?: 'biggest' | 'picked' }): Promise<Settings> {
     await this.settings();
     // Read after the wait: another save may have changed it meanwhile, and its change must stay.
     const s = this.cache!;
-    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, foldWait: { ...s.foldWait, ...change.foldWait }, webSearch: change.webSearch ?? s.webSearch, permissions: change.permissions ?? s.permissions, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
+    this.cache = { ...s, chat: { ...s.chat, ...change.chat }, image: { ...s.image, ...change.image }, loadSeconds: { ...s.loadSeconds, ...change.loadSeconds }, timings: { ...s.timings, ...change.timings }, draftDays: change.draftDays ?? s.draftDays, who: change.who ?? s.who, tone: change.tone ?? s.tone, imageAs: change.imageAs ?? s.imageAs, workspace: change.workspace ?? s.workspace, run: { ...s.run, ...change.run }, foldWait: { ...s.foldWait, ...change.foldWait }, webSearch: change.webSearch ?? s.webSearch, permissions: change.permissions ?? s.permissions, jobModels: { ...s.jobModels, ...change.jobModels }, remotes: change.remotes ?? s.remotes, cluster: onlyLinked(change.cluster ?? s.cluster, (change.remotes ?? s.remotes).map(r => r.id)), keep: change.keep ?? s.keep, chatId: change.chatId ?? s.chatId, managerName: change.managerName ?? s.managerName, hostModel: change.hostModel ?? s.hostModel, bigReads: change.bigReads ?? s.bigReads };
     POLITE.delay = this.cache.permissions.webDelay;
     const next = this.cache;
     try {

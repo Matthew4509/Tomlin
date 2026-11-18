@@ -297,9 +297,29 @@ export function paramsB(name: string): number | null {
 /** True for a mixture-of-experts model, from its name ("30b-a3b", "moe"). */
 export const isMoe = (name: string): boolean => /[_-]a\d+(?:\.\d+)?b|\bmoe\b/i.test(name);
 
-/** The model's size in billions: from its name, else about 0.6 GB a billion (a Q4 file). */
+/**
+ * About how many bits each weight takes in a model file, from the quantisation in its name ("UD-Q2_K_XL" about 2.7,
+ * "Q8_0" about 8.5, "BF16" 16), or null when the name does not say.
+ */
+export function bitsPerWeight(name: string): number | null {
+  const n = name.replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/i, '');
+  if (/(?:^|[^a-z0-9])f32(?![a-z0-9])/i.test(n)) return 32;
+  if (/(?:^|[^a-z0-9])b?f16(?![a-z0-9])/i.test(n)) return 16;
+  const q = /(?:^|[^a-z0-9])i?q([1-8])(?:_|(?![a-z0-9]))/i.exec(n);
+  const bits: Record<string, number> = { 1: 1.8, 2: 2.7, 3: 3.7, 4: 4.8, 5: 5.6, 6: 6.6, 7: 7.5, 8: 8.5 };
+  return q ? bits[q[1]] : null;
+}
+
+/**
+ * The model's size in billions: from its name, else from its file's size (all its parts, for a split model) at the
+ * bits its quantisation takes (about 0.6 GB a billion, a Q4 file, when the name does not say). A split model's
+ * "-00001-of-00004" is not part of its name.
+ */
 export function sizeB(name: string, bytes: number): number {
-  return paramsB(name) ?? Math.round((bytes / 2 ** 30 / 0.6) * 10) / 10;
+  const plain = name.replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/i, '');
+  const bits = bitsPerWeight(plain);
+  const gbPerB = bits ? (bits / 8) * (1e9 / 2 ** 30) : 0.6;
+  return paramsB(plain) ?? Math.round((bytes / 2 ** 30 / gbPerB) * 10) / 10;
 }
 
 /** The level a model's size belongs to. */
@@ -378,8 +398,18 @@ interface File {
   staff: StaffMember[];
   /** Ids of people who left: never given to a new hire, so nobody inherits their chats, notebook or photo. */
   gone?: string[];
+  /** Who each of them was (by id), so their chats keep their name and picture. */
+  left?: Record<string, Leaver>;
   /** Last audition per "role:model". */
   auditions: Record<string, Audition>;
+}
+
+/** Someone who left the team, as they were: their chats show "Name (left the team)" with their picture. */
+export interface Leaver {
+  name: string;
+  role: string;
+  look?: StaffMember['look'];
+  initials?: true;
 }
 
 /** A hire's models when a linked PC was released: what they were, and `left`, what the release moved them to. */
@@ -523,11 +553,18 @@ export class Staff {
     return m;
   }
 
+  /** Who a leaver was, or undefined (someone who left before leavers were kept by name). */
+  leaver(id: string): Leaver | undefined {
+    const l = this.file.left?.[id];
+    return l && typeof l.name === 'string' ? l : undefined;
+  }
+
   async fire(id: string): Promise<boolean> {
-    const before = this.file.staff.length;
+    const was = this.get(id);
+    if (!was) return false;
     this.file.staff = this.file.staff.filter(m => m.id !== id);
-    if (this.file.staff.length === before) return false;
     this.file.gone = [...new Set([...(this.file.gone ?? []), id])];
+    this.file.left = { ...this.file.left, [id]: { name: was.name, role: was.role, ...(was.look ? { look: was.look } : {}), ...(was.initials ? { initials: true as const } : {}) } };
     await this.save();
     return true;
   }
@@ -536,4 +573,16 @@ export class Staff {
     this.file.auditions[`${role}:${a.model}`] = a;
     await this.save();
   }
+}
+
+/**
+ * What "Draw as" (settings imageAs) becomes when hiring or changing hire `m` with `ask` (POST /api/staff {drawAs}):
+ * their id when asked and they draw; '' when asked not to be it, or when they no longer draw while being it; null to
+ * leave it as it is.
+ */
+export function drawAsChange(ask: unknown, m: { id: string; role: string }, now: string): string | null {
+  const draws = !!roleOf(m.role).kind;
+  if (ask === true && draws) return m.id === now ? null : m.id;
+  if (now === m.id && (ask === false || !draws)) return '';
+  return null;
 }

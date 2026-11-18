@@ -82,7 +82,10 @@ fileEditor.addEventListener('input', () => {
 $('#file-new-form').addEventListener('submit', async e => {
   e.preventDefault();
   const name = $('#file-new').value.trim();
-  if (!name) return;
+  if (!name) {
+    fileFault('Type a name for the new file first, for example notes.md.');
+    return $('#file-new').focus();
+  }
   const r = await saveFile(name.includes('.') ? name : `${name}.md`, '', true);
   if (r) {
     $('#file-new').value = '';
@@ -267,10 +270,13 @@ $('#files-open').addEventListener('click', async () => {
     $('#blog-tone').replaceChildren(...tones.map(t => el('option', { value: t.id, text: t.name })));
     $('#blog-tone').value = app.models?.settings?.tone ?? tones[0]?.id ?? '';
   }
+  const late = app.pageTicket();
   try {
     await loadFiles();
   } catch (e) {
     fileFault(e.message);
   }
+  // Moved on to another page while the list was read: it stays there.
+  if (late()) return;
   app.showAsPage(filesDlg, 'files');
 });

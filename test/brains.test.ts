@@ -120,3 +120,15 @@ test('backups: the same PC and model offered twice is one row; two linked PCs wi
   const labels = pcLabels([{ id: 'a', name: 'Worker PC', url: 'http://192.168.1.20:8741' }, { id: 'b', name: 'Worker PC', url: 'http://192.168.1.31:8741' }, { id: 'c', name: 'Z240', url: 'http://192.168.1.40:8741' }]);
   assert.deepEqual(labels, { a: 'Worker PC (192.168.1.20)', b: 'Worker PC (192.168.1.31)', c: 'Z240' });
 });
+
+test('a Continue sent to a linked PC ends with the person\'s ask, so every node version takes it (F5b)', async () => {
+  const { withContinueAsk, CONTINUE_ASK } = await import('../src/engine.ts');
+  const cut = [{ role: 'system', content: 'S' }, { role: 'user', content: 'Build it' }, { role: 'assistant', content: '<html>half' }];
+  assert.equal(cleanTurns(cut), null, 'the cut answer last is what an older node refused');
+  const sent = withContinueAsk(cut);
+  assert.equal(sent.length, 4);
+  assert.deepEqual(sent.at(-1), { role: 'user', content: CONTINUE_ASK });
+  assert.deepEqual(cleanTurns(sent), sent);
+  const plain = [{ role: 'user', content: 'Hi' }];
+  assert.equal(withContinueAsk(plain), plain, 'a new message is left as it is');
+});

@@ -349,8 +349,9 @@ function openViewer(p) {
   row('Model was given', p.modelPrompt);
   row('Mode', MODE_NAME[p.mode]);
   row('Size', `${p.target.width}×${p.target.height} (drawn at ${p.generated.width}×${p.generated.height}, ${p.fit})`);
-  row('Seed', p.seed);
-  row('Steps / CFG / sampler', `${p.steps} / ${p.cfg} / ${p.sampler}`);
+  // A picture from a linked PC on an older TOMLIN came back with no settings: said, not shown as noughts.
+  row('Seed', p.settingsUnknown ? 'settings unknown (drawn on a linked PC running an older TOMLIN)' : p.seed);
+  if (!p.settingsUnknown) row('Steps / CFG / sampler', `${p.steps} / ${p.cfg} / ${p.sampler}`);
   row('Model', p.modelName);
   row('Ran on', `${p.device}, ${p.seconds} s`);
   row('File', `${p.format.toUpperCase()}, ${Math.round(p.bytes / 1024)} KB${p.transparent ? ', see-through background' : ''}`);
@@ -360,8 +361,8 @@ function openViewer(p) {
   actions.replaceChildren(
     el('a', { class: 'btn primary', href: `${fileUrl(p.output)}?download`, text: 'Download' }),
     el('a', { class: 'btn', href: `${fileUrl(p.original)}?download`, text: 'Download original' }),
-    el('button', { class: 'btn', type: 'button', text: 'Draw again, same seed', onclick: () => { viewer.close(); start('/api/images/again', { id: p.id }); } }),
-    el('button', { class: 'btn', type: 'button', text: p.draft ? 'Full quality' : 'Re-run at full quality', onclick: () => { viewer.close(); start('/api/images/finalise', { id: p.id }); } }),
+    el('button', { class: 'btn', type: 'button', text: 'Draw again, same seed', disabled: !!p.settingsUnknown, title: p.settingsUnknown ? 'The seed is not known: it was drawn on a linked PC running an older TOMLIN' : '', onclick: () => { viewer.close(); start('/api/images/again', { id: p.id }); } }),
+    el('button', { class: 'btn', type: 'button', text: p.draft ? 'Full quality' : 'Re-run at full quality', disabled: !!p.settingsUnknown, onclick: () => { viewer.close(); start('/api/images/finalise', { id: p.id }); } }),
     el('button', { class: 'btn', type: 'button', text: 'Copy prompt', onclick: async e => { try { await navigator.clipboard.writeText(p.prompt); e.target.textContent = 'Copied'; } catch { promptBox.value = p.prompt; e.target.textContent = 'Put in the prompt box'; } } }),
     el('button', { class: 'btn', type: 'button', text: 'Use this prompt', onclick: () => { promptBox.value = p.prompt; viewer.close(); updatePlan(); promptBox.focus(); } }),
     el('button', { class: 'btn', type: 'button', text: 'Set as profile photo', title: 'Choose whose photo it becomes', onclick: e => { viewer.close(); app.pickFace(p, e.target); } }),
@@ -693,3 +694,87 @@ async function drawNodeArtist(staffData) {
   $('#node-artist-line').textContent = `Pictures are drawn on the PC chosen as ${local.name}'s first choice in Staff, and come back here.${/:[^:]+:/.test(local.model) ? ' The model loads there when asked; while it draws for someone else, yours waits.' : " If it has no picture model loaded, this PC's is used."}`;
 }
 app.onModels = () => { drawNodeArtist(); };
+
+// ---- Load previously made images: the image sources in a workspace folder (src/sources.ts) ----
+
+const sourcesBox = $('#sources');
+
+/** A source's words and settings into the form, for Draw (which goes wherever the artist chosen draws, a linked PC too). */
+function sourceToForm(s) {
+  promptBox.value = s.prompt;
+  $('#img-mode').value = s.mode;
+  $('#img-w').value = s.target.width;
+  $('#img-h').value = s.target.height;
+  $('#img-fit').value = ['crop', 'pad', 'stretch'].includes(s.fit) ? s.fit : 'crop';
+  const known = s.settings === 'known';
+  $('#img-random').checked = !known;
+  $('#img-seed').disabled = !known;
+  $('#img-seed').value = known ? s.seed : '';
+  $('#img-steps').value = known ? s.steps : '';
+  $('#img-cfg').value = known ? s.cfg : '';
+  if (known && [...$('#img-sampler').options].some(o => o.value === s.sampler)) $('#img-sampler').value = s.sampler;
+  $('#more-options').open = true;
+  sourcesBox.close();
+  updatePlan();
+  promptBox.focus();
+}
+
+function sourceRow(s) {
+  const known = s.settings === 'known';
+  const draw = seed => async e => {
+    e.target.disabled = true;
+    showFault($('#sources-fault'), null);
+    try {
+      await api('/api/images/from-source', { path: s.path, seed, chat: app.chatId ?? '' });
+      sourcesBox.close();
+      shownJob = null;
+      await poll();
+    } catch (error) {
+      showFault($('#sources-fault'), error.message);
+      e.target.disabled = false;
+    }
+  };
+  return el('div', { class: 'source-row' },
+    el('p', { class: 'source-prompt', text: s.prompt }),
+    el('p', { class: 'hint', text: [
+      s.path,
+      s.pictureThere ? '' : 'the picture file is gone',
+      `${s.target.width}×${s.target.height}`,
+      known ? `seed ${s.seed}, ${s.steps} steps, CFG ${s.cfg}, ${s.sampler}` : 'settings unknown',
+      s.modelName || s.model,
+      s.licence ? `licence: ${s.licence}` : '',
+      s.at ? new Date(s.at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+    ].filter(Boolean).join(' · ') }),
+    el('div', { class: 'source-acts' },
+      el('button', { class: 'btn', type: 'button', text: 'Draw again, same seed', disabled: !known, title: known ? 'On this PC, with the same words, size and settings' : 'The seed is not known: it was drawn on a linked PC running an older TOMLIN', onclick: draw('same') }),
+      el('button', { class: 'btn', type: 'button', text: 'Draw again, new seed', title: 'On this PC: the same words, size and settings, a different picture', onclick: draw('new') }),
+      el('button', { class: 'btn', type: 'button', text: 'Put in the form', title: 'Its words, size, seed and steps go into the form; Draw then sends it to the artist chosen, on this PC or a linked one', onclick: () => sourceToForm(s) })));
+}
+
+async function lookSources() {
+  const line = $('#sources-line');
+  showFault($('#sources-fault'), null);
+  line.textContent = 'Looking…';
+  try {
+    const r = await api(`/api/images/sources?folder=${encodeURIComponent($('#sources-folder').value.trim())}`);
+    $('#sources-list').replaceChildren(...r.sources.map(sourceRow));
+    const n = r.sources.length;
+    line.textContent = [
+      n ? `${n} image source${n === 1 ? '' : 's'}${r.more ? ' (there are more: name a folder to see the rest)' : ''}, newest first.` : 'No image sources in that folder. Pictures drawn before TOMLIN wrote them have none.',
+      r.damaged ? `${r.damaged} could not be read and ${r.damaged === 1 ? 'is' : 'are'} left out.` : '',
+    ].filter(Boolean).join(' ');
+  } catch (error) {
+    line.textContent = '';
+    $('#sources-list').replaceChildren();
+    showFault($('#sources-fault'), error.message);
+  }
+}
+
+$('#g-load').addEventListener('click', () => {
+  if (!sourcesBox.open) sourcesBox.showModal();
+  void lookSources();
+});
+$('#sources-look').addEventListener('click', lookSources);
+$('#sources-folder').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); void lookSources(); }
+});

@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeAtomic } from './atomic.ts';
+import { trimBaks } from './bakcopies.ts';
 
 /** Text files only. */
 // Code in more languages (an answer's code block saved from the chat): source files only, nothing Windows runs on a
@@ -23,12 +24,17 @@ export interface Entry {
 }
 
 /** A relative path inside the workspace, or null when it is not one (absolute, "..", hidden, odd characters, not a text file). */
+const RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
 export function cleanPath(input: unknown, mustBeText = true): string | null {
   const raw = String(input ?? '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
   if (!raw || raw.length > 200 || /[\0<>:"|?*]/.test(raw)) return null;
   const parts = raw.split('/');
   if (parts.some(p => !p || p === '.' || p === '..' || p.startsWith('.') || /[ .]$/.test(p))) return null;
   if (parts.length > MAX_DEPTH + 1) return null;
+  // Windows' device names (CON, AUX, NUL, COM1, LPT1 ...), with or without an extension, are not files: a save made a file
+  // that Explorer could not open or delete (found by the flows soak, aux.md and CON.txt).
+  if (parts.some(p => RESERVED.test(p))) return null;
   if (mustBeText && !TEXT_EXT.has(extname(raw).toLowerCase())) return null;
   return parts.join('/');
 }
@@ -50,9 +56,47 @@ function realFolder(path: string): string {
   }
 }
 
+/** A network folder (\\server\share) or a device's spelling of one (\\?\, \\.\): never a workspace or a models folder. */
+export const isNetworkPath = (path: string) => /^[\\/]{2}/.test(path.trim());
+export const NETWORK_WHY = 'a network folder (\\\\server\\share) cannot be used: another PC could put files there for this one to run. Choose a folder on a drive of this PC';
+
+/**
+ * Why `path` may not be the workspace (null when it may): a network folder, or a folder Windows runs files from or keeps
+ * programs in: anything under AppData (Roaming and Local, which hold the Startup folder Windows runs at sign-in),
+ * ProgramData (the Startup folder for every user), the Windows folder, or Program Files. The folder as typed and the one
+ * it really leads to (through links) are both looked at, by their whole paths, whatever the case of their letters.
+ */
+export function systemFolderWhy(path: string, env: Record<string, string | undefined> = process.env): string | null {
+  if (isNetworkPath(path)) return NETWORK_WHY;
+  const real = realFolder(path);
+  if (isNetworkPath(real)) return NETWORK_WHY;
+  const norm = (p: string) => resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+  const typed = [norm(path), norm(real)];
+  // The Temp folder (inside Local AppData) is the one place there that Windows runs nothing from by itself.
+  const temp = [env.TEMP, env.TMP].filter((t): t is string => !!t && isAbsolute(t)).map(norm);
+  const inTemp = (t: string) => temp.some(x => t === x || t.startsWith(`${x}\\`) || t.startsWith(`${x}/`));
+  if (typed.every(inTemp)) return null;
+  const places: [string | undefined, string][] = [
+    [env.APPDATA, 'AppData, where programs keep their own files (Windows runs what is in its Startup folder there at sign-in)'],
+    [env.LOCALAPPDATA, 'AppData, where programs keep their own files'],
+    [env.ProgramData ?? env.PROGRAMDATA, 'ProgramData, where programs keep their own files (Windows runs what is in its Startup folder there at sign-in)'],
+    [env.SystemRoot ?? env.windir ?? env.WINDIR, 'the Windows folder'],
+    [env.ProgramFiles ?? env.PROGRAMFILES, 'Program Files'],
+    [env['ProgramFiles(x86)'] ?? env['PROGRAMFILES(X86)'], 'Program Files'],
+    [env.ProgramW6432 ?? env.PROGRAMW6432, 'Program Files'],
+  ];
+  for (const [base, name] of places) {
+    if (!base || !isAbsolute(base)) continue;
+    const b = norm(base);
+    if (typed.some(t => t === b || t.startsWith(`${b}\\`) || t.startsWith(`${b}/`))) return `that folder is in ${name}. Choose a folder of your own, such as one in Documents`;
+  }
+  return null;
+}
+
 /**
  * A workspace folder the person typed: '' for the default one, the path when it may be used (absolute, not a drive root,
- * not Windows' own folders), null when not. The quotes Windows' "Copy as path" puts round a path are taken off.
+ * not Windows' own folders, not a network folder, not a folder Windows runs files from: systemFolderWhy), null when not.
+ * The quotes Windows' "Copy as path" puts round a path are taken off.
  */
 export function cleanFolder(input: unknown): string | null {
   const path = String(input ?? '').trim().replace(/^["“”'](.*)["“”']$/, '$1').trim();
@@ -63,6 +107,7 @@ export function cleanFolder(input: unknown): string | null {
   if (p.startsWith('\\\\.\\') || parts.some(x => /[ .]$/.test(x))) return null;
   const windows = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)(\\|$)/i;
   if (!isAbsolute(path) || parts.length < 2 || windows.test(p) || /[\0<>"|?*]/.test(path)) return null;
+  if (systemFolderWhy(path)) return null;
   // The same again for where it really leads: a link can lead to the top of a drive or to Windows' own folders.
   const real = realFolder(path);
   return windows.test(real) || /^[a-z]:\\?$/i.test(real) ? null : path;
@@ -78,8 +123,12 @@ export function overlaps(folder: string, kept: string[]): boolean {
   return kept.map(norm).some(k => f === k || f.startsWith(k + sep) || k.startsWith(f + sep));
 }
 
-/** The full path of a workspace file, checked to stay inside the folder (also through links). Null when it would not. */
-export async function inside(root: string, rel: unknown, mustBeText = true): Promise<string | null> {
+/**
+ * The full path of a workspace file, checked to stay inside the folder (also through links). Null when it would not.
+ * Nor may it lead into a folder Windows runs files from (systemFolderWhy) that the workspace itself is not in: a home
+ * folder as the workspace holds AppData, and its "Start Menu" link leads to the Startup folder four names down.
+ */
+export async function inside(root: string, rel: unknown, mustBeText = true, env: Record<string, string | undefined> = process.env): Promise<string | null> {
   const clean = cleanPath(rel, mustBeText);
   if (!clean) return null;
   const base = await realpath(root).catch(() => null);
@@ -94,7 +143,10 @@ export async function inside(root: string, rel: unknown, mustBeText = true): Pro
   let probe = dirname(full);
   for (;;) {
     const real = await realpath(probe).catch(() => null);
-    if (real) return real === base || real.startsWith(base + sep) ? full : null;
+    if (real) {
+      if (real !== base && !real.startsWith(base + sep)) return null;
+      return real !== base && systemFolderWhy(real, env) && !systemFolderWhy(base, env) ? null : full;
+    }
     const up = dirname(probe);
     if (up === probe) return null;
     probe = up;
@@ -162,17 +214,28 @@ export async function read(root: string, rel: unknown): Promise<{ path: string; 
   return { path: cleanPath(rel)!, text: await readFile(full, 'utf8') };
 }
 
+/**
+ * A PowerShell profile ("profile.ps1", "Microsoft.PowerShell_profile.ps1" and the like): PowerShell runs it each time it
+ * opens from Documents\WindowsPowerShell or Documents\PowerShell, and Documents is a usual workspace, so a model told to
+ * by a page it read could plant one. Never saved, wherever it is asked for.
+ */
+export const isProfileScript = (rel: string): boolean => /(^|\/)([\w.-]*_)?profile\.ps1$/i.test(rel);
+
 /** Saves a file (new or changed). The file as it was is kept once as "name.ext.bak" next to it. */
 export async function save(root: string, rel: unknown, text: unknown, mayCreate = true, keepOlder = false): Promise<{ path: string; created: boolean } | { error: string }> {
   const full = await inside(root, rel);
   if (!full) return { error: 'Use a plain file name with a text or code ending (.md, .txt, .html, .css, .js, .ts, .py, .php, .sql, .json, .java, .cs, .go and the like), inside the workspace.' };
+  if (isProfileScript(cleanPath(rel)!)) return { error: 'A PowerShell profile is not saved here: PowerShell runs it by itself each time it opens. Save the script under another name.' };
   if (typeof text !== 'string') return { error: 'There is no text to save.' };
   if (Buffer.byteLength(text) > MAX_BYTES) return { error: 'That is over 1 MB, too big to save here.' };
   const exists = await stat(full).then(s => s.isFile(), () => false);
   if (!exists && !mayCreate) return { error: 'There is no such file.' };
   await mkdir(dirname(full), { recursive: true });
   // keepOlder (a model's save): the .bak the last save left is not lost to this one, it is kept under a time stamp.
-  if (exists && keepOlder && (await stat(`${full}.bak`).then(s => s.isFile(), () => false))) await copyFile(`${full}.bak`, `${full}.${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}.bak`);
+  if (exists && keepOlder && (await stat(`${full}.bak`).then(s => s.isFile(), () => false))) {
+    await copyFile(`${full}.bak`, `${full}.${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}.bak`);
+    await trimBaks(full);
+  }
   if (exists) await copyFile(full, `${full}.bak`);
   await writeAtomic(full, text);
   return { path: cleanPath(rel)!, created: !exists };

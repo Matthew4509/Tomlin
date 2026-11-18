@@ -13,6 +13,44 @@ export interface ClaudeInfo {
   node: { on: boolean; port: number };
   /** The person's standing rules block (src/rules.ts rulesBlock); '' or unset when off. */
   rules?: string;
+  /** What the app folder is (copyKind); unset = not said. */
+  kind?: CopyKind;
+  /** This PC's install (src/installer.ts places().root) and the copy its current.txt names; null/unset = not installed. */
+  install?: { folder: string; current: { dir: string; version: string } | null } | null;
+}
+
+/**
+ * What the app folder is: "installed" (a version folder in the install folder, which an update replaces with a new one),
+ * "dev" (a git checkout), or "folder" (a copy started from where it was unzipped: Desktop, Downloads, anywhere).
+ */
+export type CopyKind = 'installed' | 'dev' | 'folder';
+export function copyKind(o: { inInstall: boolean; git: boolean }): CopyKind {
+  return o.inInstall ? 'installed' : o.git ? 'dev' : 'folder';
+}
+
+const same = (a: string, b: string) => a.toLowerCase().replace(/[\\/]+$/, '') === b.toLowerCase().replace(/[\\/]+$/, '');
+
+/**
+ * Where the app is, so a pasted prompt does not go stale: an installed copy's folder changes on every update (the
+ * Startup file and the Start menu run the install's program, which starts the copy current.txt names), so Claude is
+ * told to find the copy in use there, or ask the running copy, instead of trusting the folder pasted here.
+ */
+function whereLines(i: ClaudeInfo, api: string): string[] {
+  const ask = `ask GET ${api}/api/claude for the folders of the copy running now`;
+  const current = i.install ? `${i.install.folder.replace(/[\\/]+$/, '')}\\current.txt` : '';
+  if (i.kind === 'installed' && i.install) {
+    const lines = [
+      `App folder: ${i.appFolder} (the installed copy, version ${i.version}).`,
+      `Install folder: ${i.install.folder}. Each update puts the new version in a new folder there, so the app folder changes: the copy in use is the one ${current} names (a folder name there is a folder in the install folder). Read it at the start of each session, or ${ask}.`,
+    ];
+    if (i.install.current && !same(i.install.current.dir, i.appFolder)) lines.push(`Note: ${current} names ${i.install.current.dir} (version ${i.install.current.version}), not this copy.`);
+    return lines;
+  }
+  const what = i.kind === 'dev' ? 'a development checkout' : i.kind === 'folder' ? 'a copy started from this folder, not installed' : '';
+  return [
+    `App folder: ${i.appFolder}${what ? ` (${what})` : ''}. If it is moved or gone, ${ask}.`,
+    ...(i.install ? [`TOMLIN is also installed on this PC, in ${i.install.folder}: the installed program starts the copy ${current} names${i.install.current ? ` (now ${i.install.current.dir}, version ${i.install.current.version})` : ''}. Starting this copy does not change that file.`] : []),
+  ];
 }
 
 /** The version a handover's name carries ("...-SNIPPETS-2.0.42.md" -> [2, 0, 42]), [0, 0, 0] when none. */
@@ -41,13 +79,14 @@ export function claudePrompt(i: ClaudeInfo): string {
     "I have a local network of LLMs, that do a variety of tasks such as coding, graphic design, writing and more.",
     'Your role is to act as the project manager. Assign and queue work to each node, ensure that work is delivered to the correct folders.',
     'You connect to the network via TOMLIN, a local AI app (chat, pictures, staff, jobs, linked PCs). Node.js with TypeScript run directly, no build step.',
-    `App folder: ${i.appFolder}`,
+    ...whereLines(i, api),
     i.handoff ? `START HERE: ${join(i.appFolder, i.handoff)} (read it first).` : 'START HERE: there is no handover file in the app folder; read README.md there first.',
     `My data (never change it): ${i.homeFolder}`,
     `This PC: "${i.pcName}", my own copy running at ${api}. Never restart it.`,
     `This PC as a node: ${i.node.on ? `on, other PCs link to it on port ${i.node.port}` : 'off'}.`,
     '',
     `The network, through my copy's own API at ${api} (JSON in and out). It already holds the links to every PC, so you never need a PIN or a setup code:`,
+    '- GET /api/claude: where this copy is now (app folder, install folder, version, data folder), with this prompt; ask it first when a folder above is gone.',
     '- GET /api/home/pcs: the linked PCs, whether each is on, and what it has loaded.',
     '- GET /api/staff: the staff: each hire\'s id, name, role and the model they start on ("remote:<PC id>:..." is a model on a linked PC).',
     '- GET /api/jobs: the projects ("jobs" are planned; "unplanned" are saved and not planned yet).',

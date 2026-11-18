@@ -28,6 +28,8 @@ export interface ChatInfo {
   think?: boolean;
   /** Web was switched on in this chat's box: the model may search the web and read pages (src/webtools.ts). */
   web?: boolean;
+  /** Max was switched on in this chat's box: for a model that fits this PC alone, linked PCs lend to raise its tokens a second (src/maxmode.ts). */
+  max?: boolean;
   /** Allow for this thread was pressed: the model may use the file tools here without asking (src/filetools.ts). */
   files?: boolean;
   /** Web set to Auto for this thread on the permission card: the web tools are used here without asking (src/permits.ts). */
@@ -187,8 +189,11 @@ export class Chats {
   // A save that fails (a full disk) leaves the list in memory changed and the file not: the list is read from the file
   // again, so a refused rename or new chat never shows as done (and comes undone at the next start).
   private async write(): Promise<void> {
+    // A save that failed a moment ago let the list go: a change made to it meanwhile is not saved, and never as an empty
+    // list over the file (which still holds every chat).
+    if (!this.cache) throw new Error('The list of chats could not be saved just now. Try again.');
     try {
-      await this.store.writeJson(INDEX, this.cache ?? []);
+      await this.store.writeJson(INDEX, this.cache);
     } catch (e) {
       this.cache = null;
       throw e;
@@ -231,7 +236,7 @@ export class Chats {
   }
 
   /** Changes a chat's own facts (fill, the handoff answer); the title and count are kept by saved(). */
-  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'files' | 'webOk' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
+  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'max' | 'files' | 'webOk' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
     const c = (await this.index()).find(x => x.id === id);
     if (!c) return null;
     Object.assign(c, patch);
@@ -262,7 +267,7 @@ export class Chats {
     const base = from.title.replace(/ \(carried on(?: \d+)?\)$/, '');
     const n = (await this.index()).filter(x => x.title.startsWith(`${base} (carried on`)).length;
     // It stays where the old chat was: in its project (Save and picture hand-ins go there), with its Think and Web.
-    Object.assign(c, { title: `${base} (carried on${n ? ` ${n + 1}` : ''})`, named: true, opening, from: from.id, ...(from.project ? { project: from.project } : {}), ...(from.think ? { think: true } : {}), ...(from.web ? { web: true } : {}) });
+    Object.assign(c, { title: `${base} (carried on${n ? ` ${n + 1}` : ''})`, named: true, opening, from: from.id, ...(from.project ? { project: from.project } : {}), ...(from.think ? { think: true } : {}), ...(from.web ? { web: true } : {}), ...(from.max ? { max: true } : {}) });
     await this.write();
     return c;
   }

@@ -17,7 +17,7 @@ openLog(dir);
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 /** Today's "[max]" lines in the log. */
 const lines = () => { try { return readFileSync(logFile()!, 'utf8').split('\n').filter(l => l.includes('[max]')); } catch { return []; } };
-const worker = { id: '3fcca362', name: 'Worker PC' } as Remote;
+const worker = { id: 'a1b2c3d4', name: 'Worker PC' } as Remote;
 
 test('Max mode off (no TOMLIN_MAX): nothing is asked and nothing is written', async () => {
   const before = lines().length;

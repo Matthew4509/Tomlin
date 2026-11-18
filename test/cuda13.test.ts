@@ -29,8 +29,13 @@ const RTX4090 = nv('NVIDIA GeForce RTX 4090', 89, 24 * 2 ** 30);
 const RTX5080 = nv('NVIDIA GeForce RTX 5080', 120, 16 * 2 ** 30);
 
 test('the pins carry the code measured in each build, and both are the same llama.cpp release', () => {
-  assert.deepEqual(C12.cuda, { version: '12.4', native: [86, 89], ptx: [50, 61, 70, 75, 80, 90], driver: '551.61' });
-  assert.deepEqual(C13.cuda, { version: '13.4', native: [86, 89, 120, 121], ptx: [75, 80, 90], driver: '580', jitDriver: '615' });
+  const { crashedOn, mmqIdsFault, ...code12 } = C12.cuda!;
+  assert.deepEqual(code12, { version: '12.4', native: [86, 89], ptx: [50, 61, 70, 75, 80, 90], driver: '551.61' });
+  // Seen to crash on the RTX 3060 (sm 86, driver 560.94 and newer): Auto puts it after the other builds there, Max mode never offers it.
+  assert.deepEqual(crashedOn?.map(c => [c.cc, c.driver]), [[[86], '560.94']]);
+  const { mmqIdsFault: fault13, ...code13 } = C13.cuda!;
+  assert.deepEqual(code13, { version: '13.4', native: [86, 89, 120, 121], ptx: [75, 80, 90], driver: '580', jitDriver: '615' });
+  assert.ok(mmqIdsFault && fault13, 'the b11284 builds carry the expert-matrix fault note');
   assert.equal(C13.engine, 'llama');
   assert.equal(C13.device, 'cuda');
   assert.ok(C13.parts.every(p => p.url.includes('/b11284/') && /^[0-9a-f]{64}$/.test(p.sha256) && p.bytes > 1e8));
@@ -106,16 +111,26 @@ test('why a PC cannot use a build: no NVIDIA card, a card it has no code for (na
 });
 
 test('the order Auto tries the CUDA builds in: code made for the biggest card first, then the older build; one a PC cannot use is left out', () => {
-  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX5080], '581.57'), ['llama-cuda13', 'llama-cuda']);
-  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX4090], '581.57'), ['llama-cuda', 'llama-cuda13']);
-  assert.deepEqual(cudaOrder(PINS, 'llama', [GTX1060], '581.57'), ['llama-cuda']);
-  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX2060], '581.57'), ['llama-cuda']);
-  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX2060], '615.10'), ['llama-cuda', 'llama-cuda13']);
-  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX5080], '576.02'), ['llama-cuda']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX5080], '581.57'), ['llama-cuda13', 'llama-cuda', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX4090], '581.57'), ['llama-cuda', 'llama-cuda13', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [GTX1060], '581.57'), ['llama-cuda', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX2060], '581.57'), ['llama-cuda', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX2060], '615.10'), ['llama-cuda', 'llama-cuda13', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX5080], '576.02'), ['llama-cuda', 'llama-cuda2', 'llama-cuda3']);
   assert.deepEqual(cudaOrder(PINS, 'llama', [], null), []);
+  // Hardware like the one b12250 was tried on (an RTX 3060, driver 560.94 or newer) comes to it first; an older
+  // driver, a different card level or a card with no code for it leaves the usual order. The Z820 held up on it
+  // where the pinned 12.4 build crashed on long web prompts.
+  const RTX3060 = nv('NVIDIA GeForce RTX 3060', 86, 12 * 2 ** 30);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX3060], '560.94'), ['llama-cuda3', 'llama-cuda', 'llama-cuda2']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX3060], '572.16'), ['llama-cuda3', 'llama-cuda', 'llama-cuda2']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX3060], '555.10'), ['llama-cuda', 'llama-cuda2', 'llama-cuda3']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX3060], null)[0], 'llama-cuda3');
+  assert.deepEqual(cudaOrder(PINS, 'llama', [RTX4090], '581.57')[0], 'llama-cuda');
+  assert.deepEqual(cudaOrder(PINS, 'llama', [GTX1060, RTX3060], '581.57')[0], 'llama-cuda', 'a card with no code for it: not first');
   // An old and a new card: the build with code for both first (CUDA 13 has none for the GTX 1060), the other kept
   // for the speed finder to try.
-  assert.deepEqual(cudaOrder(PINS, 'llama', [GTX1060, RTX5080], '581.57'), ['llama-cuda', 'llama-cuda13']);
+  assert.deepEqual(cudaOrder(PINS, 'llama', [GTX1060, RTX5080], '581.57'), ['llama-cuda', 'llama-cuda2', 'llama-cuda3', 'llama-cuda13']);
   assert.deepEqual(cudaOrder(PINS, 'sd', [GTX1060], '581.57'), ['sd-cuda']);
 });
 
@@ -152,7 +167,7 @@ test('the build that runs a device follows the PC\'s order and what is unpacked;
   assert.ok(both.installedPin('llama-cuda'));
   assert.equal(both.id('llama', 'cuda'), 'llama-cuda');
   // Without an order set: every pin of that kind, in the file's order.
-  assert.deepEqual(homeWith([]).order('llama', 'cuda'), ['llama-cuda', 'llama-cuda13']);
+  assert.deepEqual(homeWith([]).order('llama', 'cuda'), ['llama-cuda', 'llama-cuda13', 'llama-cuda2', 'llama-cuda3']);
 });
 
 test('a model held to a build: kept only as CUDA 12, CUDA 13 or Vulkan, each naming its own build and device', () => {

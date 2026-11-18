@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { writeAtomic } from './atomic.ts';
 
 export const MAX_DOC_BYTES = 25 * 1024 * 1024;
@@ -70,8 +71,41 @@ function pdfjsLib() {
   return pdfjsLoaded;
 }
 
-/** Each page's text, in order, from a PDF's bytes (PDF.js, without drawing anything). */
-export async function pdfPages(bytes: Uint8Array): Promise<string[]> {
+/** The most memory (MB) and time a PDF's reading may take before it is stopped. */
+export const PDF_MEMORY_MB = 768;
+export const PDF_TIME_MS = 90_000;
+
+/**
+ * Each page's text, in order, from a PDF's bytes. Read in a thread of its own (src/pdfread.ts), with its own memory
+ * limit and a time limit: a PDF made to use up memory or to take for ever stops that thread only, and is said so in
+ * plain words. `o` is for the tests.
+ */
+export function pdfPages(bytes: Uint8Array, columns = false, o: { ms?: number; memoryMb?: number } = {}): Promise<string[]> {
+  const ms = o.ms ?? PDF_TIME_MS;
+  return new Promise<string[]>((resolve, reject) => {
+    let w: Worker;
+    try {
+      w = new Worker(new URL('./pdfread.ts', import.meta.url), { workerData: { bytes, columns }, resourceLimits: { maxOldGenerationSizeMb: o.memoryMb ?? PDF_MEMORY_MB, maxYoungGenerationSizeMb: 64 } });
+    } catch (e) {
+      return reject(new Error(`it could not be read (${(e as Error).message})`));
+    }
+    let over = false;
+    const end = (then: () => void) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      void w.terminate().catch(() => undefined);
+      then();
+    };
+    const timer = setTimeout(() => end(() => reject(new Error(`it took longer than ${Math.round(ms / 1000)} seconds to read, so its reading was stopped`))), ms);
+    w.once('message', (m: { pages?: string[]; error?: string }) => end(() => (Array.isArray(m.pages) ? resolve(m.pages) : reject(new Error(m.error || 'it could not be read')))));
+    w.once('error', (e: Error & { code?: string }) => end(() => reject(new Error(e.code === 'ERR_WORKER_OUT_OF_MEMORY' || /memory/i.test(e.message) ? 'it needs more memory to read than is allowed here, so its reading was stopped' : e.message))));
+    w.once('exit', () => end(() => reject(new Error('it could not be read (its reading stopped part-way)'))));
+  });
+}
+
+/** The same, read in this thread: only src/pdfread.ts calls it, in a thread of its own with its limits. */
+export async function pdfPagesHere(bytes: Uint8Array, columns = false): Promise<string[]> {
   const pdfjs = await pdfjsLib();
   // PDF.js 6 runs no code from a PDF (its old isEvalSupported switch is gone with the code it turned off).
   const task = pdfjs.getDocument({ data: bytes, disableFontFace: true, useSystemFonts: false, verbosity: 0 });
@@ -86,11 +120,21 @@ export async function pdfPages(bytes: Uint8Array): Promise<string[]> {
       // Each item is a run of text; hasEOL marks the end of a line. Runs on one line are joined with a space when
       // the PDF left no space between them.
       let text = '';
-      for (const item of content.items as Array<{ str?: string; hasEOL?: boolean }>) {
+      // `columns`: a wide gap between two runs on one line is a table's column edge, written " | " (the research
+      // tools' read_document, so a table stays a table). Where the last run ended, to measure the gap.
+      let endX: number | null = null;
+      for (const item of content.items as Array<{ str?: string; hasEOL?: boolean; transform?: number[]; width?: number; height?: number }>) {
         if (typeof item.str !== 'string') continue;
-        if (text && !/\s$/.test(text) && item.str && !/^\s/.test(item.str)) text += ' ';
+        const x = item.transform?.[4];
+        const wide = columns && endX !== null && typeof x === 'number' && item.str.trim() !== '' && x - endX > Math.max(14, (item.height || 10) * 1.6);
+        if (wide) text = `${text.replace(/[ \t]+$/, '')} | `;
+        else if (text && !/\s$/.test(text) && item.str && !/^\s/.test(item.str)) text += ' ';
         text += item.str;
-        if (item.hasEOL) text += '\n';
+        if (item.str.trim() !== '' && typeof x === 'number') endX = x + (item.width ?? 0);
+        if (item.hasEOL) {
+          text += '\n';
+          endX = null;
+        }
       }
       page.cleanup();
       const clean = tidy(text);

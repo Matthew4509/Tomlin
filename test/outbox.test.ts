@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as link from '../src/link.ts';
-import { cleanOwed, cleanRid, KEEP_MS, newRid, Outbox, owedLine, ridOf, settle, withOwedLine, type Follower, type Lock, type Owed } from '../src/outbox.ts';
+import { cleanOwed, cleanRid, KEEP_MS, newRid, Outbox, type KeptCap, owedLine, ridOf, settle, withOwedLine, type Follower, type Lock, type Owed } from '../src/outbox.ts';
 import type { ChatLine } from '../src/store.ts';
 
 const keys = randomBytes(64);
@@ -183,4 +183,33 @@ test('an owed answer that cannot come keeps the words so far and says why', () =
 test('the list of owed answers keeps only well-formed entries', () => {
   assert.deepEqual(cleanOwed([O, { ...O, rid: 'nope' }, { ...O, chatId: '../x' }, null, 'x']), [O]);
   assert.deepEqual(cleanOwed('not a list'), []);
+});
+
+test('each link keeps only so many answers and bytes here: past its cap its own oldest go first, never another link\'s', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'outbox-cap-'));
+  try {
+    const GUEST = 'b2b2b2b2b2b2b2b2';
+    const caps: Record<string, KeptCap> = { [GUEST]: { count: 3, bytes: 1_000_000 }, [OWNER]: { count: 100, bytes: 100_000_000 } };
+    const box = new Outbox(dir, owner => caps[owner]);
+    const answer = async (owner: string, words: string) => {
+      const rid = newRid();
+      const f = follower();
+      box.start(owner, rid, lock, f, async send => send('done', { text: words }));
+      await until(() => f.ended);
+      await wait(20);
+      return rid;
+    };
+    const hosts = [await answer(OWNER, 'host one'), await answer(OWNER, 'host two')];
+    const guests: string[] = [];
+    for (let i = 0; i < 5; i++) guests.push(await answer(GUEST, `guest ${i}`));
+    const kept = async (owner: string, rids: string[]) => (await Promise.all(rids.map(r => box.kept(owner, r, lock)))).map(k => !!k);
+    assert.deepEqual(await kept(GUEST, guests), [false, false, true, true, true], 'the guest keeps its newest 3');
+    assert.deepEqual(await kept(OWNER, hosts), [true, true], 'the host\'s are untouched');
+    // By bytes too: one big answer pushes out the older ones, and is itself kept.
+    caps[GUEST] = { count: 50, bytes: 20_000 };
+    const big = await answer(GUEST, randomBytes(10_000).toString('hex'));
+    assert.deepEqual(await kept(GUEST, [...guests.slice(2), big]), [false, false, false, true]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

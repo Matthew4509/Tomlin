@@ -196,3 +196,36 @@ test('a chat named in an address reads as one named in a body; an address naming
   assert.ok('error' in namedChat(chatQuery(new URLSearchParams(''))));
   assert.ok('error' in namedChat(chatQuery(new URLSearchParams('who=staff%3Amaya'))));
 });
+
+test('a save of the chat list that fails (a full disk) never lets a change made at the same moment save an empty list', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-chats-race-'));
+  try {
+    const store = new Store(dir);
+    const chats = new Chats(store);
+    const a = await chats.create('manager');
+    const b = await chats.create('staff:maya');
+    const real = store.writeJson.bind(store);
+    let refuse: (e: Error) => void = () => undefined;
+    // The next save of the list is held, then refused (the disk is full); every later one goes through.
+    let once = true;
+    store.writeJson = (name: string, value: unknown) => {
+      if (once) {
+        once = false;
+        return new Promise<void>((_, reject) => { refuse = reject; });
+      }
+      return real(name, value);
+    };
+    const first = chats.rename(a.id, 'Not saved');
+    await new Promise(r => setImmediate(r));
+    // The disk refuses the first save, and a second change starts at that very moment.
+    refuse(Object.assign(new Error('no room'), { code: 'ENOSPC' }));
+    const second = chats.rename(b.id, 'Second');
+    await assert.rejects(first);
+    await second.catch(() => undefined);
+    const kept = JSON.parse(await readFile(join(dir, 'chats', 'index.json'), 'utf8')) as ChatInfo[];
+    assert.deepEqual(kept.map(c => c.id).sort(), [a.id, b.id].sort(), 'both chats are still listed in the file');
+    assert.equal((await new Chats(store).list()).length, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

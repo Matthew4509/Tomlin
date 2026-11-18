@@ -16,7 +16,48 @@ export interface Sample {
   read?: number;
   /** Seconds to the first word, when it was timed (tests are). */
   first?: number;
+  /** Seconds from asking to the last word, when it was timed (tests are). */
+  total?: number;
+  /** Whether a test finished with a real answer (tests only). */
+  ok?: boolean;
+  /** What the hardware was when a test ran, so a later change in speed can be traced to a change in the PC. */
+  snap?: Snap;
+  /** The model as it ran. */
+  model?: ModelInfo;
 }
+
+/** The PC at the moment of a test. Every field is optional: a linked PC tells only what its hello carries. */
+export interface Snap {
+  node?: string;
+  gpu?: string;
+  vram?: string;
+  driver?: string;
+  cpu?: string;
+  ram?: string;
+}
+
+/** The model as a test ran it. */
+export interface ModelInfo {
+  name?: string;
+  quant?: string;
+  ctx?: number;
+  backend?: string;
+}
+
+const text = (v: unknown, max = 120) => (typeof v === 'string' ? v.replace(/[\x00-\x1f]/g, ' ').trim().slice(0, max) : '');
+function cleanGroup<T extends object>(raw: unknown, keys: (keyof T & string)[]): T | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = (raw as Record<string, unknown>)[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = Math.round(v);
+    else if (text(v)) out[k] = text(v);
+  }
+  return Object.keys(out).length ? (out as T) : undefined;
+}
+
+/** The quantisation named in a model's file name ("Q4_K_M", "UD-Q2_K_XL", "IQ3_XS", "F16"); '' when it does not say. */
+export const quantOf = (name: string) => /(?:^|[-_.\s])((?:UD-)?(?:I?Q\d(?:_[A-Z0-9]+)*|BF16|F16|F32))(?=$|[-_.\s])/i.exec(name)?.[1].toUpperCase() ?? '';
 
 export interface Track {
   /** The model's name, as shown. */
@@ -41,6 +82,8 @@ export interface Summary {
   test: Sample | null;
   /** Up to 20 recent real answers, oldest first, for the chart. */
   recent: Sample[];
+  /** The kept speed tests, newest first, each with the hardware and model it ran on (the results history). */
+  history: Sample[];
 }
 
 /** The fixed example prompt of a speed test (about 150 words: long enough to measure, short enough to wait for). */
@@ -70,7 +113,20 @@ export function cleanSample(s: Partial<Sample> | null | undefined, at = new Date
   if (!(write > 0 && write < 10_000) || tokens < MIN_TOKENS) return null;
   const read = Number(s?.read);
   const first = Number(s?.first);
-  return { at: typeof s?.at === 'string' ? s.at : at, write: round1(write), tokens, ...(read > 0 && read < 1_000_000 ? { read: round1(read) } : {}), ...(first >= 0 && first < 3600 ? { first: round1(first) } : {}) };
+  const total = Number(s?.total);
+  const snap = cleanGroup<Snap>(s?.snap, ['node', 'gpu', 'vram', 'driver', 'cpu', 'ram']);
+  const model = cleanGroup<ModelInfo>(s?.model, ['name', 'quant', 'ctx', 'backend']);
+  return {
+    at: typeof s?.at === 'string' ? s.at : at,
+    write: round1(write),
+    tokens,
+    ...(read > 0 && read < 1_000_000 ? { read: round1(read) } : {}),
+    ...(first >= 0 && first < 3600 ? { first: round1(first) } : {}),
+    ...(total > 0 && total < 86_400 ? { total: round1(total) } : {}),
+    ...(typeof s?.ok === 'boolean' ? { ok: s.ok } : {}),
+    ...(snap ? { snap } : {}),
+    ...(model ? { model } : {}),
+  };
 }
 
 /** The summary of one track at `now`: expected = the average of fresh real answers once there are a few, else the last test. */
@@ -89,6 +145,7 @@ export function summarise(t: Track | undefined, now = Date.now()): Summary | nul
     average,
     test,
     recent: t.answers.slice(-20),
+    history: [...t.tests].reverse(),
   };
 }
 

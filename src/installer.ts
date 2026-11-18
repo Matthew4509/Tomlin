@@ -12,7 +12,9 @@
 // An install made before the TOMLIN name (Programs\Smart Manager, Smart Manager.exe) keeps its names: see FORMER.
 // Tested in test/installer.test.ts.
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
+import { psQuote } from './psquote.ts';
 
 /** The program in an install folder made with the TOMLIN name. */
 export const EXE = 'TOMLIN.exe';
@@ -99,6 +101,89 @@ export function chooseRoot(typed: string, offered: string, setupDir: string): { 
   return { root };
 }
 
+/** A copy of TOMLIN started from a folder (not installed), found by setup: its folder, version, and whether it keeps its own data/ inside. */
+export interface LooseCopy { dir: string; version: string; ownData: boolean }
+
+/** The names a TOMLIN copy's package.json has had: tomlin, and smart-manager before the TOMLIN name. */
+const COPY_NAMES = new Set(['tomlin', 'smart-manager']);
+/** Folders never looked inside: big, hidden or never a place a person unzips to. */
+const SKIP_DIR = /^(\.|node_modules$|appdata$|application data$|onedrive - |\$recycle\.bin$)/i;
+/** At most this many names per folder are looked at, so a full Downloads folder never slows setup. */
+const LIST_CAP = 800;
+
+/**
+ * Where setup looks for copies of TOMLIN people unzipped and started from a folder: the Desktop and Downloads (two
+ * levels down: "Downloads\tomlin-2.0.70\tomlin-2.0.70" is common when Windows unzips into a folder of the same name),
+ * Documents (two levels), and the user folder itself (one level). TOMLIN_LOOK_IN (folders split by ";", depth 2) replaces
+ * the list; a test install (TOMLIN_INSTALL_ROOT set) looks nowhere unless TOMLIN_LOOK_IN says so.
+ */
+export function lookIn(env: NodeJS.ProcessEnv, desktop: string | null): { dir: string; depth: number }[] {
+  if (env.TOMLIN_LOOK_IN !== undefined) return env.TOMLIN_LOOK_IN.split(';').map(d => d.trim()).filter(Boolean).map(dir => ({ dir, depth: 2 }));
+  if (env.TOMLIN_INSTALL_ROOT) return [];
+  const user = env.USERPROFILE;
+  if (!user) return desktop ? [{ dir: desktop, depth: 2 }] : [];
+  return [
+    ...(desktop ? [{ dir: desktop, depth: 2 }] : []),
+    { dir: join(user, 'Desktop'), depth: 2 },
+    { dir: join(user, 'OneDrive', 'Desktop'), depth: 2 },
+    { dir: join(user, 'Downloads'), depth: 2 },
+    { dir: join(user, 'Documents'), depth: 2 },
+    { dir: join(user, 'OneDrive', 'Documents'), depth: 2 },
+    { dir: user, depth: 1 },
+  ];
+}
+
+/**
+ * The copies of TOMLIN in `places` (see lookIn), outside the install folder `root` and other than `skip` (the setup's
+ * own folder): a folder counts when its package.json names TOMLIN (or an earlier name) and it has src/server.ts. Read
+ * only: nothing is changed. Newest version first; never throws.
+ */
+export function findLooseCopies(places: { dir: string; depth: number }[], root: string, skip: string[] = []): LooseCopy[] {
+  const low = (p: string) => resolve(p).toLowerCase().replace(/[\\/]+$/, '');
+  const inRoot = (p: string) => low(p) === low(root) || low(p).startsWith(`${low(root)}\\`) || low(p).startsWith(`${low(root)}/`);
+  const skipped = new Set(skip.map(low));
+  const seen = new Set<string>();
+  const found: LooseCopy[] = [];
+  const isCopy = (dir: string): string | null => {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
+      return COPY_NAMES.has(String(pkg.name)) && existsSync(join(dir, 'src', 'server.ts')) ? String(pkg.version ?? '?') : null;
+    } catch {
+      return null;
+    }
+  };
+  const visit = (dir: string, depth: number) => {
+    const key = low(dir);
+    if (seen.has(key) || inRoot(dir)) return;
+    seen.add(key);
+    const version = isCopy(dir);
+    if (version) {
+      if (!skipped.has(key)) found.push({ dir: resolve(dir), version, ownData: existsSync(join(dir, 'data', 'settings.json')) });
+      return; // nothing to find inside a copy
+    }
+    if (depth <= 0) return;
+    let names: string[];
+    try {
+      names = readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory() && !SKIP_DIR.test(e.name)).slice(0, LIST_CAP).map(e => e.name);
+    } catch {
+      return;
+    }
+    for (const n of names) visit(join(dir, n), depth - 1);
+  };
+  for (const p of places) visit(p.dir, p.depth);
+  return found.sort((a, b) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0));
+}
+
+/** What setup says about the copies it found, in plain words; [] when none. */
+export function looseCopyLines(copies: LooseCopy[]): string[] {
+  if (!copies.length) return [];
+  return [
+    `Also found ${copies.length === 1 ? 'a copy' : `${copies.length} copies`} of ${NAME} started from a folder (not installed):`,
+    ...copies.map(c => `  ${c.version} in ${c.dir}${c.ownData ? ' (it keeps its own chats inside: keep it until you have checked they are in the installed one)' : ''}`),
+    `Setup does not change ${copies.length === 1 ? 'it' : 'them'}. Once ${NAME} is installed, start it from the Start menu, not from ${copies.length === 1 ? 'that folder' : 'those folders'}; delete ${copies.length === 1 ? 'it' : 'them'} when you no longer need ${copies.length === 1 ? 'it' : 'them'}.`,
+  ];
+}
+
 /** Where everything goes, for this Windows user. Tests move each one with a TOMLIN_* setting. */
 export function places(env: NodeJS.ProcessEnv = process.env): Places {
   const local = env.LOCALAPPDATA ?? join(env.USERPROFILE ?? '', 'AppData', 'Local');
@@ -156,25 +241,79 @@ export function currentCopy(root: string): { name: string; dir: string; version:
 }
 
 /**
- * current.txt follows the version that started (6 Nov slow-start plan, fix 4): once a copy answers, an existing install's
- * current.txt names it (its folder name when it sits in the install folder, else its full path), so switching between
- * versions leaves the one that started last, and the installed program never starts an older one over newer data.
- * Nothing is written when there is no install (no current.txt) or it already names this copy. Never throws.
+ * Whether a copy that started in `dir` may move the install's current.txt onto itself: only an installed one. That is a
+ * copy in the install folder (an install, an in-place update) or one the installed program started (TOMLIN_TRAY=1).
+ * Never a git checkout or worktree (.git beside package.json), a test copy (TOMLIN_DATA set, or started by the test
+ * runner), or a copy started from any other folder: such a stray start once pointed the installed program at a
+ * development folder.
  */
-export function followStarted(dir: string, env: NodeJS.ProcessEnv = process.env): void {
+export function mayFollow(dir: string, root: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.TOMLIN_DATA || env.NODE_TEST_CONTEXT) return false;
+  const full = resolve(dir);
+  if (existsSync(join(full, '.git'))) return false;
+  const inside = resolve(dirname(full)).toLowerCase() === resolve(root).toLowerCase();
+  return inside || env.TOMLIN_TRAY === '1';
+}
+
+/**
+ * current.txt follows the version that started (6 Nov slow-start plan, fix 4): once an installed copy answers (mayFollow),
+ * the install's current.txt names it (its folder name when it sits in the install folder, else its full path), so the
+ * installed program never starts an older one over newer data. Nothing is written when there is no install (no
+ * current.txt), it already names this copy, or the copy is not an installed one. Never throws.
+ */
+export function followStarted(dir: string, env: NodeJS.ProcessEnv = process.env, say?: (line: string) => void): void {
   try {
     const root = places(env).root;
     const file = join(root, CURRENT);
-    if (!existsSync(file)) return;
+    if (!existsSync(file) || !mayFollow(dir, root, env)) return;
     const full = resolve(dir);
     const inside = resolve(dirname(full)).toLowerCase() === resolve(root).toLowerCase();
     const value = inside ? basename(full) : full;
+    // Earlier copies go at every start from the install folder, not only when current.txt moves: updates pushed from a
+    // linked PC, uploaded or pulled add a folder and never took the old ones away (20 of them, 8.5 GB, on one PC).
+    if (inside) void pruneOldCopies(root, basename(full)).then(gone => { if (gone.length) say?.(`Removed ${gone.length} old cop${gone.length > 1 ? 'ies' : 'y'} of TOMLIN (${gone.join(', ')}); the running one and the one before it are kept.`); }, () => undefined);
     if (readFileSync(file, 'utf8').trim() === value) return;
     writeFileSync(`${file}.new`, value);
     renameSync(`${file}.new`, file);
   } catch {
     // The start goes on; the next one tries again.
   }
+}
+
+/**
+ * Removes the copies in the install folder that are not wanted any more: all but the one running and the newest other
+ * (KEEP_COPIES, for going back). Only a folder named like a copy that holds TOMLIN's own package.json; the one
+ * current.txt names is kept whatever its name. Returns the folders removed. Never throws.
+ */
+export async function pruneOldCopies(root: string, running: string): Promise<string[]> {
+  const gone: string[] = [];
+  try {
+    const keep = new Set([running.toLowerCase()]);
+    const named = currentCopy(root)?.name;
+    if (named) keep.add(basename(named).toLowerCase());
+    // The copy current.txt names is judged with the others (and never removed): right after an update pushed from a
+    // linked PC it is the one before the running one, so it is the copy kept for going back, not one more beside it.
+    for (const old of copiesToRemove([...readdirSync(root).filter(n => n !== running), running], running)) {
+      if (keep.has(old.toLowerCase())) continue;
+      const dir = join(root, old);
+      try {
+        const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: string };
+        if (pkg.name !== 'tomlin') continue;
+      } catch {
+        continue; // not a whole copy of TOMLIN: left alone
+      }
+      try {
+        await rm(dir, { recursive: true, force: true });
+        gone.push(old);
+      } catch {
+        // held by a program for now: the next start tries again
+      }
+    }
+  } catch {
+    // nothing is removed
+  }
+  if (gone.length) console.log(`Removed ${gone.length} old cop${gone.length > 1 ? 'ies' : 'y'} of TOMLIN (${gone.join(', ')}); the running one and the one before it are kept.`);
+  return gone;
 }
 
 /**
@@ -204,6 +343,68 @@ export function firstQuestion(installed: string | null, mine: string): { text: s
   return { text: `${NAME} ${installed} is already installed. Update to ${mine}?`, yesDefault: true, go: true };
 }
 
+export type SetupAction = 'update' | 'repair' | 'uninstall' | 'quit';
+/**
+ * What setup offers when a copy is already installed and someone is at the keyboard: it says which copy it found and
+ * where, then Repair | Update | Uninstall (or Quit) by name. Enter takes the default, which is what the one yes/no
+ * question (firstQuestion) would have done: update when this one is newer, Repair when the installed one is newer,
+ * nothing when it is the same version. With no keyboard, firstQuestion is still the whole question.
+ */
+export function actionMenu(installed: string, mine: string, where: string): { intro: string; options: { key: SetupAction; label: string }[]; defaultKey: SetupAction } {
+  const intro = `${NAME} ${installed} is installed in ${where}.`;
+  const repair = { key: 'repair' as const, label: `Repair: check ${NAME} ${installed} and fix what is wrong (it stays ${installed})` };
+  const uninstall = { key: 'uninstall' as const, label: `Uninstall: remove ${NAME} from this PC` };
+  const quit = { key: 'quit' as const, label: 'Quit: change nothing' };
+  if (newer(installed, mine)) return { intro: `${intro} It is newer than this setup (${mine}), so this setup does not replace it.`, options: [repair, uninstall, quit], defaultKey: 'repair' };
+  if (installed === mine) return { intro: `${intro} It is the same version as this setup.`, options: [repair, { key: 'update', label: `Reinstall: copy ${mine} over it again` }, uninstall, quit], defaultKey: 'quit' };
+  return { intro, options: [{ key: 'update', label: `Update: ${installed} to ${mine}` }, repair, uninstall, quit], defaultKey: 'update' };
+}
+
+/** The typed choice: its number, or the first letters of its name (two at least: Re, Up, Un, Qu); Enter = the default; else null (ask again). */
+export function pickAction(typed: string, menu: { options: { key: SetupAction; label: string }[]; defaultKey: SetupAction }): SetupAction | null {
+  const t = typed.trim().toLowerCase();
+  if (!t) return menu.defaultKey;
+  if (/^\d+$/.test(t)) return menu.options[Number(t) - 1]?.key ?? null;
+  if (t.length < 2) return null;
+  const words: Record<string, SetupAction> = { update: 'update', reinstall: 'update', repair: 'repair', uninstall: 'uninstall', quit: 'quit' };
+  // "re" is Repair; Reinstall (the same version again) needs "rei" so the two never collide.
+  const hits = menu.options.filter(o => Object.entries(words).some(([w, k]) => k === o.key && w.startsWith(t) && (w !== 'reinstall' || t.length >= 3)));
+  return hits.length === 1 ? hits[0].key : null;
+}
+
+export type WindowChoice = Exclude<SetupAction, 'quit'>;
+/**
+ * The setup window's first page when a copy is already installed (tools/setup.cs shows it, from `status`): which copy
+ * it found (folder and version), which version this setup holds, and Repair | Update | Uninstall as buttons to click.
+ * The window's own Cancel button is Quit, so it is not one of the choices. `pick` is the one ticked at the start (the
+ * same default as the terminal menu); '' when nothing is ticked (the same version: the window waits for a click).
+ */
+export function windowMenu(installed: string, mine: string, where: string, root: string, home: string): { intro: string; choices: { key: WindowChoice; label: string }[]; pick: WindowChoice | ''; uninstall: string } {
+  const m = actionMenu(installed, mine, where);
+  return {
+    intro: `${m.intro} This setup holds ${NAME} ${mine}. Pick what to do, or Cancel to change nothing.`,
+    choices: m.options.filter((o): o is { key: WindowChoice; label: string } => o.key !== 'quit'),
+    pick: m.defaultKey === 'quit' ? '' : m.defaultKey,
+    uninstall: `This removes ${NAME} ${installed} from ${root}: the program, its copies, its Start menu and desktop shortcuts, its start when this PC starts, and its entry in Settings > Apps.` +
+      ` Your chats, staff, pictures and models in ${home} are kept. Nothing is removed until you click Uninstall.`,
+  };
+}
+
+/**
+ * `install --action update|repair|uninstall`: the setup window's choice, so no yes/no question decides it (with no
+ * keyboard the question's default was taken, and for the same version that default is No: nothing was done).
+ * null: no --action given (the questions decide). Nothing installed: update is a plain install; repair and uninstall
+ * are refused. A choice the menu does not offer (update over a newer copy) is refused.
+ */
+export function actionFlag(flag: string | null, installed: string | null, mine: string): { action: WindowChoice | 'install' } | { error: string } | null {
+  if (flag === null) return null;
+  const a = flag.trim().toLowerCase();
+  if (a !== 'update' && a !== 'repair' && a !== 'uninstall') return { error: `--action must be update, repair or uninstall (not "${flag}").` };
+  if (!installed) return a === 'update' ? { action: 'install' } : { error: `${NAME} is not installed, so there is nothing to ${a}.` };
+  if (!actionMenu(installed, mine, '').options.some(o => o.key === a)) return { error: `${NAME} ${installed} is installed, which is newer than this setup (${mine}), so it is not replaced. Use Repair or Uninstall.` };
+  return { action: a };
+}
+
 /** A yes/no answer: Enter takes the default; y/yes or n/no; anything else asks again (null). */
 export function answer(typed: string, yesDefault: boolean): boolean | null {
   const t = typed.trim().toLowerCase();
@@ -213,8 +414,8 @@ export function answer(typed: string, yesDefault: boolean): boolean | null {
   return null;
 }
 
-/** PowerShell quoting: inside '...' a ' is written twice. */
-const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** PowerShell quoting: inside '...' a ' (or a curly single quote) is written twice (src/psquote.ts). */
+const q = psQuote;
 
 /** The PowerShell that makes one shortcut (.lnk) with the program's own icon. */
 export function shortcutScript(lnk: string, target: string, args = '', icon = `${target},0`): string {
@@ -310,8 +511,8 @@ export function portTakenLine(port: number | string, tomlin: boolean): string {
 
 /** The copies in the install folder that go: all but the one in use and the newest others, KEEP_COPIES in all. */
 export function copiesToRemove(names: string[], current: string): string[] {
-  const copies = names.filter(n => /^(tomlin|shelby)-\d+(\.\d+)+( \(\d+\))?$/.test(n) && n !== current);
-  const ver = (n: string) => n.replace(/^(tomlin|shelby)-/, '').replace(/ \(\d+\)$/, '');
+  const copies = names.filter(n => /^tomlin-\d+(\.\d+)+( \(\d+\))?$/.test(n) && n !== current);
+  const ver = (n: string) => n.replace(/^tomlin-/, '').replace(/ \(\d+\)$/, '');
   copies.sort((a, b) => (newer(ver(a), ver(b)) ? -1 : newer(ver(b), ver(a)) ? 1 : b.localeCompare(a)));
   return copies.slice(KEEP_COPIES - 1);
 }

@@ -53,3 +53,83 @@ test('runnerFetch reads a stream that is quiet for a while, and Stop still ends 
     f.server.close();
   }
 });
+
+/** A made-up runner that writes "ab", then goes quiet for good (a hung runner); a slow start before the first piece is `slowStart`. */
+async function hungRunner(slowStart = 0): Promise<{ base: string; server: Server }> {
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.flushHeaders();
+      setTimeout(() => {
+        res.write('data: {"choices":[{"delta":{"content":"a"}}]}\n\n');
+        res.write('data: {"choices":[{"delta":{"content":"b"}}]}\n\n');
+      }, slowStart);
+    });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  return { base: `http://127.0.0.1:${(server.address() as { port: number }).port}`, server };
+}
+
+test('an answer that has begun and then goes quiet is ended and offered Continue, with the quiet said (F2)', async () => {
+  const f = await hungRunner();
+  try {
+    const seen: string[] = [];
+    const r = await streamChat(f.base, 'qwen3', [{ role: 'user', content: 'Go.' }], t => seen.push(t), new AbortController().signal, 64, { stallMs: 400 });
+    assert.equal(r.text, 'ab', 'what was written is kept');
+    assert.equal(r.cut, true, 'Continue is offered');
+    assert.ok((r.stalled ?? 0) >= 1, 'the quiet is reported');
+    assert.ok('stalled' in r);
+  } finally {
+    f.server.closeAllConnections();
+    f.server.close();
+  }
+});
+
+test('a slow start is not a stall, and the wait before the first word and the longest quiet are reported (F3, F10)', async () => {
+  const f = await fakeRunner(1200);
+  try {
+    const r = await streamChat(f.base, 'qwen3', [{ role: 'user', content: 'Go.' }], () => undefined, new AbortController().signal, 8, { stallMs: 400 });
+    assert.equal(r.text, 'OK');
+    assert.equal(r.stalled, undefined, 'nothing had been written yet, so the wait was not a stall');
+    assert.ok((r.firstWord ?? 0) >= 1, `first word after ${r.firstWord} s`);
+  } finally {
+    f.server.closeAllConnections();
+    f.server.close();
+  }
+});
+
+test('the PC clock put forward an hour while an answer streams is not taken for a stalled runner', async () => {
+  // A made-up runner that writes a piece, thinks for a second (under the 2 s allowed), then writes the rest.
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.flushHeaders();
+      res.write('data: {"choices":[{"delta":{"content":"x"}}]}\n\n');
+      setTimeout(() => {
+        for (let n = 0; n < 14; n++) res.write('data: {"choices":[{"delta":{"content":"x"}}]}\n\n');
+        res.end('data: {"choices":[{"delta":{"content":"!"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      }, 1000);
+    });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const realNow = Date.now;
+  try {
+    let moved = false;
+    const r = await streamChat(base, 'qwen3', [{ role: 'user', content: 'Go.' }], () => {
+      // Windows sets the clock right just after the first piece: an hour forward.
+      if (!moved) {
+        moved = true;
+        Date.now = () => realNow() + 3_600_000;
+      }
+    }, new AbortController().signal, 64, { stallMs: 2000 });
+    assert.equal(r.stalled, undefined, 'not cut as a stall');
+    assert.equal(r.text, 'xxxxxxxxxxxxxxx!');
+  } finally {
+    Date.now = realNow;
+    server.closeAllConnections();
+    server.close();
+  }
+});

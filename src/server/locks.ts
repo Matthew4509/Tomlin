@@ -5,6 +5,8 @@ import { rm } from 'node:fs/promises';
 import { cleanKind, cleanSecret, generateWords, hashSecret, needsRehash, secretMatches, strength, type LockKind } from '../lock.ts';
 import { CODES_FILE, CODE_COUNT, RecoveryCodes, cleanCodesFile, hashCodes, makeCodes, type CodesFile } from '../recovery.ts';
 import { PinGuard } from '../share.ts';
+import * as hostpin from '../hostpin.ts';
+import { HostPins, TryGuard } from '../hostpin.ts';
 import { AppLock, APP_COOKIE, APP_IDLE_CHOICES, APP_LOCK_FILE, DEFAULT_APP_IDLE, cleanAppIdle, cookieValue, type AppLockFile } from '../applock.ts';
 import { DamagedFile } from '../atomic.ts';
 import { json, store } from './core.ts';
@@ -143,27 +145,43 @@ export async function appPinCheck(v: unknown): Promise<{ ok: true } | { status: 
   return { ok: true };
 }
 
-/** Wrong PINs typed on other PCs to update this one: counted per link, apart from the lock screen's (appGuard). */
-const updateGuard = new PinGuard();
+/**
+ * Wrong PINs typed on other PCs to update this one, turn it off, delete a model or give it a host PIN: counted per link
+ * in a file (src/hostpin.ts TryGuard), so a restart forgets none, with longer waits each time; apart from the lock
+ * screen's (appGuard).
+ */
+const updateGuard = new TryGuard(await store.readJson<unknown>(hostpin.TRIES_FILE, {}), f => store.writeJson(hostpin.TRIES_FILE, f));
+/** The host PINs linked hosts gave this PC (src/hostpin.ts), as hashes, by link. */
+const hostPins = new HostPins(await store.readJson<unknown>(hostpin.HELD_FILE, {}), f => store.writeJson(hostpin.HELD_FILE, f));
+const gate = { lock: () => appFile, damaged: () => (appDamaged ? damagedLock(APP_LOCK_FILE) : null), guard: updateGuard, pins: hostPins };
 
 /**
- * This PC's app lock PIN or password, typed on a linked PC to send it an update (audit X2): only someone who knows it
- * (the PC's admin, not a guest, not a program on the other PC) can. Wrong tries count per link (`who`): 5 in 10 minutes
- * stop that link, 20 from all stop every update for 10 minutes, and the lock screen here is never locked by them.
+ * This PC's app lock PIN or password, typed on a linked PC to send it an update (audit X2), turn it off or delete a
+ * model; or the host PIN that link gave it (`host`: what was typed and the link's id). Only someone who knows one (the
+ * PC's admin, not a guest, not a program on the other PC) can. Wrong tries count per link (`who`), on disk: 5 in 10
+ * minutes stop that link (longer each time), 20 from all stop every link for 10 minutes, and the lock screen here is
+ * never locked by them.
  */
-export async function updatePinCheck(v: unknown, who: string): Promise<{ ok: true } | { status: number; error: string }> {
-  if (appDamaged) return { status: 409, error: damagedLock(APP_LOCK_FILE) };
-  if (!appFile) return { status: 409, error: 'has no app lock, so it takes no update from another PC: set one there (the padlock, top right), then update it again' };
-  const w = word();
-  const wait = updateGuard.lockedFor(who) || updateGuard.pausedFor();
-  if (wait) return { status: 429, error: `had too many wrong ${w}s typed for it: wait ${wait} minute${wait > 1 ? 's' : ''}, then update it again` };
-  const secret = cleanSecret(kindOf(), v);
-  if (!secret) return { status: 403, error: `asks for its app lock ${w} (the one that opens TOMLIN there) to take an update` };
-  updateGuard.wrong(who);
-  if (!(await secretMatches(secret, appFile))) return { status: 403, error: `says that ${w} is wrong: type the app lock ${w} that opens TOMLIN there` };
-  updateGuard.right(who);
-  return { ok: true };
+export function updatePinCheck(v: unknown, who: string, forDelete: hostpin.Doing = false, host?: { pin: unknown; link: string | undefined }): Promise<{ ok: true } | { status: number; error: string }> {
+  return hostpin.pinGate(gate, v, who, forDelete, host);
 }
+
+/** The two host-only doors for a host PIN (src/hostpin.ts), for a link that is not a guest's. */
+export function hostPinDoor(p: string, b: Record<string, unknown>, who: { key: string; link: string; name: string; guest: boolean }, pcName: () => string) {
+  return hostpin.hostPinDoor(p, b, who, { pcName, check: updatePinCheck, pins: hostPins });
+}
+
+/** Whether the link `link` (its whole id) gives this PC a host PIN: told to that link only, in its hello. */
+export const hostPinHeld = (link: string | undefined) => !!hostPins.get(link);
+
+/**
+ * The linked hosts that gave this PC a host PIN, for its Network page (`alive`: the ids of the links there are now; one
+ * of a link removed since is not shown, and is taken away when the link is removed: src/jobrun/node.ts setShare).
+ */
+export const hostPinsHere = (alive: string[]) => hostPins.list().filter(x => alive.includes(x.id));
+
+/** This PC's owner takes a host PIN away (by the link's id as the page shows it); true when there was one. */
+export const hostPinDrop = (id: string) => hostPins.drop(id);
 
 export async function appLockAction(req: IncomingMessage, res: ServerResponse, b: Record<string, unknown>): Promise<void> {
   const wait = appGuard.lockedFor('local');

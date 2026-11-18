@@ -74,7 +74,9 @@ async function notebookList(scope, title, hint) {
   const form = el('form', { class: 'nb-add' }, add, addBtn);
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    if (add.value.trim() && (await act({ action: 'add', text: add.value }))) add.value = '';
+    // Add with the box empty: the box takes the keyboard, so the press does not look dead.
+    if (!add.value.trim()) return add.focus();
+    if (await act({ action: 'add', text: add.value })) add.value = '';
   });
   box.append(list, undo, fault, form);
   try {

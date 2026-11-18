@@ -3,8 +3,9 @@
 // A runner is ended only when its program path AND its start time match what was written: a process number Windows
 // has since given to something else is never touched.
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeAtomicSync } from './atomic.ts';
 
 export type Started = { pid: number; exe: string; at: number };
 
@@ -14,7 +15,8 @@ let list: Started[] = [];
 function save(): void {
   if (!file) return;
   try {
-    writeFileSync(file, JSON.stringify(list));
+    // Whole or not at all: a full disk never leaves an empty list, which would forget runners left behind.
+    writeAtomicSync(file, JSON.stringify(list));
   } catch {
     // A note that cannot be written only means a clean-up after a crash is missed.
   }

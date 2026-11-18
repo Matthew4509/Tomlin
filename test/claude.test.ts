@@ -1,7 +1,7 @@
 // Connect Claude: the prompt makes Claude the project manager, reaching the network through this copy's own API, and never holds anything secret.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claudePrompt, newestHandoff, type ClaudeInfo } from '../src/claude.ts';
+import { claudePrompt, copyKind, newestHandoff, type ClaudeInfo } from '../src/claude.ts';
 
 const info: ClaudeInfo = {
   version: '2.0.31',
@@ -42,4 +42,33 @@ test('nothing secret can reach the prompt: it is built only from these fields', 
   // The info has no field for a PIN, a setup code or a link key; extra fields are not read.
   const p = claudePrompt({ ...info, code: 'ABCD-EFGH', pin: '123456', key: 'secret' } as never);
   assert.doesNotMatch(p, /ABCD-EFGH|123456|secret/);
+});
+
+test('what the app folder is: installed, a dev checkout, or a folder copy', () => {
+  assert.equal(copyKind({ inInstall: true, git: false }), 'installed');
+  assert.equal(copyKind({ inInstall: false, git: true }), 'dev');
+  assert.equal(copyKind({ inInstall: false, git: false }), 'folder');
+});
+
+test('an installed copy: the prompt names the install folder and current.txt, since the version folder changes on update', () => {
+  const install = { folder: 'D:\\Apps\\TOMLIN', current: { dir: 'D:\\Apps\\TOMLIN\\tomlin-2.0.31', version: '2.0.31' } };
+  const p = claudePrompt({ ...info, appFolder: 'D:\\Apps\\TOMLIN\\tomlin-2.0.31', kind: 'installed', install });
+  assert.ok(p.includes('App folder: D:\\Apps\\TOMLIN\\tomlin-2.0.31 (the installed copy, version 2.0.31).'));
+  assert.ok(p.includes('Install folder: D:\\Apps\\TOMLIN.'));
+  assert.ok(p.includes('the copy in use is the one D:\\Apps\\TOMLIN\\current.txt names'));
+  assert.ok(p.includes('ask GET http://127.0.0.1:8740/api/claude'));
+  assert.ok(p.includes('- GET /api/claude: where this copy is now'));
+  assert.doesNotMatch(p, /^Note: /m);
+  // current.txt already names another copy: said.
+  const moved = claudePrompt({ ...info, appFolder: 'D:\\Apps\\TOMLIN\\tomlin-2.0.31', kind: 'installed', install: { ...install, current: { dir: 'D:\\Apps\\TOMLIN\\tomlin-2.0.32', version: '2.0.32' } } });
+  assert.ok(moved.split('\n').includes('Note: D:\\Apps\\TOMLIN\\current.txt names D:\\Apps\\TOMLIN\\tomlin-2.0.32 (version 2.0.32), not this copy.'));
+});
+
+test('a folder copy (unzipped on the Desktop) or a dev checkout: said, with the install when this PC has one', () => {
+  const p = claudePrompt({ ...info, appFolder: 'C:\\Users\\sam\\Desktop\\tomlin-2.0.31', kind: 'folder', install: null });
+  assert.ok(p.includes('App folder: C:\\Users\\sam\\Desktop\\tomlin-2.0.31 (a copy started from this folder, not installed). If it is moved or gone, ask GET'));
+  assert.doesNotMatch(p, /also installed/);
+  const d = claudePrompt({ ...info, kind: 'dev', install: { folder: 'C:\\Programs\\TOMLIN', current: { dir: 'C:\\Programs\\TOMLIN\\tomlin-2.0.30', version: '2.0.30' } } });
+  assert.ok(d.includes('(a development checkout)'));
+  assert.ok(d.includes('TOMLIN is also installed on this PC, in C:\\Programs\\TOMLIN: the installed program starts the copy C:\\Programs\\TOMLIN\\current.txt names (now C:\\Programs\\TOMLIN\\tomlin-2.0.30, version 2.0.30). Starting this copy does not change that file.'));
 });

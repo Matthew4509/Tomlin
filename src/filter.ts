@@ -9,6 +9,8 @@
 // when it was innocent. They cannot recognise every real person (a single first name, or a lower-case full name, gets
 // through). test/filter.test.ts is a release blocker.
 
+import { INVISIBLE } from './promptscan.ts';
+
 export type Verdict = { ok: true } | { ok: false; reason: 'minor' | 'real-person'; words: string };
 
 export const REFUSAL: Record<'minor' | 'real-person', string> = {
@@ -24,7 +26,7 @@ const LEET: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '
  * ("teeeen" -> "teen"; variants() also tries one, for "loooli"). */
 export function plain(text: string): string {
   return text.normalize('NFKD').replace(/[̀-ͯ]/g, '')
-    .replace(/[­​-‏⁠﻿]/g, '')
+    .replace(INVISIBLE, '')
     .replace(/[‘’ʼ`]/g, "'").replace(/[“”]/g, '"').replace(/[‐-―]/g, '-')
     .toLowerCase()
     .replace(/([a-z])\1{2,}/g, '$1$1');

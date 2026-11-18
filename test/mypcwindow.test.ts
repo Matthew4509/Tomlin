@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const pcs = readFileSync(new URL('../public/pcs.js', import.meta.url), 'utf8');
+const pcs = readFileSync(new URL('../public/pcs.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
 const drawn = /body\.replaceChildren\(head,[^\n]*/.exec(pcs)?.[0] ?? '';
 
@@ -26,8 +26,13 @@ test('nothing is taken away: specs, tokens, most-used models and the name all si
 });
 
 test('the top says it at a glance: a picture, the name, on or off, one line of specs, the version', () => {
-  const head = /const head = el\('div', \{ class: 'pc-head' \}[\s\S]*?\n\s*go, manage\);/.exec(pcs)?.[0] ?? '';
+  const head = /const head = el\('div', \{ class: 'pc-head' \}[\s\S]*?\n\s*manage\);/.exec(pcs)?.[0] ?? '';
   assert.match(head, /pcPicture\(v\)/);
+  // The buttons of a linked PC sit in a row under it: Update (a tick when up to date) and Shut down.
+  const row = /const actions = null|let actions = null;[\s\S]*?\n    \}\n/.exec(pcs)?.[0] ?? '';
+  for (const word of ["'Shut down'", "'Up to date'", 'v.off?.can', 'powerOffWithPin']) assert.ok(row.includes(word), word);
+  assert.match(pcs, /body\.replaceChildren\(head, actions \?\? ''/);
+  assert.match(css, /\.pc-actions \{[^}]*flex-wrap: wrap/);
   assert.match(head, /specLine\(v\)/);
   assert.match(pcs, /const specLine = v =>/);
   assert.match(css, /\.pc-head-pic/);
@@ -66,4 +71,29 @@ test('Hire staff says plainly where the other models are', () => {
   const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
   assert.match(hire, /available from across your network./);
   assert.doesNotMatch(hire, /has not got. Copy one there/);
+});
+
+test('a PC that did not answer: its reason takes a full row, so the name and the Off chip keep their room', () => {
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.pc-dlg \.pc-head-name \+ \.pc-head-ver\.fault-line \{[^}]*grid-column: 1 \/ -1/);
+  assert.match(css, /\.pc-head-chip \{ white-space: nowrap; \}/);
+});
+
+test('a version or build mismatch takes a full row under the name, specs and button (they wrapped a word to a line)', () => {
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  const pcs = readFileSync(new URL('../public/pcs.js', import.meta.url), 'utf8');
+  assert.match(pcs, /!fine && !v\.fault \? ' long-line' : ''/);
+  assert.match(css, /\.pc-dlg \.pc-head-name \+ \.pc-head-ver\.long-line \{[^}]*grid-column: 1 \/ -1[^}]*grid-row: 2/);
+});
+
+test('Models: free space on each drive is said above Free up space (a PC that lists no drives gives its one drive)', () => {
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  const part = /function modelsPart\(v\) \{[\s\S]*?\n  \}\n/.exec(pcs)?.[0] ?? '';
+  assert.match(part, /el\('div', \{ class: 'pc-free' \}, freeSpaceLine\(v\), free\)/, 'the line sits in the same column as the button, above it');
+  const line = /function freeSpaceLine\(v\) \{[\s\S]*?\n  \}\n/.exec(pcs)?.[0] ?? '';
+  assert.match(line, /v\.drives\?\.length/);
+  assert.match(line, /Free space: \$\{words\}/);
+  assert.match(line, /on the drive it keeps its data on/, 'an older PC names the one drive it reports');
+  assert.match(css, /\.pc-free \{[^}]*flex-direction: column/);
+  assert.match(css, /\.pc-free \.pc-free-space \{[^}]*font-size: 12px/, 'no text under 12px');
 });

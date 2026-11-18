@@ -39,6 +39,9 @@ export interface Told {
   open: string;
 }
 
+/** The hires the speed and crash tests make ("Speed Test", "Crash Test"): their answers are not news, so no sound or pop-up. */
+export const isTestHire = (name: string): boolean => /^(speed|crash) test$/i.test(name.trim());
+
 /** A job event worth telling, worded with the person who did it ("the coder" when nobody was hired), or null. */
 export function jobTold(e: JobEvent, who: (role: string | null) => string): { event: Event; text: string; role: string | null } | null {
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -59,16 +62,27 @@ export const chatTold = (name: string): string => `${name} answered.`;
 
 const xml = (s: string) => s.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]!);
 
-/** The PowerShell lines that show one silent notification; a click opens `url` in the browser. */
+/** The notification itself, as Windows reads it: silent, and a click opens `url` in the browser. */
+export function toastXml(text: string, url: string): string {
+  // Control characters are not allowed in XML (the notification would not show), and a line is all there is room for.
+  const words = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 300);
+  return `<toast activationType="protocol" launch="${xml(url)}"><visual><binding template="ToastGeneric"><text>TOMLIN</text><text>${xml(words)}</text></binding></visual><audio silent="true"/></toast>`;
+}
+
+/**
+ * The PowerShell lines that show one silent notification. The words (a hire's, a chat's or a linked PC's name) never
+ * stand in the script as text: they cross as base64, since PowerShell ends a quoted string at a curly quote too, so a
+ * name holding one cut the script short (the notification was lost) or ran what followed it as a command.
+ */
 export function toastScript(text: string, url: string): string {
-  const doc = `<toast activationType="protocol" launch="${xml(url)}"><visual><binding template="ToastGeneric"><text>TOMLIN</text><text>${xml(text)}</text></binding></visual><audio silent="true"/></toast>`;
+  const doc = Buffer.from(toastXml(text, url), 'utf8').toString('base64');
   // Windows PowerShell's own app id: a notification needs a registered app, and this one is on every Windows PC.
   const app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';
   return [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
     '$x = New-Object Windows.Data.Xml.Dom.XmlDocument',
-    `$x.LoadXml('${doc.replace(/'/g, "''")}')`,
+    `$x.LoadXml([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${doc}')))`,
     `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('${app}').Show([Windows.UI.Notifications.ToastNotification]::new($x))`,
   ].join('\n');
 }
@@ -143,6 +157,8 @@ export class Notifier {
   /** Tells one event (the caller has already checked Mute). The same words within 5 seconds are told once. */
   async tell(event: Event, text: string, open: string, now = Date.now()): Promise<Told | null> {
     if ((this.lastText.get(text) ?? 0) > now - 5000) return null;
+    // Only the last 5 seconds' words matter: older ones go (every text told stayed for as long as TOMLIN ran).
+    for (const [k, at] of this.lastText) if (at <= now - 5000) this.lastText.delete(k);
     this.lastText.set(text, now);
     const t: Told = { seq: ++this.seq, at: new Date(now).toISOString(), event, text, open };
     this.told = [...this.told, t].slice(-20);

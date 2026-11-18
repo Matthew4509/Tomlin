@@ -1,12 +1,15 @@
 // Chat models from Hugging Face: search, sizes, one download at a time; and models in another folder.
 import { statSync } from 'node:fs';
-import { readFile, statfs } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { totalmem } from 'node:os';
 import { cursorPlaces, fetchChecked, hfUrl, lookUpHf, searchHf, usualModel, type HfLookup } from '../download.ts';
-import { isMoe, ordered, pick } from '../hflist.ts';
-import { GB, HOME, type Routes, chatModels, hfList, json } from './core.ts';
+import { hasVisionFlags, isMoe, ordered, pick } from '../hflist.ts';
+import { capsPass, cleanKinds } from '../capabilities.ts';
+import { GB, HOME, type Routes, chatModels, hfList, json, modelsHome } from './core.ts';
+import { SPARE, drives, freeOn, otherDriveHint } from '../modelhome.ts';
 import { writeAtomic } from '../atomic.ts';
+import { isNetworkPath, NETWORK_WHY } from '../workspace.ts';
 import { cardFit, fitsRoom } from '../calc.ts';
 import { cardMem, chatCards, fit, images, loadShapes } from './panes.ts';
 
@@ -18,6 +21,8 @@ const hfSaid = (error: unknown) => ((error as Error).name === 'TimeoutError' ? '
 
 /** A Get being looked up (before hfJob exists). */
 let hfStarting = false;
+/** A chat model is downloading now (the folder models are kept in is not changed meanwhile). */
+export const hfBusy = () => hfStarting || hfJob?.state === 'downloading';
 const hfView = () => (hfJob ? { repo: hfJob.repo, name: hfJob.name, state: hfJob.state, got: hfJob.got, bytes: hfJob.bytes, error: hfJob.error } : null);
 
 /**
@@ -34,6 +39,8 @@ export function lookCached(repo: string): Promise<HfLookup> {
   const hit = hfLooked.get(repo);
   if (hit && Date.now() - hit.at < 30 * 60_000) return hit.got;
   const got = lookUpHf(`https://huggingface.co/${repo}`);
+  // One older than the half hour is never used again: it goes (each search kept up to 30 repos' file lists for good).
+  for (const [k, v] of hfLooked) if (Date.now() - v.at >= 30 * 60_000) hfLooked.delete(k);
   hfLooked.set(repo, { at: Date.now(), got });
   got.catch(() => hfLooked.delete(repo));
   return got;
@@ -45,7 +52,7 @@ async function hfSizes(repo: string) {
   const cards = cardMem();
   const models = l.models.map(m => ({ name: m.name, bytes: m.bytes, have: m.files.every(f => chatModels.has(f.path)), fits: fitsPc(m.bytes), fit: fit(m.bytes, 'chat').level, card: cardFit(m.bytes, cards) }));
   const usual = usualModel(l.models);
-  return { repo: l.repo, rev: l.rev, licence: l.licence, params: l.params, chat: l.chat, usual: usual?.name ?? null, models };
+  return { repo: l.repo, rev: l.rev, licence: l.licence, params: l.params, chat: l.chat, caps: l.caps, usual: usual?.name ?? null, models };
 }
 
 /** Runs `f` over `items`, at most `n` at a time. */
@@ -113,9 +120,12 @@ export async function getHf(repo: string, rev: string, name: string): Promise<{ 
     const found = await lookUpHf(`https://huggingface.co/${repo}/tree/${rev}`);
     const m = found.models.find(x => x.name === name);
     if (!m) return { status: 404, json: { error: 'That model is not at that link any more. Look the link up again.' } };
-    const fs = m.files.length ? await statfs(dirname(chatModels.target(m.files[0].path))).catch(() => null) : null;
-    const free = fs ? fs.bavail * fs.bsize : Infinity;
-    if (m.bytes + 0.5 * GB > free) return { status: 507, json: { error: `Not enough free disk space: ${m.name} needs ${(m.bytes / GB).toFixed(1)} GB, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.` } };
+    // The folder models are kept in is on a drive that is not there now (a USB drive unplugged): said, not tried.
+    const gone = modelsHome.missing();
+    if (gone) return { status: 400, json: { error: `Your models are kept in ${gone}, and that folder is not there now. Plug its drive in, or choose another folder (Models, Import models, Where models are kept), then try again.` } };
+    const free = m.files.length ? await freeOn(dirname(chatModels.target(m.files[0].path))) : Infinity;
+    // SPARE (2 GB) is left free on the drive after it, as every other writer keeps.
+    if (m.bytes + SPARE > free) return { status: 507, json: { error: `Not enough free disk space: ${m.name} needs ${(m.bytes / GB).toFixed(1)} GB, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.${otherDriveHint(m.bytes, chatModels.own, await drives().catch(() => []))}`, room: { name: m.name, bytes: m.bytes, free } } };
     startHf(found.repo, found.rev, m);
     return { status: 200, json: hfView() };
   } catch (error) {
@@ -185,6 +195,8 @@ export const hfPost: Routes = {
       return json(res, 200, { folder: null });
     }
     const dir = String(b.dir).trim().replace(/^"|"$/g, '');
+    // A network folder: models are run from it, and another PC could change them there.
+    if (isNetworkPath(dir)) return json(res, 400, { error: `For the models, ${NETWORK_WHY}.` });
     // A whole drive (D:\) would be walked file by file on every listing: a folder on it is asked for instead.
     if (/^[a-z]:[\\/]?$/i.test(dir) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/]?$/.test(dir)) return json(res, 400, { error: `${dir} is a whole drive. Pick the folder on it that holds the models (for example D:\\Models), then try again.` });
     try {
@@ -204,7 +216,7 @@ export const hfPost: Routes = {
     return json(res, 200, await hfList.status());
   },
   '/api/chatmodels/search': async ({ res, b }) => {
-    // {q, terms, moe, order, minB, maxB, minGB, maxGB, card, fitOn, cursor}: one page of GGUF chat models on Hugging Face matching the words
+    // {q, terms, moe, caps, order, minB, maxB, minGB, maxGB, card, fitOn, cursor}: one page of GGUF chat models on Hugging Face matching the words
     // ("all": every one) and sizes, each with its file sizes read already (the list shows them before anything is
     // pressed). A repo with no model file TOMLIN can download (none at all, or behind a Hugging Face licence
     // page) is left out, and so is one that is not a chat model (no chat template and no chat task: video, music). Hugging Face is asked for up to 3 lots of 40 until 20 are kept, so the size filters do not
@@ -227,13 +239,16 @@ export const hfPost: Routes = {
     const terms = [...new Set((Array.isArray(b.terms) ? b.terms : []).map(String))].filter(t => t === 'abliterated' || t === 'uncensored');
     // Mixture-of-experts ticked: mixtures of experts only (by name). Order: Size or A to Z on the page (most downloaded when not set).
     const moe = b.moe === true;
+    // Reads pictures / Uses tools / General ticked: a repo passes when it is any one of them (read from its task, files and chat template).
+    const kinds = cleanKinds(b.caps);
     const order = ['size-asc', 'size-desc', 'name-asc', 'name-desc'].includes(String(b.order)) ? String(b.order) : '';
     const list = await hfList.get();
     if (list) {
       // The file list (shipped, or this PC's own rescan): every match is known at once, so ticked terms are simply either-or.
       // Each page reads the sizes of the next matches until 20 fit (at most 60 read); `next` is where the next page
       // starts in the matches, `total` how many matched the words, ticks and the size in the name.
-      const picked = ordered(pick(list.models, { q, terms, moe, minB, maxB }), order);
+      // Only pictures ticked, and the list carries the pictures flag: the list itself narrows to them, so a page is not read from 60 other repos to find a few.
+      const picked = ordered(pick(list.models, { q, terms, moe, minB, maxB, vision: kinds.length === 1 && kinds[0] === 'images' && hasVisionFlags(list.models) }), order);
       const inB = (n: number | null) => n == null || ((!minB || n >= minB * 0.95e9) && (!maxB || n <= maxB * 1.05e9));
       // Hugging Face turning this PC away for asking too often (429) ends the page at that model, so Next starts there
       // and nothing is skipped without a word.
@@ -253,7 +268,7 @@ export const hfPost: Routes = {
         const stop = sized.indexOf('limited');
         limited = stop >= 0;
         const kept = limited ? sized.slice(0, stop) : sized;
-        for (const x of kept) if (x && x !== 'limited' && x.chat && inB(x.params) && x.models.some(sizeOk)) found.push(x);
+        for (const x of kept) if (x && x !== 'limited' && x.chat && inB(x.params) && x.models.some(sizeOk) && capsPass(x.caps, kinds)) found.push(x);
         at += kept.length;
         read += kept.length;
       }
@@ -271,7 +286,7 @@ export const hfPost: Routes = {
         const got = await Promise.all(searches.map((words, i) => (at[i] === false ? null : searchHf(words, { minB, maxB }, at[i] || null, Math.ceil(40 / searches.length)))));
         at = got.map(lot => lot?.next ?? false);
         lots++;
-        const fits = got.flatMap(lot => lot?.found ?? []).filter(x => !seen.has(x.repo) && seen.add(x.repo) && !x.gated && (!moe || isMoe(x.repo)) && (!x.params || ((!minB || x.params >= minB * 0.95e9) && (!maxB || x.params <= maxB * 1.05e9))));
+        const fits = got.flatMap(lot => lot?.found ?? []).filter(x => !seen.has(x.repo) && seen.add(x.repo) && !x.gated && (!moe || isMoe(x.repo)) && capsPass(x.caps, kinds) && (!x.params || ((!minB || x.params >= minB * 0.95e9) && (!maxB || x.params <= maxB * 1.05e9))));
         const sized = await inTurns(fits, 6, async x => {
           try {
             return { ...x, ...(await hfSizes(x.repo)) };
@@ -279,7 +294,7 @@ export const hfPost: Routes = {
             return null;
           }
         });
-        for (const x of sized) if (x && x.chat && x.models.some(sizeOk)) found.push(x);
+        for (const x of sized) if (x && x.chat && x.models.some(sizeOk) && capsPass(x.caps, kinds)) found.push(x);
       } while (at.some(c => c !== false) && found.length < 20 && lots < 3);
       // Hugging Face's own search answers most downloaded first: Size and A to Z order each page as it comes.
       found.sort((x, y) => y.downloads - x.downloads);

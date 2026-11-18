@@ -1,20 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as carry from '../src/carry.ts';
 import { alive } from '../src/hardware.ts';
 import { createServer } from 'node:net';
-import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, maxShown, nobodyThere, ownerBack, presenceOf, presenceWords, PresenceReader, reachRpc, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
+import * as maxlend from '../src/maxlend.ts';
+import { cleanLendIdle, DEFAULT_LEND_IDLE, Lender, lendWhy, loanEnds, nobodyThere, ownerBack, presenceOf, presenceWords, PresenceReader, reachRpc, rpcArgs, type RpcProgram } from '../src/maxlend.ts';
 import { chatArgs, maxFault, whyItFailed } from '../src/llama.ts';
 
-const ALL = { pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true };
+const ALL = { pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true, off: true };
 const LEND = { ...carry.NO_ALLOW, lend: true, receive: true };
 const min = 60_000;
-const base = { pc: 'Worker PC', on: true, shown: true, allow: LEND, away: false, presence: { idleMs: 10 * min, locked: false }, idleMinutes: 5, lease: null, by: { hash: 'a' } };
+const base = { pc: 'Worker PC', on: true, allow: LEND, away: false, presence: { idleMs: 10 * min, locked: false }, idleMinutes: 5, lease: null, by: { hash: 'a' } };
 const SRC = pathToFileURL(join(import.meta.dirname, '..', 'src', 'maxlend.ts')).href;
 /** A stand-in for ggml-rpc-server: a plain echo server on the port it is given. */
 const standIn = (port: number) => spawn(process.execPath, ['-e', `require('net').createServer(s => s.pipe(s)).listen(${port}, '127.0.0.1')`], { stdio: 'ignore', windowsHide: true });
@@ -70,7 +71,7 @@ test('it lends only while nobody uses it: Windows locked, or idle for the minute
 
 test('it refuses with the reason and where to change it', () => {
   assert.match(lendWhy({ ...base, on: false }), /not a node/);
-  assert.match(lendWhy({ ...base, allow: carry.NO_ALLOW }), /ticks "Lend card memory to linked PCs \(Max mode\)" under Network/);
+  assert.match(lendWhy({ ...base, allow: carry.NO_ALLOW }), /ticks "Allow to be used as part of a cluster" there \(Network, Sharing and cluster permissions\)/);
   assert.match(lendWhy({ ...base, away: true }), /I need to use the pc/);
   assert.match(lendWhy({ ...base, presence: null }), /could not tell whether someone is using it/);
 });
@@ -85,23 +86,25 @@ test('one PC borrows at a time: another is told who has it; the same one may ope
   await assert.rejects(l.open({ hash: 'a', name: 'Office PC' }, null), /RPC server is missing/);
 });
 
-test('Max mode is hidden until the PC is started with TOMLIN_MAX: no lending, and a tick saved before (Allow all) counts for nothing', () => {
-  assert.equal(maxShown({}), false);
-  assert.equal(maxShown({ TOMLIN_MAX: ' ' }), false);
-  assert.equal(maxShown({ TOMLIN_MAX: 'Worker PC' }), true);
-  assert.match(lendWhy({ ...base, shown: false }), /does not lend its card memory: Max mode is not switched on there/);
-  assert.equal(carry.cleanAllow({ ...ALL }, false).lend, false);
-  assert.equal(carry.cleanAllow({ ...ALL }, false).tune, true, 'the other ticks stay');
+test('The cluster tick (Max mode, once Lend card memory) is an ordinary permission on every PC (no TOMLIN_MAX needed): cleanAllow keeps the tick, lendWhy asks only the usual things', () => {
   assert.equal(carry.cleanAllow({ ...ALL }).lend, true);
+  assert.equal(carry.cleanAllow({ ...ALL, lend: false }).lend, false);
+  assert.equal(carry.cleanAllow({}).lend, false, 'off by default');
+  assert.equal(lendWhy({ ...base }), '');
+  assert.match(lendWhy({ ...base, allow: { ...LEND, lend: false } }), /ticks "Allow to be used as part of a cluster"/);
+  assert.match(lendWhy({ ...base, presence: { idleMs: 1000, locked: false } }), /someone is using "Worker PC"/, 'still only while nobody uses the PC');
 });
 
-test('the page shows the Lend tick and its Help line only once Max mode is shown, and Help no longer counts "all five"', () => {
+test('the page always shows the Lend tick and its Help line, and Allow all ticks it', () => {
   const html = readFileSync(join(import.meta.dirname, '..', 'public', 'index.html'), 'utf8');
-  assert.match(html, /<div data-max hidden><label class="check"><input type="checkbox" data-allow="lend">/);
-  assert.match(html, /<span data-max hidden>, <b>Lend card memory to linked PCs \(Max mode\)<\/b>/);
+  assert.match(html, /<input type="checkbox" id="allow-lend" data-allow="lend"/);
+  // The tick serves both: Cluster (a model that will not fit one PC) and a chat's Max switch (a model that fits).
+  assert.match(html, /<b>Allow to be used as part of a cluster<\/b> \(it serves both: Cluster, for a model that will not fit on one PC, and Max mode, a chat's <b>Max<\/b> switch, for a model that does fit/);
+  assert.doesNotMatch(html, /data-max/);
   assert.doesNotMatch(html, /ticks all five/);
   const js = readFileSync(join(import.meta.dirname, '..', 'public', 'home.js'), 'utf8');
-  assert.match(js, /lend: e\.target\.checked && shown/, 'Allow all ticks Lend only while it is shown');
+  assert.match(js, /lend: e\.target\.checked \}/, 'Allow all ticks Lend');
+  assert.doesNotMatch(js, /maxShown|data-max/);
 });
 
 test('a loan ends when the link to the PC borrowing it is removed', () => {
@@ -215,7 +218,7 @@ test('a screen saver that locks Windows when it ends counts as locked; one that 
   assert.deepEqual(presenceOf('61234 0 1 0'), { idleMs: 61234, locked: false, saver: true });
   assert.deepEqual(presenceOf('61234 0 0 1'), { idleMs: 61234, locked: false, saver: false }, 'set to lock, but not running');
   assert.deepEqual(presenceOf('61234 1 0 0'), { idleMs: 61234, locked: true, saver: false });
-  const base = { pc: 'Worker PC', on: true, shown: true, allow: LEND, away: false, idleMinutes: 2, lease: null, by: { hash: 'a' } };
+  const base = { pc: 'Worker PC', on: true, allow: LEND, away: false, idleMinutes: 2, lease: null, by: { hash: 'a' } };
   assert.equal(lendWhy({ ...base, presence: presenceOf('30000 0 1 1') }), '', 'the locking screen saver: lends at once');
   assert.equal(presenceWords({ idleMs: 30_000, locked: true, saver: true }), 'its screen saver is on and locks Windows');
   // Exact under 10 minutes: "2 min" beside "after 2 minutes" read as if it should have lent (2 Nov).
@@ -226,12 +229,40 @@ test('a screen saver that locks Windows when it ends counts as locked; one that 
   assert.equal(presenceWords({ idleMs: 25 * min + 20_000, locked: false }), 'last used 25 min ago');
 });
 
-test('the presence reader on Windows says whether the screen saver runs', { skip: process.platform !== 'win32' }, async () => {
+test('a locked, disconnected or empty Windows session counts as nobody there, whatever session TOMLIN runs in; Remote Desktop use is named (14 Nov)', () => {
+  // "idleMs locked saverRunning saverLocks how": the reader's line since 14 Nov.
+  assert.deepEqual(presenceOf('10000 1 0 0 L'), { idleMs: 10_000, locked: true, saver: false, seen: 'locked' });
+  assert.deepEqual(presenceOf('10000 1 0 0 D'), { idleMs: 10_000, locked: true, saver: false, seen: 'disconnected' });
+  assert.deepEqual(presenceOf('10000 1 0 0 N'), { idleMs: 10_000, locked: true, saver: false, seen: 'nobody' });
+  assert.deepEqual(presenceOf('10000 0 0 0 R'), { idleMs: 10_000, locked: false, saver: false, seen: 'remote' });
+  assert.deepEqual(presenceOf('800 0 1 1 C'), { idleMs: 800, locked: true, saver: true, seen: 'console' });
+  assert.equal(presenceOf('10000 0 0 0 X'), null);
+  const base = { pc: 'Worker PC', on: true, allow: LEND, away: false, idleMinutes: 5, lease: null, by: { hash: 'a' } };
+  // Input on the lock screen just after Windows+L (10 s ago) does not count: locked wins, at once.
+  for (const l of ['10000 1 0 0 L', '0 1 0 0 L', '10000 1 0 0 D', '10000 1 0 0 N']) {
+    const p = presenceOf(l)!;
+    assert.equal(lendWhy({ ...base, presence: p }), '', l);
+    assert.equal(ownerBack(p), false, l);
+  }
+  assert.equal(presenceWords(presenceOf('10000 1 0 0 L')!), 'Windows is locked');
+  assert.match(presenceWords(presenceOf('10000 1 0 0 D')!), /disconnected/);
+  assert.match(presenceWords(presenceOf('10000 1 0 0 N')!), /nobody is signed in/);
+  // Someone at an unlocked session, at its keyboard or over Remote Desktop, still stops a loan.
+  for (const l of ['900 0 0 0 C', '900 0 0 0 R']) assert.equal(ownerBack(presenceOf(l)!), true, l);
+  const rdp = lendWhy({ ...base, presence: presenceOf('10000 0 0 0 R') });
+  assert.match(rdp, /^someone is using "Worker PC" \(last used 10 s ago over Remote Desktop, not locked: Windows\+L in a Remote Desktop window locks the PC in front of you/);
+  assert.equal(presenceWords(presenceOf('10000 0 0 0 C')!), 'last used 10 s ago');
+});
+
+test('the presence reader on Windows says whether the screen saver runs, and what Windows\' session list showed', { skip: process.platform !== 'win32' }, async () => {
   const r = new PresenceReader();
   try {
     const p = await r.first(20_000);
     assert.ok(p, 'a reading came');
     assert.equal(typeof p.saver, 'boolean', JSON.stringify(p));
+    // Run by someone signed in and using this PC, at its screen or over Remote Desktop.
+    assert.ok(p.seen === 'console' || p.seen === 'remote', JSON.stringify(p));
+    assert.equal(p.locked, false, JSON.stringify(p));
   } finally {
     r.stop();
   }
@@ -243,5 +274,203 @@ test('an update waits while this PC lends its card: restarting TOMLIN would cut 
   assert.equal(loanBusy({ hash: 'a', name: 'Office PC', since: '' }), 'lending its card memory to "Office PC" (Max mode)');
   // The node's busy rule (what the update door asks) puts a loan first.
   const node = readFileSync(new URL('../src/jobrun/node.ts', import.meta.url), 'utf8');
-  assert.match(node, /busy: \(\) => loanBusyNow\(\) \?\? /);
+  assert.match(node, /nodeBusyNow = \(\) => loanBusyNow\(\) \?\? /);
+});
+
+test('an RPC server that stops on its own: the log says its exit code, the free RAM then and its last lines', async () => {
+  const { PassThrough } = await import('node:stream');
+  const stderr = new PassThrough();
+  const tail = maxlend.keepTail({ stderr } as never, 3);
+  stderr.write('line one\r\nline two\n\nline three\nline four\npart of five');
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(tail(), ['line three', 'line four', 'part of five']);
+  const words = maxlend.stoppedWords(-1073741571, null, { total: 64 * 2 ** 30, free: 3.5 * 2 ** 30 }, tail());
+  assert.match(words, /exit code -1073741571 \(0xC00000FD\)/);
+  assert.match(words, /3\.5 GB free of 64\.0 GB/);
+  assert.match(words, /line four \| part of five/);
+  assert.match(maxlend.stoppedWords(null, 'SIGKILL', { total: 2 ** 30, free: 0 }, []), /ended by SIGKILL.*wrote nothing/);
+  assert.deepEqual(maxlend.keepTail({ stderr: null } as never)(), []);
+  // Output that never ends a line keeps only its end, in a moment, not the whole of it.
+  const endless = new PassThrough();
+  const last = maxlend.keepTail({ stderr: endless } as never, 3);
+  const t0 = Date.now();
+  for (let i = 0; i < 120; i++) {
+    endless.write('.'.repeat(2 ** 20));
+    if (i % 10 === 0) await new Promise(r => setImmediate(r));
+  }
+  await new Promise(r => setImmediate(r));
+  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms for 120 MB of dots`);
+  assert.ok(last()[0].length <= 300);
+});
+
+test('an RPC server that floods its error output with no line end is kept to a short tail, not held whole', async () => {
+  const { PassThrough } = await import('node:stream');
+  const stderr = new PassThrough();
+  const tail = maxlend.keepTail({ stderr } as never, 3);
+  // 8 MB of dots with no line end (as a load bar does), then a real last line.
+  for (let k = 0; k < 128; k++) stderr.write('.'.repeat(64 * 1024));
+  await new Promise(r => setImmediate(r));
+  stderr.write('the real last line\n');
+  await new Promise(r => setImmediate(r));
+  const t = tail();
+  assert.equal(t.at(-1), 'the real last line', 'the dots were let go as a line of their own, not held and glued to the next');
+  assert.ok(t.every(l => l.length <= 300));
+});
+
+test('the weight cache is kept under its limit and never fills the drive (689 files, 122.6 GB, 17 Nov)', async () => {
+  const GB = 2 ** 30;
+  const files = Array.from({ length: 689 }, (_, i) => ({ path: `f${i}`, size: Math.round((122.6 * GB) / 689), at: i }));
+  // 3.2 GB free with the cache on the disk: it comes down to the 24 GB limit, oldest files first.
+  const gone = maxlend.cacheToDelete(files, 3.2 * GB);
+  const left = files.filter(f => !gone.includes(f.path));
+  assert.ok(left.reduce((n, f) => n + f.size, 0) <= maxlend.CACHE_LIMIT);
+  assert.ok(left.every(f => f.at >= 689 - left.length), 'the newest files stay');
+  assert.equal(gone[0], 'f0', 'the oldest goes first');
+  // Little room even without the cache: it is not kept at all (the cache is used only with 20 GB free besides it).
+  assert.equal(maxlend.cacheToDelete(files.slice(0, 10), 5 * GB).length, 10);
+  // Plenty of room and a small cache: nothing goes.
+  assert.deepEqual(maxlend.cacheToDelete(files.slice(0, 10), 400 * GB), []);
+  // A cache that fits but would leave under 20 GB free: cut back so that 20 GB stays free.
+  const some = [{ path: 'a', size: 10 * GB, at: 1 }, { path: 'b', size: 10 * GB, at: 2 }];
+  assert.deepEqual(maxlend.cacheToDelete(some, 12 * GB), ['a']);
+  // On the real folder: only the oldest go, and the folder is read down two levels.
+  const dir = mkdtempSync(join(tmpdir(), 'sm-cache-'));
+  try {
+    mkdirSync(join(dir, 'sub'));
+    for (let i = 0; i < 5; i++) {
+      const p = join(dir, i < 3 ? '' : 'sub', `w${i}`);
+      writeFileSync(p, Buffer.alloc(1000));
+      utimesSync(p, new Date(2026, 10, 10 + i), new Date(2026, 10, 10 + i));
+    }
+    const r = await maxlend.pruneCache(dir, 100 * GB, 2500, 0);
+    assert.equal(r.files, 3);
+    assert.deepEqual(readdirSync(dir).sort(), ['sub', 'w3'.length ? 'sub' : ''].filter(Boolean).slice(0, 1));
+    assert.deepEqual(readdirSync(join(dir, 'sub')).sort(), ['w3', 'w4']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a loan ends when the disk is nearly full, and the cache is brought down as it starts and as it ends', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sm-cache-'));
+  const said: string[] = [];
+  let pruned = 0;
+  let free = 100 * 2 ** 30;
+  class D extends Lender {
+    protected override async prune(): Promise<void> { pruned++; }
+    protected override async diskFree(): Promise<number> { return free; }
+    protected override spawnRpc(_p: RpcProgram, port: number) { return standIn(port); }
+  }
+  const told: string[] = [];
+  const l = new D(dir, () => '', e => told.push(e.why), { read: () => ({ total: 1, free: 1 }), say: s => said.push(s) });
+  try {
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    assert.equal(pruned, 1, 'brought down as the loan starts');
+    free = 2 * 2 ** 30;
+    for (let i = 0; i < 40 && !told.length; i++) await new Promise(r => setTimeout(r, 1000));
+    assert.match(told[0] ?? '', /disk is nearly full/);
+    // Brought down once the RPC server is gone (its files closed), a moment after the end is told.
+    for (let i = 0; i < 100 && pruned < 2; i++) await new Promise(r => setTimeout(r, 100));
+    assert.ok(pruned >= 2, 'and again as it ends');
+  } finally {
+    await l.end('test');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('after the disk floor ended a loan, the next one runs without the cache until 44 GB is free (20 to 36 GB free looped for ever)', async () => {
+  const GB = 2 ** 30;
+  const dir = mkdtempSync(join(tmpdir(), 'sm-cache-'));
+  const said: string[] = [];
+  const caches: boolean[] = [];
+  let free = 30 * GB;
+  let room = 30 * GB;
+  class D extends Lender {
+    protected override async prune(): Promise<void> {}
+    protected override async diskFree(): Promise<number> { return free; }
+    protected override async cacheRoom(): Promise<number> { return room; }
+    protected override spawnRpc(_p: RpcProgram, port: number, cache: boolean) { caches.push(cache); return standIn(port); }
+  }
+  const told: string[] = [];
+  const l = new D(dir, () => '', e => told.push(e.why), { read: () => ({ total: 1, free: 1 }), say: s => said.push(s) });
+  try {
+    assert.equal(maxlend.CACHE_AGAIN, maxlend.CACHE_DISK + maxlend.CACHE_LIMIT);
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    assert.deepEqual(caches, [true], '30 GB free: the cache is used');
+    // The cache grows to the floor: the loan ends there.
+    free = 5 * GB;
+    for (let i = 0; i < 40 && !told.length; i++) await new Promise(r => setTimeout(r, 500));
+    assert.match(told[0] ?? '', /disk is nearly full/);
+    // Pruned back to 30 GB free: the next loan runs without the cache, and the log says why.
+    free = 30 * GB;
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    assert.deepEqual(caches, [true, false]);
+    assert.ok(said.some(s => /not used for this loan.*44 GB is free \(30\.0 GB now\)/.test(s)), said.join(' / '));
+    await l.end('test');
+    // 44 GB free: the cache is used again, and stays so.
+    room = 44 * GB;
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    await l.end('test');
+    room = 30 * GB;
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    assert.deepEqual(caches, [true, false, true, true]);
+  } finally {
+    await l.end('test');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a loan ended by force: the cache files of its last 5 minutes go, older ones stay; ended because the borrower was done, none go', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sm-cache-'));
+  const rpc = join(dir, 'rpc');
+  const said: string[] = [];
+  let room = 100 * 2 ** 30;
+  class D extends Lender {
+    protected override async prune(): Promise<void> {}
+    protected override async diskFree(): Promise<number> { return 100 * 2 ** 30; }
+    protected override async cacheRoom(): Promise<number> { return room; }
+    protected override spawnRpc(_p: RpcProgram, port: number) { return standIn(port); }
+  }
+  const put = (name: string, minutesAgo: number) => {
+    const f = join(rpc, name);
+    mkdirSync(join(f, '..'), { recursive: true });
+    writeFileSync(f, Buffer.alloc(1000));
+    const t = new Date(Date.now() - minutesAgo * 60_000);
+    utimesSync(f, t, t);
+    return f;
+  };
+  const l = new D(dir, () => '', () => undefined, { read: () => ({ total: 1, free: 1 }), say: s => said.push(s) });
+  try {
+    assert.equal(maxlend.CUT_SHORT_MS, 5 * 60_000);
+    const before = put('from-an-older-loan.bin', 60);
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    const written = put(join('ab', 'written-now.bin'), 0);
+    await l.end('someone started using it');
+    for (let i = 0; i < 20 && existsSync(written); i++) await new Promise(r => setTimeout(r, 100));
+    assert.ok(!existsSync(written), 'the file the stop may have cut short went');
+    assert.ok(existsSync(before), 'one written before the loan stays');
+    assert.ok(said.some(s => /removed 1 file .* cut short would load as wrong weights/.test(s)), said.join(' / '));
+    // The borrower was done: nothing was being written, nothing goes.
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    const kept = put('done.bin', 0);
+    await l.end(maxlend.IDLE_END, 'idle');
+    await new Promise(r => setTimeout(r, 300));
+    assert.ok(existsSync(kept));
+    // A loan that did not use the cache writes none: a stop deletes nothing.
+    room = 1;
+    await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
+    const other = put('not-from-this-loan.bin', 0);
+    await l.end('sharing was turned off there');
+    await new Promise(r => setTimeout(r, 300));
+    assert.ok(existsSync(other));
+    // Only the files under the folder given, and never a folder.
+    const beside = join(dir, 'beside.bin');
+    writeFileSync(beside, 'x');
+    assert.deepEqual(await maxlend.dropCutShort(rpc, 0), { files: 3, bytes: 3000 });
+    assert.ok(existsSync(beside) && existsSync(join(rpc, 'ab')));
+    assert.deepEqual(await maxlend.dropCutShort(join(dir, 'none'), 0), { files: 0, bytes: 0 });
+  } finally {
+    await l.end('test');
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

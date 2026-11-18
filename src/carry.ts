@@ -8,6 +8,7 @@
 // cut short carries on from where it stopped. Sending a model to a node needs no tick there (2.0.56): every linked PC
 // may. The parts (both sides) are here, tested in test/carry.test.ts; the doors are in src/jobrun/copies.ts (this PC
 // asking) and src/jobrun/node.ts (a node answering).
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { open, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
@@ -15,6 +16,7 @@ import { basename, dirname, join } from 'node:path';
 import type { SharedModel } from './nodestaff.ts';
 import type { RunnerHello } from './runnerpush.ts';
 import * as git from './gitstore.ts';
+import { writeAtomic } from './atomic.ts';
 
 // ---- What linked PCs may do here ----
 
@@ -27,7 +29,7 @@ export interface Allow {
   update: boolean;
   /** "Allow host to test and change model run settings" (2.0.56): a linked PC may set a model's run settings here (src/runset.ts). */
   tune: boolean;
-  /** "Lend card memory to linked PCs (Max mode)" (2.0.58): a linked PC's chat runner may use this PC's card while nobody is using it (src/maxlend.ts). */
+  /** "Allow to be used as part of a cluster" (Max mode; 2.0.58 "Lend card memory to linked PCs"): a linked PC's chat runner may use this PC's card while nobody is using it (src/maxlend.ts). */
   lend: boolean;
   /**
    * "Accept models from linked PCs" (2.0.61): a linked PC may send a model here, which this PC's runners then read.
@@ -39,17 +41,23 @@ export interface Allow {
    * only) to update itself from them (src/update.ts giveSide).
    */
   give: boolean;
+  /**
+   * "Allow host to turn this PC off" (17 Nov 2026): a linked PC may shut this PC down, one PC at a time, with this PC's
+   * app lock PIN typed on the host (src/poweroff.ts). ON unless it is unticked, so an updated node can be turned off
+   * with no one logging in to tick it. Never given to a guest link.
+   */
+  off: boolean;
 }
 
-export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false };
+/** The ticks of a PC that has saved none: every one off except "Allow host to turn this PC off", which is on until unticked. */
+export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false, off: true };
 
 /**
  * The ticks as saved or said in a hello; the old "Allow host to push models" tick (before 2.0.56) is not read.
- * `lendShown` false (Max mode hidden on this PC, src/maxlend.ts maxShown): the Lend tick counts as off.
  */
-export function cleanAllow(raw: unknown, lendShown = true): Allow {
+export function cleanAllow(raw: unknown): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: lendShown && o.lend === true, receive: o.receive === true, give: o.give === true };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: o.lend === true, receive: o.receive === true, give: o.give === true, off: o.off !== false };
 }
 
 /** "Allow all" is ticked when every one is. */
@@ -61,6 +69,11 @@ export const allowsAll = (a: Allow) => a.pull && a.backup && a.update && a.tune 
 export const PIECE = 16 * 2 ** 20;
 /** Room left free on a disk after a copy, so a PC is never filled to the brim. */
 export const SPARE = 2 * 2 ** 30;
+/**
+ * Kept free on a node when a linked PC's projects are backed up to it: that backup comes by itself every few minutes
+ * and keeps every version of every file, so it stops well before the disk is short for the PC's own work.
+ */
+export const PROJECTS_SPARE = 10 * 2 ** 30;
 /** Restore points kept on a node for each linked PC: the newest ones; older ones go as a new one comes in. */
 export const KEEP_FOR_PC = 3;
 /** Nothing larger crosses as one file (the biggest chat models on Hugging Face are split well below this). */
@@ -105,10 +118,15 @@ export interface NetPc {
   /** What it lets linked PCs do; null from a PC older than 2.0.32. */
   allow: Allow | null;
   models: SharedModel[];
+  /** A Backups only PC lends no model, so `models` is empty; what it holds, as its hello said (null: not known now). Read for "where else is this model" only. */
+  held?: SharedModel[] | null;
   /** Kept for backups only (set on this PC): no work is sent to it. */
   backupsOnly?: boolean;
   /** Its backup disk as its hello said it (null: an older TOMLIN, or off). */
   disk?: { total: number; free: number } | null;
+  /** Its drives and the one its models folder is on, as its hello said them (none from an older TOMLIN): for modelRoom. */
+  drives?: { drive: string; label: string; total: number; free: number }[];
+  modelsDrive?: string;
   /** Its memory as its hello said it (RAM, graphics card), to tell PCs apart in a list. */
   memory?: unknown;
   /** Its NVIDIA card, driver and CUDA runner as its hello said them (null: an older TOMLIN, or off). */
@@ -181,6 +199,38 @@ export function sendWhy(pc: NetPc): string {
   if (why) return why;
   // A node from before the tick (it does not say 'receive') takes models as it always did.
   if (pc.can.includes('receive') && !pc.allow?.receive) return receiveRefused(pc.name);
+  return '';
+}
+
+/**
+ * Why one of this PC's models cannot be moved to a linked PC now ('' when it can): it must take a send, and be able to check
+ * the copy (a TOMLIN from before the check cannot, and a move without a check is not offered).
+ */
+export function moveWhy(pc: NetPc): string {
+  const why = sendWhy(pc);
+  if (why) return why;
+  if (!pc.can.includes('carry-sum')) return `"${pc.name}" runs a TOMLIN that cannot check a copy yet: update it there first (Send a copy still works, then Delete here)`;
+  return '';
+}
+
+/**
+ * Why a model cannot be deleted from a linked PC now ('' when it can). The same owner's tick as sending models to it: a PC
+ * that lets this one put models on it lets it take them off again, so a PC nobody sits at can be kept tidy.
+ */
+export function removeWhy(pc: NetPc): string {
+  if (!pc.ok) return `"${pc.name}" is off or not answering now`;
+  if (pc.away) return `"${pc.name}" is being used by its owner for now`;
+  if (!pc.can.includes('model-remove')) return `"${pc.name}" runs a TOMLIN that cannot delete a model for another PC: update it there first`;
+  if (!pc.allow?.receive) return receiveRefused(pc.name);
+  return '';
+}
+
+/** Why a host cannot turn a node off from here: the node's answer in its own words, or '' when it can. */
+export function powerOffWhy(pc: NetPc): string {
+  if (!pc.ok) return `"${pc.name}" is off or not answering now`;
+  if (pc.away) return `"${pc.name}" is being used by its owner for now`;
+  if (!pc.can.includes('power-off')) return `"${pc.name}" runs a TOMLIN that cannot be turned off from another PC: update it there first`;
+  if (pc.allow?.off !== true) return `"${pc.name}" does not allow a host to turn it off now (its owner ticks "Allow host to turn this PC off" under Network)`;
   return '';
 }
 
@@ -257,6 +307,34 @@ export function cleanDisk(v: unknown): { total: number; free: number } | null {
   return Number.isFinite(total) && Number.isFinite(free) && total > 0 && free >= 0 && free <= total ? { total: Math.round(total), free: Math.round(free) } : null;
 }
 
+/** The drives as a hello says them: a letter ("D:"), a name, and whole sensible numbers; anything else is left out (at most 8). */
+/** A drive letter as a hello says it ("D:"), or ''. */
+export const cleanDriveLetter = (v: unknown): string => (typeof v === 'string' && /^[A-Z]:$/i.test(v) ? v.toUpperCase() : '');
+
+/**
+ * The free space a model sent to that PC needs: the drive its models folder is on, from its drives (2.0.89 on). An
+ * older PC says only its backup disk (`disk`): that, as before. Null when neither is known.
+ */
+export function modelRoom(pc: { disk?: { total: number; free: number } | null; drives?: { drive: string; label: string; total: number; free: number }[]; modelsDrive?: string }): { drive: string; label: string; total: number; free: number } | null {
+  const on = pc.modelsDrive ? pc.drives?.find(d => d.drive === pc.modelsDrive) : undefined;
+  if (on) return { ...on };
+  return pc.disk ? { drive: '', label: '', total: pc.disk.total, free: pc.disk.free } : null;
+}
+
+export function cleanDrives(v: unknown): { drive: string; label: string; total: number; free: number }[] {
+  if (!Array.isArray(v)) return [];
+  const out: { drive: string; label: string; total: number; free: number }[] = [];
+  for (const x of v) {
+    const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+    const drive = String(o.drive ?? '').toUpperCase();
+    const total = Number(o.total), free = Number(o.free);
+    if (!/^[A-Z]:$/.test(drive) || !Number.isFinite(total) || !Number.isFinite(free) || total <= 0 || free < 0 || free > total) continue;
+    out.push({ drive, label: String(o.label ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 32), total: Math.round(total), free: Math.round(free) });
+    if (out.length === 8) break;
+  }
+  return out;
+}
+
 /**
  * The order PCs are offered and backed up to: "Backups only" PCs first (they are there for it), then the rest, each
  * group by name and then address so two PCs with one name keep their places.
@@ -266,9 +344,9 @@ export function backupOrder<T extends { name: string; where?: string; backupsOnl
 }
 
 /** Null when `need` more bytes fit on that disk with SPARE left over; else why not, in plain words. */
-export function roomWhy(need: number, free: number, where: string): string | null {
-  if (need + SPARE <= free) return null;
-  return `there is not enough room on ${where}: it needs ${GB(need)} and ${GB(free)} is free (${GB(SPARE)} is kept free).`;
+export function roomWhy(need: number, free: number, where: string, spare = SPARE): string | null {
+  if (need + spare <= free) return null;
+  return `there is not enough room on ${where}: it needs ${GB(need)} with ${GB(spare)} kept free besides (${GB(need + spare)} in all), and ${GB(free)} is free.`;
 }
 
 // ---- Pieces of a file ----
@@ -326,6 +404,16 @@ async function startAt(part: string, bytes: number): Promise<number> {
 async function sha256File(file: string): Promise<string> {
   const h = createHash('sha256');
   for await (const chunk of createReadStream(file)) h.update(chunk);
+  return h.digest('hex');
+}
+
+/** The range a copy is checked in: both PCs hash the same 256 MB at a time, so a check shows progress and a drop costs one range. */
+export const SUM_RANGE = 256 * 2 ** 20;
+
+/** The SHA-256 of `len` bytes of a file from `from` (a stream, so a 35 GB model never sits in memory). */
+export async function sumRange(file: string, from: number, len: number): Promise<string> {
+  const h = createHash('sha256');
+  for await (const chunk of createReadStream(file, { start: from, end: from + len - 1 })) h.update(chunk);
   return h.digest('hex');
 }
 
@@ -508,6 +596,19 @@ export function nodeSide(d: NodeDeps) {
         }
         return { status: 200, json: { at: r.at, done } };
       }
+      // Read only: the SHA-256 of one range of a model file received here, so the sender can check the copy before it lets go of
+      // its own. Needs the same tick as receiving (the copy is the sender's, put here with it).
+      case '/worker/carry-sum': {
+        const got = await incoming(b);
+        if (typeof got === 'string') return no(403, got);
+        const f = got.files[int(b.file)];
+        const from = int(b.from);
+        const len = int(b.length);
+        if (!f || from < 0 || len <= 0 || len > SUM_RANGE || from + len > f.bytes) return no(400, 'that range is not part of the model.');
+        const have = await sizeOf(f.path);
+        if (have !== f.bytes) return no(404, `${basename(f.path)} is not whole on "${d.pcName()}" (${have} of ${f.bytes} bytes).`);
+        return { status: 200, json: { sha256: await sumRange(f.path, from, len), bytes: have } };
+      }
       case '/worker/carry-drop': {
         // A send that was stopped: its unfinished parts go (whole files stay).
         const got = await incoming(b, false);
@@ -582,7 +683,7 @@ export function nodeSide(d: NodeDeps) {
         if (await git.hasObject(repo, id)) return { status: 200, json: { at: bytes, done: true } };
         const part = join(repo, 'incoming', `${id}.part`);
         if (from === 0) {
-          const why = roomWhy(bytes, await room(repo), `"${d.pcName()}"`);
+          const why = roomWhy(bytes, await room(repo), `"${d.pcName()}"`, PROJECTS_SPARE);
           if (why) return no(507, why);
           await rm(part, { force: true });
           await mkdir(dirname(part), { recursive: true });
@@ -690,19 +791,33 @@ export async function projectsHere(root: string): Promise<{ key: string; name: s
   const out: { key: string; name: string; at: number; files: number; backups: number; folder: string }[] = [];
   for (const k of await readdir(root).catch(() => [] as string[])) {
     const repo = join(root, k, 'projects.git');
-    const log = await git.logOf(repo, 500).catch(() => [] as git.Commit[]);
-    if (!log.length) continue;
+    // Read again only when its newest backup or its cut (src/gitstore.ts trimRepo) changed: a node reads this once a
+    // minute, and reading every backup and every folder of the newest one each time cost the same work over and over.
+    const head = await git.headOf(repo);
+    if (!head) continue;
+    const mark = `${head} ${[...(await git.shallowOf(repo))].join(',')}`;
+    let got = projectsRead.get(repo);
+    if (got?.mark !== mark) {
+      const log = await git.logOf(repo, 500).catch(() => [] as git.Commit[]);
+      if (!log.length) continue;
+      const tree = await git.listTree(repo, log[0].tree).catch(() => null);
+      got = { mark, at: log[0].at, files: tree?.length ?? 0, backups: log.length };
+      // One that could not be read whole is read again next time.
+      if (tree) projectsRead.set(repo, got);
+      else projectsRead.delete(repo);
+    }
     let name = 'A linked PC';
     try {
       name = String(JSON.parse(await readFile(join(root, k, 'pc.json'), 'utf8')).name || name);
     } catch {
       // no name kept
     }
-    const files = (await git.listTree(repo, log[0].tree).catch(() => [] as git.Entry[])).length;
-    out.push({ key: k, name, at: log[0].at, files, backups: log.length, folder: repo });
+    out.push({ key: k, name, at: got.at, files: got.files, backups: got.backups, folder: repo });
   }
   return out;
 }
+/** What projectsHere read of each repository, with the newest backup and cut it read them at. */
+const projectsRead = new Map<string, { mark: string; at: number; files: number; backups: number }>();
 
 /** Writes the newest backup of one linked PC's projects into `dest` (a new folder). Gives how many files. */
 export async function projectsOut(root: string, key: string, dest: string): Promise<number> {
@@ -721,9 +836,9 @@ export async function projectsOut(root: string, key: string, dest: string): Prom
   return n;
 }
 
-/** The name of the PC whose restore points a folder holds, shown on the node's page. */
+/** The name of the PC whose restore points a folder holds, shown on the node's page. Whole or not at all, so a full disk never leaves it empty. */
 async function writeOwner(dir: string, name: string) {
-  await writeFile(join(dir, 'pc.json'), JSON.stringify({ name: String(name).slice(0, 40) }));
+  await writeAtomic(join(dir, 'pc.json'), JSON.stringify({ name: String(name).slice(0, 40) }));
 }
 
 /** Restore points kept on this PC for linked PCs, for its own page: whose, how many, how big. */
@@ -804,11 +919,18 @@ export async function push(w: Wire, o: { kind: 'chat' | 'image'; model: string; 
     if (at > f.bytes) at = 0;
     while (at < f.bytes) {
       if (o.signal.aborted) {
-        await w.ask('/worker/carry-drop', ask).catch(() => undefined);
+        await afterStop(() => w.ask('/worker/carry-drop', ask)).catch(() => undefined);
         throw new Error('Stopped.');
       }
       o.progress({ done: before + at, bytes });
-      const r = await w.putPiece('/worker/carry-put', { ...ask, file: k, from: at }, await readPiece(f.path, at));
+      // Stop pressed while the piece was on its way ends it at once: the tidy-up still goes.
+      const r = await w.putPiece('/worker/carry-put', { ...ask, file: k, from: at }, await readPiece(f.path, at)).catch(async e => {
+        if (o.signal.aborted) {
+          await afterStop(() => w.ask('/worker/carry-drop', ask)).catch(() => undefined);
+          throw new Error('Stopped.');
+        }
+        throw e;
+      });
       at = int(r.at);
       if (at < 0) throw new Error('that PC did not say how much it has.');
     }
@@ -816,6 +938,32 @@ export async function push(w: Wire, o: { kind: 'chat' | 'image'; model: string; 
   }
   o.progress({ done: bytes, bytes });
   return true;
+}
+
+/**
+ * Checks that a linked PC holds the same bytes as this PC's model files: each file's size, then its SHA-256 in ranges of
+ * SUM_RANGE, hashed on both PCs. Null when everything matches, else why not (nothing is changed on either PC). A PC that
+ * cannot answer, or a dropped link, throws: the copy is then not proved, and the caller keeps its own files.
+ */
+export async function verifySent(w: Wire, o: { kind: 'chat' | 'image'; model: string; name: string; files: FileRef[]; progress: (p: Progress) => void; signal: AbortSignal; range?: number }): Promise<string | null> {
+  const step = Math.min(SUM_RANGE, o.range ?? SUM_RANGE);
+  const ask = { kind: o.kind, model: o.model, name: o.name, files: o.files.map(f => ({ name: f.name, bytes: f.bytes })) };
+  const bytes = o.files.reduce((n, f) => n + f.bytes, 0);
+  let before = 0;
+  for (const [k, f] of o.files.entries()) {
+    for (let at = 0; at < f.bytes; at += step) {
+      if (o.signal.aborted) throw new Error('Stopped.');
+      o.progress({ done: before + at, bytes });
+      const len = Math.min(step, f.bytes - at);
+      const mine = await sumRange(f.path, at, len);
+      const got = await w.ask('/worker/carry-sum', { ...ask, file: k, from: at, length: len });
+      if (int(got.bytes) !== f.bytes) return `${f.name} is ${int(got.bytes)} bytes there and ${f.bytes} here`;
+      if (got.sha256 !== mine) return `${f.name} differs from this PC's file (bytes ${at} to ${at + len})`;
+    }
+    before += f.bytes;
+  }
+  o.progress({ done: bytes, bytes });
+  return null;
 }
 
 /** Sends a restore point (a backup zip here) to a linked PC. */
@@ -852,8 +1000,8 @@ export async function pullBackup(w: Wire, o: { name: string; bytes: number; dest
 
 export interface Transfer {
   id: string;
-  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; backup: a restore point to it; bring: one back; update: this TOMLIN to it; pull: its TOMLIN taken into this PC; projects: the projects backed up to it; restore: brought back from it; fetch: a model that PC downloads itself; runner: the CUDA runner sent to it. */
-  kind: 'copy' | 'send' | 'backup' | 'bring' | 'update' | 'pull' | 'projects' | 'restore' | 'fetch' | 'runner';
+  /** copy: a model from a linked PC; send: one of this PC's to a linked PC; move: one of this PC's to a linked PC, checked there, then removed here; backup: a restore point to it; bring: one back; update: this TOMLIN to it; pull: its TOMLIN taken into this PC; projects: the projects backed up to it; restore: brought back from it; fetch: a model that PC downloads itself; runner: the CUDA runner sent to it. */
+  kind: 'copy' | 'send' | 'move' | 'backup' | 'bring' | 'update' | 'pull' | 'projects' | 'restore' | 'fetch' | 'runner';
   what: string;
   pc: string;
   pcName: string;
@@ -864,16 +1012,72 @@ export interface Transfer {
   stage?: 'compare' | 'send' | 'start' | 'check' | 'get';
   /** An update only: what that PC is busy with while the new version waits to start there. */
   wait?: string;
+  /** Not begun yet: AT_ONCE others are running, and this one takes its turn after them. */
+  queued?: boolean;
   said: string;
   started: number;
   ended: number | null;
 }
 
-/** The copies this PC is making or made (the last 12), one at a time per linked PC. */
+/**
+ * The copies this PC is making or made (every one still going, and the last 12 in all), one at a time per linked PC and
+ * AT_ONCE at a time over all of them: the rest wait their turn, so an update or a model sent to many PCs at once does
+ * not put them all on this PC's one network port and disk together.
+ */
+/**
+ * A fault in this PC's link door as the linked PC that asked is told it: a full disk in plain words, another system
+ * fault by its code only (its folder names stay here, in this PC's log), a message written for people as it is.
+ */
+export function doorFault(e: unknown): string {
+  const x = e as NodeJS.ErrnoException;
+  if (x?.code === 'ENOSPC' || x?.code === 'EDQUOT') return 'its disk is full, so what was sent could not be kept. Free some space on that PC, then press it again to carry on from where it stopped';
+  if (typeof x?.code === 'string' && /^E[A-Z]+$/.test(x.code)) return `a file there could not be used (${x.code}). The details are in its log`;
+  return x?.message ?? String(e);
+}
+
+/**
+ * The Stop of the transfer a request is made for: each transfer runs inside it (Transfers.start), so a request to a linked
+ * PC that has gone quiet part way ends the moment Stop is pressed, not when its own long wait runs out (src/jobrun/copies.ts).
+ */
+export const transferStop = new AsyncLocalStorage<AbortSignal>();
+
+/**
+ * The tidy-up a transfer sends after its Stop (the half-sent file dropped on that PC): it still goes, but given 15 seconds
+ * at most, so a PC that went quiet never keeps a stopped transfer showing as working.
+ */
+export const afterStop = <T>(send: () => Promise<T>): Promise<T> => transferStop.run(AbortSignal.timeout(15_000), send);
+
 export class Transfers {
+  /** How many run at the same time. A model a linked PC downloads itself ('fetch') uses nothing here and is not counted. */
+  static AT_ONCE = 4;
   private list: Transfer[] = [];
   private stops = new Map<string, AbortController>();
   private n = 0;
+  private running = 0;
+  private waiting: { job: Transfer; go: () => void }[] = [];
+
+  /** This transfer's turn, when AT_ONCE others run: it comes when one of them ends. Refused when it is stopped first. */
+  private turn(job: Transfer, signal: AbortSignal): Promise<void> {
+    job.queued = true;
+    return new Promise<void>((resolve, reject) => {
+      const w = { job, go: () => { delete job.queued; resolve(); } };
+      this.waiting.push(w);
+      signal.addEventListener('abort', () => {
+        const k = this.waiting.indexOf(w);
+        if (k < 0) return; // its turn had come: the run itself hears the stop
+        this.waiting.splice(k, 1);
+        delete job.queued;
+        reject(new Error('stopped'));
+      }, { once: true });
+    });
+  }
+
+  /** One that ran has ended: the next one waiting takes its place. */
+  private free(): void {
+    const next = this.waiting.shift();
+    if (next) next.go();
+    else this.running--;
+  }
 
   view(): Transfer[] {
     return this.list.map(t => ({ ...t }));
@@ -882,6 +1086,7 @@ export class Transfers {
   /** What Stop leaves, said when it is pressed: a copy here carries on; a send was cleared on that PC. */
   static stopped(kind: Transfer['kind'], pcName: string): string {
     if (kind === 'send') return `Stopped. Nothing half-sent is left on "${pcName}": Send a copy starts it again.`;
+    if (kind === 'move') return `Stopped. Nothing was removed from this PC, and nothing half-sent is left on "${pcName}": Move starts it again.`;
     if (kind === 'runner') return `Stopped. Nothing half-sent is left on "${pcName}", and what was downloaded here is kept: send it again to carry on.`;
     if (kind === 'backup' || kind === 'projects') return 'Stopped. Back up again when you are ready.';
     if (kind === 'update') return `Stopped. Nothing was changed on "${pcName}": it still runs its old version.`;
@@ -897,8 +1102,18 @@ export class Transfers {
     const job: Transfer = { ...t, id: `t${++this.n}`, done: 0, bytes: 0, state: 'working', said: '', started: Date.now(), ended: null };
     const ac = new AbortController();
     this.stops.set(job.id, ac);
-    this.list = [job, ...this.list].slice(0, 12);
-    void run(p => Object.assign(job, p), ac.signal).then(said => {
+    // One still going is never dropped from the list (it could not be seen or stopped any more); finished ones age out.
+    this.list = [job, ...this.list].filter((x, k) => x.state === 'working' || k < 12);
+    const begin = () => transferStop.run(ac.signal, () => run(p => Object.assign(job, p), ac.signal));
+    let held = false;
+    let going: Promise<string>;
+    if (t.kind === 'fetch') going = begin();
+    else if (this.running < Transfers.AT_ONCE) {
+      this.running++;
+      held = true;
+      going = begin();
+    } else going = this.turn(job, ac.signal).then(() => { held = true; return begin(); });
+    void going.then(said => {
       job.state = 'done';
       job.said = said;
     }, e => {
@@ -907,6 +1122,7 @@ export class Transfers {
     }).finally(() => {
       job.ended = Date.now();
       this.stops.delete(job.id);
+      if (held) this.free();
     });
     return job;
   }

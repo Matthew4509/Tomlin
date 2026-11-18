@@ -16,7 +16,9 @@ import { images } from './panes.ts';
 import { answeringBusy, imageSpecialist } from './answering.ts';
 import { jobRoutes } from './jobs.ts';
 import { awayBusy, queuedPicture } from './pictures.ts';
+import { ridOf } from '../outbox.ts';
 import { handInTo } from './places.ts';
+import { picturePrompt, stepArtist } from '../picturestep.ts';
 import { queuedMessage } from './chat.ts';
 
 const FILE = join(HOME.data, 'queue.json');
@@ -152,7 +154,10 @@ async function run(id: string): Promise<void> {
 
 /** One picture: drawn by its artist (here or on their PC), kept in the gallery and handed in to its project. */
 async function runPicture(it: QItem, signal: AbortSignal, st: { stage: string; step?: number; steps?: number; eta?: number | null }): Promise<Partial<QItem> & { state: QItem['state'] }> {
-  const got = await queuedPicture({ prompt: it.prompt ?? it.title, as: it.as, mode: it.mode, width: it.width, height: it.height }, signal, p => {
+  // The request id is the item and what it asks: the same item tried again (after a lost link or a restart) collects the
+  // picture its PC kept; an item changed since asks for a new one.
+  const rid = ridOf({ queue: it.id, prompt: it.prompt ?? it.title, as: it.as ?? '', mode: it.mode ?? '', width: it.width ?? 0, height: it.height ?? 0, ...(it.negative ? { negative: it.negative } : {}) });
+  const got = await queuedPicture({ prompt: it.prompt ?? it.title, as: it.as, mode: it.mode, width: it.width, height: it.height, rid, negative: it.negative }, signal, p => {
     if (typeof p.text === 'string') st.stage = p.text;
     if (typeof p.step === 'number') st.step = p.step;
     if (typeof p.steps === 'number') st.steps = p.steps;
@@ -167,7 +172,7 @@ async function runPicture(it: QItem, signal: AbortSignal, st: { stage: string; s
   return {
     state: 'done',
     output: got.pic.output,
-    result: `Drawn by ${got.by} on ${got.where} in ${Math.round(got.pic.seconds)} s.`,
+    result: `Drawn by ${got.by} on ${got.where} in ${Math.round(got.pic.seconds)} s.${got.note ? ` ${got.note}` : ''}`,
     ...(handed ? { handed: 'path' in handed ? handed.path : `Not handed in: ${handed.error}` } : {}),
   };
 }
@@ -220,7 +225,11 @@ async function runProject(it: QItem, signal: AbortSignal, st: { stage: string })
   const far = count.words;
   if (r.kind === 'finished') return { state: 'done', result: `${count.skipped ? count.words : `All ${total} step${total === 1 ? '' : 's'} done`}${saved ? `, ${saved} saved by the queue` : ''}.` };
   if (r.kind === 'picture') {
-    const pic: QItem = { id: newId(), kind: 'picture', state: 'waiting', title: r.brief || r.title, prompt: r.brief || r.title, added: new Date().toISOString(), project: it.project, projectName: it.projectName, step: r.n };
+    // Drawn by the hire with the step's role (the artist, or the designer for an icon), not whoever the Images window
+    // draws as; the picture model is given what the picture shows, not the planner's brief about files and pages.
+    const as = stepArtist(r.role, staff.list().map(m => ({ id: m.id, role: m.role, draws: !!roleOf(m.role).kind })), (await imageSpecialist())?.id);
+    const prompt = picturePrompt(r.title, r.brief);
+    const pic: QItem = { id: newId(), kind: 'picture', state: 'waiting', title: prompt, prompt, ...(as ? { as } : {}), added: new Date().toISOString(), project: it.project, projectName: it.projectName, step: r.n };
     // Straight after the project, so its picture is next in line for the artist's PC.
     await change(q => {
       const i = q.items.findIndex(x => x.id === it.id);
@@ -270,7 +279,8 @@ async function itemFrom(raw: Record<string, unknown>): Promise<QItem | { error: 
     const as = typeof raw.as === 'string' && raw.as ? raw.as : undefined;
     if (as && !(staff.get(as) && roleOf(staff.get(as)!.role).kind)) return { error: 'That artist is not on the team any more. Pick another.' };
     const size = (v: unknown) => (typeof v === 'number' && v >= 64 && v <= 4096 ? Math.round(v) : undefined);
-    return Q.cleanItem({ ...base, kind: 'picture', title: prompt, prompt, as, mode: typeof raw.mode === 'string' && raw.mode !== 'auto' ? raw.mode : undefined, width: size(raw.width), height: size(raw.height), project: projectId, projectName })!;
+    const negative = typeof raw.negative === 'string' ? raw.negative.replace(/\s+/g, ' ').trim().slice(0, 1000) || undefined : undefined;
+    return Q.cleanItem({ ...base, kind: 'picture', title: prompt, prompt, as, mode: typeof raw.mode === 'string' && raw.mode !== 'auto' ? raw.mode : undefined, width: size(raw.width), height: size(raw.height), negative, project: projectId, projectName })!;
   }
   if (raw.kind === 'project') {
     if (!projectId) return { error: 'Pick the project to run.' };

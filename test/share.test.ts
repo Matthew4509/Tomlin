@@ -164,3 +164,33 @@ test('S6: a worker address that is a name must resolve to the home network only'
   // The real resolver: localhost is this PC.
   assert.equal(await homeNetworkWhy('http://localhost:8741'), null);
 });
+
+test('a worker that only sends heartbeats is reported quiet, then still waited for', async () => {
+  const enc = new TextEncoder();
+  const body = new ReadableStream({
+    async start(c) {
+      for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 40)); c.enqueue(enc.encode(': still working\n\n')); }
+      c.enqueue(enc.encode('event: text\ndata: {"text":"hi"}\n\nevent: done\ndata: {}\n\n'));
+      c.close();
+    },
+  });
+  const quiet: number[] = [];
+  const text = await readStream(new Response(body), () => undefined, (ev, data) => { if (ev === 'quiet') quiet.push(Number(data.seconds)); }, 500, 100);
+  assert.equal(text, 'hi');
+  assert.ok(quiet.length >= 1, 'a quiet notice came');
+});
+
+test('the host keeps an answer stream to its client alive with a comment line', async () => {
+  const { beatTo } = await import('../src/heartbeat.ts');
+  const wrote: string[] = [];
+  const open = { destroyed: false, writableEnded: false, write: (s: string) => wrote.push(s) };
+  const gone = { destroyed: true, writableEnded: false, write: (s: string) => wrote.push('BAD' + s) };
+  const stop = beatTo(() => [open, gone] as never, 20);
+  await new Promise(r => setTimeout(r, 90));
+  stop();
+  const n = wrote.length;
+  await new Promise(r => setTimeout(r, 60));
+  assert.ok(n >= 2);
+  assert.equal(wrote.length, n);
+  assert.ok(wrote.every(w => w === ': still working\n\n'));
+});

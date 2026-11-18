@@ -153,7 +153,8 @@ test('known setups pick the build expected: Pascal 12.4, Blackwell 13.4, a Pasca
   const pick = (names: string[], driver: string) => cudaOrder(PINS, 'llama', names.map(n => gpu(CATALOG.find(c => c.name.includes(n))!)), driver)[0];
   assert.equal(pick(['GTX 1060'], '582.78'), 'llama-cuda');
   assert.equal(pick(['RTX 5080'], '582.78'), 'llama-cuda13');
-  assert.equal(pick(['RTX 3060'], '582.78'), 'llama-cuda', 'both native: the first pinned');
+  assert.equal(pick(['RTX 3060'], '582.78'), 'llama-cuda3', 'b12250 was tried on an RTX 3060 (driver 560.94 or newer) and held up where the first pinned build crashed');
+  assert.equal(pick(['RTX 3060'], '555.10'), 'llama-cuda', 'a driver older than the one tried: the first pinned');
   assert.equal(pick(['GTX 1060', 'RTX 5080'], '582.78'), 'llama-cuda', 'only 12.4 has code for both');
   assert.equal(pick(['RTX 2060'], '582.78'), 'llama-cuda', '13.4 would compile at start and needs driver 615 for that');
   assert.match(pinWhy(PINS['llama-cuda13'], [gpu(CATALOG[4])], '582.78', 'This PC', Object.values(PINS)), /no code for it: it needs an RTX 20 or GTX 16 series \(Turing\) card or newer\. The CUDA 12\.4 runner works there instead/);
@@ -255,7 +256,7 @@ test('the speed finder never tries a CUDA build on a card it has no code for: it
         if (!r || r === 'vulkan') continue;
         rowsChecked++;
         const on = row.run.cards?.length ? pc.cards.filter(c => c.ids!.some(id => row.run.cards!.includes(id))) : pc.cards;
-        for (const c of on) assert.ok(c.runners!.includes(r), `${cards.map(k => k.name).join(' + ')} (${size}): row "${row.name}" runs ${r} on the ${c.name}, which it has no code for`);
+        for (const c of on) assert.ok(c.runners!.includes(r as RunnerName), `${cards.map(k => k.name).join(' + ')} (${size}): row "${row.name}" runs ${r} on the ${c.name}, which it has no code for`);
       }
       // A build with code for none of the cards: not a row, and said why.
       for (const r of runners.filter(x => x !== 'vulkan')) {

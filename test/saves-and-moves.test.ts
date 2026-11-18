@@ -15,6 +15,7 @@ import * as keep from '../src/keep.ts';
 import { listZip } from '../src/zip.ts';
 import { addSnippet, NotesStore, setScratch } from '../src/notes.ts';
 import * as ws from '../src/workspace.ts';
+import { testEnv } from './env.ts';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const pic = (id: string, extra: Partial<Picture> = {}): Picture => ({
@@ -47,7 +48,7 @@ async function boot(home: string): Promise<{ base: string; stop: () => Promise<v
   writeFileSync(join(home, 'models-folder.txt'), '');
   const port = await freePort();
   const server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';

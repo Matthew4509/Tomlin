@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { CURRENT, cscArgs, exeIn, places, sideExe } from './installer.ts';
+import { CURRENT, cscArgs, exeIn, mayFollow, places, sideExe } from './installer.ts';
 
 /** Beside the program: the SHA-256 of the tools/tray.cs it was built from. */
 export const STAMP = 'tray.sha256';
@@ -80,4 +80,31 @@ export async function refreshTray(appRoot: string, build: Build = cscBuild()): P
   }
   await writeFile(join(dir, STAMP), sum);
   return 'built';
+}
+
+/** Runs reg.exe with these words: what it printed, or a throw when it failed (a key or value that is not there). */
+export type Reg = (args: string[]) => Promise<string>;
+const regExe: Reg = async args => (await promisify(execFile)('reg', args, { windowsHide: true })).stdout;
+
+/**
+ * The entry in Settings > Apps made to say the version that runs. An update made inside the app (Check git, Check zip,
+ * or one sent from a linked PC) brings a new copy but never runs setup, so the entry kept the version first installed
+ * (2.0.81 after an update to 2.0.99). Only the copy current.txt names in the install folder changes it, only its
+ * version, and only when the entry is there: a missing entry is for Repair to make. Never touches another install.
+ */
+export async function followAppsEntry(appRoot: string, version: string, env: NodeJS.ProcessEnv = process.env, reg: Reg = regExe): Promise<'none' | 'same' | 'set'> {
+  const p = places(env);
+  const dir = dirname(resolve(appRoot));
+  if (!p.uninstallKey || resolve(p.root).toLowerCase() !== dir.toLowerCase() || !mayFollow(appRoot, p.root, env)) return 'none';
+  const named = (await readFile(join(dir, CURRENT), 'utf8').catch(() => '')).trim();
+  if (!named || resolve(dir, named).toLowerCase() !== resolve(appRoot).toLowerCase()) return 'none';
+  let said: string;
+  try {
+    said = await reg(['query', p.uninstallKey, '/v', 'DisplayVersion']);
+  } catch {
+    return 'none';
+  }
+  if ((/DisplayVersion\s+REG_SZ\s+(\S*)/i.exec(said)?.[1] ?? '') === version) return 'same';
+  await reg(['add', p.uninstallKey, '/v', 'DisplayVersion', '/t', 'REG_SZ', '/d', version, '/f']);
+  return 'set';
 }

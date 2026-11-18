@@ -2,12 +2,12 @@
 // No administrator needed. Nothing is downloaded, except Microsoft's Visual C++ Runtime when this PC lacks it and the
 // answer is Yes (src/vcrt.ts; Windows asks for permission to install it). See src/installer.ts for where everything goes.
 //   node tools/install.ts install [--dir "D:\Apps\TOMLIN"] [--yes] [--no-start] [--desktop|--no-desktop] [--autostart|--no-autostart]
-//                                 [--firewall|--no-firewall] [--vcrt|--no-vcrt] [--dry-run]
+//                                 [--firewall|--no-firewall] [--vcrt|--no-vcrt] [--dry-run] [--action update|repair|uninstall]
+//     --action: the setup window's choice when a copy is installed; it replaces the first question (src/installer.ts actionFlag).
 //   node tools/install.ts uninstall [--yes] [--firewall|--no-firewall] [--dry-run]   (Settings > Apps > TOMLIN > Uninstall runs it)
 //   node tools/install.ts repair [--yes] [--dry-run]          (the icon's Repair install; My PC has the same, src/repair.ts)
 // Tests and scratch runs move every place with TOMLIN_INSTALL_ROOT, TOMLIN_START_MENU_DIR, TOMLIN_DESKTOP_DIR,
 // TOMLIN_STARTUP_DIR, TOMLIN_UNINSTALL_KEY (a throwaway key, or "none"), TOMLIN_VCRT_DIR and TOMLIN_HOME.
-import '../src/envnames.ts';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -222,18 +222,52 @@ async function install() {
   say(`${inst.NAME} setup (${version})`);
   say('===========================');
   say();
-  const first = inst.firstQuestion(was?.version ?? null, version);
-  if (!first.go) {
-    say(first.text);
-    return 0;
-  }
-  if (!(await ask(first.text, first.yesDefault))) {
-    say('Nothing was changed.');
-    return 0;
-  }
-  if (first.repair) {
+  // Copies people unzipped and started from a folder (Desktop, Downloads, Documents, the user folder): said, never changed.
+  const loose = inst.looseCopyLines(inst.findLooseCopies(inst.lookIn(process.env, P.desktop), P.root, [SRC]));
+  if (loose.length) {
+    for (const line of loose) say(line);
     say();
-    return repair();
+  }
+  const actionAt = argv.indexOf('--action');
+  const chosen = inst.actionFlag(actionAt >= 0 ? argv[actionAt + 1] ?? '' : null, was?.version ?? null, version);
+  if (chosen) {
+    // The setup window's choice (Repair | Update | Uninstall), already made: no question decides it again.
+    if ('error' in chosen) {
+      say(chosen.error);
+      say('Nothing was changed.');
+      return 1;
+    }
+    if (chosen.action === 'repair') return repair();
+    if (chosen.action === 'uninstall') return uninstall();
+    if (was) say(was.version === version ? `${inst.NAME} ${version} is installed in ${was.dir}: copying it in again.` : `${inst.NAME} ${was.version} is installed in ${was.dir}: updating it to ${version}.`);
+  } else if (was && rl) {
+    // Someone is at the keyboard: say which copy was found and where, then Repair | Update | Uninstall by name.
+    const menu = inst.actionMenu(was.version, version, was.dir);
+    say(menu.intro);
+    menu.options.forEach((o, i) => say(`  ${i + 1}. ${o.label}${o.key === menu.defaultKey ? '  (Enter)' : ''}`));
+    let action: inst.SetupAction | null = null;
+    while (!action) action = inst.pickAction(await rl.question(' Type a number or a name: '), menu);
+    if (action === 'quit') {
+      say('Nothing was changed.');
+      return 0;
+    }
+    say();
+    if (action === 'repair') return repair();
+    if (action === 'uninstall') return uninstall();
+  } else {
+    const first = inst.firstQuestion(was?.version ?? null, version);
+    if (!first.go) {
+      say(first.text);
+      return 0;
+    }
+    if (!(await ask(first.text, first.yesDefault))) {
+      say('Nothing was changed.');
+      return 0;
+    }
+    if (first.repair) {
+      say();
+      return repair();
+    }
   }
   await chooseFolder(!!was);
   if (!(await closeRunning())) return 1;
@@ -359,7 +393,9 @@ async function uninstall() {
   await removeFirewallRule();
   await step(`remove ${P.root}`, async () => {
     if (!DRY) await new Promise(r => setTimeout(r, 1000));
-    await rm(P.root, { recursive: true, force: true });
+    // A model runner can take a few seconds to let go of its files after TOMLIN closes: tried again for about 15 s
+    // before it gives up (once, it stopped with the shortcuts and the Apps entry already gone).
+    await rm(P.root, { recursive: true, force: true, maxRetries: 30, retryDelay: 500 });
     if (!process.env.TOMLIN_INSTALL_ROOT) await rm(locationFile(), { force: true });
   });
   say();
@@ -460,6 +496,15 @@ async function status() {
     user: process.env.USERNAME ?? '',
   };
   for (const [k, v] of Object.entries(lines)) console.log(`${k}=${v}`);
+  if (was) {
+    // The window's first page when a copy is there: what was found, then the choices (src/installer.ts windowMenu).
+    const menu = inst.windowMenu(was.version, lines.version, was.dir, P.root, lines.home);
+    console.log(`found=${was.dir}`);
+    console.log(`intro=${menu.intro}`);
+    for (const c of menu.choices) console.log(`choice=${c.key}|${c.label}`);
+    console.log(`pick=${menu.pick}`);
+    console.log(`removes=${menu.uninstall}`);
+  }
   return 0;
 }
 

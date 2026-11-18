@@ -1,20 +1,23 @@
 // A chat turn: a message, Continue and the handoff, documents in a chat, Send to.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { TooLarge, readBody } from '../bodyread.ts';
 import { log } from '../log.ts';
 import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine, wholeSection } from '../docs.ts';
 import type { ChatLine } from '../store.ts';
-import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatWatch, streamChat, THINK_ROOM, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
+import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatWatch, streamChat, THINK_SIZES, thinkRoomFit, withContinueAsk, thinkRoomOf, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { pictureAsk } from '../chatpic.ts';
 import { cleanAnswer, roleOf, isPlain, type StaffMember } from '../staff.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
+import { scanText } from '../promptscan.ts';
 import type { ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { cleanFrom, cleanWritten, markSent, promptFor } from '../sendto.ts';
 import { cleanFoldWait, findInChat, FOLD_WAIT_MAX, isBigRead, LOG_KINDS, recallLine, sentLines, startIn, type LogKind } from '../layers.ts';
-import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, staff, staffId, store, workspaceDir } from './core.ts';
-import { chat, lastUsed, main, runOn, runnerUsed } from './panes.ts';
+import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, shortName, staff, staffId, store, workspaceDir } from './core.ts';
+import { chat, chatList, fitsAloneNow, lastUsed, main, maxEngineFor, maxGateNow, maxLoadEta, maxRunOf, maxSpeeds, runOn, runnerUsed, toolsModels } from './panes.ts';
+import { afterAnswer } from '../maxmode.ts';
 import { answeringBusy, askOnce, chatAnswering, chatContext, endAnswer, lastContext, layerAsk, notebooksOf, reserve, setPhase, startAnswer, stopChats, takeChat, takeTurn, workOn } from './answering.ts';
 import { artistPointer, chatPeople, chatPersonHere, chatToSend, openChat, previewsTake, sendTarget, type SendTarget } from './people.ts';
 import { namedChat } from '../chats.ts';
@@ -25,18 +28,44 @@ import { keepFirstAnswer, saveToOf } from './places.ts';
 import { inScope, staffOfWho } from '../meter.ts';
 import { queueOn } from './queue.ts';
 import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, type ToolUse } from '../webtools.ts';
-import { FILE_ROUNDS, FILE_TOOLS, FileTurn, fileCallWords, filesFit, isFileTool, withFilesLine } from '../filetools.ts';
-import { Gate, cleanPermit, deniedWords, type Kind, type Permit } from '../permits.ts';
+import { FILE_ROUNDS, FILE_TOOLS, FileTurn, deniedFor, fileCallWords, filesFit, isFileTool, wantsFilesFor, withFilesLine } from '../filetools.ts';
+import { Gate, cleanPermissions, cleanPermit, deniedWords, isTierKind, type Kind, type Permit } from '../permits.ts';
+import { withLine } from '../screentools.ts';
+import { RESEARCH_BUDGET } from '../notetools.ts';
+import { loadAsk, widenForWeb } from './webctx.ts';
+import type { Kit } from '../toolkit.ts';
+import { holdFindings, kitFor } from './tools.ts';
 import { chatFilesRoot } from './places.ts';
 import { readProjectRules, withProjectRules } from '../rules.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Pane } from '../pane.ts';
+import { faultFor, faultFrom, thisPc } from './faults.ts';
+import { permitTimedOut, PERMIT_WAIT_MS, toolsNotice, webOffWords } from '../toolsnotice.ts';
+import { noticeTitle } from '../faults.ts';
 import * as Q from '../queue.ts';
+import { beatTo } from '../heartbeat.ts';
+
+/**
+ * Why a message was not answered with no model connected: Connect when this PC has a chat model; else where to get
+ * one first (Connect alone would only say there is nothing to connect).
+ */
+const noModelWords = () => (chatList().length
+  ? 'No chat model is loaded: press Connect beside the model at the top of this chat, then send again.'
+  : 'No chat model is on this PC yet: get one under Settings, Models, then press Connect at the top of this chat and send again.');
 
 /** A new message, answered in the chat it names (`to`): never in whichever chat another window opened last. */
-async function chatMessage(res: ServerResponse, message: string, to: SendTarget, from = '', agree = false, think = false, now = false, web = false): Promise<void> {
+async function chatMessage(res: ServerResponse, message: string, to: SendTarget, from = '', agree = false, think = false, now = false, web = false, scanOk = false, room = 0, max = false, retry = false): Promise<void> {
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', ...SECURITY_HEADERS });
   const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // A message that looks like a pasted attempt to take a model over (src/promptscan.ts): nothing is saved or sent on until
+  // the page has shown it and the owner has ticked that they understand the risks; the page then asks again with scanOk.
+  if (!scanOk) {
+    const scan = scanText(message);
+    if (scan.suspect) {
+      send('scan', { reasons: scan.reasons, hits: scan.hits });
+      return void res.end();
+    }
+  }
   const { who } = to;
   const member = staffId(who) ? staff.get(who.slice(6)) : undefined;
   // A hire who lived on a linked PC is retired (linked PCs lend only their models): the old chat is kept to read.
@@ -77,7 +106,7 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
   const noModel = !!memory.rememberCommand(message);
   const hostModel = !member ? (await store.settings()).hostModel : '';
   if (!own && !noModel && (chat.view.state !== 'connected' || !chat.worker.base || (!!hostModel && chat.view.model !== hostModel))) {
-    send('error', { text: 'No chat model is loaded: press Connect beside the model at the top of this chat, then send again.' });
+    send('error', { text: noModelWords() });
     return void res.end();
   }
   // A chat with someone who has left the team can be read, not carried on.
@@ -113,6 +142,7 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
   // Quick or Think, as chosen in this chat's box: kept on the chat, so it is chosen again when the chat opens. Web too.
   if (!!openChat0.think !== think) await chats.mark(openId, { think });
   if (!!openChat0.web !== web) await chats.mark(openId, { web });
+  if (!!openChat0.max !== max) await chats.mark(openId, { max });
   const books = notebooksOf(who);
   // "remember: ..." is written to the notebook by code, at once; no model is asked.
   const cmd = memory.rememberCommand(message);
@@ -128,7 +158,7 @@ async function chatMessage(res: ServerResponse, message: string, to: SendTarget,
     send('done', { text: reply, perSecond: 0, ran: 'written by the app, no model', note: '', saved: !('error' in r) });
     return void res.end();
   }
-  return answerTurn(res, send, { who, member, own, file, openId, mode: 'message', message, from, think, web });
+  return answerTurn(res, send, { who, member, own, file, openId, mode: 'message', message, from, think, web, room, max, retry });
 }
 
 /**
@@ -231,7 +261,7 @@ async function answerTurn(res: ServerResponse, send: (event: string, data: unkno
 }
 
 /** `think`: Think was chosen for this message (the model works it out first, when it can). */
-type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; queued?: string; think?: boolean; web?: boolean };
+type TurnAsk = { who: string; member: StaffMember | undefined; own: boolean; file: string; openId: string; mode: 'message' | 'continue' | 'handoff'; message: string; from?: string; queued?: string; think?: boolean; web?: boolean; room?: number; max?: boolean; retry?: boolean };
 
 /**
  * An answer being written in a chat, kept going for whoever follows it: the page that asked, and a page that opens the
@@ -255,7 +285,10 @@ class LiveAnswer {
     this.followers.add(first);
     first.on('close', () => this.followers.delete(first));
     liveAnswers.set(chatId, this);
+    // A line now and then so the client's fetch does not give up ("terminated") while a linked PC loads or reads.
+    this.stopBeat = beatTo(() => this.followers);
   }
+  private readonly stopBeat: () => void;
   send = (event: string, data: unknown) => {
     if (['text', 'status', 'progress', 'thinking', 'reading'].includes(event)) this.said = this.said.filter(e => e.event !== event);
     this.said.push({ event, data });
@@ -274,6 +307,7 @@ class LiveAnswer {
   }
   finish() {
     this.done = true;
+    this.stopBeat();
     for (const fn of this.ends.splice(0)) fn();
     for (const r of this.followers) if (!r.writableEnded) r.end();
     if (liveAnswers.get(this.chatId) === this) liveAnswers.delete(this.chatId);
@@ -322,12 +356,18 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   lastUsed.chat = Date.now();
   const now = new Date().toISOString();
   const mine: ChatLine = { role: 'user', content: message, at: now, ...(t.from ? { from: t.from } : {}), ...(t.queued ? { queued: t.queued } : {}) };
-  if (mode === 'message') await store.changeChat(file, lines => [...lines, mine], mark);
+  // Asked again from a card (more room for the working): the same message is already the last one, followed by the failed
+  // answer. That answer goes and the message stays, so it is in the chat once and the model reads it once.
+  const again = (lines: ChatLine[]): ChatLine[] => {
+    const last = lines.at(-1);
+    return t.retry && last?.role === 'assistant' && last.failed && lines.at(-2)?.role === 'user' && lines.at(-2)?.content === message ? lines.slice(0, -1) : [...lines, mine];
+  };
+  if (mode === 'message') await store.changeChat(file, lines => again(lines), mark);
   // A fault that ends a new message's turn before any answer was written: shown now and kept under the message, so a
   // reload still says why there is no answer (never sent to a model). Continue and the handoff leave the chat as it was.
-  const fault = async (text: string) => {
+  const fault = async (text: string, more: Record<string, unknown> = {}) => {
     if (mode === 'message') await store.changeChat(file, lines => [...lines, { role: 'assistant', content: text, at: new Date().toISOString(), failed: true }], mark);
-    send('error', { text });
+    send('error', { text, ...more });
   };
   // Finding the hire's brain may load their model here (Stop still works while it loads).
   let target: Awaited<ReturnType<typeof jobRoutes.hireBrain>> | null = null;
@@ -341,7 +381,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       if (hire && !ac.signal.aborted && mode === 'message') {
         await store.changeChat(file, lines => lines.filter(l => l !== mine && !(l.role === 'user' && l.at === now && l.content === message)), mark);
         const reasons = (error as { reasons?: string[] }).reasons ?? [];
-        send('backup', { hire, name: member!.name, why: reasons.join('; '), off: reasons.some(r => /is off|not answering|log off|using it/.test(r)), ...(await jobRoutes.backupChoices(member!)) });
+        send('backup', { hire, name: member!.name, why: reasons.join('; '), off: reasons.some(r => /is off|not answering|log off|using it/.test(r)), ...((error as { gone?: boolean }).gone ? { gone: true, suggest: (error as { suggest?: string[] }).suggest ?? [], why: (error as { goneWhy?: string }).goneWhy ?? '' } : {}), ...(await jobRoutes.backupChoices(member!)) });
         return void res.end();
       }
       if (ac.signal.aborted) send('error', { text: 'Stopped.' });
@@ -352,10 +392,44 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     }
   }
   // A hire's model on this PC answers in its own runner (two or more chat models can be loaded); anyone else on the main one.
-  const runner = target?.here ? target.pane ?? main() : main();
+  let runner = target?.here ? target.pane ?? main() : main();
+  // Web on: a model here that runs with too small a context for web pages is started again with a larger one for this
+  // answer (src/webctx.ts); what was changed, or why not, is told in the answer's note.
+  const webOn = mode === 'message' && (t.web ?? (await chats.get(openId))?.web ?? false);
+  const ctxNotes: string[] = [];
+  if (webOn && (!target || target.here) && !(await toolsWhy(runner))) {
+    try {
+      const wide = await widenForWeb(runner, text => {
+        send('status', { text });
+        ctxNotes.push(text);
+      }, ac.signal, await loadAsk());
+      if (wide !== runner) {
+        runner = wide;
+        if (target && member) {
+          target = await jobRoutes.hireBrain(member, text => send('status', { text }), ac.signal);
+          runner = target.here ? target.pane ?? main() : main();
+        }
+      }
+    } catch (error) {
+      if (ac.signal.aborted) endAnswer(ac);
+      await fault((error as Error).message);
+      return void res.end();
+    }
+  }
   if (!target || target.here) reserve(ac, runner);
   const ran = target ? `${brains.ranOn(target.pc, target.model)}${target.intern ? ' · intern' : ''}` : brains.ranOn('this PC', runner.view.modelName ?? '');
   const info = await chats.get(openId);
+  // Web on, the model on a linked PC: that PC is asked to run it with a larger context (its owner's run-settings tick).
+  if (webOn && target && !target.here) {
+    const far = await jobRoutes.widenFar(target.ref);
+    if (far) {
+      if ('words' in far) {
+        target.brain.ctx = far.ctx;
+        ctxNotes.push(far.words);
+      } else ctxNotes.push(far.note);
+      send('status', { text: ctxNotes[ctxNotes.length - 1] });
+    }
+  }
   const ctx = target ? target.brain.ctx : runOn(runner).ctx;
   // Documents in this chat (PLAN F10 G6): the parts that match this message (and the one before it), found by code.
   const docs = mode === 'message' ? await docStore.all(openId) : [];
@@ -400,12 +474,17 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // chat format has tools. Addresses the person gave (messages, the documents' parts read now) may be opened.
   const webAsked = mode === 'message' && (t.web ?? info?.web ?? false);
   const webAway = webAsked && !!target && !target.here;
-  const webWhy = !webAsked ? '' : webAway ? (jobRoutes.canWeb(target!.ref) ? '' : `Web is on, but "${target!.pc}" runs an older TOMLIN without the web tools, so it answered from what it knows. Update it there (Network, Update).`) : await toolsWhy(runner);
+  const webWhy = !webAsked ? '' : webAway ? (jobRoutes.canWeb(target!.ref) || jobRoutes.canTools(target!.ref) ? '' : `Web is on, but "${target!.pc}" runs an older TOMLIN without the web tools, so it answered from what it knows. Update it there (Network, Update).`) : await toolsWhy(runner);
   const webSeed = [message, ...history.filter(l => l.role === 'user').map(l => l.content), ...found.map(f => f.part.text)];
   const thinkNote = t.think && mode === 'message' && !thinkNow
-    ? olderPc ? `"${target!.pc}" runs an older TOMLIN that cannot think first, so this was answered straight away.` : `${target?.model || runner.view.modelName || 'This model'} cannot think first, so it answered straight away (Qwen 3 and 3.5 can).`
+    ? olderPc ? `"${target!.pc}" runs an older TOMLIN that cannot think first, so this was answered straight away.` : `${target?.model || runner.view.modelName || 'This model'} cannot think first, so it answered straight away (Qwen 3 and 3.5, and GLM 4.5 and later, can).`
     : '';
-  const answerTokens = mode === 'handoff' ? Math.min(built.answerTokens, 1200) : built.answerTokens + (thinkNow || thinks === 'always' ? THINK_ROOM : 0);
+  // The working's room: the default, or the size picked on the card shown when it filled the default (THINK_SIZES).
+  const thinkAsked = thinkRoomOf(t.room);
+  // What the model's context leaves after the prompt (about 3 characters a word-piece) and the answer: the working may not
+  // be given more than that, or the context fills before the answer starts and the whole working is lost.
+  const { room: thinkRoom, free: ctxFree } = thinkRoomFit(thinkAsked, built.ctx, built.used, built.answerTokens);
+  const answerTokens = mode === 'handoff' ? Math.min(built.answerTokens, 1200) : built.answerTokens + (thinkNow || thinks === 'always' ? thinkRoom : 0);
   // The working so far, as it was last sent (Answer now on a linked PC's model asks again with it).
   const working = { text: '', seconds: 0 };
   const sendThought = everyFew(1000, (text: string, seconds: number) => send('thinking', { text, seconds }));
@@ -433,6 +512,8 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     return void res.end();
   };
   let perSecond = 0;
+  /** The word-pieces this answer wrote (a model here), for the speeds Max mode decides by. */
+  let tokens = 0;
   let cut = false;
   // This answer's web tools (Web on), set by the ask that wrote it; or what a linked PC used for it.
   let web: WebTurn | null = null;
@@ -467,27 +548,47 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // llama.cpp streams a continued answer's start back first: only what comes after it is new.
   const fresh = (text: string) => (before && text.startsWith(before) ? text.slice(before.length) : text);
   // Permissions (src/permits.ts): a Manual kind is asked on a card the first time in this answer; Auto (in Settings, or
-  // for this thread) is not. The card shows where every kind stands; up to 10 minutes, Stop is a no.
+  // for this thread) is not. The card shows where every kind stands; up to PERMIT_WAIT_MS (said, then a no), Stop is a no.
   const perms = { ...(await store.settings()).permissions };
-  const threadOk: Record<Kind, boolean> = { files: info?.files === true, web: info?.webOk === true };
+  const threadOk: Partial<Record<Kind, boolean>> = { files: info?.files === true, web: info?.webOk === true };
+  // The newer tools of this answer (src/toolkit.ts): the screen, the laptop helper, git and notes.
+  let kit: Kit | null = null;
   let filesFolder = '';
   let webNo = '';
+  const permitLate: string[] = [];
+  let stalledNote = '';
+  // Files are offered unless the message only asks for something new to be written and the person has not allowed files
+  // (src/filetools.ts wantsFiles): the answer is then written in the chat, with no card for files that are not there.
+  const filesOffered = perms.files === 'auto' || threadOk.files === true || wantsFilesFor(message, history, !!info?.project);
   const gate = new Gate({
-    allowed: k => perms[k] === 'auto' || threadOk[k],
-    ask: (kind, what) => new Promise<Permit>(resolve => {
+    allowed: k => (k === 'files' || k === 'web' ? perms[k] === 'auto' : false) || threadOk[k] === true,
+    ask: (kind, what, each, extra) => new Promise<Permit>(resolve => {
       const done = (p: Permit) => {
         clearTimeout(timer);
         if (live.permit === done) live.permit = null;
         resolve(p);
       };
-      const timer = setTimeout(() => done('no'), 10 * 60_000);
+      // Nobody answered in time: said on the card and under the answer, then a no (the answer goes on without it).
+      const timer = setTimeout(() => {
+        const words = permitTimedOut(kind);
+        permitLate.push(words);
+        send('permit-end', { kind, text: words });
+        done('no');
+      }, PERMIT_WAIT_MS);
       ac.signal.addEventListener('abort', () => done('no'), { once: true });
       live.permit = done;
       holdNoMore();
-      send('permit', { kind, who: member ? member.name.split(/s+/)[0] : 'This chat', what, folder: kind === 'files' ? filesFolder : '', perms, thread: threadOk });
+      send('permit', { kind, who: member ? member.name.split(/\s+/)[0] : 'This chat', what, folder: kind === 'files' ? filesFolder : '', perms, thread: threadOk, wait: PERMIT_WAIT_MS, ...(each ? { each: true } : {}), ...(extra ?? {}) });
     }),
     keep: async (k, p) => {
-      if (p === 'always') {
+      if (isTierKind(k)) {
+        // A newer kind: Allowed in Settings for always; for this chat it lasts this answer (nothing is kept on the chat).
+        threadOk[k] = true;
+        if (p === 'always') {
+          const now = (await store.settings()).permissions;
+          await store.saveSettings({ permissions: cleanPermissions({ tiers: { ...now.tiers, [k]: 'allowed' } }, now) });
+        }
+      } else if (p === 'always') {
         perms[k] = 'auto';
         await store.saveSettings({ permissions: { ...(await store.settings()).permissions, [k]: 'auto' } });
       } else {
@@ -496,6 +597,56 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       }
     },
   });
+  // A second model to read a draft against its quotes (check_draft): a hire's model on a linked PC that is loaded
+  // there and free now, and is not the model writing this answer (`mine`). None: the draft is checked by the code alone.
+  const secondModelFor = (mine: string) => async (system: string, user: string, sig?: AbortSignal): Promise<{ text: string; by: string } | null> => {
+    const pcs = await jobRoutes.remoteStatus();
+    for (const m of staff.list()) {
+      const ref = brains.parseRef(m.model);
+      if (ref.kind !== 'remote' || !ref.model) continue;
+      const pc = pcs.find(r => r.id === ref.pc);
+      if (!pc?.ok || pc.backupsOnly || pc.heldByCluster || !('models' in pc)) continue;
+      const there = pc.models?.find(x => x.id === ref.model);
+      if (!there || there.kind === 'image' || !there.loaded || there.busy || shortName(there.name).toLowerCase() === mine) continue;
+      const stop = AbortSignal.any([sig ?? ac.signal, ac.signal, AbortSignal.timeout(240_000)]);
+      const got = await jobRoutes.hireBrain(m, () => undefined, stop, m.model ?? '');
+      const text = await got.brain.chat([{ role: 'system', content: system }, { role: 'user', content: user }], 700, () => undefined, stop, { plain: true });
+      return { text: cleanAnswer(text), by: `${shortName(got.model)} on ${got.pc}` };
+    }
+    return null;
+  };
+  /**
+   * The tools an answer may use, whichever PC the model is on: the web, the chat's folder and the newer tools, all run on
+   * this PC. A model on a linked PC calls them over the link (src/jobrun/tooltalk.ts); a model here calls them directly.
+   */
+  const assembleTools = async (i: { say: (text: string) => void; filesRoot: string | null; kitOk: boolean; webPerCall: number; webTotal: number; second: (system: string, user: string, sig?: AbortSignal) => Promise<{ text: string; by: string } | null> }) => {
+    const search = (await store.settings()).webSearch ?? { provider: 'duckduckgo' as const };
+    const research = perms.research && webAsked && !webWhy;
+    const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: i.webPerCall, total: i.webTotal, onStatus: i.say, ...(research ? { pagesPerAnswer: RESEARCH_BUDGET.pagesPerAnswer } : {}) }) : null;
+    web = turnWeb;
+    const files = i.filesRoot ? new FileTurn(i.filesRoot, { perCall: i.webPerCall, allowed: true }) : null;
+    const turnKit = i.kitOk ? await kitFor({ perms, gate, perCall: i.webPerCall, root: i.filesRoot, web: !!turnWeb, webUses: () => turnWeb?.uses ?? [], page: u => turnWeb?.pageOf(u) ?? null, second: i.second, canQueue: true }) : null;
+    kit = turnKit;
+    const baseRounds = files ? FILE_ROUNDS : turnWeb ? (research ? RESEARCH_BUDGET.rounds : WEB_ROUNDS) : 0;
+    const tools = turnWeb || files || turnKit ? {
+      defs: [...(turnWeb ? WEB_TOOLS : []), ...(files ? FILE_TOOLS : []), ...(turnKit?.defs ?? [])],
+      run: async (n: string, a: string, sig: AbortSignal, round: number) => {
+        if (turnKit?.has(n)) return turnKit.run(n, a, sig);
+        if (!files && !turnWeb) return `There is no tool called "${n}".`;
+        const toFiles = !!files && (isFileTool(n) || !turnWeb);
+        const kind: Kind = toFiles ? 'files' : 'web';
+        if (!(await gate.permitted(kind, (toFiles ? fileCallWords(n, a) : callWords(n, a)).replace(/…$/, '')))) return toFiles ? deniedFor(n) : deniedWords(kind);
+        return toFiles ? files!.run(n, a) : turnWeb!.run(n, a, sig, round);
+      },
+      // Web calls in one go run side by side: each site keeps its own pace, so pages on two sites take turns.
+      parallel: (n: string) => !isFileTool(n) && !turnKit?.has(n),
+      rounds: Math.max(baseRounds, turnKit?.rounds ?? 0),
+      // A long research answer: older results are cut down and the working notes handed back (src/researchtools.ts).
+      ...(turnKit?.fold ? { fold: turnKit.fold } : {}),
+      onCall: (n: string, a: string) => i.say(turnKit?.has(n) ? turnKit.words(n, a) : isFileTool(n) ? fileCallWords(n, a) : callWords(n, a)),
+    } : undefined;
+    return { tools, lines: turnKit?.lines ?? [], withFiles: !!i.filesRoot };
+  };
   try {
     if (target && !target.here) {
       // On a paired PC: the whole conversation goes over, the answer streams back (that PC cuts a repeating answer and
@@ -512,11 +663,24 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         await addOwed(owe);
       }
       // Web on: that PC runs the web tools itself, with the addresses given here and the room in the context.
-      const webAllowed = webAway && !webWhy && (await gate.permitted('web', `search the web and read pages, on ${target.pc}`));
-      if (webAway && !webWhy && !webAllowed) webNo = 'Web was not allowed for this answer, so it answered from what it knows.';
+      // A linked PC that can call this PC's tools (2.0.82 on) gets them all, the web among them, run here: it does not search itself.
+      const farTools = mode === 'message' && jobRoutes.canTools(target.ref) && filesFit(target.model ?? '');
+      const webAllowed = !farTools && webAway && !webWhy && (await gate.permitted('web', `search the web and read pages, on ${target.pc}`));
+      if (!farTools && webAway && !webWhy && !webAllowed) webNo = 'Web was not allowed for this answer, so it answered from what it knows.';
       const webThere = webAllowed ? { seed: webSeed, perCall: Math.max(1500, Math.min(12_000, Math.floor(Math.max(2000, (built.room - built.used) * 0.7) / 3))), total: Math.max(2000, Math.min(60_000, Math.floor((built.room - built.used) * 0.7))) } : undefined;
+      // The chat's folder and the newer tools: made here, called by the model there.
+      const farBox = farTools ? await (async () => {
+        const left = Math.max(0, built.room - built.used);
+        const webTotal = Math.max(2000, Math.min(60_000, Math.floor(left * 0.7)));
+        const filesRoot = filesOffered ? await chatFilesRoot(info?.project) : null;
+        if (filesRoot) filesFolder = filesRoot;
+        return assembleTools({ say: text => send('status', { text }), filesRoot, kitOk: true, webPerCall: Math.max(1500, Math.min(12_000, Math.floor(webTotal / 3))), webTotal, second: secondModelFor(shortName(target.model ?? '').toLowerCase()) });
+      })() : null;
+      const farBase = farBox ? farBox.lines.reduce((all, line) => withLine(all, line), farBox.withFiles ? withFilesLine(turns) : turns) : turns;
+      // Continue: a linked PC takes only a conversation that ends with the person's message, so it is asked to carry on.
+      const farTurns = mode === 'continue' ? withContinueAsk(farBase) : farBase;
       try {
-        shown = fresh(await target.brain.chat(turns, answerTokens, text => show((shown = fresh(text))), inner.signal, { ...askOpts, ...(owe ? { rid: owe.rid } : {}), ...(webThere ? { web: webThere } : {}) }));
+        shown = fresh(await target.brain.chat(farTurns, answerTokens, text => show((shown = fresh(text))), inner.signal, { ...askOpts, ...(owe ? { rid: owe.rid } : {}), ...(webThere ? { web: webThere } : {}), ...(farBox?.tools ? { tools: farBox.tools } : {}) }));
         if (target.brain.tools?.length) awayTools = target.brain.tools;
         thought = target.brain.thought ?? null;
         // Stopped at its length limit (a linked PC says so from 2.0.43): Continue is offered, as for a model here.
@@ -530,7 +694,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
           owe = { ...owe, rid: newRid() };
           await addOwed(owe);
         }
-        shown = fresh(await target.brain.chat(withWorking(turns, so.text), Math.max(512, answerTokens - THINK_ROOM), text => show((shown = fresh(text))), ac.signal, { plain, ...(owe ? { rid: owe.rid } : {}) }));
+        shown = fresh(await target.brain.chat(withWorking(turns, so.text), Math.max(512, answerTokens - thinkRoom), text => show((shown = fresh(text))), ac.signal, { plain, ...(owe ? { rid: owe.rid } : {}) }));
         cut = target.brain.cut === true;
         thought = so.text ? { text: so.text, seconds: so.seconds, stopped: 'hurry' } : null;
       } finally {
@@ -543,12 +707,14 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       const left = Math.max(0, built.room - built.used);
       const webTotal = Math.max(2000, Math.min(60_000, Math.floor(left * 0.7)));
       const webPerCall = Math.max(1500, Math.min(12_000, Math.floor(webTotal / 3)));
-      const search = (await store.settings()).webSearch ?? { provider: 'duckduckgo' as const };
       // The model may also list, read and save files in the chat's folder when it can call tools, once the person allows
       // it (src/filetools.ts): asked in the chat the first time, up to 10 minutes; Stop is a no.
-      const filesRoot = mode === 'message' && filesFit(runner.view.model ?? '') && !(await toolsWhy(runner)) ? await chatFilesRoot(info?.project) : null;
+      const filesRoot = mode === 'message' && filesOffered && filesFit(runner.view.model ?? '') && !(await toolsWhy(runner)) ? await chatFilesRoot(info?.project) : null;
       if (filesRoot) filesFolder = filesRoot;
-      const ask = () => {
+      // The newer tools need a model that can call tools and is big enough for them, as the file tools do.
+      const kitOk = mode === 'message' && filesFit(runner.view.model ?? '') && !(await toolsWhy(runner));
+      const secondModel = secondModelFor(shortName(runner.view.modelName ?? runner.view.model ?? '').toLowerCase());
+      const ask = async () => {
         // Asked again (a smaller context, or no prefill): the web is used afresh, and only that ask's use is kept.
         // What it is doing, in the answer's place until the answer comes (a text held back is not sent after it).
         const say = (text: string) => {
@@ -556,24 +722,10 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
           latest = before;
           send('status', { text });
         };
-        const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: webPerCall, total: webTotal, onStatus: say }) : null;
-        web = turnWeb;
-        const files = filesRoot ? new FileTurn(filesRoot, { perCall: webPerCall, allowed: true }) : null;
-        const tools = turnWeb || files ? {
-          defs: [...(turnWeb ? WEB_TOOLS : []), ...(files ? FILE_TOOLS : [])],
-          run: async (n: string, a: string, sig: AbortSignal, round: number) => {
-            const toFiles = !!files && (isFileTool(n) || !turnWeb);
-            const kind: Kind = toFiles ? 'files' : 'web';
-            if (!(await gate.permitted(kind, (toFiles ? fileCallWords(n, a) : callWords(n, a)).replace(/…$/, '')))) return deniedWords(kind);
-            return toFiles ? files!.run(n, a) : turnWeb!.run(n, a, sig, round);
-          },
-          // Web calls in one go run side by side: each site keeps its own pace, so pages on two sites take turns.
-          parallel: (n: string) => !isFileTool(n),
-          rounds: files ? FILE_ROUNDS : WEB_ROUNDS,
-          onCall: (n: string, a: string) => say(isFileTool(n) ? fileCallWords(n, a) : callWords(n, a)),
-        } : undefined;
+        const { tools, lines, withFiles } = await assembleTools({ say, filesRoot, kitOk, webPerCall, webTotal, second: secondModel });
         const repeats = repeatWatch();
-        return streamChat(runner.worker.base!, runner.view.model ?? '', filesRoot ? withFilesLine(turns) : turns, text => {
+        const lined = lines.reduce((all, line) => withLine(all, line), withFiles ? withFilesLine(turns) : turns);
+        return streamChat(runner.worker.base!, runner.view.model ?? '', lined, text => {
           const loop = repeats(text);
           shown = fresh(loop ?? text);
           show(shown);
@@ -581,7 +733,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
             looped = true;
             ac.abort();
           }
-        }, ac.signal, answerTokens, { ...askOpts, ...(tools ? { tools } : {}) });
+        }, ac.signal, answerTokens, { ...askOpts, thinkRoom, ...(tools ? { tools } : {}) });
       };
       let r;
       try {
@@ -607,7 +759,12 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
         }
       }
       perSecond = r.perSecond;
+      tokens = r.tokens ?? 0;
       cut = r.cut && !looped;
+      // A wait of a minute or more before the first word, or between two words, is logged with the model (F3, F10); a model
+      // that began and then went quiet for ten minutes is ended there with Continue offered (src/engine.ts STALL_MS).
+      if ((r.firstWord ?? 0) >= 60 || (r.longestGap ?? 0) >= 60 || r.stalled) log.info('chat', `${runner.view.modelName ?? runner.view.model}: first word after ${r.firstWord ?? 0} s, longest quiet ${r.longestGap ?? 0} s, ${r.tokens} word-pieces at ${Math.round(r.perSecond * 10) / 10}/s${r.stalled ? `; ended after ${r.stalled} s of nothing` : ''}`);
+      if (r.stalled) stalledNote = `The model went quiet for ${Math.round(r.stalled / 60)} minutes part-way, so the answer was ended there. Press Continue to go on.`;
       if (r.thought) thought = { text: r.thought, seconds: r.thoughtSeconds, ...(r.thoughtStopped ? { stopped: r.thoughtStopped } : {}) };
     }
   } catch (error) {
@@ -626,13 +783,17 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       return void res.end();
     }
     if (!ac.signal.aborted) {
-      const why = target && !target.here ? awayFault(target.pc, error) : `The model stopped part-way: ${(error as Error).message}. Try again; if it keeps happening, disconnect and connect again.`;
+      // The runner crashed (here, or on the linked PC that answered): said in plain words, with the crash notice below.
+      const crash = target && !target.here ? await faultFrom((error as { fault?: unknown }).fault, target.pc) : await faultFor(runner.view.model, Date.parse(now));
+      const why = crash ? `${noticeTitle(crash)}: ${crash.fault}` : target && !target.here ? awayFault(target.pc, error) : `The model stopped part-way: ${(error as Error).message}. Try again; if it keeps happening, disconnect and connect again.`;
       log.error('chat', `${mode} on ${ran}: ${why}`);
       endAnswer(ac);
       // What was already written stays in the chat, with the fault under it (a handoff is not kept: the chat is unchanged).
       if (shown.trim() && mode === 'message') await keepCutAnswer(file, shown, ran, send, why, mark);
       else if (shown.trim() && mode === 'continue') await keepContinued(file, before, shown, ran, send, why, false, 0, null, mark);
       else await fault(why);
+      // What to try, the record and the log: the notice offers, and changes nothing on its own.
+      if (crash) send('fault', { ...crash, here: !(target && !target.here), ...(target && !target.here ? { pcId: ((r: ReturnType<typeof brains.parseRef>) => (r.kind === 'remote' ? r.pc : ''))(brains.parseRef(target.ref)) } : {}) });
       return void res.end();
     }
   } finally {
@@ -642,8 +803,12 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     // Came in whole, stopped, or failed there: nothing is owed any more.
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
-  const note = [looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, webWhy, webNo, thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : ''].filter(Boolean).join(' ');
-  const tools = (web as WebTurn | null)?.uses ?? awayTools;
+  const used = kit as Kit | null;
+  const note = [stalledNote, looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, ctxNotes.filter(n => !/^Web is on: starting /.test(n)).join(' '), webWhy, webNo, ...permitLate, target?.brain.toolsOff ? `${target.brain.toolsOff}, so it answered from what it knows.` : '', thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : '', used?.note() ?? ''].filter(Boolean).join(' ');
+  const tools: ToolUse[] = [...((web as WebTurn | null)?.uses ?? awayTools), ...((used?.uses() ?? []) as ToolUse[])];
+  // Findings the model suggested: shown with Save buttons, kept only when one is pressed (src/server/tools.ts).
+  const findings = used?.findings() ?? [];
+  if (mode === 'message') holdFindings(openId, findings);
   // How full, whether it was layered (no "getting large" bar then), and a linked PC's read speed for the next turn
   // (from a big read only: a small one carries start-up time, src/layers.ts BIG_READ_TOKENS).
   const last = away ? target!.brain.last : null;
@@ -672,7 +837,18 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // All of the allowance went on working it out, or the working went round in circles (a model that always thinks):
   // nothing to keep but the message, and a way out. Stopped before the answer began: said so, nothing kept.
   if (!shown.trim() && thought && !ac.signal.aborted) {
-    await fault(thought.stopped === 'loop' ? `Its working went round in circles (${thought.seconds} s) and no answer was written. Ask again more simply, or one part at a time.` : `It spent its whole allowance working it out (${thought.seconds} s) and wrote no answer. Send it again with Quick, or ask for one part at a time.`);
+    // Filled its room (not in circles): the page offers the next sizes up in a drop-down, and asks again with the one picked.
+    const bigger = THINK_SIZES.filter(s => s > thinkAsked && s <= ctxFree);
+    const ctxBound = thinkRoom < thinkAsked || (!bigger.length && THINK_SIZES.some(s => s > thinkAsked));
+    await fault(
+      thought.stopped === 'loop'
+        ? `Its working went round in circles (${thought.seconds} s) and no answer was written. Ask again more simply, or one part at a time.`
+        : thought.stopped === 'hurry'
+          ? `Answer now was pressed after ${thought.seconds} s of working, but the model kept working instead of writing the answer, so no answer was written. A model that always works first cannot be told to stop. Send it again, or ask for one part at a time.`
+        : ctxBound
+          ? `Its working used up all the room this chat's context leaves (about ${Math.round(thinkRoom / 1024)}k, ${thought.seconds} s) and no answer was written. Send it again with Quick, ask for one part at a time, or start a new chat: a longer chat leaves less room.`
+          : `Its working filled the room it was given (${Math.round(thinkRoom / 1024)}k, ${thought.seconds} s) and no answer was written.${bigger.length ? ' Give it more room and ask again, send it again with Quick, or ask for one part at a time.' : ' Send it again with Quick, or ask for one part at a time.'}`,
+      thought.stopped !== 'loop' && thought.stopped !== 'hurry' && bigger.length && !away ? { room: { now: thinkRoom, sizes: bigger } } : {});
     return void res.end();
   }
   if (!shown.trim() && ac.signal.aborted && !looped) {
@@ -682,6 +858,21 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // A "REMEMBER: ..." line is only a suggestion: it comes off the answer and he decides (Save / No).
   const sug = memory.takeSuggestion(shown);
   shown = sug.answer;
+  // A subagent's check that was queued (it was allowed, and no node was free): now the answer is written, this PC's
+  // model reads it against the kept quotes, and what it finds is kept under the answer.
+  let subNote = '';
+  const queuedCheck = mode === 'message' && !ac.signal.aborted && shown.trim() ? used?.after?.(shown) ?? null : null;
+  if (queuedCheck && runner.worker.base) {
+    send('status', { text: 'A subagent is reading the answer against its quotes…' });
+    try {
+      const r = await streamChat(runner.worker.base, runner.view.model ?? '', [{ role: 'system', content: queuedCheck.system }, { role: 'user', content: queuedCheck.user }], () => undefined, AbortSignal.timeout(240_000), 700, { plain: true });
+      const found = cleanAnswer(r.text).trim().slice(0, 3000);
+      if (found) shown = `${shown.trimEnd()}\n\n---\nSubagent check (${shortName(runner.view.modelName ?? '') || 'the model'} on this PC, after the answer): ${/^\W*all supported\W*$/i.test(found) ? 'every statement of fact is supported by the kept quotes.' : `\n${found}`}`;
+      else subNote = 'The queued subagent check gave no answer.';
+    } catch (e) {
+      subNote = `The queued subagent check did not run (${(e as Error).message.replace(/\.$/, '').slice(0, 160)}).`;
+    }
+  }
   const line: ChatLine = { role: 'assistant', content: shown, at: new Date().toISOString(), perSecond, ran, ...(cut ? { cut } : {}), ...(ac.signal.aborted && !looped ? { stopped: true } : {}), ...(sources ? { sources } : {}), ...(thought ? { thought } : {}), ...(tools.length ? { tools } : {}) };
   // A stand-in for this answer (owed, src/server/owed.ts) never stays beside the answer itself.
   const rid = owe?.rid;
@@ -692,8 +883,27 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const kept = mode === 'message' && marked?.saveAnswer && !(ac.signal.aborted && !looped) ? await keepFirstAnswer(marked, message, shown) : null;
   const unsaved = !!kept && 'error' in kept;
   const keptSaid = !kept ? '' : 'error' in kept ? `This answer is in the chat, but its file could not be saved in the project folder (${kept.error}).` : `Also saved as ${kept.path.replace(/\//g, '\\')} in the workspace folder${cut ? ' (as far as it got: the rest, after Continue, is in this chat only)' : ''}.`;
-  const said = [note, keptSaid].filter(Boolean).join(' ');
-  send('done', { text: shown, perSecond, ran, cut, sources, thought, ...(tools.length ? { tools } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said, ...(unsaved ? { unsaved } : {}) });
+  // Max mode (the chat's switch, src/maxmode.ts): this answer's speed is kept (this PC alone, or with the PCs that lent
+  // by expert parallel), then the line under the answer and, when a Max load could help, the card that offers it.
+  const here = !target || target.here;
+  const modelId = here ? runner.view.model ?? '' : '';
+  const loadedAs = here ? maxRunOf(runner) : null;
+  if (modelId && !ac.signal.aborted && loadedAs?.engine !== 'layers') maxSpeeds.record(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : [], perSecond, tokens);
+  const maxOn = mode === 'message' && (t.max ?? info?.max ?? false);
+  const lenders = maxOn && modelId ? maxGateNow() : { why: '', names: [], ids: [], build: '' };
+  const maxEngine = maxOn && modelId && !lenders.why ? maxEngineFor(modelId, lenders) : null;
+  const maxSaid = afterAnswer({ on: maxOn, away: here ? '' : target!.pc, fitsAlone: modelId ? fitsAloneNow(modelId) : null, loaded: loadedAs, gate: lenders, engine: maxEngine, perSecond, measured: modelId ? maxSpeeds.get(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : lenders.ids) : {}, model: runner.view.modelName || modelId, seconds: maxEngine?.use === 'experts' ? maxLoadEta(modelId, lenders.names) : null });
+  const said = [note, subNote, keptSaid, maxSaid.note].filter(Boolean).join(' ');
+  send('done', { text: shown, perSecond, ...(tokens ? { tokens } : {}), ran, cut, sources, thought, ...(tools.length ? { tools } : {}), ...(findings.length ? { findings } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said, ...(unsaved ? { unsaved } : {}) });
+  // Web is off and the message plainly asked for it (a link or address, "search the web"): a card under the answer says
+  // so and offers the switch, with the web permission rows. Nothing is switched on here: the person chooses.
+  if (!webAsked && mode === 'message' && webOffWords(message)) send('weboff', { text: webOffWords(message) });
+  // Max is on and the model is loaded here alone: a card offers a Max load (Reload with linked PCs / Not now). Nothing loads by itself.
+  if (maxSaid.card && !ac.signal.aborted) send('maxload', { text: maxSaid.card, model: modelId });
+  // Asked to use tools on a model without the Tools mark: the notice names the PC and the model and offers models that
+  // have it. It only offers: the chat keeps its model until the person picks another.
+  const noTools = (webAsked && !webAway && !!webWhy) || !!target?.brain.toolsOff;
+  if (noTools && !ac.signal.aborted) send('tools', toolsNotice({ pc: target && !target.here ? target.pc : thisPc(), model: (target && !target.here ? target.model : runner.view.modelName) || 'This model', offers: toolsModels() }));
   res.end();
 }
 
@@ -729,14 +939,12 @@ export const docStore = new Docs(HOME.data);
 
 /** A dropped file's bytes, up to `max` (the request is refused past it). */
 async function rawBody(req: IncomingMessage, max: number): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > max) throw new Error(`The file is over ${max / 1048576} MB, more than a chat reads.`);
-    chunks.push(c as Buffer);
+  try {
+    return new Uint8Array(await readBody(req, max));
+  } catch (e) {
+    if (e instanceof TooLarge) throw new Error(`The file is over ${max / 1048576} MB, more than a chat reads.`);
+    throw e;
   }
-  return new Uint8Array(Buffer.concat(chunks));
 }
 
 export async function addDoc(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -819,7 +1027,7 @@ async function chatMore(res: ServerResponse, mode: 'continue' | 'handoff', at: S
   if (!open || nodestaff.parseNodeWho(who)) return fault('This chat cannot do that: open a chat with TOMLIN or a hire.');
   if (!chatPersonHere(open.who)) return fault('The person in this chat is no longer on the team, so it can be read but not carried on.');
   const own = !!member && brains.refsOf(member).length > 0;
-  if (!own && (chat.view.state !== 'connected' || !chat.worker.base)) return fault('No chat model is loaded: press Connect beside the model at the top of this chat, then send again.');
+  if (!own && (chat.view.state !== 'connected' || !chat.worker.base)) return fault(noModelWords());
   const file = chats.file(open.id);
   const history = await store.chat(file);
   if (mode === 'continue' && !(history.at(-1)?.role === 'assistant' && history.at(-1)?.cut)) return fault('There is nothing to continue: the last answer was finished. Type a message instead.');
@@ -936,7 +1144,7 @@ export const chatPost: Routes = {
     // {chatId}: the chat it goes into; {chatId: '', who}: a new chat with that person, made by this message.
     const at = await namedTarget(b, true);
     if ('error' in at) return json(res, at.status, { error: at.error });
-    return chatMessage(res, message, at, cleanFrom(b.from), b.agree === true, b.think === true, b.now === true, b.web === true);
+    return chatMessage(res, message, at, cleanFrom(b.from), b.agree === true, b.think === true, b.now === true, b.web === true, b.scanOk === true, thinkRoomOf(b.room), b.max === true, b.retry === true);
   },
   '/api/chat/continue': moreOrHandoff,
   '/api/chat/handoff': moreOrHandoff,
@@ -1027,6 +1235,13 @@ export const chatPost: Routes = {
     // {chatId, on}: Web switched on or off in a chat's box, kept on that chat (a chat not made yet keeps it at its first message).
     const c = await chats.get(b.chatId);
     if (c) await chats.mark(c.id, { web: b.on === true });
+    return json(res, 200, { ok: true });
+  },
+  '/api/chat/max': async ({ res, b }) => {
+    // {chatId, on}: Max switched on or off in a chat's box, kept on that chat (a chat not made yet keeps it at its first
+    // message). Nothing loads here: a Max load is asked on the card under an answer (src/maxmode.ts).
+    const c = await chats.get(b.chatId);
+    if (c) await chats.mark(c.id, { max: b.on === true });
     return json(res, 200, { ok: true });
   },
   '/api/chat/follow': async ({ res, b }) => {

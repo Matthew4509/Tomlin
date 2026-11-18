@@ -5,6 +5,7 @@
 // the pictures, is sealed with AES-256-GCM, and a message changed on the way, replayed, or sent to another door is
 // refused. Built on node:crypto only. Plain functions, tested in test/link.test.ts.
 import { createCipheriv, createDecipheriv, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, scrypt, timingSafeEqual, type KeyObject } from 'node:crypto';
+import { closeSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
 
 /** What a node says in whoami when it speaks this link; an older one says nothing. */
 export const LINK_VERSION = 2;
@@ -137,14 +138,76 @@ export function sealRequest(keys: Buffer, path: string, body: unknown, now = Dat
   return { v: LINK_VERSION, box: seal(toNode(keys), Buffer.from(JSON.stringify({ path, t: now, body: body ?? {} })), 'request') };
 }
 
-/** Requests already taken, by id, so the same one sent again is refused. */
+/**
+ * Requests already taken, by id, so the same one sent again is refused. With `keepIn`, also kept on the disk: a request
+ * is good for 15 minutes either side, so without it a copy recorded on the network (a turn-off, a model deleted) could
+ * be sent again after a restart within that time. Each id is added to the file as it is taken (before the request is
+ * acted on); the file is written again whole, through a new file put in its place, at start and when it has grown.
+ * Ids older than twice the window are dropped, as they are here.
+ */
 export class Seen {
   private ids = new Map<string, number>();
+  private file: string | null = null;
+  private fd: number | null = null;
+  private lines = 0;
+
+  /** Keeps the ids in `file` from now on, and takes back the ones kept there that are still young enough to matter. */
+  keepIn(file: string, now = Date.now()): void {
+    this.file = file;
+    let text = '';
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      // No file yet (or it cannot be read): nothing taken before.
+    }
+    for (const line of text.split('\n')) {
+      const m = /^([\w-]{1,32}) (\d{1,16})$/.exec(line.trim());
+      if (m && now - Number(m[2]) <= LINK_WINDOW_MS * 2) this.ids.set(m[1], Math.min(Number(m[2]), now));
+    }
+    this.writeWhole();
+  }
+
   take(id: string, now = Date.now()): boolean {
     for (const [k, t] of this.ids) if (now - t > LINK_WINDOW_MS * 2) this.ids.delete(k);
     if (this.ids.has(id)) return false;
     this.ids.set(id, now);
+    if (this.file) {
+      try {
+        // Added through the file kept open: opening and closing it for each request cost a scanner's look at each close
+        // (about 0.2 s a request on a busy PC). What is written is the system's at once, so a crash of TOMLIN keeps it.
+        this.fd ??= openSync(this.file, 'a');
+        writeSync(this.fd, `${id} ${now}\n`);
+        if (++this.lines > this.ids.size * 2 + 500) this.writeWhole();
+      } catch {
+        // The disk refused: the id is still held here, as before (the file is opened again at the next one).
+        this.close();
+      }
+    }
     return true;
+  }
+
+  /** Lets go of the file kept open (written whole again, or for the tests); the next id opens it again. */
+  close(): void {
+    if (this.fd === null) return;
+    try {
+      closeSync(this.fd);
+    } catch {
+      // Already gone.
+    }
+    this.fd = null;
+  }
+
+  private writeWhole(): void {
+    if (!this.file) return;
+    this.close();
+    try {
+      const tmp = `${this.file}.new`;
+      writeFileSync(tmp, [...this.ids].map(([k, t]) => `${k} ${t}\n`).join(''));
+      renameSync(tmp, this.file);
+      this.lines = this.ids.size;
+    } catch {
+      // Left as it was: it is written whole again when it next grows.
+    }
   }
 }
 

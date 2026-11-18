@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COUNTER_GRACE, NVIDIA_SMI, SmiReader, cardsName, cardsTogether, chipOf, engineBusy, gpusFrom, oneAtATime, smiRows, totalFromName, unreadOf } from '../src/hardware.ts';
+import { Worker } from 'node:worker_threads';
+import { CPU_READER, COUNTER_GRACE, NVIDIA_SMI, QUIET_AFTER, QUIET_EVERY, SmiReader, cardsName, cardsTogether, chipOf, engineBusy, gpusFrom, oneAtATime, ramFromTasklist, readDue, smiRows, totalFromName, unreadOf } from '../src/hardware.ts';
 
 test('NVIDIA cards together are named as they are: two the same as "2 ×", different ones each by name', () => {
   assert.equal(cardsName([{ name: 'NVIDIA GeForce RTX 3060' }]), 'NVIDIA GeForce RTX 3060');
@@ -216,4 +217,41 @@ test('the driver mode of each NVIDIA card is read apart, and a TCC card is marke
   await old.rows();
   assert.deepEqual(await old.modes(), []);
   assert.equal(gpusFrom('', await old.rows(), [], [])[0].tcc, undefined);
+});
+
+// An idle node started nvidia-smi every second (3,600 an hour) and restarted typeperf every 30 s with no page open.
+test('the costly readings run every second while something asks, and once in 30 s while nothing does', () => {
+  const asked = 1_000_000;
+  // Asked a moment ago: due every tick.
+  assert.equal(readDue(asked + 1000, asked, asked), true);
+  assert.equal(readDue(asked + QUIET_AFTER - 1, asked, asked + QUIET_AFTER - 2), true);
+  // Nothing asked for 30 s: due only once in QUIET_EVERY.
+  const quiet = asked + QUIET_AFTER + 5000;
+  assert.equal(readDue(quiet, asked, quiet - 1000), false);
+  assert.equal(readDue(quiet, asked, quiet - QUIET_EVERY), true);
+  // Asked again: due at once.
+  assert.equal(readDue(quiet, quiet, quiet - 1000), true);
+});
+
+// A list of every process took about a second of CPU (up to a minute) on a PC with 400 processes: each model's process
+// is asked for by its id, and its line read the same way.
+test('a process\'s memory is read from tasklist\'s line for it, and "no tasks" reads as none', () => {
+  const one = '"llama-server.exe","4242","Console","1","1,234,567 K"\r\n';
+  assert.deepEqual([...ramFromTasklist(one, new Set([4242]))], [[4242, 1_234_567 * 1024]]);
+  assert.equal(ramFromTasklist(one, new Set([7])).size, 0);
+  assert.equal(ramFromTasklist('INFO: No tasks are running which match the specified criteria.\r\n', new Set([4242])).size, 0);
+});
+
+// os.cpus() waited 300 to 500 ms on a busy PC, once a second on the server's own thread: it is read on a thread of its own.
+test('the processor\'s times come from a thread of their own, at once and again when the server asks', async () => {
+  const w = new Worker(CPU_READER, { eval: true });
+  try {
+    const next = () => new Promise<{ idle: number; user: number }[]>(ok => w.once('message', ok));
+    const first = await next();
+    assert.ok(first.length > 0 && first.every(t => t.idle >= 0 && t.user >= 0));
+    w.postMessage(10_000);
+    assert.equal((await next()).length, first.length);
+  } finally {
+    await w.terminate();
+  }
 });

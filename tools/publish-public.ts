@@ -34,6 +34,10 @@ export const ACCEPTED: { rule: string; file: string; why: string }[] = [
   { rule: 'DISC-003', file: 'test/staff.test.ts', why: 'the answer cleaner\'s test' },
   { rule: 'DISC-003', file: 'test/claude.test.ts', why: 'Connect Claude writes a prompt naming a handover note: the test uses a made-up one' },
   { rule: 'DISC-004', file: 'test/claude.test.ts', why: 'a made-up home folder for the same prompt' },
+  { rule: 'DISC-001', file: 'test/report.test.ts', why: 'the public repo address (owner/name) in the issue-link test' },
+  { rule: 'DISC-004', file: 'test/report.test.ts', why: 'made-up user names in paths, to prove the report scrubber takes them out' },
+  { rule: 'DISC-004', file: 'test/runnerexit.test.ts', why: 'a made-up user name in a path, to prove the runner log scrubber takes it out' },
+  { rule: 'DISC-004', file: 'test/installer.test.ts', why: 'made-up folders for the text of the setup window' },
   { rule: 'DISC-001', file: 'test/release.test.ts', why: 'the public repo\'s own address (owner/name), as package.json gives it' },
 ];
 

@@ -5,7 +5,7 @@ import * as brains from '../brains.ts';
 import { detectMode, type Mode } from '../modes.ts';
 import { roleOf } from '../staff.ts';
 import type { Picture } from '../gallery.ts';
-import { type Routes, chats, json, shortName, staff, store } from './core.ts';
+import { type Routes, chats, json, shortName, staff, store, workspaceDir } from './core.ts';
 import { images, runners, runnerUsed } from './panes.ts';
 import { optionsFrom, promptWhy } from '../images.ts';
 import { drawChoices } from '../nodestaff.ts';
@@ -13,6 +13,10 @@ import type { Quality } from '../quality.ts';
 import { answeringBusy, imageSpecialist } from './answering.ts';
 import { isArtistWho } from './people.ts';
 import { jobRoutes } from './jobs.ts';
+import { readFile, realpath } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import * as ws from '../workspace.ts';
+import { cleanSource, readSources, SOURCE_END } from '../sources.ts';
 
 // ---- The Images pane's artist: a picture hire draws wherever they live ----
 
@@ -82,7 +86,7 @@ async function startAway(away: { r: Remote; model?: string; name: string }, b: R
         job.etaSeconds = typeof p.etaSeconds === 'number' ? p.etaSeconds : null;
         if (job.step > 0) job.perStep = (Date.now() - job.startedAt) / 1000 / job.step;
       }, job.ac.signal);
-      const pic = await images.receive({ png: got.png, prompt, modelPrompt: got.modelPrompt, mode: got.mode, modelName: got.modelName, pc: away.r.name, seconds: got.seconds, chat: job.chat ?? undefined });
+      const pic = await images.receive({ png: got.png, prompt, modelPrompt: got.modelPrompt, mode: got.mode, modelName: got.modelName, pc: away.r.name, seconds: got.seconds, made: got.made, chat: job.chat ?? undefined });
       job.results = [pic];
       job.note = got.note ? `${away.r.name} ${got.note}` : null;
       job.state = 'done';
@@ -122,7 +126,7 @@ async function roomForPicture(id: string): Promise<string[]> {
  * A picture for the queue (src/server/queue.ts): drawn by its artist where they live, whole (not a draft): on their
  * linked PC, or here, loading their picture model first (making room for it). It comes back into the gallery here.
  */
-export async function queuedPicture(o: { prompt: string; as?: string; mode?: string; width?: number; height?: number }, signal: AbortSignal, progress: (p: Record<string, unknown>) => void): Promise<{ pic: Picture; where: string; by: string } | { error: string }> {
+export async function queuedPicture(o: { prompt: string; as?: string; mode?: string; width?: number; height?: number; negative?: string; rid?: string }, signal: AbortSignal, progress: (p: Record<string, unknown>) => void): Promise<{ pic: Picture; where: string; by: string; note?: string } | { error: string }> {
   const artist = o.as ? staff.get(o.as) ?? null : (await imageSpecialist()) ?? null;
   if (o.as && !artist) return { error: 'That artist is no longer on the team: add the picture again with another artist.' };
   const by = artist ? artist.name.split(/\s+/)[0] : 'The picture model';
@@ -137,10 +141,15 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
     const style = brains.styleOfMode(recipe?.mode ?? chosen) ?? (brains.isStyle(artist?.style) ? artist.style : null);
     // The artist's way of working goes with the words (that PC knows nothing about this team), unless a style is asked.
     const prompt = recipe?.boost && !style ? `${o.prompt.replace(/[\s,.]+$/, '')}, ${recipe.boost}` : o.prompt;
+    // The words to leave out go too (the asked ones, then the artist's own): that PC adds its own for the style after them.
+    const negative = [o.negative?.trim(), recipe?.negative].filter(Boolean).join(', ');
     progress({ text: `Asking "${away.r.name}" to draw it` });
-    const got = await jobRoutes.drawOn(away.r, { prompt, style, width: o.width, height: o.height, ...(away.model ? { model: away.model } : {}), queue: true }, progress, signal);
-    const pic = await images.receive({ png: got.png, prompt: o.prompt, modelPrompt: got.modelPrompt, mode: got.mode, modelName: got.modelName, pc: away.r.name, seconds: got.seconds });
-    return { pic, where: `"${away.r.name}"`, by };
+    // Asked with the queue item's request id: when the link is lost, or this PC is closed while that PC draws, the picture
+    // waits there and the next try collects it (src/jobrun/pictureback.ts). That PC forgets it only once it is saved here.
+    const got = await jobRoutes.drawOn(away.r, { prompt, style, width: o.width, height: o.height, ...(negative ? { negative } : {}), ...(away.model ? { model: away.model } : {}), queue: true, ...(o.rid ? { rid: o.rid } : {}) }, progress, signal);
+    const pic = await images.receive({ png: got.png, prompt: o.prompt, modelPrompt: got.modelPrompt, mode: got.mode, modelName: got.modelName, pc: away.r.name, seconds: got.seconds, made: got.made });
+    await got.taken();
+    return { pic, where: `"${away.r.name}"`, by, ...(got.note ? { note: got.note } : {}) };
   }
   const v = images.pane.view;
   const want = first?.kind === 'here' ? first.id : v.state === 'connected' ? v.model ?? null : null;
@@ -154,7 +163,7 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
     // Stopped while it loaded (that can take minutes): no picture is asked for.
     if (signal.aborted) return { error: 'Stopped.' };
   }
-  const job = await images.generate({ prompt: o.prompt, mode: o.mode && o.mode !== 'auto' ? (o.mode as Mode) : 'auto', width: o.width, height: o.height, drafts: 1, full: true, source: 'api', as: artist?.id });
+  const job = await images.generate({ prompt: o.prompt, negative: o.negative, mode: o.mode && o.mode !== 'auto' ? (o.mode as Mode) : 'auto', width: o.width, height: o.height, exactSize: o.width !== undefined || o.height !== undefined, drafts: 1, full: true, source: 'api', as: artist?.id });
   if (!('id' in job)) return { error: job.error };
   const timer = setInterval(() => {
     const j = images.jobView();
@@ -170,7 +179,8 @@ export async function queuedPicture(o: { prompt: string; as?: string; mode?: str
   });
   const pic = job.results[0];
   if (!pic) return { error: job.state === 'cancelled' ? 'Stopped.' : job.error ?? 'The picture did not come out.' };
-  return { pic, where: 'this PC', by };
+  const said = images.jobView();
+  return { pic, where: 'this PC', by, ...(said?.id === job.id && said.note ? { note: said.note } : {}) };
 }
 
 /** Every picture model in the registry, with the styles it is made for (registry recommendedModes). */
@@ -182,8 +192,8 @@ export function pictureModels(): brains.PictureModel[] {
  * One picture for a linked PC, on the picture model connected here (F7 E2). It is drawn in memory and sent: it never
  * enters this PC's gallery or its folder, and this PC's Images pane shows only "Drawing for <that PC>".
  */
-export async function drawForPc(o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) {
-  const job = await images.generate({ prompt: o.prompt, mode: o.mode as Mode, width: o.width, height: o.height, quality: o.quality as Quality, seed: o.seed, drafts: 1, source: 'api', forPc: o.forPc });
+export async function drawForPc(o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number; negative?: string }, progress: (p: unknown) => void, signal: AbortSignal) {
+  const job = await images.generate({ prompt: o.prompt, negative: o.negative, mode: o.mode as Mode, width: o.width, height: o.height, quality: o.quality as Quality, seed: o.seed, drafts: 1, source: 'api', forPc: o.forPc, exactSize: o.width !== undefined || o.height !== undefined });
   if (!('id' in job)) return { error: job.error };
   const timer = setInterval(() => {
     const j = images.jobView();
@@ -200,7 +210,7 @@ export async function drawForPc(o: { prompt: string; mode: string; width?: numbe
   });
   const pic = images.takeAway(job.id);
   if (!pic) return { error: job.state === 'cancelled' ? 'it was stopped.' : job.error ?? 'the picture did not come out.' };
-  return { png: pic.png, modelName: pic.modelName.replace(/\s*\(.*\)$/, ''), modelPrompt: pic.modelPrompt, mode: pic.mode, seconds: pic.seconds, note: pic.note };
+  return { png: pic.png, modelName: pic.modelName.replace(/\s*\(.*\)$/, ''), modelPrompt: pic.modelPrompt, mode: pic.mode, seconds: pic.seconds, note: pic.note, made: pic.made };
 }
 
 /** Swaps this PC's connected picture model for another of its own (a paired PC asked for a style this one draws better). */
@@ -234,6 +244,21 @@ export async function loadImage(id: string): Promise<boolean> {
 
 // ---- Routes ----
 
+/** GET requests answered here, by path. */
+export const picturesGet: Routes = {
+  '/api/images/sources': async ({ res, url }) => {
+    // ?folder=<a folder in the workspace, '' for all of it>: Load previously made images. Every image source in it
+    // (src/sources.ts), newest first, whether its picture file is still there or not.
+    const folder = (url.searchParams.get('folder') ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const root = await workspaceDir();
+    const probe = folder ? await ws.inside(root, `${folder}/x`, false) : null;
+    const dir = folder ? (probe ? dirname(probe) : null) : await realpath(root).catch(() => null);
+    if (!dir) return json(res, 400, { error: folder ? 'That is not a folder in the workspace. Type a folder as Files shows it (a project folder, say), or leave it empty for the whole workspace.' : 'The workspace folder is not there. Choose it under Settings, then try again.' });
+    const r = await readSources(dir);
+    return json(res, 200, { folder, ...r, sources: r.sources.map(s => ({ ...s, path: folder ? `${folder}/${s.path}` : s.path })) });
+  },
+};
+
 /** POST requests answered here, by path (the body is read already). */
 export const picturesPost: Routes = {
   '/api/images/generate': async ({ res, b }) => {
@@ -255,6 +280,19 @@ export const picturesPost: Routes = {
     const r = await images.generate({ ...optionsFrom(b, 'page'), chat: chat?.id ?? '' });
     if (!('id' in r)) return json(res, r.status, { error: r.error });
     await name();
+    return json(res, 202, { id: r.id, job: images.jobView() });
+  },
+  '/api/images/from-source': async ({ res, b }) => {
+    // {path, seed: 'same' | 'new', chat}: draws an image source found by Load previously made images again on this
+    // PC's picture model: the same words, size and settings, with its seed or a new one.
+    if (typeof b.chat !== 'string') return json(res, 400, { error: 'Nothing was drawn: this names no chat for the picture. Reload the page, then try again.' });
+    const chat = b.chat ? await chats.get(b.chat) : null;
+    if (b.chat && !chat) return json(res, 404, { error: 'Nothing was drawn: that chat is not there any more. Open a chat from the list, then try again.' });
+    const path = typeof b.path === 'string' && b.path.endsWith(SOURCE_END) ? await ws.inside(await workspaceDir(), b.path, false) : null;
+    const src = path ? cleanSource(await readFile(path, 'utf8').then(JSON.parse).catch(() => null)) : null;
+    if (!src) return json(res, 404, { error: 'That image source is not there any more, or cannot be read. Press Look again.' });
+    const r = await images.generate({ prompt: '', source: 'page', chat: chat?.id ?? '', fromSource: src, newSeed: b.seed === 'new', ...(src.settings === 'known' ? {} : { drafts: 1 }) });
+    if (!('id' in r)) return json(res, r.status, { error: r.error });
     return json(res, 202, { id: r.id, job: images.jobView() });
   },
   '/api/images/cancel': async ({ req, res, url, b }) => {

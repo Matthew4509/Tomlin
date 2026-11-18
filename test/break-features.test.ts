@@ -15,6 +15,7 @@ import { Store } from '../src/store.ts';
 import { Worker } from '../src/worker.ts';
 import { slug } from '../src/modes.ts';
 import * as T from '../src/todo.ts';
+import { testEnv } from './env.ts';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 120, g: 130, b: 140 } } }).png().toBuffer();
@@ -316,7 +317,7 @@ test('staff.json with a hire who has no name or a bad list still opens every pag
   ] }));
   const port = await freePort();
   const server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';
@@ -349,7 +350,7 @@ test('one damaged project file does not take down the To Do, the queue or Home',
   writeFileSync(join(home, 'models-folder.txt'), '');
   const port = await freePort();
   const server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';
@@ -415,7 +416,7 @@ test('a queued picture stopped while its model loads is not drawn; one stopped j
     process.exit(0);
   `);
   const child = spawn(process.execPath, [script], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: home, TOMLIN_OPEN: '', TOMLIN_PORT: String(await freePort()) },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: home, TOMLIN_OPEN: '', TOMLIN_PORT: String(await freePort()) }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';

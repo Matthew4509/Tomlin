@@ -14,6 +14,21 @@ test('Hugging Face search: keeps public owner/name repos, most downloaded first,
   assert.equal(got[1].gated, false);
   assert.deepEqual(hfFound({ error: 'x' }), []);
 });
+
+test('Hugging Face search: each repo carries what it can do, from its task, its files and its chat template', async () => {
+  const { hfFound } = await import('../src/download.ts');
+  const got = hfFound([
+    { id: 'a/Plain-7B-GGUF', downloads: 10, siblings: [{ rfilename: 'Plain-7B-Q4_K_M.gguf' }], gguf: { total: 7e9, chat_template: '{% for m in messages %}{{ m.content }}{% endfor %}' }, pipeline_tag: 'text-generation' },
+    { id: 'b/Tooled-9B-GGUF', downloads: 20, siblings: [{ rfilename: 'Tooled-9B-Q4_K_M.gguf' }], gguf: { total: 9e9, chat_template: '{% if tools %}{{ tools }}{% endif %}' }, pipeline_tag: 'text-generation' },
+    { id: 'c/Seeing-4B-GGUF', downloads: 30, siblings: [{ rfilename: 'Seeing-4B-Q4_K_M.gguf' }, { rfilename: 'mmproj-F16.gguf' }], gguf: { total: 4e9, chat_template: '{% for m in messages %}{{ m.content }}{% endfor %}' }, pipeline_tag: 'image-text-to-text' },
+    { id: 'd/Nothing-Said-GGUF', downloads: 5 },
+  ]);
+  const caps = Object.fromEntries(got.map(x => [x.repo, x.caps]));
+  assert.deepEqual(caps['a/Plain-7B-GGUF'], { images: false, tools: false });
+  assert.deepEqual(caps['b/Tooled-9B-GGUF'], { images: false, tools: true });
+  assert.deepEqual(caps['c/Seeing-4B-GGUF'], { images: true, tools: false });
+  assert.deepEqual(caps['d/Nothing-Said-GGUF'], { images: false, tools: false });
+});
 test('Hugging Face search: the next page is the cursor in the Link header, none on the last page', async () => {
   const { nextCursor } = await import('../src/download.ts');
   assert.equal(nextCursor('<https://huggingface.co/api/models?filter=gguf&limit=40&cursor=eyJhIjoxfQ%3D%3D>; rel="next"'), 'eyJhIjoxfQ==');

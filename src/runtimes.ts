@@ -4,7 +4,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fetchChecked, type Progress } from './download.ts';
 import { RUNNER_WORD } from './vcrt.ts';
@@ -25,6 +25,23 @@ export interface CudaCode {
   ptx: number[];
   driver: string;
   jitDriver?: string;
+  /**
+   * Hardware this build was tried on and held up (not crashing on long web prompts): cards of these sm levels, with
+   * this driver or newer. A PC whose biggest card and driver match comes to this build first (cudaOrder).
+   */
+  testedOn?: { cc: number[]; driver: string; card: string }[];
+  /**
+   * Hardware this build crashed on (same match as testedOn: every NVIDIA card of these sm levels, this driver or newer),
+   * with what happened in plain words. Auto puts it after every other build, and Max mode never offers it there.
+   */
+  crashedOn?: { cc: number[]; driver: string; card: string; why: string }[];
+  /**
+   * This llama.cpp build has the fault fixed upstream in October 2026 (pull requests 29941 and 29953): its MMQ kernel for
+   * expert (mixture-of-experts) matrices reads past the end of its working buffer, and on some cards and pool states that
+   * is an "illegal memory access" while a long prompt is read. TOMLIN does not ask such a build for 2048-token prompt chunks.
+   * Holds the words for the log.
+   */
+  mmqIdsFault?: string;
 }
 
 export interface RuntimePin {
@@ -36,6 +53,9 @@ export interface RuntimePin {
   cuda?: CudaCode;
   parts: Array<{ url: string; bytes: number; sha256: string }>;
 }
+
+/** The llama.cpp build in a runner's name ("llama.cpp b12250, CUDA 12.4" gives "b12250"), or ''. */
+export const buildOf = (name: string): string => /\bb\d{3,6}\b/.exec(name)?.[0] ?? '';
 
 const EXE: Record<Engine, string> = { llama: 'llama-server', sd: 'sd-server' };
 
@@ -82,6 +102,24 @@ export class Runtimes {
   id(engine: Engine, device: Device): string {
     const ids = this.order(engine, device);
     return ids.find(id => this.exePin(id) !== null) ?? ids[0] ?? this.idsOf(engine, device)[0] ?? `${engine}-${device}`;
+  }
+
+  /** The llama.cpp build a pinned runner is ("b12250", read from its name), or '' when its name gives none. */
+  buildOfPin(id: string): string {
+    return buildOf(this.pins[id]?.name ?? '');
+  }
+
+  /** The llama.cpp build of the runner whose program is `exe` ('' when it is none of this PC's pins). */
+  buildOfExe(exe: string): string {
+    const here = exe.toLowerCase();
+    for (const id of Object.keys(this.pins)) if (this.exePin(id)?.toLowerCase() === here) return this.buildOfPin(id);
+    // The server program and its RPC server sit in the same folder.
+    const dir = dirname(here);
+    for (const id of Object.keys(this.pins)) {
+      const e = this.exePin(id);
+      if (e && dirname(e).toLowerCase() === dir) return this.buildOfPin(id);
+    }
+    return '';
   }
 
   /** True when a build in this PC's order for that kind is unpacked (one it cannot use is not counted). */
@@ -150,6 +188,25 @@ export class Runtimes {
 
   zipOf(engine: Engine, device: Device, k: number): string {
     return this.zipOfPin(this.id(engine, device), k);
+  }
+
+  /** The folder those zips are kept in, and the file names every current pin's zips have there (src/oldfiles.ts sweepUnpinned). */
+  get downloadsDir(): string {
+    return join(this.kept, '_downloads');
+  }
+
+  downloadNames(): string[] {
+    const names: string[] = [];
+    for (const pin of Object.values(this.pins)) {
+      for (const p of pin.parts ?? []) {
+        try {
+          names.push(basename(new URL(p.url).pathname));
+        } catch {
+          // A part with no address names no file.
+        }
+      }
+    }
+    return names;
   }
 
   /** Every zip of this build is here at its pinned size (checked by SHA-256 when it was downloaded). */
@@ -247,6 +304,16 @@ export const RUNNER_NAMES = Object.keys(RUNNER_PINS) as RunnerName[];
 export const runnerDevice = (r: RunnerName): Device => (r === 'vulkan' ? 'vulkan' : 'cuda');
 /** The runner name of a chat build ('' for one no model is held to, the CPU's). */
 export const runnerOfPin = (id: string): RunnerName | '' => RUNNER_NAMES.find(r => RUNNER_PINS[r] === id) ?? '';
+/**
+ * What a model can be held to (RunOptions.runner): one of the short names above (the speed finder's rows), or any pinned
+ * chat card runner by its runtimes.json id ("llama-cuda2"), so a new pin needs no new name here. Checked against this PC's
+ * own pins where it is used: a runner it does not pin, has not unpacked or cannot use leaves the model on Auto.
+ */
+export type HeldRunner = RunnerName | `llama-${string}`;
+export const RUNNER_ID = /^llama-(cuda\d{0,2}|vulkan)$/;
+export const isHeldRunner = (r: unknown): r is HeldRunner => typeof r === 'string' && ((RUNNER_NAMES as string[]).includes(r) || RUNNER_ID.test(r));
+/** The runtimes.json id a held runner names ('' when it names none). */
+export const pinOfRunner = (r: string | undefined): string => (!r ? '' : (RUNNER_NAMES as string[]).includes(r) ? RUNNER_PINS[r as RunnerName] : RUNNER_ID.test(r) ? r : '');
 
 /** The NVIDIA driver a CUDA 12.4 build needs on Windows: an older one cannot compile its code for a Pascal card. */
 export const CUDA_DRIVER_MIN = '551.61';
@@ -395,18 +462,39 @@ export function buildFits(pin: RuntimePin | undefined, cards: GpuFacts[], driver
  * The CUDA builds of `engine` this PC can use (pinWhy says nothing against them), best first. A build with code for
  * every NVIDIA card here comes before one without (Auto spreads a model over every card, and a card with no code stops
  * the start); then code made for the biggest card beats PTX the driver compiles at start; equal, the one listed first
- * in runtimes.json (CUDA 12.4, the build every PC had before).
+ * in runtimes.json (CUDA 12.4, the build every PC had before). A build tried on hardware like this PC's (its
+ * `testedOn`: every card of an sm level it was tried on, and a driver as new as the one tried) comes before all of those, as long as
+ * it has code for every card here.
  */
-export function cudaOrder(pins: Record<string, RuntimePin>, engine: Engine, gpus: GpuFacts[], driver: string | null): string[] {
-  const ids = Object.keys(pins).filter(id => pins[id].engine === engine && pins[id].device === 'cuda');
+export function cudaOrder(pins: Record<string, RuntimePin>, engine: Engine, gpus: GpuFacts[], driver: string | null, o: { avoid?: ReadonlySet<string>; first?: string } = {}): string[] {
+  const ids = Object.keys(pins).filter(id => pins[id].engine === engine && pins[id].device === 'cuda' && !o.avoid?.has(id));
   const cards = gpus.filter(g => g.vendor === 'nvidia' && !g.integrated);
   const big = [...cards].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))[0];
-  const rank = (id: string) => (cards.some(g => codeFor(pins[id], g.cc) === 'none') ? 2 : codeFor(pins[id], big?.cc) === 'native' ? 0 : 1);
-  return ids
+  const rank = (id: string) => (crashedHere(pins[id], cards, driver) ? 3 : cards.some(g => codeFor(pins[id], g.cc) === 'none') ? 2 : testedHere(pins[id], cards, driver) ? -1 : codeFor(pins[id], big?.cc) === 'native' ? 0 : 1);
+  const sorted = ids
     .filter(id => !pinWhy(pins[id], gpus, driver))
     .map((id, i) => ({ id, i, r: rank(id) }))
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .map(x => x.id);
+  // A runner this PC's own test kept comes first (src/runnercheck.ts), unless it is known to crash here.
+  return o.first && sorted.includes(o.first) && !crashedHere(pins[o.first], cards, driver) ? [o.first, ...sorted.filter(id => id !== o.first)] : sorted;
+}
+
+/** "Like the hardware it was tried on": every NVIDIA card here is of a level the build was tried on (a mixed rig is not), the driver as new. */
+export function testedHere(pin: RuntimePin | undefined, cards: GpuFacts[], driver: string | null): boolean {
+  const nv = cards.filter(g => g.vendor === 'nvidia' && !g.integrated);
+  return nv.length > 0 && (pin?.cuda?.testedOn ?? []).some(t => nv.every(g => !!g.cc && t.cc.includes(g.cc)) && (!driver || driverAtLeast(driver, t.driver)));
+}
+
+/**
+ * Why the build `pin` is known to crash on these cards ('' when it is not): every NVIDIA card here is of a level it
+ * crashed on, with a driver as new as the one it crashed with (the same match as testedOn).
+ */
+export function crashedHere(pin: RuntimePin | undefined, cards: GpuFacts[], driver: string | null): string {
+  const nv = cards.filter(g => g.vendor === 'nvidia' && !g.integrated);
+  if (!nv.length) return '';
+  const hit = (pin?.cuda?.crashedOn ?? []).find(t => nv.every(g => !!g.cc && t.cc.includes(g.cc)) && (!driver || driverAtLeast(driver, t.driver)));
+  return hit ? `${hit.why} (seen on ${hit.card}, driver ${hit.driver} or newer)` : '';
 }
 
 /**

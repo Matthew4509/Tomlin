@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const home = readFileSync(new URL('../public/home.js', import.meta.url), 'utf8');
+const home = readFileSync(new URL('../public/home.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const move = /async function deskMove\(s, pc, pcName\) \{[\s\S]*?\n\}\n/.exec(home)![0];
 
 test('no words about logging in or permissions: neither is what stops a move', () => {

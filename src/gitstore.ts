@@ -6,11 +6,12 @@
 // Written here with Node's own zlib and SHA-1, no git program or package: blobs, trees, commits and one branch.
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createDeflate, createInflate, deflateSync, inflateSync } from 'node:zlib';
+import { writeAtomic } from './atomic.ts';
 
 /** The branch every backup is a commit on. */
 export const BRANCH = 'refs/heads/main';
@@ -203,17 +204,23 @@ export async function writeTree(repo: string, files: Entry[]): Promise<string> {
   return write(root);
 }
 
+/** The rows of a tree object: each one's mode, name and id. */
+function treeRows(content: Buffer): { mode: string; name: string; id: string }[] {
+  const rows: { mode: string; name: string; id: string }[] = [];
+  for (let at = 0; at < content.length;) {
+    const sp = content.indexOf(0x20, at);
+    const nul = content.indexOf(0, sp);
+    rows.push({ mode: content.subarray(at, sp).toString(), name: content.subarray(sp + 1, nul).toString(), id: content.subarray(nul + 1, nul + 21).toString('hex') });
+    at = nul + 21;
+  }
+  return rows;
+}
+
 /** Every file a tree holds, with its path. */
 export async function listTree(repo: string, tree: string, prefix = ''): Promise<Entry[]> {
   const { content } = await readObject(repo, tree);
   const out: Entry[] = [];
-  for (let at = 0; at < content.length;) {
-    const sp = content.indexOf(0x20, at);
-    const nul = content.indexOf(0, sp);
-    const mode = content.subarray(at, sp).toString();
-    const name = content.subarray(sp + 1, nul).toString();
-    const id = content.subarray(nul + 1, nul + 21).toString('hex');
-    at = nul + 21;
+  for (const { mode, name, id } of treeRows(content)) {
     if (mode === '40000') out.push(...(await listTree(repo, id, `${prefix}${name}/`)));
     else out.push({ path: `${prefix}${name}`, id });
   }
@@ -251,9 +258,14 @@ export async function readCommit(repo: string, id: string): Promise<Commit> {
 
 /**
  * Makes a commit of `files` on the branch (its parent the newest one), unless the files are the same as the newest
- * commit's. Every file must be stored already. Gives the commit (the newest one when nothing changed).
+ * commit's. Every file must be stored already. Gives the commit (the newest one when nothing changed). Runs in the
+ * repository's turn, so a trim (trimRepo) never sweeps a file between the check that it is here and the commit.
  */
-export async function commitFiles(repo: string, files: Entry[], message: string, now = Date.now()): Promise<{ id: string; same: boolean }> {
+export function commitFiles(repo: string, files: Entry[], message: string, now = Date.now()): Promise<{ id: string; same: boolean }> {
+  return inRepoTurn(repo, () => commitNow(repo, files, message, now));
+}
+
+async function commitNow(repo: string, files: Entry[], message: string, now: number): Promise<{ id: string; same: boolean }> {
   await initRepo(repo);
   for (const f of files) if (!(await hasObject(repo, f.id))) throw new Error(`a file of the backup is missing here (${f.path})`);
   const tree = await writeTree(repo, files);
@@ -269,15 +281,170 @@ export async function commitFiles(repo: string, files: Entry[], message: string,
   return { id, same: false };
 }
 
-/** The newest commits, newest first (at most `max`). */
+/**
+ * The newest commits, newest first (at most `max`). The history stops at a commit whose older history was let go
+ * (trimRepo), and at a parent that is not here any more.
+ */
 export async function logOf(repo: string, max = 30): Promise<Commit[]> {
+  const cut = await shallowOf(repo);
   const out: Commit[] = [];
   for (let id = await headOf(repo); id && out.length < max;) {
-    const c = await readCommit(repo, id);
+    let c: Commit;
+    try {
+      c = await readCommit(repo, id);
+    } catch (e) {
+      // An older commit swept away: the history ends here. The newest one unreadable is a fault, said as before.
+      if (out.length && !(await hasObject(repo, id))) break;
+      throw e;
+    }
     out.push(c);
-    id = c.parent;
+    id = cut.has(c.id) ? null : c.parent;
   }
   return out;
+}
+
+// ---- Keeping the repository from growing for ever ----
+
+/**
+ * Commits kept in each repository: the newest ones. The host lists the newest 30 (/worker/git-log), so every backup it
+ * shows can still be brought back. With a backup every 10 minutes while files change, that is at least 5 hours of them.
+ */
+export const KEEP_COMMITS = 30;
+/**
+ * An object written this recently is never swept: a backup sends its files first and names them in its commit only at
+ * the end, which on a slow link can be hours later. It also keeps the last day's versions a while after they are let go.
+ */
+export const SWEEP_GRACE_MS = 24 * 3600_000;
+/** Git's own file naming the commits whose older history is not here: git and this module both stop there. */
+const SHALLOW = 'shallow';
+
+const turns = new Map<string, Promise<unknown>>();
+/** Runs `job` in `repo`'s turn: a commit and a trim of one repository never run at the same time. */
+export function inRepoTurn<T>(repo: string, job: () => Promise<T>): Promise<T> {
+  const key = resolve(repo).toLowerCase();
+  const turn = (turns.get(key) ?? Promise.resolve()).then(job);
+  const settled = turn.then(() => undefined, () => undefined);
+  turns.set(key, settled);
+  void settled.then(() => { if (turns.get(key) === settled) turns.delete(key); });
+  return turn;
+}
+
+/** The commits whose parents were let go (the "shallow" file); none when there is no such file. */
+export async function shallowOf(repo: string): Promise<Set<string>> {
+  try {
+    return new Set((await readFile(join(repo, SHALLOW), 'utf8')).split(/\r?\n/).map(l => l.trim()).filter(isId));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Adds to `seen` every object commit `c` reaches (the commit, its trees, its files) that is not in it yet, and gives
+ * those new ids. A tree already seen is not read again (all it holds was counted with it). Throws when a tree cannot
+ * be read: what it holds is not known, so nothing may be swept on that count.
+ */
+export async function reachOf(repo: string, c: Commit, seen: Set<string>): Promise<string[]> {
+  const fresh: string[] = [];
+  const add = (id: string) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    fresh.push(id);
+    return true;
+  };
+  const walk = async (tree: string): Promise<void> => {
+    if (!add(tree)) return;
+    const { type, content } = await readObject(repo, tree);
+    if (type !== 'tree') throw new Error(`${tree} is not a folder of the backup`);
+    for (const r of treeRows(content)) {
+      if (r.mode === '40000') await walk(r.id);
+      else add(r.id);
+    }
+  };
+  add(c.id);
+  await walk(c.tree);
+  return fresh;
+}
+
+/** A folder that is a folder itself, not a junction or link to one somewhere else. */
+export const realFolder = (dir: string): Promise<boolean> => lstat(dir).then(s => s.isDirectory() && !s.isSymbolicLink(), () => false);
+
+/** The bytes one object takes on the disk (0 when it is not here). */
+export const objectBytes = (repo: string, id: string): Promise<number> => stat(objPath(repo, id)).then(s => s.size, () => 0);
+
+export interface Trimmed {
+  /** Older commits let go this time. */
+  commits: number;
+  /** Object files swept away, and their bytes. */
+  objects: number;
+  bytes: number;
+}
+
+/**
+ * Keeps the newest `keep` commits of `repo` (fewer with `oldest`: none older than that commit) and lets the older
+ * history go, then sweeps away what no kept commit needs.
+ * In this order, so a stop at any point (a crash, a power cut) never loses what a kept commit needs: first the cut is
+ * written to git's own "shallow" file (whole or not at all), so neither git nor TOMLIN reads past it; then every object
+ * the kept commits reach is read; only then are the others deleted. A tree that cannot be read stops it before anything
+ * is deleted.
+ * May delete: only files directly in <repo>/objects/<two hex digits>/ named as a git object (38 hex digits) or as the
+ * temporary copy writeObject or storeBlobFile makes (38 hex digits, ".<number>.tmp"), that no kept commit reaches and
+ * that were not written in the last `graceMs`. Never a folder, never the branch, never anything else, and never
+ * through a junction or link (an objects folder that is one is not swept at all).
+ * Runs in the repository's turn (a backup's commit waits for it). Never throws: a repository it cannot read is left as it is.
+ */
+export async function trimRepo(repo: string, o: { keep?: number; oldest?: string; graceMs?: number; now?: number } = {}): Promise<Trimmed> {
+  const none: Trimmed = { commits: 0, objects: 0, bytes: 0 };
+  try {
+    return await inRepoTurn(repo, async () => {
+      const log = await logOf(repo, Math.max(1, o.keep ?? KEEP_COMMITS));
+      // No branch (an empty repository, or its branch file unreadable): nothing is known to be kept, so nothing goes.
+      if (!log.length) return none;
+      const at = o.oldest ? log.findIndex(c => c.id === o.oldest) : -1;
+      const kept = at >= 0 ? log.slice(0, at + 1) : log;
+      const last = kept[kept.length - 1];
+      let commits = 0;
+      const cut = await shallowOf(repo);
+      if (last.parent && !cut.has(last.id)) {
+        // Counted before the cut (the commits let go, as far as they are still here).
+        for (let id: string | null = last.parent; id && commits < 100_000;) {
+          const c: Commit | null = await readCommit(repo, id).catch(() => null);
+          if (!c) break;
+          commits++;
+          id = cut.has(c.id) ? null : c.parent;
+        }
+        await writeAtomic(join(repo, SHALLOW), `${last.id}\n`);
+      }
+      const seen = new Set<string>();
+      for (const c of kept) await reachOf(repo, c, seen);
+      const now = o.now ?? Date.now();
+      const grace = o.graceMs ?? SWEEP_GRACE_MS;
+      let objects = 0;
+      let bytes = 0;
+      const top = join(repo, 'objects');
+      // A junction or link (the objects folder, or one of its folders) is never followed: what it leads to is not this
+      // repository's to sweep.
+      if (!(await realFolder(top))) return { commits, objects: 0, bytes: 0 };
+      for (const e of await readdir(top, { withFileTypes: true }).catch(() => [])) {
+        const d = e.name;
+        if (!e.isDirectory() || !/^[0-9a-f]{2}$/.test(d)) continue;
+        for (const n of await readdir(join(top, d)).catch(() => [] as string[])) {
+          const obj = /^[0-9a-f]{38}$/.test(n);
+          if (!obj && !/^[0-9a-f]{38}\.\d+\.tmp$/.test(n)) continue;
+          if (obj && seen.has(d + n)) continue;
+          const file = join(top, d, n);
+          const s = await stat(file).catch(() => null);
+          if (!s?.isFile() || now - s.mtimeMs < grace) continue;
+          if (await rm(file, { force: true }).then(() => true, () => false)) {
+            objects++;
+            bytes += s.size;
+          }
+        }
+      }
+      return { commits, objects, bytes };
+    });
+  } catch {
+    return none;
+  }
 }
 
 // ---- The host's workspace ----

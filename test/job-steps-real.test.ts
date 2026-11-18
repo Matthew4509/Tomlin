@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseResult } from '../src/jobs.ts';
+import { useTestEnv } from './env.ts';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise<number>((ok, no) => {
@@ -27,7 +28,7 @@ let asked = 0;
 const HOME = mkdtempSync(join(tmpdir(), 'sm-job-steps-'));
 const PORT = await freePort();
 const RUNNER = await freePort();
-Object.assign(process.env, { TOMLIN_HOME: HOME, TOMLIN_PORT: String(PORT), TOMLIN_NO_TOAST: '1', TOMLIN_OPEN: '', TOMLIN_STARTUP_DIR: join(HOME, 'startup'), TOMLIN_MODELS_FILE: join(HOME, 'models-folder.txt') });
+useTestEnv({ TOMLIN_HOME: HOME, TOMLIN_PORT: String(PORT), TOMLIN_NO_TOAST: '1', TOMLIN_OPEN: '', TOMLIN_STARTUP_DIR: join(HOME, 'startup'), TOMLIN_MODELS_FILE: join(HOME, 'models-folder.txt') });
 mkdirSync(join(HOME, 'startup'), { recursive: true });
 mkdirSync(join(HOME, 'models', 'chat'), { recursive: true });
 writeFileSync(join(HOME, 'models-folder.txt'), '');

@@ -1,0 +1,334 @@
+[
+ {
+  "id": "flappy-bird",
+  "title": "Flappy Bird in one HTML file",
+  "prompt": "Build a Flappy Bird style game as a single self-contained HTML file with inline CSS and JavaScript, no external libraries or images. Draw on a canvas. A bird falls under gravity, space bar or a click makes it flap upward, pipes with a gap scroll in from the right, passing a pipe scores one point, touching a pipe or the ground ends the game. Show the score and a \"Game Over, press space to restart\" message.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the file index.html is a complete document with html, head and body tags",
+   "it contains a canvas element",
+   "there are no external script, stylesheet or image URLs",
+   "a keydown handler reacts to the space key",
+   "pressing space makes the bird move up",
+   "the bird accelerates downward when no key is pressed",
+   "pipes spawn at the right edge and move left",
+   "each pipe pair has a gap the bird can fit through",
+   "the score goes up by 1 when the bird passes a pipe pair",
+   "collision with a pipe or the ground shows a game over message",
+   "pressing space after game over restarts with score 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "snake",
+  "title": "Snake in one HTML file",
+  "prompt": "Create the classic Snake game in one self-contained HTML file (inline CSS and JS, no libraries). Use a canvas grid of 20 by 20 cells. Arrow keys steer the snake, it moves on a timer, eating food makes it longer and adds 10 to the score, hitting a wall or its own body ends the game. Show the score and let the player restart with the Enter key.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the file has a canvas element",
+   "there are no external resources",
+   "arrow keys change the snake direction",
+   "the snake cannot reverse straight into itself",
+   "the snake moves automatically on a timer",
+   "food appears at a random free cell",
+   "eating food grows the snake by one cell",
+   "eating food adds 10 to the displayed score",
+   "hitting a wall ends the game",
+   "hitting its own body ends the game",
+   "pressing Enter after game over restarts the game"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "tictactoe-ai",
+  "title": "Tic-tac-toe with a simple AI",
+  "prompt": "Write Tic-tac-toe as a single HTML file with inline CSS and JavaScript. The human plays X and clicks cells in a 3 by 3 grid, then the computer plays O. The computer must take a winning move if it has one, otherwise block the human, otherwise take the centre, otherwise any free cell. Detect wins and draws, show a status line, and add a New Game button.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the page shows a 3 by 3 grid of 9 clickable cells",
+   "clicking an empty cell puts an X in it",
+   "clicking a filled cell does nothing",
+   "after the human move the computer places an O automatically",
+   "the computer completes its own line of two when it can",
+   "the computer blocks a human line of two",
+   "a status line announces a win for X or O",
+   "a status line announces a draw when the board is full",
+   "no moves are accepted after the game ends",
+   "a New Game button clears the board"
+  ],
+  "size": "small"
+ },
+ {
+  "id": "todo-localstorage",
+  "title": "To-do list with local storage",
+  "prompt": "Build a to-do list web page as one HTML file with inline CSS and JavaScript. The user types a task and presses Enter or an Add button to add it. Each task has a checkbox to mark it done (shown with a line through) and a Delete button. Show how many tasks are still open. Save all tasks in localStorage and reload them when the page opens.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "there is a text input and an Add button",
+   "pressing Enter in the input adds a task",
+   "empty input does not add a task",
+   "each task has a checkbox",
+   "checking a task shows it with a line-through style",
+   "each task has a Delete button that removes it",
+   "a counter shows the number of open tasks",
+   "the code calls localStorage.setItem",
+   "the code calls localStorage.getItem on page load",
+   "the code stores the list as JSON"
+  ],
+  "size": "small"
+ },
+ {
+  "id": "calculator",
+  "title": "Calculator page",
+  "prompt": "Make a calculator as one HTML file with inline CSS and JavaScript. It has a display, buttons 0-9, a decimal point, + - * / operators, equals, and a Clear button. Do not use eval or new Function; evaluate the operations with your own code. Division by zero must show the text \"Error\" instead of crashing. Keyboard digits and Enter should also work.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "there is a display element and buttons for digits 0 to 9",
+   "there are buttons for plus, minus, multiply and divide",
+   "there is an equals button and a Clear button",
+   "the source does not contain eval( or new Function",
+   "2 + 3 = shows 5",
+   "7 * 6 = shows 42",
+   "1 / 0 shows Error",
+   "pressing a decimal point twice in one number does not create two dots",
+   "Clear resets the display to 0",
+   "typing digits on the keyboard updates the display"
+  ],
+  "size": "small"
+ },
+ {
+  "id": "markdown-to-html",
+  "title": "Markdown to HTML converter (Node, with tests)",
+  "prompt": "Write a small Markdown to HTML converter in plain Node.js (no npm packages). File markdown.js exports a function toHtml(text) (module.exports = { toHtml }). Support headings # to ###, paragraphs, **bold**, *italic*, `inline code`, unordered lists with \"- \", links [text](url), and fenced code blocks. Escape < > and & in normal text. Also write markdown.test.js using node:test and node:assert that checks each feature, so that \"node --test\" passes.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: markdown.js, markdown.test.js. No prose outside the blocks.",
+  "deliverable": [
+   "markdown.js",
+   "markdown.test.js"
+  ],
+  "acceptance": [
+   "markdown.js exports toHtml",
+   "it uses no require of third-party packages",
+   "toHtml(\"# Hi\") returns text containing <h1>Hi</h1>",
+   "**bold** becomes <strong>bold</strong>",
+   "*it* becomes <em>it</em>",
+   "a line starting with \"- \" becomes an li inside a ul",
+   "[a](http://x.y) becomes an anchor with href",
+   "a < in text is escaped to &lt;",
+   "inline code becomes a code element",
+   "markdown.test.js requires node:test",
+   "it contains at least 6 test cases",
+   "running node --test exits with code 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "csv-parser",
+  "title": "CSV parser (Node, with tests)",
+  "prompt": "Write a CSV parser in plain Node.js with no packages. File csv.js exports parseCsv(text) returning an array of rows (arrays of strings). It must handle commas, double-quoted fields containing commas or line breaks, doubled quotes (\"\") as an escaped quote, both \\n and \\r\\n line endings, and a missing final newline. Also export parseCsvObjects(text) that uses the first row as header keys. Write csv.test.js with node:test covering all of this.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: csv.js, csv.test.js. No prose outside the blocks.",
+  "deliverable": [
+   "csv.js",
+   "csv.test.js"
+  ],
+  "acceptance": [
+   "csv.js exports parseCsv and parseCsvObjects",
+   "parseCsv(\"a,b\\n1,2\") returns [[\"a\",\"b\"],[\"1\",\"2\"]]",
+   "a quoted field with a comma stays one field",
+   "a quoted field may contain a newline",
+   "a doubled quote inside quotes becomes one quote",
+   "CRLF line endings give the same result as LF",
+   "a missing final newline is accepted",
+   "an empty field gives an empty string",
+   "parseCsvObjects returns objects keyed by header",
+   "csv.test.js has at least 6 test cases",
+   "running node --test exits with code 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "url-shortener",
+  "title": "URL shortener (Node, in memory, with tests)",
+  "prompt": "Build an in-memory URL shortener library in plain Node.js (no packages, no network). File shortener.js exports a class Shortener with shorten(url) returning a 6-character code made of letters and digits, resolve(code) returning the original url or null, and stats(code) returning the number of times it was resolved. Shortening the same url twice returns the same code. Reject anything that is not an http or https URL by throwing an Error. Add shortener.test.js with node:test.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: shortener.js, shortener.test.js. No prose outside the blocks.",
+  "deliverable": [
+   "shortener.js",
+   "shortener.test.js"
+  ],
+  "acceptance": [
+   "shortener.js exports class Shortener",
+   "shorten returns a string of exactly 6 characters",
+   "the code uses only letters and digits",
+   "shortening the same url twice gives the same code",
+   "different urls give different codes",
+   "resolve returns the original url for a known code",
+   "resolve returns null for an unknown code",
+   "stats counts successful resolves",
+   "shorten(\"ftp://x.y\") throws an Error",
+   "shorten(\"not a url\") throws an Error",
+   "running node --test exits with code 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "pong",
+  "title": "Pong clone in one HTML file",
+  "prompt": "Write a Pong clone in a single HTML file with inline CSS and JS and a canvas. The left paddle follows the W and S keys, the right paddle is controlled by the computer and can miss. The ball bounces off the top and bottom walls and off paddles, speeds up a little on each paddle hit, and when it passes a side the other player scores a point and the ball resets to the centre. Show both scores. First to 7 wins and the game shows a winner message.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the page has a canvas element",
+   "there are no external resources",
+   "W moves the left paddle up",
+   "S moves the left paddle down",
+   "the right paddle moves by itself",
+   "the ball bounces off the top and bottom walls",
+   "the ball bounces off a paddle",
+   "the ball speed increases after a paddle hit",
+   "a point is scored when the ball passes a side",
+   "both scores are drawn on screen",
+   "reaching 7 points shows a winner message"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "tetris-like",
+  "title": "Tetris-like falling blocks game",
+  "prompt": "Build a Tetris-like game in one HTML file with inline CSS and JS on a canvas. The board is 10 columns by 20 rows. Seven piece shapes (I, O, T, S, Z, J, L) fall at a steady speed. Left and right arrows move, the up arrow rotates, the down arrow drops faster, space hard-drops. Full rows are cleared and scored, 100 points per row, and the game ends when a new piece cannot fit.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the file contains a canvas element",
+   "the board is 10 columns by 20 rows",
+   "all seven piece shapes are defined",
+   "pieces fall automatically on a timer",
+   "left and right arrow keys move the piece",
+   "the up arrow rotates the piece",
+   "pieces cannot move through walls or settled blocks",
+   "pieces lock when they land",
+   "a full row is removed and rows above shift down",
+   "each cleared row adds 100 to the score",
+   "game over is shown when a new piece cannot be placed"
+  ],
+  "size": "large"
+ },
+ {
+  "id": "unit-converter",
+  "title": "Unit converter page",
+  "prompt": "Create a unit converter page as one HTML file with inline CSS and JS. Three categories chosen in a dropdown: Length (metre, kilometre, mile, foot, inch), Weight (gram, kilogram, pound, ounce) and Temperature (Celsius, Fahrenheit, Kelvin). The user enters a number and picks a from-unit and a to-unit; the result updates as they type. Show results rounded to at most 4 decimal places. Invalid or empty input shows a dash.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "there is a category dropdown with Length, Weight and Temperature",
+   "there are from-unit and to-unit dropdowns that change with the category",
+   "the number input updates the result without pressing a button",
+   "1 kilometre converts to 1000 metres",
+   "1 mile converts to about 1.6093 kilometres",
+   "1 kilogram converts to about 2.2046 pounds",
+   "0 Celsius converts to 32 Fahrenheit",
+   "0 Celsius converts to 273.15 Kelvin",
+   "results show at most 4 decimal places",
+   "empty input shows a dash instead of NaN"
+  ],
+  "size": "small"
+ },
+ {
+  "id": "stopwatch-timer",
+  "title": "Stopwatch and countdown timer page",
+  "prompt": "Make a page with a stopwatch and a countdown timer in a single HTML file with inline CSS and JS. Stopwatch: Start, Stop, Reset and Lap buttons, display as MM:SS.cs, laps listed below. Countdown: a minutes input and seconds input, Start and Reset, display as MM:SS, and when it reaches zero show the text \"Time is up\" and stop. Use performance.now or Date.now so time does not drift.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "there is a stopwatch display and a countdown display",
+   "the stopwatch has Start, Stop, Reset and Lap buttons",
+   "Start makes the stopwatch count up",
+   "Stop pauses it and Start resumes from the same time",
+   "Reset sets it to 00:00.00",
+   "Lap adds an entry to a visible list",
+   "the countdown has minutes and seconds inputs",
+   "the countdown display goes down once per second",
+   "at zero the text Time is up appears",
+   "the code uses Date.now or performance.now rather than only counting ticks"
+  ],
+  "size": "small"
+ },
+ {
+  "id": "bank-account",
+  "title": "Bank account class (Node, with tests)",
+  "prompt": "Write a BankAccount class in plain Node.js with no packages. File account.js exports BankAccount. Constructor takes an owner name and an optional opening balance (default 0, negative is an error). Methods: deposit(amount), withdraw(amount), transfer(amount, otherAccount), getBalance(), and getHistory() which returns the list of transactions with type, amount and resulting balance. Amounts must be positive numbers, and withdrawing more than the balance throws an Error and changes nothing. Add account.test.js using node:test.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: account.js, account.test.js. No prose outside the blocks.",
+  "deliverable": [
+   "account.js",
+   "account.test.js"
+  ],
+  "acceptance": [
+   "account.js exports class BankAccount",
+   "a new account has balance 0 by default",
+   "a negative opening balance throws",
+   "deposit(50) raises the balance by 50",
+   "withdraw reduces the balance",
+   "withdrawing more than the balance throws an Error",
+   "a failed withdraw leaves the balance unchanged",
+   "deposit(0) and deposit(-5) throw",
+   "transfer moves money from one account to another",
+   "getHistory records type, amount and balance for each successful action",
+   "account.test.js has at least 8 test cases",
+   "running node --test exits with code 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "lru-cache",
+  "title": "LRU cache (Node, with tests)",
+  "prompt": "Implement an LRU cache in plain Node.js with no packages. File lru.js exports class LRUCache. Constructor takes a capacity (positive integer, otherwise throw). Methods: get(key) returns the value or undefined and marks the key as most recently used, set(key, value) inserts or updates and evicts the least recently used entry when over capacity, has(key) which does not change the order, delete(key), and a size property. Both get and set must run in O(1). Write lru.test.js with node:test.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: lru.js, lru.test.js. No prose outside the blocks.",
+  "deliverable": [
+   "lru.js",
+   "lru.test.js"
+  ],
+  "acceptance": [
+   "lru.js exports class LRUCache",
+   "constructing with capacity 0 or a negative number throws",
+   "get on a missing key returns undefined",
+   "set then get returns the value",
+   "inserting beyond capacity evicts the least recently used key",
+   "get makes a key most recently used so it survives the next eviction",
+   "updating an existing key does not grow size",
+   "has does not change recency order",
+   "delete removes a key and lowers size",
+   "size reports the current number of entries",
+   "lru.test.js has at least 7 test cases",
+   "running node --test exits with code 0"
+  ],
+  "size": "medium"
+ },
+ {
+  "id": "memory-match",
+  "title": "Memory card matching game",
+  "prompt": "Create a memory card matching game as one HTML file with inline CSS and JS. A 4 by 4 grid has 8 pairs of cards using emoji faces. Click a card to flip it; two flipped cards that match stay open, otherwise they flip back after about one second and clicks are ignored during that time. Count the moves, shuffle the cards fairly on every new game, show \"You win\" when all pairs are found, and include a Restart button.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+  "deliverable": [
+   "index.html"
+  ],
+  "acceptance": [
+   "the grid contains 16 cards",
+   "there are exactly 8 distinct pairs",
+   "clicking a card reveals it",
+   "matching cards stay revealed",
+   "non-matching cards flip back after a short delay",
+   "clicks are ignored while two cards are being compared",
+   "a move counter increases after each pair of flips",
+   "a Restart button reshuffles and clears progress",
+   "finding all pairs shows You win",
+   "the shuffle does not use sort with a random comparator"
+  ],
+  "size": "medium"
+ }
+]

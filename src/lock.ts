@@ -31,7 +31,7 @@ export function cleanSecret(kind: LockKind, v: unknown): string | null {
   return s.length >= 1 && s.length <= PASSWORD_MAX ? s : null;
 }
 
-const COMMON = new Set(['password', 'passw0rd', 'qwerty', 'qwertyuiop', 'letmein', 'welcome', 'admin', 'iloveyou', 'monkey', 'dragon', 'abc123', 'football', 'baseball', 'sunshine', 'princess', 'tomlin', 'shelby']);
+const COMMON = new Set(['password', 'passw0rd', 'qwerty', 'qwertyuiop', 'letmein', 'welcome', 'admin', 'iloveyou', 'monkey', 'dragon', 'abc123', 'football', 'baseball', 'sunshine', 'princess', 'tomlin']);
 
 /**
  * The strength line under a new password: a rough guess of how many tries it takes (its length times the kinds of

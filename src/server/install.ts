@@ -2,12 +2,13 @@
 // installed program (TOMLIN.exe) in place of a copy started from a folder. Start TOMLIN when this PC starts goes through /api/share, as
 // the tick in Network does.
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { startupDir, startupFileIn } from '../autostart.ts';
 import * as inst from '../installer.ts';
 import { desktopShortcut, makeDesktopShortcut, planRepair, runRepair, windowsDeps } from '../repair.ts';
 import { PORT, ROOT, type Routes, VERSION, json, startupOf } from './core.ts';
 import { backupRunning } from './bridge.ts';
+import { psQuote } from '../psquote.ts';
 
 /** The exit code that tells Start TOMLIN.cmd its window may close: the installed program takes over. */
 export const HANDED_OVER = 78;
@@ -26,15 +27,20 @@ async function view() {
   const d = windowsDeps();
   const plan = await planRepair(me(), d);
   const desk = await desktopShortcut(me(), d).catch(() => null);
+  const current = inst.currentCopy(plan.root);
+  // When the install folder was made (installed) and when the copy it runs was put there (last updated).
+  const madeAt = (dir: string | undefined) => (dir ? stat(dir).then(s => s.birthtime.toISOString(), () => null) : Promise.resolve(null));
   return {
     windows: true,
     root: plan.root,
     here: ROOT,
     version: VERSION,
     installed: plan.installed,
+    installedOn: plan.installed ? await madeAt(plan.root) : null,
+    updatedOn: await madeAt(current?.dir),
     outside: plan.outside,
     // The copy the install runs now (current.txt), and its version.
-    current: inst.currentCopy(plan.root),
+    current,
     steps: plan.steps.map(s => s.say),
     left: plan.left,
     desktop: desk ? { there: desk.there, target: desk.target, opens: desk.opens } : null,
@@ -69,7 +75,7 @@ export const installPost: Routes = {
     const exe = inst.installExe(VERSION);
     if (!windows || !exe || process.env.TOMLIN_TRAY === '1') return json(res, 409, { error: 'There is no whole installed TOMLIN of this version to start. Press Repair install first.' });
     if (backupRunning()) return json(res, 409, { error: backupRunning() });
-    const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const q = psQuote;
     const script = `$t = (Get-Date).AddSeconds(60); while ((Get-Date) -lt $t -and (Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 500 }; Start-Process -FilePath ${q(exe)}`;
     spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     json(res, 200, { ok: true });

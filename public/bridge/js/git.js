@@ -28,7 +28,7 @@ function gitSteps(g) {
 
 // The projects waiting for something, by what they need.
 function gitWaiting() {
-  const g = rows.filter(r => r.git && !['none', 'error'].includes(r.git.state));
+  const g = rows.filter(r => r.git && !['none', 'error', 'checking'].includes(r.git.state));
   return {
     unsaved: g.filter(r => r.git.changes > 0),
     unpushed: g.filter(r => r.git.state === 'ahead' || r.git.state === 'unpushed' || (r.git.state === 'changes' && r.git.ahead > 0)),
@@ -49,6 +49,7 @@ function gitHealthDialog() {
     [h('button', { class: 'btn accent', type: 'button', onclick: closeDialog }, 'Close')], 'wide');
 }
 $('st-git').addEventListener('click', gitHealthDialog);
+$('st-gitproblem').addEventListener('click', gitProblemsDialog);
 
 // ---- The Git program (About › Git) ----
 let gitProg = null;

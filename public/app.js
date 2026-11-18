@@ -563,6 +563,7 @@ function drawContext() {
   $('#ctx-draft-card-row').hidden = !cards.length || !draft.value || draft.value === 'mtp';
   $('#ctx-try-row').hidden = !(m.places?.length > 1);
   drawTry();
+  drawRunner(m);
   const bytes = m.cost?.[m.run.cache]?.[m.run.ctx];
   const total = bytes != null ? m.bytes + bytes : null;
   hint.textContent = [
@@ -589,6 +590,8 @@ async function saveContext() {
       ...(guess === 'mtp' ? { spec: 'mtp' } : was?.spec === 'mtp' ? { spec: null } : {}),
       // Only what is shown is sent: a hidden choice keeps what was saved.
       ...(!$('#ctx-cards-row').hidden ? { cards: idsAt($('#ctx-cards').value) } : {}),
+      // The Runner (null: Auto). Only when the row is shown: a model held to a runner keeps it otherwise.
+      ...(!$('#ctx-runner-row').hidden ? { runner: $('#ctx-runner').value || null } : {}),
       ...(!$('#ctx-draft-card-row').hidden ? { draftOn: where === 'ram' ? 'ram' : null, draftCard: where === 'ram' ? [] : idsAt(where) } : {}),
     } });
     app.models = await api('/api/models');
@@ -647,7 +650,74 @@ async function reconnect(name) {
   }
   poll();
 }
-for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft', '#ctx-cards', '#ctx-draft-card']) $(id).addEventListener('change', saveContext);
+for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft', '#ctx-cards', '#ctx-draft-card', '#ctx-runner']) $(id).addEventListener('change', saveContext);
+
+// ---- The Runner a chat model starts on (src/server/faults.ts): Auto, or one card runner this PC pins and has unpacked ----
+
+/** This PC's chat runners (/api/runner-pins), read once and again after a test. */
+let runnerPins = null;
+async function drawRunner(m) {
+  const row = $('#ctx-runner-row');
+  const sel = $('#ctx-runner');
+  if (!m || String(m.id).startsWith('ollama:')) {
+    row.hidden = true;
+    return;
+  }
+  try {
+    runnerPins ??= (await api('/api/runner-pins')).pins;
+  } catch {
+    runnerPins = [];
+  }
+  const cards = runnerPins.filter(p => p.device !== 'cpu');
+  // Only a PC with more than one card runner to choose from.
+  row.hidden = cards.filter(p => p.installed && !p.why).length < 2 && !m.run.runner;
+  const held = m.run.runner ?? '';
+  const short = { cuda: 'llama-cuda', cuda13: 'llama-cuda13', vulkan: 'llama-vulkan' };
+  sel.replaceChildren(el('option', { value: '', text: 'Auto (the one that suits this card)' }), ...cards.map(p => el('option', { value: p.pin, disabled: !p.installed || !!p.why, text: `${p.name}${!p.installed ? ' (not installed)' : p.why ? ' (cannot run here)' : ''}` })));
+  sel.value = short[held] ?? held;
+  if (sel.value !== (short[held] ?? held)) sel.value = '';
+}
+
+/** The guided notice under the gear's Test now after a fail (one at a time). */
+let runnerNotice = null;
+$('#ctx-runner-test').addEventListener('click', async () => {
+  const id = panes.chat.model.value;
+  const pin = $('#ctx-runner').value;
+  const said = $('#ctx-runner-said');
+  const p = (runnerPins ?? []).find(x => x.pin === pin);
+  if (!id || !p) {
+    said.textContent = 'Pick a runner in the list first (Auto is not one runner).';
+    return;
+  }
+  if (!confirm(`Test this model on ${p.name}?\n\nTOMLIN loads it on that runner only, asks a short question, has it write a short answer, then gives it a long prompt (about 3,000 tokens). It passes when every answer comes back and the runner is still running. Chats wait meanwhile; the models that were loaded are loaded again afterwards. Nothing is changed.`)) return;
+  const btn = $('#ctx-runner-test');
+  btn.disabled = true;
+  runnerNotice?.remove();
+  let s = null;
+  try {
+    await api('/api/runner-test', { model: id, runner: pin });
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2000));
+      s = (await api('/api/runner-test')).test;
+      if (!s) break;
+      said.textContent = s.now || s.said;
+      if (s.state !== 'running') break;
+    }
+  } catch (err) {
+    said.textContent = err.message;
+  }
+  btn.disabled = false;
+  // A fail: the crash notice's guided flow suggests the next runner to try (src/server/faults.ts /api/runner-next).
+  if (s?.state === 'failed' && app.crashNotice) {
+    try {
+      const { fault } = await api(`/api/runner-next?model=${encodeURIComponent(id)}`);
+      if (fault) said.after((runnerNotice = app.crashNotice(fault)));
+    } catch {
+      // the words above already say why it failed
+    }
+  }
+  runnerPins = null;
+});
 
 // ---- Fold wait (src/layers.ts): how long a fold in a chat of 16k or more may spend reading, kept per model ----
 /** What the wait keeps word for word at this model's read speed, as src/layers.ts shortTokens works it out (with a 2,000-token log above). */
@@ -839,6 +909,7 @@ async function poll() {
       app.loadChats?.();
     }
     drawBar(s);
+    drawMax();
     for (const name of ['chat', 'image']) {
       drawPane(name, s.panes[name]);
       threadsHint(name);
@@ -1349,12 +1420,153 @@ webPick.addEventListener('click', () => {
   api('/api/chat/web', { chatId: app.chatId ?? '', on: webOn() }).catch(() => undefined);
 });
 
+/**
+ * Max for the chat on screen (the switch in the chat box, beside Web): for a model that fits this PC alone, linked PCs lend
+ * to raise its tokens a second (src/maxmode.ts); kept on the chat by the server, sent with each message. Greyed, with the
+ * reason in its tooltip, when it cannot run: the model does not fit one PC (Cluster runs it), or no linked PC can lend now.
+ */
+const maxPick = $('#max-pick');
+const MAX_TIP = maxPick.title;
+/** The reason in words under the chat box (not only in the tip): shown while Max is on but cannot run, or after a press on the faded switch. */
+const maxWhyLine = $('#max-why');
+let maxPressed = false;
+const maxOn = () => maxPick.getAttribute('aria-pressed') === 'true';
+function setMax(on) {
+  maxPick.setAttribute('aria-pressed', String(on));
+  maxPick.textContent = on ? 'Max: on' : 'Max: off';
+  maxPressed = false;
+  drawMax();
+}
+/** Why Max cannot run now ('' when it can): the model's side first (the one loaded for this chat, else the one picked), then the lenders'. */
+function maxWhy() {
+  const id = app.status?.panes?.chat?.model || panes.chat.model.value;
+  const m = (app.models?.chat ?? []).find(x => x.id === id);
+  if (m && m.fitsAlone === false) return 'This model does not fit one PC: Cluster runs it';
+  return app.status?.max?.why ?? '';
+}
+function drawMax() {
+  const why = maxWhy();
+  maxPick.classList.toggle('greyed', !!why);
+  maxPick.setAttribute('aria-disabled', String(!!why));
+  maxPick.title = why ? `${MAX_TIP} Not available now: ${why}.` : MAX_TIP;
+  const show = !!why && (maxOn() || maxPressed);
+  maxWhyLine.hidden = !show;
+  maxWhyLine.textContent = show ? `Max mode ${maxOn() ? 'is on but ' : ''}cannot run now: ${why}.` : '';
+}
+maxPick.addEventListener('click', () => {
+  const why = maxWhy();
+  // Greyed: it can still be switched off, never on.
+  if (why && !maxOn()) {
+    // The reason is said once, in the line under the box (#max-why), not again as a note in the chat.
+    maxPressed = true;
+    return drawMax();
+  }
+  setMax(!maxOn());
+  api('/api/chat/max', { chatId: app.chatId ?? '', on: maxOn() }).catch(() => undefined);
+});
+
 /** What an answer looked up on the web (Web on), in words for the line under it ('' when nothing). */
 function webLine(uses) {
   if (!Array.isArray(uses) || !uses.length) return '';
   const one = u => (u.name === 'web_search' ? `searched “${u.input}” (${u.said})` : u.ok ? `read ${u.said}` : `did not read ${u.input} (${u.said})`);
-  return `Web: ${uses.map(one).join('; ')}`;
+  const web = uses.filter(u => u.name === 'web_search' || u.name === 'open_page');
+  // The newer tools (the screen, the laptop helper, git, notes): each step with how it ended and how long it took.
+  const step = u => `${TOOL_WORDS[u.name] ?? u.name} ${u.input} (${u.ok ? '' : 'not done: '}${u.said}${Number.isFinite(u.ms) ? `, ${(u.ms / 1000).toFixed(1)} s` : ''})`;
+  const other = uses.filter(u => !web.includes(u));
+  return [web.length ? `Web: ${web.map(one).join('; ')}` : '', other.length ? `Tools: ${other.map(step).join('; ')}` : ''].filter(Boolean).join(' ');
 }
+const TOOL_WORDS = { window_list: 'listed windows:', screen_look: 'looked at', window_focus: 'window:', click: 'click:', press_key: 'keys:', cam_menus: 'read the menus on', cam_window_state: 'read the window on', git_read: 'git:', run_command: 'ran', save_note: 'note:', suggest_finding: 'finding:' };
+
+/** The newer kinds (src/permits.ts TIER_KINDS), in the order shown, with the tiers each one may have. */
+app.TIER_KINDS = [
+  { kind: 'screen', name: 'Screen', what: 'name and read the windows on your list, as text (nothing is clicked)', tiers: ['never', 'look', 'each', 'allowed'] },
+  { kind: 'machine', name: 'Laptop helper', what: 'read a linked helper\'s menus and window state, as text', tiers: ['never', 'look', 'each', 'allowed'] },
+  { kind: 'focus', name: 'Bring to front', what: 'bring a window on your list to the front (it can take the keyboard from you)', tiers: ['never', 'each'] },
+  { kind: 'input', name: 'Click and type', what: 'click and press keys in a window on your list, a card for each action', tiers: ['never', 'each'] },
+  { kind: 'git', name: 'Git (read)', what: 'read status, diff and history in a folder on your coding list', tiers: ['never', 'look', 'each', 'allowed'] },
+  { kind: 'run', name: 'Run a command', what: 'run test, build, lint or typecheck in a folder on your coding list', tiers: ['never', 'each', 'allowed'] },
+  { kind: 'notes', name: 'Notes', what: 'save a research note in the chat\'s folder, and suggest findings for you to save', tiers: ['never', 'look', 'each', 'allowed'] },
+  { kind: 'subagent', name: 'Subagent', what: 'have a second model check a draft against its quotes: on an available node, or queued on this PC after the answer', tiers: ['never', 'look', 'each', 'allowed'] },
+];
+app.TIER_NAMES = { never: 'Never', look: 'Look only', each: 'Ask each time', allowed: 'Allowed' };
+
+/**
+ * Settings, Permissions, the newer kinds, as rows in groups: Screen, Coding and Research. Each kind is a row with its
+ * tiers side by side; the lists a kind needs (the windows, the coding folders and commands) fold under their group, and
+ * the laptop helper's link under Screen. `save(change)` saves and gives back the permissions now (or null).
+ */
+app.tierRows = save => {
+  const now = () => ({ tiers: {}, windows: [], folders: [], commands: [], research: false, coding: false, ...(app.models?.settings?.permissions ?? {}) });
+  const kinds = Object.fromEntries(app.TIER_KINDS.map(k => [k.kind, k]));
+  const picks = {};
+  const icons = { screen: 'screen', machine: 'laptop', focus: 'front', input: 'click', git: 'git', run: 'run', notes: 'note', subagent: 'sub' };
+  // "Let the model click and type" is the Click and type row (it was a tick of its own as well, saying the same thing).
+  const about = { input: 'Let the model click and type in the listed windows only; it asks before every click and key' };
+  const tierRow = kind => {
+    const k = kinds[kind];
+    const pick = app.setSeg(k.tiers.map(t => [t, app.TIER_NAMES[t]]), now().tiers?.[kind] ?? k.tiers[0], `${k.name}: when to ask`, async v => {
+      const p = await save({ tiers: { ...now().tiers, [kind]: v } });
+      pick.value = p ? p.tiers[kind] : now().tiers?.[kind] ?? k.tiers[0];
+    });
+    picks[kind] = pick;
+    const what = about[kind] ?? k.what;
+    return app.setRow({ icon: icons[kind], name: k.name, about: what[0].toUpperCase() + what.slice(1), side: pick });
+  };
+  const count = (list, one, none) => (list.length ? `${list.length} ${one}${list.length === 1 ? '' : 's'} listed` : none);
+  const lines = (icon, name, key, one, none, hint, placeholder) => {
+    const box = el('textarea', { rows: 3, spellcheck: 'false', 'aria-label': name, placeholder });
+    box.value = (now()[key] ?? []).join('\n');
+    const row = app.setRow({ icon, name, about: count(now()[key] ?? [], one, none), inside: [box, el('p', { class: 'set-note', text: hint })] });
+    box.addEventListener('change', async () => {
+      const p = await save({ [key]: box.value.split('\n').map(x => x.trim()).filter(Boolean) });
+      if (!p) return;
+      box.value = p[key].join('\n');
+      row.about.textContent = count(p[key], one, none);
+    });
+    return row;
+  };
+  const role = (icon, name, key, words) => app.setRow({ icon, name, about: words, side: app.setSwitch(now()[key] === true, name, on => save({ [key]: on })) });
+
+  // The laptop helper: linked with the code its window shows on the laptop; the code is never sent.
+  const helpers = el('div', { class: 'set-helpers' });
+  const helperRow = app.setRow({ icon: 'laptop', name: 'Link a laptop helper', about: 'No laptop helper is linked', inside: [] });
+  const drawHelpers = list => {
+    helperRow.about.textContent = list.length ? list.map(h => h.name).join(', ') : 'No laptop helper is linked';
+    helpers.replaceChildren(...list.map(h => el('div', { class: 'set-line' },
+      el('span', { text: `${h.name} at ${h.url.replace('http://', '')} · ${h.role} · reads ${h.tools.join(', ') || 'nothing'}` }),
+      app.setButton('Remove', async () => drawHelpers((await api('/api/helpers', { action: 'remove', id: h.id })).helpers)))));
+  };
+  api('/api/helpers').then(r => drawHelpers(r.helpers)).catch(() => undefined);
+  const address = el('input', { type: 'text', placeholder: '192.168.1.20', 'aria-label': 'The laptop\'s address', size: 16 });
+  const code = el('input', { type: 'text', placeholder: 'Setup code', 'aria-label': 'The setup code shown on the laptop', size: 12, autocomplete: 'off' });
+  const linkSaid = el('span', { class: 'set-note', role: 'status' });
+  const link = app.setButton('Link', async () => {
+    linkSaid.textContent = 'Linking…';
+    try {
+      drawHelpers((await api('/api/helpers', { action: 'link', address: address.value, code: code.value })).helpers);
+      code.value = '';
+      linkSaid.textContent = 'Linked.';
+    } catch (error) {
+      linkSaid.textContent = error.message;
+    }
+  });
+  helperRow.querySelector('.set-inside').append(helpers,
+    el('div', { class: 'set-line' }, el('label', { class: 'field' }, el('span', { text: 'The laptop\'s address' }), address), el('label', { class: 'field' }, el('span', { text: 'Setup code' }), code), link),
+    linkSaid,
+    el('p', { class: 'set-note', text: 'Start the helper on the laptop (docs/CAM-HELPER.md), then type its address and the code its window shows. It only reads menus and window text; it cannot click.' }));
+
+  return {
+    screen: app.setCard(tierRow('screen'), tierRow('focus'), tierRow('input'), tierRow('machine'),
+      lines('list', 'Windows it may look at', 'windows', 'window', 'None listed: no screen tools', 'One a line: the window\'s whole title, with * for any letters, and its program before a | if you wish. A window that is not listed is never named, read or touched.', 'mstsc.exe|192.168.1.20 - *'),
+      helperRow),
+    coding: app.setCard(role('code', 'Coding role', 'coding', 'In a chat whose folder is listed below: read git, and run a named command when allowed'),
+      tierRow('git'), tierRow('run'),
+      lines('folder', 'Coding folders', 'folders', 'folder', 'None listed: no coding tools', 'One folder a line (the whole path). Only a chat that works in one of them gets the coding tools.', 'C:\\code\\my-project'),
+      lines('run', 'Your named commands', 'commands', 'command', 'None of your own: test, build, lint and typecheck come from package.json', 'One a line, as name=command. It must start with node, npm, npx, python or php, with no pipes, && or redirects.', 'docs=npm run docs')),
+    research: app.setCard(role('research', 'Research role', 'research', 'In a chat with Web on: read more pages, save notes with their sources, and suggest findings'),
+      tierRow('notes'), tierRow('subagent')),
+  };
+};
 
 /** What a chat's model may do (src/permits.ts), in the order shown. */
 app.PERMISSION_KINDS = [
@@ -1393,18 +1605,64 @@ app.permissionRows = (onChange) => {
   return el('div', { class: 'perm-rows' }, ...rows, el('label', { class: 'check' }, delay, ' Wait 1-5 seconds (at random) between pages on the same site, so the site does not ban this PC'), said);
 };
 
-/** Settings, Permissions: Manual (asked in the chat the first time in each answer) or Auto, for each kind. */
-app.permissionsBox = () => el('fieldset', { class: 'colours-pick permissions' },
-  el('legend', { text: 'Permissions' }),
-  el('p', { class: 'hint', text: 'What a chat\'s model may do on its own. Manual: it asks in the chat the first time in each answer (Allow once, Auto for this chat, Auto always, or Don\'t allow). Auto: it goes ahead without asking. Pages on this PC or your home network are never opened, and files outside the chat\'s folder are never touched, whatever is chosen here.' }),
-  app.permissionRows());
+/**
+ * Settings, Permissions (a page of its own): what a chat's model may do on its own, in groups (Files and web, Screen,
+ * Coding, Research), then the standing rules. Saved as each is changed; one line at the foot says what was saved.
+ */
+app.permissionsPage = () => {
+  const said = app.setSaid();
+  // One save at a time: each sends the whole permissions, so two sent together would undo each other's change.
+  let queue = Promise.resolve(null);
+  const save = change => (queue = queue.then(() => saveNow(change)));
+  const saveNow = async change => {
+    try {
+      const s = await api('/api/settings', { permissions: { files: 'ask', web: 'ask', webDelay: true, ...(app.models?.settings?.permissions ?? {}), ...change } });
+      if (app.models?.settings) app.models.settings.permissions = s.permissions;
+      said.textContent = 'Saved.';
+      return s.permissions;
+    } catch (error) {
+      said.textContent = `Not saved: ${error.message}`;
+      return null;
+    }
+  };
+  const perms = () => ({ files: 'ask', web: 'ask', webDelay: true, ...(app.models?.settings?.permissions ?? {}) });
+  // Files and Web: Ask first (asked in the chat the first time in each answer) or Auto (it goes ahead without asking).
+  const askRow = (kind, icon) => {
+    const k = app.PERMISSION_KINDS.find(x => x.kind === kind);
+    const pick = app.setSeg([['ask', 'Ask first'], ['auto', 'Auto']], perms()[kind] === 'auto' ? 'auto' : 'ask', `${k.name}: ask first or auto`, async v => {
+      const p = await save({ [kind]: v });
+      pick.value = p?.[kind] === 'auto' ? 'auto' : 'ask';
+    });
+    return app.setRow({ icon, name: k.name, about: k.what[0].toUpperCase() + k.what.slice(1), side: pick });
+  };
+  const tiers = app.tierRows(save);
+  return [
+    el('p', { class: 'set-lead', text: 'What a chat\'s model may do on its own. Ask first: it asks in the chat the first time in each answer. Pages on this PC or your home network are never opened, and files outside the chat\'s folder are never touched, whatever is chosen here.' }),
+    app.setPart('Files and web', app.setCard(askRow('files', 'file'), askRow('web', 'web'), ...app.webSearchRows(),
+      app.setRow({ icon: 'pause', name: 'Pause between pages', about: '1 to 5 seconds on the same site, so the site does not ban this PC', side: app.setSwitch(perms().webDelay !== false, 'Pause between pages', on => save({ webDelay: on })) }))),
+    app.setPart('Screen', tiers.screen),
+    app.setPart('Coding', tiers.coding),
+    app.setPart('Research', tiers.research),
+    app.setPart('Rules', app.rulesBox()),
+    said,
+  ];
+};
 
 /** Settings, Rules: the standing rules added to every request a model gets (data/rules.md). A request, not a lock: the notes say which are also checked in code. */
 app.rulesBox = () => {
-  const said = el('p', { class: 'hint', role: 'status' });
-  const text = el('textarea', { rows: 14, spellcheck: 'true', 'aria-label': 'Standing rules', maxlength: 4000 });
-  const on = el('input', { type: 'checkbox' });
-  const fill = r => { text.value = r.text; on.checked = r.on; };
+  const said = el('p', { class: 'set-note', role: 'status' });
+  const text = el('textarea', { rows: 12, spellcheck: 'true', 'aria-label': 'Standing rules', maxlength: 4000 });
+  const sw = app.setSwitch(false, 'Rules on', on => save({ on }));
+  const count = t => {
+    const n = t.split('\n').filter(x => x.trim()).length;
+    return `${n} rule${n === 1 ? '' : 's'}, sent with every message`;
+  };
+  const row = app.setRow({ icon: 'rules', name: 'Standing rules', about: 'Reading…', side: sw, inside: [] });
+  const fill = r => {
+    text.value = r.text;
+    sw.box.checked = r.on;
+    row.about.textContent = r.on ? count(r.text) : 'Off: no rules are sent';
+  };
   api('/api/rules').then(fill).catch(error => { said.textContent = `Could not read the rules: ${error.message}`; });
   const save = async body => {
     try {
@@ -1414,66 +1672,154 @@ app.rulesBox = () => {
       said.textContent = `Not saved: ${error.message}`;
     }
   };
-  const saveBtn = el('button', { type: 'button', class: 'btn', text: 'Save rules' });
-  saveBtn.addEventListener('click', () => save({ text: text.value, on: on.checked }));
-  const resetBtn = el('button', { type: 'button', class: 'btn', text: 'Reset to the 12 defaults' });
-  resetBtn.addEventListener('click', () => { if (confirm('Replace your rules with the 12 defaults?')) save({ reset: true }); });
-  on.addEventListener('change', () => save({ on: on.checked }));
-  return el('fieldset', { class: 'colours-pick rules' },
-    el('legend', { text: 'Rules' }),
-    el('p', { class: 'hint', text: 'Standing rules added to every message a model gets, and to the Connect Claude prompt. One rule per line. A rule here is a request, not a lock. Checked in code as well: files outside the chat folder are never touched, no tool can delete a file, a save that would empty or gut a file (or hold a password or key) is refused, and the previous backup is kept. Rules like "plan first" or "say when unsure" depend on the model following them.' }),
-    el('label', { class: 'check' }, on, ' Rules on'),
+  row.querySelector('.set-inside').append(
+    el('p', { class: 'set-note', text: 'One rule per line, added to every message a model gets and to the Connect Claude prompt. A rule is a request, not a lock. Checked in code as well: files outside the chat folder are never touched, no tool can delete a file, and a save that would empty or gut a file (or hold a password or key) is refused.' }),
     text,
-    el('div', { class: 'row' }, saveBtn, resetBtn),
+    el('div', { class: 'set-line' },
+      app.setButton('Save rules', () => save({ text: text.value, on: sw.box.checked }), { main: true }),
+      app.setButton('Reset to the 12 defaults', () => { if (confirm('Replace your rules with the 12 defaults?')) save({ reset: true }); })),
     said);
+  return app.setCard(row);
 };
 
-/** Settings, Web search: which engine a chat with Web on searches with, and its key or address. */
-app.webSearchBox = () => {
+/** Settings, Web search: which engine a chat with Web on searches with, and its key or address (rows for Files and web). */
+app.webSearchRows = () => {
   const now = app.models?.settings?.webSearch ?? { provider: 'duckduckgo' };
-  const said = el('p', { class: 'hint', role: 'status' });
-  const radio = (value, text) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'web-search', value, checked: now.provider === value }), ` ${text}`);
-  const key = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Brave Search key', placeholder: now.hasKey ? 'A key is saved: paste a new one to change it' : 'Paste your Brave Search key' });
-  const url = el('input', { type: 'url', spellcheck: 'false', 'aria-label': 'SearXNG address', placeholder: 'http://192.168.0.5:8888', value: now.url ?? '' });
-  const keyRow = el('div', { class: 'field' }, el('span', { text: 'Brave Search key' }), key);
-  const urlRow = el('div', { class: 'field' }, el('span', { text: 'SearXNG address' }), url);
-  const box = el('fieldset', { class: 'colours-pick web-search' },
-    el('legend', { text: 'Web search' }),
-    el('p', { class: 'hint', text: 'Where a chat with Web on searches (the Web switch beside Quick and Think). Your search words go to that engine; the pages the model reads come straight to this PC, and a page on this PC or your home network is never opened. A page is opened only at an address given in the chat: a search result, a link on a page it read, or one you wrote.' }),
-    radio('duckduckgo', 'DuckDuckGo: no key needed'),
-    radio('brave', 'Brave Search: with your own key (brave.com/search/api)'),
-    keyRow,
-    radio('searxng', 'SearXNG of your own: its address (turn on its JSON format in settings.yml)'),
-    urlRow,
-    said);
-  const pick = () => box.querySelector('input[name="web-search"]:checked')?.value ?? 'duckduckgo';
+  const said = el('span', { class: 'set-note', role: 'status' });
+  const pick = el('select', { 'aria-label': 'Search with' },
+    el('option', { value: 'duckduckgo', text: 'DuckDuckGo (no key needed)' }),
+    el('option', { value: 'brave', text: 'Brave Search (your own key)' }),
+    el('option', { value: 'searxng', text: 'SearXNG of your own' }));
+  pick.value = now.provider;
+  const key = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Brave Search key', placeholder: now.hasKey ? 'A key is saved: paste a new one to change it' : 'Paste your Brave Search key', size: 30 });
+  const url = el('input', { type: 'url', spellcheck: 'false', 'aria-label': 'SearXNG address', placeholder: 'http://192.168.0.5:8888', value: now.url ?? '', size: 30 });
+  const forget = app.setButton('Remove the saved key', () => save({ key: '' }));
+  forget.hidden = !now.hasKey;
+  const engine = app.setRow({ icon: 'search', name: 'Search with', about: 'Where a chat with Web on searches. Your search words go to that engine.', side: [said, pick] });
+  const keyRow = app.setRow({ name: 'Brave Search key', about: 'From brave.com/search/api', side: [key, forget] });
+  const urlRow = app.setRow({ name: 'SearXNG address', about: 'Turn on its JSON format in settings.yml', side: url });
   const show = () => {
-    keyRow.hidden = pick() !== 'brave';
-    urlRow.hidden = pick() !== 'searxng';
+    keyRow.hidden = pick.value !== 'brave';
+    urlRow.hidden = pick.value !== 'searxng';
   };
   const save = async (extra = {}) => {
     try {
-      const s = await api('/api/settings', { webSearch: { provider: pick(), url: url.value.trim(), ...extra } });
+      const s = await api('/api/settings', { webSearch: { provider: pick.value, url: url.value.trim(), ...extra } });
       app.models.settings.webSearch = s.webSearch;
       key.value = '';
       key.placeholder = s.webSearch.hasKey ? 'A key is saved: paste a new one to change it' : 'Paste your Brave Search key';
-      const why = s.webSearch.provider !== pick() ? 'That address is not one a search engine can be reached at: DuckDuckGo is used.' : pick() === 'brave' && !s.webSearch.hasKey ? 'Saved. Brave Search needs its key before it can search.' : pick() === 'searxng' && !s.webSearch.url ? 'Saved. SearXNG needs its address before it can search.' : 'Saved.';
-      said.textContent = why;
+      said.textContent = s.webSearch.provider !== pick.value ? 'That address cannot be reached: DuckDuckGo is used.' : pick.value === 'brave' && !s.webSearch.hasKey ? 'Saved. It needs its key.' : pick.value === 'searxng' && !s.webSearch.url ? 'Saved. It needs its address.' : 'Saved.';
       forget.hidden = !s.webSearch.hasKey;
     } catch (error) {
       said.textContent = `Not saved: ${error.message}`;
     }
   };
-  const forget = el('button', { class: 'btn quiet', type: 'button', text: 'Remove the saved key', hidden: !now.hasKey, onclick: () => save({ key: '' }) });
-  keyRow.append(forget);
-  box.addEventListener('change', e => {
-    show();
-    if (e.target === key) save({ key: key.value.trim() });
-    else save();
-  });
+  pick.addEventListener('change', () => { show(); save(); });
+  key.addEventListener('change', () => save({ key: key.value.trim() }));
+  url.addEventListener('change', () => save());
   show();
-  return box;
+  return [engine, keyRow, urlRow];
 };
+
+// ---- Settings rows (Data and lock, Permissions): one look for every setting ----
+// Each setting is a row in a white card: an icon, its name, one line saying how it is now, and its control on the right.
+// A row with more to it folds open from that row. A filled button is the one main action; a tint is where you are.
+
+const SET_ICONS = {
+  data: 'M5 6c0 1.7 3.1 3 7 3s7-1.3 7-3-3.1-3-7-3-7 1.3-7 3zM5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6',
+  backup: 'M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4M12 8v4l3 2',
+  lock: 'M7 11V8a5 5 0 0 1 10 0v3M5 11h14v9H5z',
+  timer: 'M12 7v5l3 2M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM10 2h4',
+  bell: 'M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0',
+  sound: 'M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11',
+  file: 'M7 3h7l4 4v14H7zM14 3v4h4',
+  web: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM3.5 12h17M12 3.5c2.5 2.7 2.5 14.3 0 17M12 3.5c-2.5 2.7-2.5 14.3 0 17',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16 16l4 4',
+  pause: 'M9 6v12M15 6v12',
+  screen: 'M3 4h18v12H3zM9 20h6M12 16v4',
+  front: 'M8 8h12v12H8zM16 8V4H4v12h4',
+  click: 'M9 4v3M4 9h3M5.5 5.5l2 2M10 10l9 3.5-4 1.5-1.5 4z',
+  laptop: 'M5 5h14v10H5zM3 19h18',
+  list: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  git: 'M7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM17 7a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8v8M17 11c0 3-4 3-8 5',
+  run: 'M3 4h18v16H3zM7 9l3 3-3 3M13 15h4',
+  folder: 'M3 6h6l2 2h10v11H3z',
+  note: 'M5 4h14v11l-5 5H5zM14 20v-5h5M8 9h8M8 13h4',
+  sub: 'M9 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.5a3 3 0 0 1 0 5.5M18 14.5c1.8.9 3 2.9 3 5.5',
+  rules: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  code: 'M8 8l-4 4 4 4M16 8l4 4-4 4',
+  research: 'M4 19V5h12l4 4v10zM8 10h8M8 14h5',
+  chev: 'M9 6l6 6-6 6',
+};
+/** One of the settings icons, drawn as a line. */
+app.setIcon = (name, size = 20) => {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) s.setAttribute(k, String(v));
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', SET_ICONS[name] ?? '');
+  s.append(p);
+  return s;
+};
+/** A heading and the cards under it. */
+app.setPart = (title, ...cards) => el('section', { class: 'set-part' }, el('h3', { text: title }), ...cards);
+/** A white card of rows. */
+app.setCard = (...rows) => el('div', { class: 'set-card' }, ...rows);
+/**
+ * One setting: `icon`, `name`, `about` (how it is now, one line), `side` (its controls, on the right) and `inside` (more,
+ * folded under the row until it is pressed; `open` starts it open). A button or switch on the right does its own job;
+ * it does not also fold the row.
+ */
+app.setRow = ({ icon = '', name, about = '', side = [], inside = null, open = false }) => {
+  const aboutLine = el('span', { class: 'set-about', text: about });
+  const head = [
+    el('span', { class: 'set-tile' }, icon ? app.setIcon(icon) : null),
+    el('span', { class: 'set-txt' }, el('b', { text: name }), aboutLine),
+  ];
+  const sides = [].concat(side).filter(Boolean);
+  if (!inside) {
+    const row = el('div', { class: 'set-row' }, ...head, el('span', { class: 'set-side' }, ...sides));
+    row.about = aboutLine;
+    return row;
+  }
+  const row = el('details', { class: 'set-row', open },
+    el('summary', {}, ...head, el('span', { class: 'set-side' }, ...sides, el('span', { class: 'set-chev' }, app.setIcon('chev', 18)))),
+    el('div', { class: 'set-inside' }, ...[].concat(inside).filter(Boolean)));
+  row.about = aboutLine;
+  return row;
+};
+/** An on/off switch: `onChange(on)` is told when it is pressed. */
+app.setSwitch = (on, label, onChange) => {
+  const box = el('input', { type: 'checkbox', role: 'switch', 'aria-label': label, checked: !!on });
+  box.addEventListener('change', () => onChange(box.checked, box));
+  const sw = el('label', { class: 'set-sw' }, box, el('i', { 'aria-hidden': 'true' }));
+  sw.box = box;
+  return sw;
+};
+/**
+ * A choice of two to four, side by side: the one picked is raised and white, the rest are plain words. `choices` is
+ * [[value, words], …]; `onChange(value)` is told when another is pressed. `.value` reads or sets the one picked.
+ */
+app.setSeg = (choices, value, label, onChange) => {
+  const group = el('span', { class: 'set-seg', role: 'radiogroup', 'aria-label': label });
+  const mark = v => {
+    for (const b of group.children) b.setAttribute('aria-checked', String(b.dataset.value === v));
+  };
+  for (const [v, words] of choices) {
+    group.append(el('button', { type: 'button', role: 'radio', 'data-value': v, 'aria-checked': 'false', text: words, onclick: () => {
+      if (group.value === v) return;
+      group.value = v;
+      mark(v);
+      onChange(v);
+    } }));
+  }
+  Object.defineProperty(group, 'value', { get: () => group.dataset.value, set: v => { group.dataset.value = v; mark(v); } });
+  group.value = value;
+  return group;
+};
+/** A short line under a card that says what was saved, or why not. */
+app.setSaid = () => el('p', { class: 'set-said', role: 'status' });
+/** A button: `main` is the one filled button a card has at most. */
+app.setButton = (text, onclick, { main = false, danger = false, title = '' } = {}) => el('button', { class: `btn${main ? ' primary' : ''}${danger ? ' danger-text' : ''}`, type: 'button', text, title: title || null, onclick });
 
 /** A chat that carries on from an earlier one: the handoff it opened with, folded at the top. */
 function openingNote(text) {

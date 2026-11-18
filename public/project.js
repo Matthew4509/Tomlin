@@ -189,7 +189,7 @@ function hiresRound() {
   return [
     el('p', { class: 'hint', text: 'Who could do each kind of work, from the staff you have. Only suggestions: nothing is assigned here. Hire one opens Staff (your answers stay); who does each kind of step is set in the job\'s Overview, under Roles.' }),
     el('div', { class: 'pj-hires' }, ...rows),
-    el('p', { class: 'hint', text: 'Next saves the Scope card and the design brief in the job folder.' }),
+    el('p', { class: 'hint', text: 'Save project puts the Scope card and the design brief in the job folder.' }),
   ];
 }
 

@@ -3,9 +3,10 @@
 // On Windows a virus scanner or the search indexer can hold a file for a moment: the swap tries again before it gives up.
 // Reading is as careful: only a file that is not there reads as empty. A file that is there but cannot be read as JSON
 // (a power cut, a disk fault) is set aside under a new name and reported, never written over by an empty one.
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 const queues = new Map<string, Promise<void>>();
 const BUSY = new Set(['EPERM', 'EBUSY', 'EACCES']);
@@ -50,6 +51,69 @@ function inTurn<T>(file: string, job: () => Promise<T>): Promise<T> {
 /** Writes `data` to `file` whole or not at all. */
 export function writeAtomic(file: string, data: string | Buffer): Promise<void> {
   return inTurn(file, () => writeNow(file, data));
+}
+
+/**
+ * The same for a small file written from code that cannot wait (a note made as a runner starts, a mark written as the
+ * app ends): a copy written and flushed, then swapped in, so a full disk or a power cut leaves the old file whole, never
+ * an empty one. A swap a scanner holds up is tried for about a second. Throws when it could not be written (the copy goes).
+ */
+export function writeAtomicSync(file: string, data: string | Buffer): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, data, { flush: true });
+    for (let i = 1; ; i++) {
+      try {
+        renameSync(tmp, file);
+        break;
+      } catch (e) {
+        if (i >= 8 || !BUSY.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * i);
+      }
+    }
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Nothing more to do.
+    }
+    throw e;
+  }
+}
+
+/** The name of a copy a save writes before it swaps it in: "<file>.<process>-<8 hex>.tmp". */
+const HALF_SAVE = /\.(\d+)-[0-9a-f]{8}\.tmp$/;
+
+/**
+ * Removes the copies saves left half way under `root` (TOMLIN was ended hard, or the PC lost power, between writing the
+ * copy and swapping it in): every one written by another process than this one, in `root` and the folders under it, down
+ * to `depth` folders, leaving out `skip` (by folder name) and links. Only one TOMLIN runs per home (src/onecopy.ts), so
+ * a copy named with another process is never a save still going on. The file it was for is untouched. Gives how many went.
+ */
+export async function sweepHalfSaves(root: string, o: { depth?: number; skip?: string[]; pid?: number } = {}): Promise<number> {
+  const pid = o.pid ?? process.pid;
+  const skip = new Set((o.skip ?? []).map(s => s.toLowerCase()));
+  let gone = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    let items;
+    try {
+      items = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of items) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth > 0 && !skip.has(e.name.toLowerCase())) await walk(full, depth - 1);
+        continue;
+      }
+      const m = e.isFile() ? HALF_SAVE.exec(e.name) : null;
+      if (m && Number(m[1]) !== pid && (await rm(full, { force: true }).then(() => true, () => false))) gone++;
+    }
+  };
+  await walk(root, o.depth ?? 4);
+  return gone;
 }
 
 /** Deletes `file` in its turn: after every write of it asked for before, so a save still being written never puts it back. */

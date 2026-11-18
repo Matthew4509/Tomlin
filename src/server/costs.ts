@@ -8,12 +8,17 @@ import * as brains from '../brains.ts';
 import { chatNeed } from '../calc.ts';
 import { added, API_PRICES, cleanPower, cleanPrices, costs, dayOf, powerFault, PRICES_CHECKED, scope, ZERO, type ApiPrice, type Costs, type Power, type Tally } from '../meter.ts';
 import { nowModel, roleOf } from '../staff.ts';
+import type { Assigned } from '../assigned.ts';
 import * as update from '../update.ts';
-import { type Routes, BUILD, STARTED_AT, VERSION, byModel, byStaff, faultWords, json, ledger, meter, pcProfiles, shortName, staff, store, uptime } from './core.ts';
+import { type Routes, BUILD, lastUsed, STARTED_AT, VERSION, byModel, byStaff, faultWords, json, ledger, meter, pcProfiles, shortName, staff, store, uptime } from './core.ts';
 import { photoPng, profileView, shownName } from '../pcprofile.ts';
+import { pcLook } from '../home.ts';
+import { refreshDisks } from './slowdisk.ts';
 import { jobRoutes } from './jobs.ts';
 import { cpuHere, memoryNow, modelsHere } from './thispc.ts';
 import { chatList } from './panes.ts';
+import { assignedTo, staffLines } from '../assigned.ts';
+import { driveReport } from '../modelhome.ts';
 
 /** The hires who work on one PC ('here' or a linked PC's id) now, with the time each worked in the last 7 days. */
 function staffOn(key: string) {
@@ -47,6 +52,7 @@ readings.used = (model, u) => {
   meter.add(u);
   // Per model of this PC, whoever it worked for (the PC window's "Most-used models").
   byModel.add('here', model, u);
+  lastUsed.touch(model);
   const s = scope.getStore();
   if (s) s.used = added(s.used, u);
   if (s?.forPc) {
@@ -67,27 +73,44 @@ export async function staffUsage(id: string): Promise<{ tally: Tally; last: stri
   return { tally, last, apis: costs(tally, { watts: null, kwh: null }, cleanPrices((await readPower()).prices)).apis };
 }
 
-/** Everything the PC window shows for one PC ('here' for this one). */
-async function pcView(id: string): Promise<{ status: number; body: unknown }> {
+/** Said in a linked PC's window when it did not answer: never the network's own error text. */
+export const NOT_ANSWERING = 'This PC is not answering: it may be off, asleep or off the network. What it said last is shown.';
+
+/**
+ * Everything the PC window shows for one PC ('here' for this one). `quick`: a linked PC is not asked; what it said last
+ * is drawn at once (`checking`), and the page asks again without `quick` for the answer from that PC now.
+ */
+async function pcView(id: string, quick = false): Promise<{ status: number; body: unknown }> {
   const here = !id || id === 'here';
   const s = await store.settings();
   const r = here ? null : s.remotes.find(x => x.id === id);
   if (!here && !r) return { status: 404, body: { error: 'That PC is no longer linked to this one. Close this window: the list on the left has the PCs linked now.' } };
   const key = here ? 'here' : r!.id;
-  // A linked PC's own log of its work for this PC is the final tally: read now (it is also read once a minute).
-  const synced = here ? true : await jobRoutes.syncUsage(r!, 3000);
   // A linked PC behind this one: its version, and whether "Update it" can send this version there (or why not), as its
-  // tile under Other PCs says.
+  // tile under Other PCs says. Its own log of its work for this PC is the final tally: read now too (it is also read
+  // once a minute). Both are asked at once, so a PC that is off costs one wait of 3 s, not two.
   let fault = '';
-  const h = here ? null : await jobRoutes.hello(r!, 3000).catch(e => {
-    // A PC that answered and refused says why in its own words; one that did not answer at all gets the likely reason.
-    const said = (e as Error).message.replace(/\.$/, '');
-    fault = (e as { answered?: boolean }).answered ? said : `it is off, or not reachable on your network (${said}). Check that TOMLIN is running there with "Enable this PC as a node" ticked`;
-    return null;
-  });
+  let answered = false;
+  const asked = here || quick ? null : await Promise.all([
+    jobRoutes.syncUsage(r!, 3000).catch(() => false),
+    jobRoutes.hello(r!, 3000).catch(e => {
+      // A PC that answered and refused says why in its own words; one that did not answer gets plain words, never the
+      // network's own ("The operation was aborted due to timeout").
+      answered = (e as { answered?: boolean }).answered === true;
+      fault = answered ? `It answered but said: ${(e as Error).message.replace(/\.$/, '')}.` : NOT_ANSWERING;
+      return null;
+    }),
+  ]);
+  const synced = here ? true : asked ? asked[0] : false;
+  // Quick: what it said last (nothing while it is not answering, src/jobrun/links.ts seen).
+  const h = here ? null : asked ? asked[1] : jobRoutes.lastHello(r!.id);
+  // Its state: the same word as the left panel (src/home.ts pcLook).
+  const look = here ? { state: 'on', text: 'This PC', activity: 'available', word: 'Available' } : pcLook({ ok: !!h, model: h?.model, image: h?.image, away: h?.away, answered, error: fault, backupsOnly: r!.backupsOnly === true });
   const why = h ? update.updateWhy({ name: r!.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, VERSION, BUILD) : null;
   // Ahead of this PC (a newer version, or the same with other files): whether "Update this PC from it" can take it here.
   const pullWhy = h ? update.pullWhy({ name: r!.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can ?? [], allowGive: h.allow?.give === true }, VERSION, BUILD, process.env.TOMLIN_LOOP === '1') : null;
+  // This PC's drives and whether each is a hard disk or an SSD, for the HDD mark on its models (src/server/modelhome.ts).
+  if (here) await refreshDisks();
   const said = here ? { up: { since: STARTED_AT, pc: Math.round(pcUptime()) }, meter: meter.view(), at: Date.now() } : jobRoutes.lastSaid(key);
   const profile = await pcProfiles.get(key);
   const file = await readPower();
@@ -116,6 +139,9 @@ async function pcView(id: string): Promise<{ status: number; body: unknown }> {
       profile: profileView(key, profile),
       here,
       online: here || !!jobRoutes.lastHello(key),
+      look,
+      // Drawn from what it said last; the answer from that PC now follows.
+      checking: !here && quick,
       version: here ? VERSION : h?.version ?? null,
       // When that PC's TOMLIN was put there ("Up to date: Last updated ..."), and its memory for the top line.
       installed: h?.installed ?? null,
@@ -124,6 +150,8 @@ async function pcView(id: string): Promise<{ status: number; body: unknown }> {
       build: update.shortBuild(here ? BUILD : h?.build),
       update: why === null ? null : { why, mine: VERSION, build: update.shortBuild(BUILD), other: !!h && update.standing(h, VERSION, BUILD) === 'other' },
       pull: pullWhy === null || !h ? null : { why: pullWhy, mine: VERSION, build: update.shortBuild(BUILD), other: !update.newer(h.version, VERSION) },
+      // Whether this PC may turn that PC off from its window: it knows how (can), its owner's tick is on (allowed), and it is not asleep or away.
+      off: here || !h ? null : { can: Array.isArray(h.can) && h.can.includes('power-off'), allowed: h.allow?.off === true, away: !!h.away },
       ours: VERSION,
       ourBuild: update.shortBuild(BUILD),
       // Why a linked PC did not answer just now, in its own words ('' when it did).
@@ -144,9 +172,14 @@ async function pcView(id: string): Promise<{ status: number; body: unknown }> {
       // its most-used models. A linked PC's models are the ones it lets this PC use (as it last said).
       cpu: here ? cpuHere() : null,
       disk: here ? await diskHere() : null,
-      models: here ? modelsHere() : ((h?.models ?? r!.models ?? []) as { id: string; name: string; kind: 'chat' | 'image'; bytes: number; loaded?: boolean; busy?: boolean; hidden?: boolean }[]).map(m => ({
+      // Every drive with its free space, for the line above "Free up space": this PC reads them; a linked PC says them in its hello (an older TOMLIN: only the one drive its hello names).
+      drives: here ? await driveReport() : h?.drives?.length ? h.drives : (r ? jobRoutes.lastHello(r.id)?.drives : null) ?? [],
+      diskThere: here ? null : h?.disk ?? (r ? jobRoutes.lastHello(r.id)?.disk : null) ?? null,
+      models: here ? modelsHere() : ((h?.models ?? r!.models ?? []) as { id: string; name: string; kind: 'chat' | 'image'; bytes: number; loaded?: boolean; busy?: boolean; hidden?: boolean; assigned?: Assigned[] }[]).map(m => ({
         id: m.id, name: shortName(m.name) || m.name, kind: m.kind === 'image' ? 'image' : 'chat', bytes: m.bytes || 0, need: m.kind === 'image' ? m.bytes || 0 : Math.round(chatNeed(m.bytes || 0)),
         loaded: !!h && !!m.loaded, busy: !!h && !!m.busy, hidden: m.hidden === true,
+        // The hires on it: this PC's (on that PC's model) and that PC's own, when it says (an older TOMLIN does not).
+        staffNote: staffLines({ mine: assignedTo(staff.list(), `remote:${r!.id}:${m.id}`), theirs: m.assigned ?? null, pcName: r!.name }).note,
       })),
       staff: staffOn(key),
       top: topModels(key),
@@ -186,7 +219,7 @@ export async function pcPhotoFile(key: string, res: ServerResponse): Promise<voi
 
 export const costsGet: Routes = {
   '/api/pc': async ({ res, url }) => {
-    const r = await pcView(url.searchParams.get('id') ?? 'here');
+    const r = await pcView(url.searchParams.get('id') ?? 'here', url.searchParams.get('quick') === '1');
     return json(res, r.status, r.body);
   },
   '/api/pc/profiles': async ({ res }) => {

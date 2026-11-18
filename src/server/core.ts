@@ -1,15 +1,20 @@
 // The server's shared parts: the home folder and data opened at start, the stores, the hardware, and the replies.
 // Every other part of the server (src/server/*.ts) builds on these; this module imports none of them.
 import { ByModel, ByStaff, Ledger, Meter, Uptime } from '../meter.ts';
+import { parseBody } from '../safejson.ts';
+import { TooLarge, readBody } from '../bodyread.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readHardware, Sampler } from '../hardware.ts';
 import { logConsole, openLog } from '../log.ts';
-import { overlaps } from '../workspace.ts';
-import { cudaOrder, Runtimes } from '../runtimes.ts';
+import { endBecause, startLastWords } from '../lastwords.ts';
+import { overlaps, systemFolderWhy } from '../workspace.ts';
+import { crashedHere, cudaOrder, Runtimes } from '../runtimes.ts';
+import { hardwareKey, RunnerChecks } from '../runnercheck.ts';
 import { Models } from '../models.ts';
+import { ModelsHome } from '../modelhome.ts';
 import { Store, type ChatLine, type Settings } from '../store.ts';
 import * as leftovers from '../leftovers.ts';
 import { Staff } from '../staff.ts';
@@ -24,10 +29,12 @@ import * as memory from '../memory.ts';
 import { ChatLogs } from '../layers.ts';
 import { Speeds } from '../speed.ts';
 import { Hidden } from '../hidden.ts';
+import { LastUsed } from '../lastused.ts';
 import { cachedOtherModelDirs } from '../oldcopies.ts';
 import { autostart } from '../autostart.ts';
 import * as keep from '../keep.ts';
 import { LOCK_FILE, releaseHome, takeHomeOrRepair } from '../onecopy.ts';
+import { sweepHalfSaves } from '../atomic.ts';
 import { HfList } from '../hflist.ts';
 import { buildId, NEXT_COPY_FILE, RESTART_INTO } from '../update.ts';
 import { openWaitDoor } from '../waitdoor.ts';
@@ -97,6 +104,12 @@ if (ready.state === 'too-new') {
   console.error(`Your data in ${HOME.data} was last used by TOMLIN ${ready.app}, which changed how it is kept. This copy (${VERSION}) is older and cannot read it safely. Start ${ready.app} or newer, or put a backup back from ${HOME.backups} with that version.`);
   process.exit(1);
 }
+// Start TOMLIN.cmd moved on to this copy from the one before it (an update): that window, shortcut or folder would start
+// the old version again, so this window and the page say which folder to start from now on (not the program, which follows).
+if (process.env.TOMLIN_PREV && process.env.TOMLIN_TRAY !== '1') {
+  console.log(`TOMLIN ${VERSION} is in ${ROOT}. From now on, start it with Start TOMLIN.cmd in that folder. The version before it stays in ${process.env.TOMLIN_PREV} for going back.`);
+  await keep.noteStartFrom(HOME, ROOT).catch(() => undefined);
+}
 
 export const store = new Store(HOME.data);
 await store.settings();
@@ -118,41 +131,66 @@ await chats.moveOld(await readdir(store.dir).catch(() => [] as string[]));
 // No chat open yet (the first start with chats): the latest one with whoever is chosen opens.
 if (!(await chats.get(store.peek()!.chatId))) await store.saveSettings({ chatId: (await chats.latestFor(whoKind(store.peek()!.who)))?.id ?? '' });
 export const runtimes = new Runtimes(join(ROOT, 'runtime'), join(ROOT, 'runtimes.json'), HOME.runtime);
-export const chatModels = new Models(join(HOME.models, 'chat'), HOME.modelsFile, process.env.TOMLIN_MODELS);
+// Where models are kept (src/modelhome.ts): models/ in the home, or a folder chosen on another drive. Downloads go there.
+export const modelsHome = new ModelsHome(join(HOME.home, 'models-home.txt'), HOME.models);
+export const chatModels = new Models(join(modelsHome.dir(), 'chat'), HOME.modelsFile, process.env.TOMLIN_MODELS);
 chatModels.cacheMs = 2000;
 // Models still in this app folder (versions before the home kept them here) and in the copies beside it are lent in place.
 const besideCopies = cachedOtherModelDirs(ROOT);
 export const cachedCopies = () => [join(ROOT, 'models'), ...besideCopies()];
 {
   const copies = cachedCopies;
-  chatModels.copies = () => copies().map(d => join(d, 'chat'));
+  // The folders models were kept in before another was chosen are read where they are, until their models are moved.
+  chatModels.copies = () => [...copies(), ...modelsHome.others()].map(d => join(d, 'chat'));
 }
 export const staff = await Staff.load(HOME.data);
 // How fast each model answers, here and on linked PCs: every real answer, and Test speed (src/speed.ts).
 export const speeds = await Speeds.load(HOME.data);
 /** Models hidden from the lists a model is picked from (This PC: models and updates, Models on this PC, Hide). */
 export const hidden = await Hidden.load(HOME.data);
+/** When each model last answered or drew (src/lastused.ts), for Free up space. */
+export const lastUsed = await LastUsed.load(HOME.data);
 // One profile photo per person (src/faces.ts), kept in data/faces.
 export const faces = new Faces(join(store.dir, 'faces'));
 // Each PC's name, make and model and photo as you know it (src/pcprofile.ts), kept in data/pc-profiles.
 export const pcProfiles = new PcProfileStore(join(store.dir, 'pc-profiles'));
 export const hardware = await readHardware();
 // Which CUDA build this PC tries first comes from its NVIDIA cards and the code each build carries.
-runtimes.order = (engine, device) => (device === 'cuda' ? cudaOrder(runtimes.pins, engine, hardware.gpus, hardware.nvidiaDriver ?? null) : runtimes.idsOf(engine, device));
+// The first-run runner test (src/runnercheck.ts): which runners passed or failed on this card and driver. A failed one is
+// left out of Auto's order, a kept one (the first that passed) comes first.
+export const runnerChecks = await new RunnerChecks(join(HOME.data, 'runner-check.json')).load();
+let hwMemo: { gpus: unknown; driver: string | null; key: string } | null = null;
+/** This PC's card-and-driver key (asked on every runner choice, so worked out once for the cards as read). */
+export const hwKey = (): string => {
+  const driver = hardware.nvidiaDriver ?? null;
+  if (hwMemo?.gpus !== hardware.gpus || hwMemo.driver !== driver) hwMemo = { gpus: hardware.gpus, driver, key: hardwareKey(hardware.gpus, driver) };
+  return hwMemo.key;
+};
+runtimes.order = (engine, device) => {
+  const failed = runnerChecks.failed(hwKey());
+  // A build seen to crash on this card (runtimes.json crashedOn) is never started by Auto, as one this PC's test failed is not.
+  const avoid = new Set([...failed, ...Object.keys(runtimes.pins).filter(id => crashedHere(runtimes.pins[id], hardware.gpus, hardware.nvidiaDriver ?? null))]);
+  return device === 'cuda' ? cudaOrder(runtimes.pins, engine, hardware.gpus, hardware.nvidiaDriver ?? null, { avoid, first: runnerChecks.keep(hwKey()) }) : runtimes.idsOf(engine, device).filter(id => !failed.has(id));
+};
 export const sampler = new Sampler(hardware);
 sampler.start();
 // Closing the window (or Ctrl+C) ends the model processes too: exit handlers run on these signals.
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => process.exit(0));
+// SIGBREAK is Ctrl+Break on Windows. Each leaves its name as the last line in the log (src/lastwords.ts).
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => endBecause(`it was sent ${sig} (Ctrl+C, its window closed, or a command ended it)`));
 // A background save or job that fails is written to this window; it never stops the server (and the models it runs).
 // The log file (PLAN F10 G8): data/logs, a week kept; console.error and console.warn land there too.
 openLog(join(HOME.data, 'logs'));
 logConsole();
+// Every end of this run leaves a line saying why; a run before this one that ended without one is placed now.
+startLastWords(join(HOME.data, 'logs'), VERSION);
 process.on('unhandledRejection', e => console.error('Something failed in the background:', e));
 // The same for a fault outside any request (an 'error' nobody listened for): logged, and the models keep running.
 process.on('uncaughtException', e => console.error('Something failed and was caught at the last moment:', e));
 // Model runners left running by a copy that was ended hard last time are ended now (only this copy's own, checked).
 const leftOver = await leftovers.cleanUp(store.dir).catch(() => 0);
 if (leftOver) console.log(`Ended ${leftOver} model runner${leftOver === 1 ? '' : 's'} left running from last time.`);
+// Copies a save left half way when TOMLIN was ended hard last time (src/atomic.ts) are removed, in the background.
+void sweepHalfSaves(HOME.home, { skip: ['models', 'backups', 'workspace'] }).then(n => { if (n) console.log(`Removed ${n} unfinished save${n === 1 ? '' : 's'} left from last time (the files they were for are as they were).`); }, () => undefined);
 
 /** Mute per chat, staff member and job room, and Mute all (quiet, not stopped). */
 export const mutes = new mute.MuteStore(store.dir);
@@ -229,17 +267,17 @@ export function decoded(s: string): string | null {
 }
 
 export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > limit) throw new AskError(413, 'The request is too large.');
-    chunks.push(c as Buffer);
-  }
-  if (!chunks.length) return {};
+  let raw: Buffer;
   try {
-    const v = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    return v && typeof v === 'object' ? v : {};
+    raw = await readBody(req, limit);
+  } catch (e) {
+    if (e instanceof TooLarge) throw new AskError(413, 'The request is too large.');
+    throw e;
+  }
+  if (!raw.length) return {};
+  try {
+    const v = parseBody(raw.toString('utf8'));
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
   } catch {
     throw new AskError(400, 'The request was not valid JSON.');
   }
@@ -273,15 +311,17 @@ export function publicSettings(s: Settings) {
 }
 
 /** "Qwen3.5-0.8B-Q4_K_M" -> "Qwen3.5-0.8B": the name a person knows, without the file's packing. */
-export const shortName = (n: string | undefined) => (n ?? '').replace(/\s*[(+].*$/, '').replace(/[-_.](?:i?q\d\w*|f16|bf16)$/i, '').replace(/-it$/i, '');
+// A split model's "-00001-of-00004" goes first (an older PC names its models by their first part's file).
+export const shortName = (n: string | undefined) => (n ?? '').replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/i, '').replace(/\s*[(+].*$/, '').replace(/[-_.](?:i?q\d\w*|f16|bf16)$/i, '').replace(/-it$/i, '');
 
 export const DATA_DIR = HOME.data;
 
 /** The workspace folder (made when it is first needed). */
 export async function workspaceDir(): Promise<string> {
   const chosen = (await store.settings()).workspace;
-  // A folder that is (or holds) the app or its home was never allowed to be chosen; one saved before is not used.
-  const dir = chosen && !overlaps(chosen, [ROOT, HOME.home]) ? chosen : join(DATA_DIR, 'workspace');
+  // A folder that is (or holds) the app or its home was never allowed to be chosen; one saved before is not used. Nor a
+  // network folder or one Windows runs files from (src/workspace.ts systemFolderWhy), however it came to be saved.
+  const dir = chosen && !overlaps(chosen, [ROOT, HOME.home]) && !systemFolderWhy(chosen) ? chosen : join(DATA_DIR, 'workspace');
   await mkdir(dir, { recursive: true });
   return dir;
 }

@@ -93,3 +93,35 @@ test('two graphics cards count as their memory added up', async () => {
   assert.deepEqual(cardsTogether([{ total: 16 * GB, used: 1 * GB }, { total: 16 * GB, used: 2 * GB }]), { count: 2, total: 32 * GB, used: 3 * GB });
   assert.equal(cardsTogether([]), null);
 });
+
+test('copies a save left half way by an earlier run are removed at the next start; the files, this run\'s copies and the left-out folders stay', async () => {
+  const { sweepHalfSaves } = await import('../src/atomic.ts');
+  const { writeFile } = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'sm-halfsave-'));
+  try {
+    for (const d of ['data/chats', 'data/kept/pc1', 'workspace', 'models']) await mkdir(join(home, d), { recursive: true });
+    const put = (rel: string) => writeFile(join(home, rel), '{"half":');
+    // Left by a run that was ended hard (another process number): they go.
+    await put('data/settings.json.4242-0a1b2c3d.tmp');
+    await put('data/chats/index.json.4242-ffffffff.tmp');
+    await put('data/kept/pc1/pc.json.17-12345678.tmp');
+    // Stay: the files themselves, a save of this run still going on, files in the left-out folders, other names.
+    await writeFile(join(home, 'data/settings.json'), '{}');
+    await put(`data/share.json.${process.pid}-aaaaaaaa.tmp`);
+    await put('workspace/notes.json.4242-0a1b2c3d.tmp');
+    await put('models/x.gguf.4242-0a1b2c3d.tmp');
+    await put('data/report.tmp');
+    await put('data/link-seen.txt.new');
+    assert.equal(await sweepHalfSaves(home, { skip: ['models', 'backups', 'workspace'] }), 3);
+    assert.deepEqual((await readdir(join(home, 'data'))).sort(), ['chats', 'kept', 'link-seen.txt.new', 'report.tmp', 'settings.json', `share.json.${process.pid}-aaaaaaaa.tmp`]);
+    assert.deepEqual(await readdir(join(home, 'data/chats')), []);
+    assert.deepEqual(await readdir(join(home, 'data/kept/pc1')), []);
+    assert.deepEqual(await readdir(join(home, 'workspace')), ['notes.json.4242-0a1b2c3d.tmp']);
+    assert.deepEqual(await readdir(join(home, 'models')), ['x.gguf.4242-0a1b2c3d.tmp']);
+    assert.equal(await readFile(join(home, 'data/settings.json'), 'utf8'), '{}');
+    // A home that is not there: nothing, no fault.
+    assert.equal(await sweepHalfSaves(join(home, 'gone')), 0);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

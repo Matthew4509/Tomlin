@@ -12,6 +12,7 @@ import { dllLine, dllNotFound, RUNNER_FILE_HELP, RUNNER_FILE_LINE, VCRT_DLLS, VC
 import { whyItFailed } from '../src/llama.ts';
 import { Worker } from '../src/worker.ts';
 import * as inst from '../src/installer.ts';
+import { testEnv } from './env.ts';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const onWindows = process.platform === 'win32';
@@ -127,7 +128,7 @@ test('a signature that could not be read is told from a wrong one, and neither w
 test('the installer offers the runtime when it is missing (dry run), and skips it on --no-vcrt', { skip: !onWindows }, () => {
   const t = tmp();
   try {
-    const env = { ...process.env, TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787', TOMLIN_VCRT_DIR: join(t, 'empty-system32') };
+    const env = testEnv({ TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787', TOMLIN_VCRT_DIR: join(t, 'empty-system32') });
     const run = (more: string[]) => execFileSync(process.execPath, [join(root, 'tools', 'install.ts'), 'install', '--yes', '--dry-run', '--no-firewall', '--no-autostart', ...more], { env, encoding: 'utf8', timeout: 120_000 });
     const out = run([]);
     assert.match(out, /does not have the Microsoft Visual C\+\+ Runtime \(vcruntime140\.dll, /);

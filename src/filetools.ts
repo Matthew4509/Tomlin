@@ -6,7 +6,14 @@
 import type { ToolDef } from './webtools.ts';
 import * as ws from './workspace.ts';
 import { paramsB, withFileTools } from './staff.ts';
-import { checkSave } from './rules.ts';
+import { checkSave, looksSecret } from './rules.ts';
+import { secretPath } from './codetools.ts';
+
+/** A file whose name says it holds keys or passwords (the same names git_read refuses, and a few more). */
+export function secretFile(path: string): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
+  return secretPath(path) || /^(credentials?|secrets?|passwords?|service[-_]?account[\w-]*|[\w-]*[-_.](credentials?|secrets?|tokens?|passwords?))\.[a-z]+$/.test(name) || /^(auth|token)s?\.json$/.test(name);
+}
 
 /** Offered to a model of 4B or more (or of a size its name does not tell): a 0.8B offered them stopped answering what was asked. */
 export const FILES_MIN_B = 4;
@@ -53,6 +60,51 @@ export const FILE_ROUNDS = 6;
 export const FILES_LINE = 'You can work on the person\'s files yourself, in the folder this chat works in: list_files shows them, read_file reads one, save_file writes one to the drive. The person is asked to allow it the first time. Read a file before you change it, save the whole file, and say which files you saved.';
 
 const DENIED = deniedWords('files');
+
+/** Said after a save_file that was not allowed: the answer goes on in the chat, in full (a denied save once left a short or broken answer). */
+export const SAVE_DENIED = 'The person did not allow saving files for this answer, so nothing was saved. Do not call save_file again. Write the whole answer here in the chat now, in full, with the code in code blocks (one block for each file, with the file name on the line above it), and say they can allow saving next time.';
+
+/** What a model is told when a file call was not allowed: a save carries on in the chat, a read answers from what it knows. */
+export const deniedFor = (name: string): string => (name === 'save_file' ? SAVE_DENIED : DENIED);
+
+/**
+ * Whether a message needs the file tools. A request that opens with a making word (write, build, create...) and names no
+ * existing file or folder, and does not ask for a save, is answered in the chat: offered the tools, a model asked for a
+ * "Looking at the files" card first with nothing to look at, and a no on it left a short or broken answer (7 of 15
+ * project requests on Qwen3-Coder-30B, 17 Nov 2026). Any other message keeps the tools only when it points at files (a
+ * file, folder or repo word, a path, a named file, a save) or the chat is in a project: a plain question, or a question
+ * with the code pasted in, is answered in the chat (43 of 157 soak prompts raised a file card on Qwen3-Coder-30B, among
+ * them "What is 7 times 8?" and pasted-code questions, and an unanswered card holds the answer for 5 minutes).
+ */
+export function wantsFiles(message: string, inProject = false): boolean {
+  const m = message.slice(0, 4000);
+  const makes = /^\s*(?:(?:please|kindly)\s+)?(?:(?:can|could|would) you\s+(?:please\s+)?|i (?:need|want) you to\s+|i(?:'d| would) like you to\s+)?(?:write|make|create|build|code|generate|implement|design|draft|produce|program|give me|show me)\b/i;
+  // "save it", "save as x.js" ask for a file; "save to localStorage" is part of what is being built.
+  const saves = /\bsave\s+(?:it|this|that|them|these|the (?:files?|code|page|game|result)|as|to|into|in)\b(?!\s*(?:local|session|the browser|a browser|browser|memory))|\b(?:to|onto|on) (?:a |the |my )?(?:file|disk|drive|folder)\b|\bin (?:a |the |my )?(?:folder|directory)\b/i;
+  const path = /(?:^|[\s"'`(])(?:[\w.-]+[\\/])+[\w.-]+\.\w{1,6}\b/;
+  if (!makes.test(m)) {
+    // No message of its own (Continue) carries on whatever the answer was doing.
+    if (!m.trim() || inProject || saves.test(m) || path.test(m)) return true;
+    const words = /\b(?:files?|folders?|director(?:y|ies)|repos?|repositor(?:y|ies)|codebase|workspace|hard drive|disk)\b/i;
+    // A file named after "my", "the", "in"... (not a method call such as console.log( or res.json( ).
+    const named = /\b(?:my|the|this|that|our|in|of|from|to|open|read|edit|update|fix|see|check|into)\s+[\w.\/\\-]*[\w-]\.(?:jsx?|tsx?|mjs|cjs|py|rb|php|sh|ps1|bat|md|txt|json|csv|tsv|ya?ml|toml|xml|html?|css|sql|docx?|xlsx?|pdf)\b(?!\s*[(\[])/i;
+    const looks = /\b(?:look|go|read|scan|search|browse|grep|walk)\s+(?:through|over|at|in|into)?\s*(?:all\s+)?(?:the|my|our)\s+(?:code|source|sources|app|site|scripts?|tests?)\b/i;
+    return words.test(m) || named.test(m) || looks.test(m);
+  }
+  const existing = /\b(?:my|the|this|that|our|these|those|existing|current)\s+(?:\w+\s+)?(?:files?|folders?|directory|directories|repo|repository|codebase|project|workspace)\b/i;
+  return saves.test(m) || existing.test(m) || path.test(m);
+}
+
+/**
+ * wantsFiles for an answer: a Continue has no message of its own, so it is asked about the last thing the person said in
+ * the chat (the question the cut answer was answering). Offered the tools on every Continue, a plain chat could be given
+ * the "Looking at the files" card again (walk of 17 Nov).
+ */
+export function wantsFilesFor(message: string, lines: { role: string; content: string }[], inProject = false): boolean {
+  if (message.trim()) return wantsFiles(message, inProject);
+  const said = [...lines].reverse().find(l => l.role === 'user')?.content;
+  return wantsFiles(typeof said === 'string' ? said : '', inProject);
+}
 
 /**
  * The turns with FILES_LINE at the end of the system turn (one is put first when there is none), and a hire's lines that
@@ -110,7 +162,7 @@ export class FileTurn {
   }
 
   async run(name: string, args: string): Promise<string> {
-    if (isFileTool(name) && !(await this.permitted(fileCallWords(name, args).replace(/…$/, '')))) return DENIED;
+    if (isFileTool(name) && !(await this.permitted(fileCallWords(name, args).replace(/…$/, '')))) return deniedFor(name);
     let a: Record<string, unknown>;
     try {
       a = JSON.parse(args || '{}') as Record<string, unknown>;
@@ -130,8 +182,11 @@ export class FileTurn {
       return out.trimEnd();
     }
     if (name === 'read_file') {
+      // Keys and passwords are never read, as git_read and run_command withhold them: by the file's name first, then by what is in it.
       const r = await ws.read(this.root, a.path);
       if ('error' in r) return r.error;
+      if (secretFile(r.path)) return `Not read: ${r.path} is a file of keys or passwords by its name, so it is never read. Tell the person; do not guess what it holds.`;
+      if (looksSecret(r.text)) return `Not read: ${r.path} looks like it holds a password, key or token, so it was withheld. Tell the person; do not guess what it holds.`;
       const parts = Math.max(1, Math.ceil(r.text.length / this.perCall));
       if (parts === 1) return `${r.path}:\n${r.text}`;
       const part = Math.min(parts, Math.max(1, Math.floor(Number(a.part) || 1)));

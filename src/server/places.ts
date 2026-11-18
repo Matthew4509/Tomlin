@@ -1,10 +1,12 @@
 // Where work goes in the workspace (src/folders.ts): a chat's Save, a quick chat's files going into a project, a note
 // saved from the right panel, a picture kept in a project's chat, and the work handed in to a project.
 import { constants, existsSync } from 'node:fs';
-import { copyFile, mkdir, rename, rmdir } from 'node:fs/promises';
-import { dirname, extname, join } from 'node:path';
+import { copyFile, mkdir, readFile, rename, rmdir } from 'node:fs/promises';
+import { basename, dirname, extname, join } from 'node:path';
+import { cleanSource, ignoreSources, sourceName, writeSource } from '../sources.ts';
 import * as folders from '../folders.ts';
 import * as ws from '../workspace.ts';
+import { cleanProjectFolder } from '../jobs.ts';
 import type { ChatInfo } from '../chats.ts';
 import { type Routes, chats, json, staff, staffId, workspaceDir } from './core.ts';
 import { jobRoutes } from './jobs.ts';
@@ -13,7 +15,9 @@ import { jobRoutes } from './jobs.ts';
 export async function projectFolder(id: string | undefined): Promise<string | null> {
   if (!id) return null;
   const job = await jobRoutes.loadJob(id);
-  if (job) return job.folder ?? '';
+  // Cleaned as the job's own steps clean it (jobRoot): plan.json is a file in the workspace, so a folder written into it
+  // ("..", a path to somewhere else) must never become the folder a chat's file tools work in.
+  if (job) return (job.folder ? cleanProjectFolder(job.folder) : null) ?? '';
   // Saved on Home and not planned yet: its folder is in its project file.
   return (await jobRoutes.projectInfo(id))?.folder ?? null;
 }
@@ -116,9 +120,25 @@ export async function handInTo(project: string, prompt: string, file: string | n
     const dest = join(dirname(at), rel.split('/').pop()!);
     await mkdir(dirname(dest), { recursive: true });
     await copyFile(file, dest, constants.COPYFILE_EXCL);
+    await handInSource(file, dest, folder ? join(await workspaceDir(), folder) : await workspaceDir());
     return { path: rel };
   } catch (e) {
     return { error: (e as Error).message };
+  }
+}
+
+/**
+ * The image source goes with a picture handed in (src/sources.ts): written beside the copy under the copy's name, and
+ * git is told to leave image sources out of that project. Never a fault: the picture is handed in either way.
+ */
+async function handInSource(file: string, dest: string, project: string): Promise<void> {
+  try {
+    const s = cleanSource(JSON.parse(await readFile(join(dirname(file), sourceName(basename(file))), 'utf8')));
+    if (!s) return;
+    await writeSource(dirname(dest), { ...s, file: basename(dest) });
+    await ignoreSources(project);
+  } catch {
+    // no source beside it (a picture from before sources): nothing to hand in
   }
 }
 

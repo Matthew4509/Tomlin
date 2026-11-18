@@ -139,6 +139,20 @@ const alive = (pid: number) => {
     return false;
   }
 };
+/**
+ * Whether process `pid` has ended, waiting up to a minute for it: a copy is ended with taskkill, and on a busy PC Windows
+ * can take longer than the 10 s testStart waits for it. One that was never told to end is still there after the minute.
+ */
+async function endedSoon(pid: number): Promise<boolean> {
+  for (const end = Date.now() + 60_000; Date.now() < end; await new Promise(r => setTimeout(r, 100))) if (!alive(pid)) return true;
+  return false;
+}
+/**
+ * How long a made-up copy that never answers is given before testStart gives up on it. Long enough for Node.js to start
+ * it and for it to write its pid on a busy PC (it was 2 s, and the pid file was sometimes not written yet), short enough
+ * to keep the file quick.
+ */
+const NEVER_MS = 8000;
 
 test('the new copy is started once as a test, in a home of its own, and ended: it must answer as the version it is', async () => {
   const before = { TOMLIN_LOOP: process.env.TOMLIN_LOOP, TOMLIN_OPEN: process.env.TOMLIN_OPEN, BRIDGE_ROOT: process.env.BRIDGE_ROOT };
@@ -154,7 +168,7 @@ test('the new copy is started once as a test, in a home of its own, and ended: i
     assert.deepEqual(seen.bridge, []);
     assert.ok(seen.home.startsWith(tmpdir()), seen.home);
     assert.equal(existsSync(seen.home), false, 'its home is removed afterwards');
-    assert.equal(alive(seen.pid), false, 'and it is ended');
+    assert.equal(await endedSoon(seen.pid), true, 'and it is ended');
     assert.match(await testStart(fakeCopy(answering('2.0.55')), '2.0.56', { ms: 20_000 }), /says it is 2\.0\.55, not 2\.0\.56/);
   } finally {
     for (const [k, v] of Object.entries(before)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
@@ -164,8 +178,9 @@ test('the new copy is started once as a test, in a home of its own, and ended: i
 test('a new copy that stops at once, or never answers, fails its test start and is ended', async () => {
   assert.match(await testStart(fakeCopy("console.error('Cannot find module sharp'); process.exit(1);"), '2.0.56', { ms: 20_000 }), /stopped as soon as it started \(Cannot find module sharp\)/);
   const dir = fakeCopy("import { writeFileSync } from 'node:fs'; writeFileSync('seen.json', JSON.stringify({ pid: process.pid })); setInterval(() => {}, 1000);");
-  assert.match(await testStart(dir, '2.0.56', { ms: 2000 }), /did not answer within 2 seconds/);
-  assert.equal(alive(JSON.parse(readFileSync(join(dir, 'seen.json'), 'utf8')).pid), false);
+  assert.match(await testStart(dir, '2.0.56', { ms: NEVER_MS }), new RegExp(`did not answer within ${NEVER_MS / 1000} seconds`));
+  assert.ok(existsSync(join(dir, 'seen.json')), `the made-up copy did not even start in ${NEVER_MS / 1000} s, so this proves nothing`);
+  assert.equal(await endedSoon(JSON.parse(readFileSync(join(dir, 'seen.json'), 'utf8')).pid), true);
 });
 
 test('a new copy whose own Node.js will not run fails its test start (said, not thrown) and leaves no home behind', async () => {
@@ -174,6 +189,7 @@ test('a new copy whose own Node.js will not run fails its test start (said, not 
   writeFileSync(join(dir, 'runtime', 'node', 'node.exe'), 'not a program');
   const homes = () => readdirSync(tmpdir()).filter(n => n.startsWith('tomlin-test-start-')).length;
   const before = homes();
-  assert.match(await testStart(dir, '2.0.56', { ms: 5000 }), /its Node\.js \(runtime\\node\\node\.exe\) would not run|stopped as soon as it started/);
+  // It fails at once; the long limit only stops a busy PC from turning that into "did not answer".
+  assert.match(await testStart(dir, '2.0.56', { ms: 20_000 }), /its Node\.js \(runtime\\node\\node\.exe\) would not run|stopped as soon as it started/);
   assert.equal(homes(), before);
 });

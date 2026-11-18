@@ -23,19 +23,37 @@ import type { Speeds } from './speed.ts';
 import { inScope, type Tally, type Used } from './meter.ts';
 import type { Pane } from './pane.ts';
 import type { Place } from './runners.ts';
+import type { Made } from './sources.ts';
 import type { RunOptions, Settings, Store } from './store.ts';
 import type { RunnerHello } from './runnerpush.ts';
 import type { Device, Runtimes } from './runtimes.ts';
 import { d, useDeps } from './jobrun/shared.ts';
-import { canKeep, canThink, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, nodeLog, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
-import { backupChoices, hireBrain } from './jobrun/who.ts';
+import { canKeep, canThink, canTools, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, nodeLog, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
+import { backupChoices, brainForRef, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, claimOn, claimStateOn, copyFrom, fetchOn, keptOn, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
+import { backupTo, bringBack, claimOn, claimStateOn, copiesOn, copyFrom, moveTo, fetchOn, freeOn, keptOn, removeModelOn, powerOffOn, widenFar, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
+import { startPassSync } from './jobrun/passsync.ts';
+import { hostPinOn } from './jobrun/hostpins.ts';
 import { applyShare, askHost, claimsWaiting, impactOf, lanList, linkedUse, nodeView, projectsCopy, serving, setShare, shareListening, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
 import { goAway } from './jobrun/giveway.ts';
+import { clusterGaps, labelOf } from './jobrun/maxhost.ts';
+import { loaderModelWhy, type ClusterHello } from './cluster/loader.ts';
+
+/**
+ * The saved cluster for the pages, with a line for each member of a switched-on cluster that cannot lend now (public/home.js
+ * shows them). With this PC out of it: the loader's name and the chat models on its disk (the only ones it can load).
+ */
+function clusterNow() {
+  const c = d.store.peek()?.cluster ?? { on: false, members: [] as string[] };
+  if (!c.out || !c.loader) return { ...c, gaps: clusterGaps() };
+  const r = d.store.peek()?.remotes.find(x => x.id === c.loader);
+  const models = (lastHello(c.loader)?.models ?? []).filter(m => m.kind === 'chat');
+  const name = r ? labelOf(r) : c.loader;
+  return { ...c, gaps: clusterGaps(), loaderName: name, loaderModels: models.map(m => ({ id: `remote:${c.loader}:${m.id}`, name: m.name })), loaderNoModel: loaderModelWhy(name, models) };
+}
 
 /** The main chat runner as the jobs see it (the one a step with no model of its own runs on). */
 export type ChatSeat = Pick<Pane, 'view' | 'worker' | 'disconnect' | 'busy'>;
@@ -61,7 +79,7 @@ export interface JobDeps {
   json: (res: ServerResponse, status: number, value: unknown) => void;
   body: (req: IncomingMessage, limit?: number) => Promise<Record<string, unknown>>;
   workspaceDir: () => Promise<string>;
-  chatList: () => { id: string; name: string; bytes: number }[];
+  chatList: () => { id: string; name: string; bytes: number; trained?: number | null }[];
   /** Starts loading a chat model in the runner `place` picks (returns at once; the runner's state shows progress). */
   connectChat: (id: string, asked: Settings['chat']['asked'], threads: number) => Promise<{ ok: true; runner: Pane } | { error: string }>;
   /** How the connected chat model was started. */
@@ -90,6 +108,8 @@ export interface JobDeps {
   usageTake: (pc: string, rows: { project: string; tally: Tally; last?: string }[]) => void;
   /** This PC's memory now, told to a manager PC in the worker's hello (for its memory bar). */
   memory: () => unknown;
+  /** This PC's processor (name, physical cores, threads), told to a host in the hello for its Cluster page. */
+  cpu?: () => { name: string; cores: number; threads: number };
   /** This PC's meters as the sampler last read them (it reads every second anyway): for a paired PC's chat head. */
   stats: () => nodestaff.NodeStats;
   /** The Images pane, for a manager PC asking this one to draw. */
@@ -98,12 +118,18 @@ export interface JobDeps {
   pictureModels: () => brains.PictureModel[];
   /** A model hidden by this PC's owner (Models on this PC, Hide): told to linked PCs so their pick lists leave it out. */
   isHidden?: (id: string) => boolean;
+  /** Deletes a model's files from this PC for a linked PC (src/server/thispc.ts deleteModelHere). */
+  removeModel?: (kind: string, id: string) => Promise<{ status: number; body: Record<string, unknown> }>;
+  /** Why a model of this PC cannot be deleted now (hidden, loaded, kept by Ollama, not here), or '' when it can: asked before a Move copies anything. */
+  removeBlock?: (kind: string, id: string) => Promise<string>;
+  /** When a model last answered or drew here (ms), told to linked PCs for Free up space; null when not recorded. */
+  usedAt?: (id: string) => number | null;
   /** Whether picture model `id` fits in the memory free now (counting what the picture model loaded frees). */
   pictureFit: (id: string) => 'ok' | 'tight' | 'no';
   /** Whether picture model `id` fits on the graphics card beside the chat models loaded there now. */
   pictureRoom: (id: string) => boolean;
   /** Draws one picture on this PC's connected picture model (nothing is loaded for it), with progress. */
-  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note?: string } | { error: string }>;
+  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number; negative?: string }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note?: string; made?: Made } | { error: string }>;
   /** Swaps the connected picture model for another on this PC (same device and cores); true when it is connected. */
   swapImage: (id: string) => Promise<boolean>;
   /** A hire's system prompt (who they are, the role, the level, the writing tone chosen here), for a paired PC's chat with them. */
@@ -126,8 +152,14 @@ export interface JobDeps {
   appLocked: () => boolean;
   /** Checks the app lock PIN (wrong tries are counted there). */
   appPinCheck: (pin: unknown) => Promise<{ ok: true } | { status: number; error: string }>;
-  /** This PC's app lock PIN typed on a linked PC sending it an update (audit X2), counted per link (src/server/locks.ts). */
-  updatePinCheck: (pin: unknown, who: string) => Promise<{ ok: true } | { status: number; error: string }>;
+  /** This PC's app lock PIN typed on a linked PC sending it an update (audit X2), counted per link (src/server/locks.ts); or the host PIN that link gave (`host`). */
+  updatePinCheck: (pin: unknown, who: string, forDelete?: boolean | 'power' | 'host', host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>;
+  /** The host PIN doors (src/hostpin.ts): a linked host gives this PC its host PIN, or takes it away. */
+  hostPinDoor: (p: string, b: Record<string, unknown>, who: { key: string; link: string; name: string; guest: boolean }, pcName: () => string) => Promise<{ status: number; json: Record<string, unknown> }>;
+  /** Whether that link (its whole id) gave this PC a host PIN. */
+  hostPinHeld: (link: string | undefined) => boolean;
+  /** This PC's owner takes a host PIN away, by the link's id as the page shows it. */
+  hostPinDrop: (id: string) => Promise<boolean>;
   /** Unloads every model on this PC (F7 E5: the node gives way). */
   /** Unloads every model here; `still` is asked before each one (the node may be started again part-way). */
   unloadAll: (still?: () => boolean) => Promise<void>;
@@ -139,15 +171,23 @@ export interface JobDeps {
   /** The chat model the speed finder is testing here now, or null: it stays counted as loaded for a linked PC while it reloads. */
   finderTesting?: () => string | null;
   /** Max mode (src/maxlend.ts): the RPC server beside this PC's best chat runner, what it lends, its threads; null with none. */
-  rpcProgram?: () => import('./maxlend.ts').RpcProgram | null;
+  rpcProgram?: (want?: string) => import('./maxlend.ts').RpcProgram | null;
+  /** The llama.cpp builds this PC can lend with ("b12250"), told in its hello so a borrower can check before it loads. */
+  rpcBuilds?: () => string[];
   /** Told when a linked PC says "I need to log off for now" (its name). */
   onNodeAway?: (name: string) => void;
   /** Told when someone at a linked PC sends "I need to use the pc, please log out for N hours" (its name, the hours). */
   onNodeAsk?: (name: string, hours: number) => void;
+  /** A guest whose pass expired asks for more (`pc`: the node it is linked to; '' when this PC is that node). */
+  onPassAsk?: (pc: string, guest: string) => void;
+  /** At once (src/slots.ts): the slots the runner with model `id` was started with (1: as before), and why fewer than asked. */
+  slotsOf?: (id: string) => number;
+  slotNote?: (id: string) => string;
   /** A4: a new PC asks for a linked PC's backups kept here (the backup name, the new PC's name): the owner is told. */
   onClaim?: (name: string, pc: string) => void;
   /** A PC linked here (its setup code was used, and a new one made); `dropped`: the oldest link it pushed out. */
-  onLinked?: (name: string, dropped: string) => void;
+  /** A PC linked here; `guest`: the label of the guest pass it used (src/guestpass.ts), not the setup code. */
+  onLinked?: (name: string, dropped: string, guest?: string) => void;
   /** A3: the app lock's kind when `pin` is also what opens TOMLIN here (the "same as your screen PIN" nudge), else null. */
   sameAsLock?: (pin: string) => Promise<'pin' | 'password' | null | { wait: number }>;
   /** A3: this PC's recovery codes as their hashes (src/recovery.ts), or null when it has none. */
@@ -173,6 +213,10 @@ export interface RunnerDeps {
   why: (id: string, pc: string) => string;
   /** True while a model runs (or loads) on that device here. */
   inUse: (device: Device) => boolean;
+  /** Every way this PC can run the chat runner safely, best first (src/runnermatch.ts): told in its hello as runner.can. */
+  options?: () => import('./runnermatch.ts').Option[];
+  /** How this PC's first-run runner test stands (src/runnercheck.ts checkWord), told in its hello. */
+  check?: () => 'none' | 'due' | 'passed' | 'failed' | 'skipped';
 }
 
 /** What a paired PC said in its last hello: what it has loaded and what it can do. */
@@ -232,8 +276,28 @@ export interface Hello {
   installed: string | null;
   /** The disk that keeps other PCs' backups there: its size and what is free (bytes); null before 2.0.47. */
   disk: { total: number; free: number } | null;
+  /** Every drive there with its free space (the My PC window's "Free space" line); empty before 2.0.89. */
+  drives: { drive: string; label: string; total: number; free: number }[];
+  /** The drive its models folder is on ("D:"), where a model sent there is written; '' from an older TOMLIN. */
+  modelsDrive: string;
+  /** Its processor: name, physical cores and threads; null from an older TOMLIN (or to a guest). */
+  cpu?: { name: string; cores: number; threads: number } | null;
+  /** A Backups only PC lends no model (`models` is empty); what it said it holds is kept here, for "where else is this model" only. */
+  held?: nodestaff.SharedModel[];
   /** Its NVIDIA card, driver and CUDA runner, and its last chat start (2.0.56 on); null from an older TOMLIN. */
   runner: RunnerHello | null;
+  /** How fast it reads model weights on its card and in its RAM (Max mode's speed test, src/speedtest.ts); null from an older TOMLIN or before its test. */
+  speed?: import('./speedtest.ts').HelloSpeed | null;
+  /** This PC is a guest there: its pass's name and end (null: no end). Absent: an admin link. */
+  guest?: { label: string; expires: string | null; caps?: { answer: number; prompt: number } } | null;
+  /** Its line (src/nodeline.ts): how many run and wait there now (2.0.97 guest passes on). */
+  line?: { running: number; waiting: number } | null;
+  /** Requests from guests whose pass, made here, expired there: waiting for an answer from this PC. */
+  passAsks?: { id: string; name: string; expired: string; text: string; at: string }[];
+  /** Which PCs it would borrow from for a big model, and the adapter this PC reached it on (src/cluster/loader.ts); null from an older TOMLIN or a guest link. */
+  cluster?: ClusterHello | null;
+  /** It holds this PC's host PIN (src/hostpin.ts); false from one that does not, or from an older TOMLIN. */
+  hostPin?: boolean;
 }
 
 /** Something that answers: the local chat model, or a worker PC's. */
@@ -259,6 +323,8 @@ export interface Brain {
   cut?: boolean;
   /** What the last answer searched for and read on the web there (Web on, a linked PC from 2.0.58); null for none. */
   tools?: ToolUse[] | null;
+  /** Tools were offered and that PC's model cannot call them (a linked PC from 2.0.82): why, in words. */
+  toolsOff?: string;
 }
 
 /** The brain that answers for a hire, and where it is. */
@@ -299,8 +365,9 @@ export function createJobs(deps: JobDeps) {
   useDeps(deps);
   startNode();
   startLinks();
+  startPassSync();
   startProjectBackups();
-  return { get, post, startShare, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
+  return { get, post, startShare, clusterView: clusterNow, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, brainForRef, widenFar, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canTools, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
 }
 
 // ---- Routes ----
@@ -314,7 +381,8 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
   }
   if (p === '/api/jobs/setup') return d.json(res, 200, await setup()), true;
   if (p === '/api/remotes') return d.json(res, 200, { remotes: await remoteStatus() }), true;
-  if (p === '/api/network') return d.json(res, 200, await network()), true;
+  // known=1: the linked PCs as each said last, at once (Hire staff draws that first, then asks for the full list).
+  if (p === '/api/network') return d.json(res, 200, await network(url.searchParams.get('known') === '1')), true;
   if (p === '/api/network/transfers') return d.json(res, 200, { transfers: transfers.view() }), true;
   if (p === '/api/network/backups') return reply(res, await keptOn(url.searchParams.get('pc'))), true;
   if (p === '/api/network/projects') return reply(res, await projectsOn(url.searchParams.get('pc'))), true;
@@ -333,7 +401,7 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;
   }
-  if (p === '/api/home/pcs') return d.json(res, 200, { pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), activity: r.ok ? (r.away ? 'owner' : 'available') : 'offline', backupsOnly: r.backupsOnly === true, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, newer: r.ok && r.pull && !r.pull.why ? { version: r.version, mine: r.pull.mine, other: r.pull.other } : null, ...home.pcState(r) })) }), true;
+  if (p === '/api/home/pcs') return d.json(res, 200, { cluster: clusterNow(), pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), backupsOnly: r.backupsOnly === true, inCluster: r.inCluster, heldByCluster: r.heldByCluster, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, newer: r.ok && r.pull && !r.pull.why ? { version: r.version, mine: r.pull.mine, other: r.pull.other } : null, ...home.pcLook(r), ...pcComputer(r) })) }), true;
   return false;
 }
 
@@ -355,6 +423,10 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/projects-back': reply(await projectsBack(b)); return true;
     case '/api/network/copy': reply(await copyFrom(b)); return true;
     case '/api/network/send': reply(await sendTo(b)); return true;
+    // { pc, kind, model }: sent to a linked PC, checked there byte for byte, and only then removed from this PC.
+    case '/api/network/move': reply(await moveTo(b)); return true;
+    // { pc?: 'here' | a linked PC's id, models: [{ kind, id }] }: where else each model is held.
+    case '/api/network/copies': reply(await copiesOn(b)); return true;
     case '/api/network/fetch': reply(await fetchOn(b)); return true;
     case '/api/network/backup': reply(await backupTo(b)); return true;
     case '/api/network/bring': reply(await bringBack(b)); return true;
@@ -366,12 +438,28 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/runner-remove': reply(await runnerOff(b)); return true;
     case '/api/network/run-set': reply(await runSetOn(b)); return true;
     case '/api/network/tune': reply(await tuneOn(b)); return true;
+    case '/api/network/model-remove': reply(await removeModelOn(b)); return true;
+    case '/api/network/power-off': reply(await powerOffOn(b)); return true;
+    // { action: view | set | check | give | off }: the host PIN, one PIN for the linked PCs (src/jobrun/hostpins.ts).
+    case '/api/network/host-pin': reply(await hostPinOn(b)); return true;
+    case '/api/network/free': reply(await freeOn(b)); return true;
+    // { pc, model? }: a larger context for a linked PC's model, for the web (src/webctx.ts); what happened, in words.
+    case '/api/network/web-context': reply({ status: 200, body: (await widenFar(brains.remoteRef(String(b.pc ?? ''), typeof b.model === 'string' ? b.model : null))) ?? { note: 'Nothing to change: the context there is large enough, or that PC or model is not there.' } }); return true;
     case '/api/network/stop': d.json(res, 200, { stopped: transfers.stop(String(b.id ?? '')) }); return true;
     default: return false;
   }
 }
 
 const reply = (res: ServerResponse, r: { status: number; body: unknown }) => d.json(res, r.status, r.body);
+
+/**
+ * The computer's own name (Windows') a linked PC said in its hello (kept from the last one while it is off), so two PCs
+ * that both call themselves "Worker PC" are told apart. '' from an older TOMLIN, which does not say it.
+ */
+function pcComputer(r: { id: string; ok: boolean; memory?: unknown }): { computer: string } {
+  const said = (m: unknown) => (m && typeof m === 'object' ? (m as { computer?: unknown }).computer : undefined);
+  return { computer: brains.cleanComputer(said(r.ok ? r.memory : null) ?? said(lastHello(r.id)?.memory)) || brains.cleanComputer(d.store.peek()?.remotes.find(x => x.id === r.id)?.computer) };
+}
 
 /** A linked PC's total RAM and graphics-card memory, as it said in its last answer: null when it is off, VRAM 0 when it has no card of its own. */
 function pcMemory(r: { ok: boolean; memory?: unknown }): { ram: number | null; vram: number | null; ramUsed: number | null } {

@@ -57,11 +57,11 @@ test('node side: off, not listening, no connection, no router address, Public, a
   // A second Ethernet port with no cable (169.254) beside a working one is ignored, not an error; the working one is what is typed.
   const two = nodeChecklist(node({ adapters: [
     { alias: 'Ethernet', address: '169.254.10.20', prefix: 16, dhcp: true, gateway: null, gatewayAnswers: null },
-    { alias: 'Ethernet 2', address: '192.168.0.200', prefix: 24, dhcp: true, gateway: '192.168.0.1', gatewayAnswers: true },
+    { alias: 'Ethernet 2', address: '192.168.0.77', prefix: 24, dhcp: true, gateway: '192.168.0.1', gatewayAnswers: true },
   ] }));
   assert.equal(two.lines.some(l => l.state === 'bad'), false, two.lines.map(l => l.text).join(' | '));
   assert.match(two.lines.find(l => /Ignoring Ethernet:/.test(l.text))!.text, /Ethernet 2 is connected/);
-  assert.equal(two.typeThis, '192.168.0.200:8741');
+  assert.equal(two.typeThis, '192.168.0.77:8741');
   const wifi = nodeChecklist(node({ adapters: [{ ...SPARE, alias: 'Wi-Fi' }] }));
   assert.ok(wifi.lines.find(l => l.state === 'bad')!.steps!.some(s => /Wi-Fi, then your network's properties/.test(s)));
   const pub = nodeChecklist(node({ adapters: [{ alias: 'Wi-Fi', address: '192.168.0.50', prefix: 24, dhcp: true, gateway: '192.168.0.1', gatewayAnswers: true }], firewall: { ok: false, problems: ['The network on Wi-Fi is set to Public, so Windows blocks other PCs.'], networks: [{ alias: 'Wi-Fi', category: 'Public' }] } }));
@@ -177,8 +177,8 @@ test('probe results, and devices seen only by a link-local address', () => {
 
 test('the pages, the installer and Help use it', () => {
   const html = read('public/index.html');
-  assert.match(html, /<details class="sub" id="link-help">/);
-  assert.match(html, /Is TOMLIN open on the other PC, with "Enable this PC as a node" ticked\?/);
+  assert.match(html, /<details class="set-row" id="link-help">/);
+  assert.match(html, /Is TOMLIN open on the other PC, with "Enable this PC as a node" turned on\?/);
   assert.match(html, /id="link-help-name"/);
   assert.match(html, /Checks this PC's own settings/);
   const home = read('public/home.js');

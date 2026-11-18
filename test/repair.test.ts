@@ -64,15 +64,15 @@ function world() {
 
 test('an install left on 2.0.34 while a folder copy ran 2.0.44: the copy goes in, and everything points at TOMLIN.exe', async () => {
   const w = world();
-  copy(join(w.root, 'shelby-2.0.34'), '2.0.34');
-  writeFileSync(join(w.root, CURRENT), 'shelby-2.0.34');
+  copy(join(w.root, 'tomlin-2.0.34'), '2.0.34');
+  writeFileSync(join(w.root, CURRENT), 'tomlin-2.0.34');
   writeFileSync(w.exe, 'old program');
   writeFileSync(join(w.root, 'icon.ico'), 'icon');
   writeFileSync(join(w.root, STAMP), 'an older tray.cs');
-  const unzipped = join(w.t, 'Downloads', 'shelby-2.0.36');
+  const unzipped = join(w.t, 'Downloads', 'tomlin-2.0.36');
   copy(unzipped, '2.0.44');
-  // The Start with Windows entry the folder copy made: its own Start Shelby.cmd.
-  writeFileSync(join(w.env.TOMLIN_STARTUP_DIR, STARTUP_FILE), `@echo off\r\nstart "TOMLIN" /min "${unzipped}\\Start Shelby.cmd"\r\n`);
+  // The Start with Windows entry the folder copy made: its own Start TOMLIN.cmd.
+  writeFileSync(join(w.env.TOMLIN_STARTUP_DIR, STARTUP_FILE), `@echo off\r\nstart "TOMLIN" /min "${unzipped}\\Start TOMLIN.cmd"\r\n`);
   w.reg.version = '2.0.34';
 
   const plan = await planRepair({ here: unzipped, version: '2.0.44', env: w.env }, w.d);
@@ -82,7 +82,7 @@ test('an install left on 2.0.34 while a folder copy ran 2.0.44: the copy goes in
   assert.match(said, /Build TOMLIN.exe again/);
   assert.match(said, /Point current\.txt at the new copy/);
   assert.match(said, /Add TOMLIN to the Start menu/);
-  assert.match(said, /Make "Start TOMLIN when this PC starts" start TOMLIN.exe \(it started .*Start Shelby\.cmd\)/);
+  assert.match(said, /Make "Start TOMLIN when this PC starts" start TOMLIN.exe \(it started .*Start TOMLIN\.cmd\)/);
   assert.match(said, /Show 2\.0\.44 in Settings > Apps \(it says 2\.0\.34\)/);
   assert.deepEqual(plan.left, []);
 
@@ -108,7 +108,7 @@ test('an install left on 2.0.34 while a folder copy ran 2.0.44: the copy goes in
 
 test('shortcuts under the earlier name that open this app are replaced by TOMLIN ones', async () => {
   const w = world();
-  const app = join(w.root, 'shelby-2.0.44');
+  const app = join(w.root, 'tomlin-2.0.44');
   copy(app, '2.0.44');
   const oldDesk = join(w.env.TOMLIN_DESKTOP_DIR, OLD_LINKS[0]!);
   const oldMenu = join(w.env.TOMLIN_START_MENU_DIR, OLD_LINKS[0]!);
@@ -130,26 +130,26 @@ test('shortcuts under the earlier name that open this app are replaced by TOMLIN
 
 test('the installed copy itself: a missing desktop target and current.txt are put back; missing files are said, not faked', async () => {
   const w = world();
-  const app = join(w.root, 'shelby-2.0.44');
+  const app = join(w.root, 'tomlin-2.0.44');
   copy(app, '2.0.44', ['runtime/llama-cpu/llama-server.exe']);
   writeFileSync(join(w.env.TOMLIN_DESKTOP_DIR, LINK), 'shortcut');
-  w.links.set(join(w.env.TOMLIN_DESKTOP_DIR, LINK), 'D:\\old\\Start Shelby.cmd');
+  w.links.set(join(w.env.TOMLIN_DESKTOP_DIR, LINK), 'D:\\old\\Start TOMLIN.cmd');
   const plan = await planRepair({ here: app, version: '2.0.44', env: w.env }, w.d);
   const said = plan.steps.map(s => s.say).join('\n');
   assert.match(said, /Build TOMLIN.exe: it is missing/);
-  assert.match(said, /Point current\.txt at shelby-2\.0\.44/);
-  assert.match(said, /Point the desktop shortcut at TOMLIN.exe \(it opened D:\\old\\Start Shelby\.cmd\)/);
+  assert.match(said, /Point current\.txt at tomlin-2\.0\.44/);
+  assert.match(said, /Point the desktop shortcut at TOMLIN.exe \(it opened D:\\old\\Start TOMLIN\.cmd\)/);
   assert.match(plan.left.join(' '), /Files are missing from .*runtime\/llama-cpu\/llama-server\.exe/);
   const r = await runRepair(plan);
   assert.deepEqual(r.failed, []);
-  assert.equal(readFileSync(join(w.root, CURRENT), 'utf8'), 'shelby-2.0.44');
+  assert.equal(readFileSync(join(w.root, CURRENT), 'utf8'), 'tomlin-2.0.44');
   assert.equal(w.links.get(join(w.env.TOMLIN_DESKTOP_DIR, LINK)), w.exe);
   w.done();
 });
 
 test('the source folder is never copied in, and a missing Visual C++ Runtime is said', async () => {
   const w = world();
-  const src = join(w.t, 'shelby-2');
+  const src = join(w.t, 'tomlin-src');
   copy(src, '2.0.44');
   mkdirSync(join(src, '.git'));
   rmSync(join(w.env.TOMLIN_VCRT_DIR, 'msvcp140.dll'));
@@ -164,7 +164,7 @@ test('the source folder is never copied in, and a missing Visual C++ Runtime is 
 
 test('Shortcut to desktop: the install\'s program when there is one, else the copy\'s Start TOMLIN.cmd', async () => {
   const w = world();
-  const unzipped = join(w.t, 'shelby-2.0.44');
+  const unzipped = join(w.t, 'tomlin-2.0.44');
   copy(unzipped, '2.0.44');
   const o = { here: unzipped, version: '2.0.44', env: w.env };
   assert.equal((await desktopShortcut(o, w.d)).there, false);

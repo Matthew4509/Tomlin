@@ -4,6 +4,7 @@ import { appendFile, mkdir, open, readFile, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import type { Size } from './sizes.ts';
 import type { Mode } from './modes.ts';
+import { sourceName, sourceOf, writeSource } from './sources.ts';
 
 export interface Picture {
   id: string;
@@ -20,6 +21,10 @@ export interface Picture {
   steps: number;
   cfg: number;
   sampler: string;
+  /** The runner's scheduler ('' or absent: its own). */
+  scheduler?: string;
+  /** Drawn by an older TOMLIN on a linked PC that sent no settings back: the seed, steps and sampler are not known. */
+  settingsUnknown?: boolean;
   generated: Size;
   target: Size;
   fit: string;
@@ -48,6 +53,9 @@ export interface Picture {
   /** The chat that was open when it was drawn (src/chats.ts); '' or absent = no chat (older pictures, the API). */
   chat?: string;
 }
+
+/** A picture's files, relative to data/images: the pictures and the image source beside the finished one (src/sources.ts). */
+const filesOf = (p: Picture): string[] => [...new Set([p.original, p.output, ...(p.icoFiles ?? []), sourceName(p.output)])].filter(rel => /^\d{4}-\d{2}\/[\w.-]+$/.test(rel));
 
 /** Has what search and the pages read from every picture. */
 const wholePicture = (p: Picture): boolean => [p.at, p.prompt, p.output].every(x => typeof x === 'string');
@@ -167,13 +175,17 @@ export class Gallery {
   async clearDrafts(days: number, now = Date.now()): Promise<number> {
     if (!(days > 0)) return 0;
     const old = (await this.all()).filter(p => p.kept === false && !p.removed && now - Date.parse(p.at) > days * 86_400_000);
+    let cleared = 0;
     for (const p of old) {
-      for (const rel of new Set([p.original, p.output, ...(p.icoFiles ?? [])])) {
-        if (/^\d{4}-\d{2}\/[\w.-]+$/.test(rel)) await rm(join(this.dir, rel), { force: true });
-      }
-      await this.update(p.id, { removed: true });
+      // Looked at again in its turn: one added to the gallery since the sweep began is kept.
+      if (await this.inOrder(async () => {
+        if (p.kept !== false || p.removed) return false;
+        await this.drop(p);
+        await this.write(p, { removed: true });
+        return true;
+      })) cleared++;
     }
-    return old.length;
+    return cleared;
   }
 
   /**
@@ -185,9 +197,7 @@ export class Gallery {
     const mine = (await this.all()).filter(p => !p.removed && p.chat === chat);
     for (const p of mine) {
       if (deleteThem) {
-        for (const rel of new Set([p.original, p.output, ...(p.icoFiles ?? [])])) {
-          if (/^\d{4}-\d{2}\/[\w.-]+$/.test(rel)) await rm(join(this.dir, rel), { force: true });
-        }
+        await this.drop(p);
         await this.update(p.id, { removed: true });
       } else await this.update(p.id, { chat: '' });
     }
@@ -198,10 +208,22 @@ export class Gallery {
   async remove(id: string): Promise<void> {
     const p = await this.get(id);
     if (!p || p.removed) return;
-    for (const rel of new Set([p.original, p.output, ...(p.icoFiles ?? [])])) {
-      if (/^\d{4}-\d{2}\/[\w.-]+$/.test(rel)) await rm(join(this.dir, rel), { force: true });
-    }
+    await this.drop(p);
     await this.update(p.id, { removed: true });
+  }
+
+  /** A picture's files deleted, its image source with them. */
+  private async drop(p: Picture): Promise<void> {
+    for (const rel of filesOf(p)) await rm(join(this.dir, rel), { force: true });
+  }
+
+  /**
+   * The image source beside a picture (src/sources.ts): how it was made, for drawing it again later or on another PC.
+   * Never a fault: the picture is saved either way.
+   */
+  async saveSource(p: Picture, o: Parameters<typeof sourceOf>[1] = {}): Promise<void> {
+    if (!/^\d{4}-\d{2}\/[\w.-]+$/.test(p.output)) return;
+    await writeSource(join(this.dir, p.output.slice(0, 7)), sourceOf(p, o)).catch(() => undefined);
   }
 
   /** How many pictures each chat has (not removed). */

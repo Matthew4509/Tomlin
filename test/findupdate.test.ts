@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { noRelease } from '../src/release.ts';
 
-const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const page = (f: string) => read(`public/${f}`);
 
 test('the Settings menu has Manage updates of its own, after This PC, opening Update this install', () => {
@@ -21,7 +21,7 @@ test('the Settings menu has Manage updates of its own, after This PC, opening Up
   assert.match(page('homeview.js'), /b\.dataset\.setup === 'updates'\) app\.openUpdateInstall\?\.\(\)/);
   assert.match(page('home.js'), /app\.openUpdateInstall = \(\) => \{/);
   // A page of its own, so that menu entry is the one marked there.
-  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours'\];/);
+  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];/);
 });
 
 test('Update this install has Check git, one function for it, and a download followed on its own page', () => {
@@ -32,18 +32,23 @@ test('Update this install has Check git, one function for it, and a download fol
   assert.match(home, /\$\('#node-install-git'\)\.addEventListener\('click', e => \{\n[^\n]*\n\s*checkGit\(e\.currentTarget, gitSay, getGit\);/);
 });
 
-test('the My PC window has Update TOMLIN beside its version line', () => {
+test('Manage PC and updates updates in place: the Updates page\'s section is lent to the tile, the window never closes', () => {
   const pcs = page('pcs.js');
-  const here = pcs.slice(pcs.indexOf('if (v.here) {'), pcs.indexOf("const head = el('div', { class: 'pc-head' }"));
-  assert.match(here, /text: 'Update TOMLIN'/);
-  assert.match(here, /dlg\.close\(\);\s*\n?\s*app\.openUpdateInstall\?\.\(\);/);
+  const home = page('home.js');
+  assert.match(pcs, /text: 'Manage PC and updates'/);
+  assert.match(pcs, /app\.updateInstallInto\?\.\(updHost\)/);
+  assert.match(pcs, /dlg\.addEventListener\('close', \(\) => \{\s*app\.updateInstallBack\?\.\(\);/);
+  assert.match(pcs, /const ask = \$\('#pc-ask'\);[\s\S]*?cancel\(\);/, 'a question left open is called off with the window');
+  assert.doesNotMatch(pcs, /app\.openUpdateInstall/, 'no jump to the Settings page any more');
+  assert.match(home, /app\.updateInstallInto = async host =>/);
+  assert.match(home, /app\.updateInstallBack = \(\) =>/);
 });
 
-test('with no release on GitHub, Check git says what to do instead (Check zip, or the zip\'s Install TOMLIN.cmd)', () => {
+test('with no release on GitHub, Check git says what to do instead (Update via zip, or the zip\'s Install TOMLIN.cmd)', () => {
   // A made-up repo: the real one carries its owner's name, which the publish check keeps out of the public copy.
   const line = noRelease('someone/tomlin-copy', '2.0.62');
   assert.match(line, /^There is no release of TOMLIN on GitHub yet \(github\.com\/someone\/tomlin-copy\)\. This PC runs 2\.0\.62\./);
-  assert.match(line, /Check zip/);
+  assert.match(line, /Update via zip/);
   assert.match(line, /tomlin-<version>\.zip and its \.zip\.sig/);
   assert.match(line, /Install TOMLIN\.cmd/);
   assert.ok(line.length < 400, 'one short paragraph');

@@ -123,13 +123,33 @@ function startEntry(c, exeKey, argsKey, cwd, from, skipped) {
 // Words that name a script or a sub-command, not a folder ("npm run dev", "vite preview"): a project folder that
 // happens to be called dev or public is not the one a root entry runs.
 const SUBCOMMAND = new Set(['dev', 'start', 'serve', 'build', 'preview', 'test', 'watch', 'run', 'exec']);
+
 // A root entry's argument belongs to the folder only when it names a path that is there, inside the folder.
-function pointsInside(a, i, args, root, dir) {
-  if (/^-/.test(a)) return false;
-  const bare = !/[\\/.]/.test(a);
-  if (bare && (SUBCOMMAND.has(a.toLowerCase()) || /^(run|run-script|exec)$/i.test(args[i - 1] || ''))) return false;
-  const abs = path.resolve(root, a), k = keyOf(abs), d = keyOf(dir);
-  return (k === d || k.startsWith(d + path.sep)) && fs.existsSync(abs);
+// The working folder's own launch.json entries, read once per list instead of once per project: with 72 entries and
+// 50 folders, checking every argument again for every folder was half a second of each list. For each argument, the
+// path it names (null when it cannot name this folder's path: a flag, a sub-command) and, asked only when needed,
+// whether that path is there.
+const rootPrepared = new WeakMap();
+function rootEntries(rootLaunch, root) {
+  if (!rootLaunch || typeof rootLaunch !== 'object') return [];
+  let byRoot = rootPrepared.get(rootLaunch);
+  if (!byRoot) rootPrepared.set(rootLaunch, byRoot = new Map());
+  if (byRoot.has(root)) return byRoot.get(root);
+  const list = asList(rootLaunch.configurations).map(c => {
+    const e = startEntry(c, 'runtimeExecutable', 'runtimeArgs', root, 'root .claude/launch.json', []); // other folders' entries are not this one's to count
+    if (!e) return { c, e: null, argKeys: [], exists: () => false };
+    const abs = e.args.map((a, i) => {
+      if (/^-/.test(a)) return null;
+      const bare = !/[\\/.]/.test(a);
+      if (bare && (SUBCOMMAND.has(a.toLowerCase()) || /^(run|run-script|exec)$/i.test(e.args[i - 1] || ''))) return null;
+      return path.resolve(e.cwd, a);
+    });
+    const seen = new Map();
+    const exists = i => { if (!seen.has(i)) seen.set(i, fs.existsSync(abs[i])); return seen.get(i); };
+    return { c, e, argKeys: abs.map(p => (p === null ? null : keyOf(p))), exists };
+  });
+  byRoot.set(root, list);
+  return list;
 }
 
 function startCommands(root, dir, rootLaunch, override, skipped = []) {
@@ -145,9 +165,9 @@ function startCommands(root, dir, rootLaunch, override, skipped = []) {
   // the folder or inside it ("npx craco start" run in shop/frontend).
   const d = keyOf(dir);
   const inside = p => { const k = keyOf(p); return k === d || k.startsWith(d + path.sep); };
-  for (const c of asList(rootLaunch && rootLaunch.configurations)) {
-    const e = startEntry(c, 'runtimeExecutable', 'runtimeArgs', root, 'root .claude/launch.json', []); // other folders' entries are not this one's to count
-    if (e && (inside(e.cwd) || e.args.some((a, i) => pointsInside(a, i, e.args, e.cwd, dir)))) add(e);
+  const isIn = k => k === d || k.startsWith(d + path.sep);
+  for (const { c, e, argKeys, exists } of rootEntries(rootLaunch, root)) {
+    if (e && (isIn(keyOf(e.cwd)) || argKeys.some((k, i) => k !== null && isIn(k) && exists(i)))) add({ ...e });
     // ...except one whose cwd names this folder but could not be used (the sub-folder was renamed or deleted): it is
     // this project's, so it is counted with the reason, instead of the project saying it has no start entry at all.
     else if (!e && c && typeof c.cwd === 'string' && c.cwd.trim() && inside(path.resolve(root, c.cwd))) {
@@ -204,10 +224,11 @@ const keyOf = p => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
 // on every list request. Kept for 60 s per folder; Refresh and Scan folders pass fresh=true.
 const META_TTL = 60000;
 const metaCache = new Map();
-function meta(dir, fresh) {
+// stale: an answer past its minute will do (warmMeta is walking the folder again meanwhile).
+function meta(dir, fresh, stale) {
   const k = keyOf(dir);
   const hit = metaCache.get(k);
-  if (!fresh && hit && Date.now() - hit.at < META_TTL) return hit;
+  if (!fresh && hit && (stale || Date.now() - hit.at < META_TTL)) return hit;
   const m = { at: Date.now(), updated: lastUpdated(dir), description: firstProseLine(dir) };
   metaCache.set(k, m);
   return m;
@@ -215,19 +236,25 @@ function meta(dir, fresh) {
 // Fills the cache for every folder that needs it, all at once, so listProjects then only reads the cache.
 // A walk already under way for a folder is shared, not started again (start-up and the page's first request
 // would otherwise walk every folder twice at once).
+// A folder walked before whose minute is up keeps its last answer while it is walked again in the background: an open
+// of the list a few minutes after the last one waited 2 to 3 s for 50 walks. Only a folder never walked, or Refresh,
+// waits for the walk.
 const walking = new Map();
 async function warmMeta(dirs, fresh) {
   await Promise.all(dirs.map(async dir => {
     const k = keyOf(dir);
     const hit = metaCache.get(k);
     if (!fresh && hit && Date.now() - hit.at < META_TTL) return;
-    if (walking.has(k)) return walking.get(k);
-    const job = lastUpdatedAsync(dir)
-      .then(updated => { metaCache.set(k, { at: Date.now(), updated, description: firstProseLine(dir) }); })
-      .finally(() => walking.delete(k));
-    walking.set(k, job);
-    return job;
+    if (!fresh && hit) { if (!walking.has(k)) walkMeta(dir, k).catch(() => {}); return; }
+    return walking.has(k) ? walking.get(k) : walkMeta(dir, k);
   }));
+}
+function walkMeta(dir, k) {
+  const job = lastUpdatedAsync(dir)
+    .then(updated => { metaCache.set(k, { at: Date.now(), updated, description: firstProseLine(dir) }); })
+    .finally(() => walking.delete(k));
+  walking.set(k, job);
+  return job;
 }
 
 // The project folders, before anything is read from them: { dir, working, added }.
@@ -278,7 +305,7 @@ function listProjects(settings, opts = {}) {
     if (ov.hide) continue;
     const pj = { ...obj(readJson(path.join(f.dir, 'project.json'))), ...ov };
     const root = f.working || path.dirname(f.dir);
-    const m = meta(f.dir, opts.fresh);
+    const m = meta(f.dir, opts.fresh, opts.stale);
     const skipped = [];
     rows.push({
       id,
@@ -315,7 +342,7 @@ function listProjects(settings, opts = {}) {
 // The list, with the folder walks done in parallel first (the server keeps answering meanwhile).
 async function listProjectsAsync(settings, opts = {}) {
   await warmMeta(projectFolders(settings, opts).map(f => f.dir), opts.fresh);
-  return listProjects(settings, { ...opts, fresh: false });
+  return listProjects(settings, { ...opts, fresh: false, stale: true });
 }
 
 module.exports = { listProjects, listProjectsAsync, projectFolders, idOf, projectId, keyOf, startCommands };

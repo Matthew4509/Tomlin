@@ -3,13 +3,14 @@
 // and taking a CUDA one away. Sending it to a linked PC is src/jobrun/copies.ts runnerTo.
 import { type Progress } from '../download.ts';
 import { pageDownloads, pinWhy } from '../runtimes.ts';
-import { hardware, json, runtimes, type Routes } from './core.ts';
+import { hardware, hwKey, json, runnerChecks, runtimes, type Routes } from './core.ts';
+import { unsafeWhy } from './runnercheck.ts';
 import { images, runners } from './panes.ts';
 
 /** A download here: how far it is, or how it ended. */
 const getting = new Map<string, { got: number; bytes: number; checking: boolean; error: string | null; done: boolean; stop: AbortController }>();
 
-const whyHere = (id: string) => pinWhy(runtimes.pins[id], hardware.gpus, hardware.nvidiaDriver ?? null, 'This PC', Object.values(runtimes.pins));
+const whyHere = (id: string) => pinWhy(runtimes.pins[id], hardware.gpus, hardware.nvidiaDriver ?? null, 'This PC', Object.values(runtimes.pins)) || unsafeWhy(id);
 /** A model running (or loading) on that device holds its runner's files open. */
 const inUse = (device: string) => [...runners, images.pane].some(p => p.view.device === device && (p.view.state === 'connected' || p.view.state === 'loading'));
 
@@ -30,6 +31,8 @@ function list() {
       // The CUDA build Auto starts first on this PC (the one with code made for its card).
       best: p.device === 'cuda' && runtimes.order(p.engine, 'cuda')[0] === id,
       cuda: p.cuda?.version ?? null,
+      // Its first-run test on this card and driver (src/runnercheck.ts): passed, failed (and why), or not tried.
+      check: runnerChecks.rec(hwKey())?.results[id] ?? null,
       getting: g ? { got: g.got, bytes: g.bytes, checking: g.checking, error: g.error, done: g.done } : null,
     };
   });

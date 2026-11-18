@@ -10,6 +10,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { testEnv } from './env.ts';
 
 const freePort = () => new Promise<number>(resolve => {
   const s = createServer().listen(0, '127.0.0.1', () => {
@@ -25,7 +26,7 @@ test('a full disk: each save says the disk is full, the server keeps answering, 
   writeFileSync(join(home, 'models-folder.txt'), '');
   const port = await freePort();
   const server = spawn(process.execPath, ['--import', pathToFileURL(fileURLToPath(new URL('./fulldisk.mjs', import.meta.url))).href, fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';

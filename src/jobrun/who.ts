@@ -6,8 +6,11 @@ import { chatNeed, memOfReport, ramFit } from '../calc.ts';
 import type { Pane } from '../pane.ts';
 import { scope } from '../meter.ts';
 import { d, sleep } from './shared.ts';
-import { hello, lastModel, remoteBrain, sharedName, sharedWhy } from './links.ts';
+import { clusterHeld, hello, lastModel, remoteBrain, sharedGone, sharedName, sharedWhy } from './links.ts';
+import * as replacement from '../replacement.ts';
+import * as carry from '../carry.ts';
 import type { Brain, ChatSeat, HireBrain } from '../jobrun.ts';
+import { askerWords, loads } from '../loadlog.ts';
 
 // ---- Who answers ----
 
@@ -89,13 +92,13 @@ export async function candidate(ref: string): Promise<brains.Candidate> {
   const b = brains.parseRef(ref);
   if (b.kind === 'remote') {
     const r = s.remotes.find(x => x.id === b.pc);
-    if (!r) return { ref, ready: false, loadable: false, why: 'its PC is no longer linked' };
+    if (!r) return { ref, ready: false, loadable: false, why: 'its PC is no longer linked', gone: true };
     try {
       const h = await hello(r, 3000);
       // One of the models it lets linked PCs use: it answers, loading it there first when it is not loaded.
       if (b.model) {
         const why = sharedWhy(r, h, b.model);
-        return why ? { ref, ready: false, loadable: false, why } : { ref, ready: true, loadable: false, why: '' };
+        return why ? { ref, ready: false, loadable: false, why, ...(sharedGone(r, h, b.model) ? { gone: true } : {}) } : { ref, ready: true, loadable: false, why: '' };
       }
       return h.model ? { ref, ready: true, loadable: false, why: '' } : { ref, ready: false, loadable: false, why: `"${r.name}" has no chat model loaded` };
     } catch {
@@ -105,7 +108,7 @@ export async function candidate(ref: string): Promise<brains.Candidate> {
   }
   if (b.kind !== 'here') return { ref, ready: false, loadable: false, why: '' };
   const entry = d.chatList().find(m => m.id === b.id);
-  if (!entry) return { ref, ready: false, loadable: false, why: 'its model is not on this PC any more' };
+  if (!entry) return { ref, ready: false, loadable: false, why: 'its model is not on this PC any more', gone: true };
   if (d.runnerFor(b.id)?.view.state === 'connected') return { ref, ready: true, loadable: false, why: '' };
   // Beside the loaded models when it fits, else in place of the least recently used one not answering (src/runners.ts).
   const at = d.place(b.id);
@@ -164,6 +167,12 @@ export async function brainForRef(want: string, forWhat: string, change: string,
   if (swapped && d.busy(swapped)) throw new Error('That model is still answering. Wait for it to finish (or press Stop), then try again.');
   const expected = s.loadSeconds[`chat:${id}`] ?? Math.round(entry.bytes / (150 * 2 ** 20)) + 4;
   const from = swapped ? swapped.view.modelName : null;
+  if (!at.already) {
+    // Who made this PC load it, kept for the hello and written to the log (an unexplained load spoiled a run, 10 Nov).
+    const asker = askerWords(scope.getStore());
+    loads.add({ model: entry.name, asker });
+    console.log(`Loading ${entry.name} for ${asker} (${forWhat}).`);
+  }
   if (!at.already) stage(`${from ? `Unloading ${from}, then loading` : 'Loading'} ${entry.name} for ${forWhat} (about ${expected} s)…`);
   const got = await d.connectChat(id, s.chat.asked, s.chat.threads);
   if ('error' in got) throw new Error(`${got.error.replace(/\.$/, '')} (for ${forWhat}).`);
@@ -201,6 +210,15 @@ export async function hireBrain(m: StaffMember, stage: (text: string) => void, s
   if (!refs.length) return { ...(await brainForRef('', first, 'in Team', stage, signal)), ref: '', note: '', intern: false };
   const cands = await Promise.all(refs.map(candidate));
   const pick = brains.pickBrain(cands);
+  // The first choice's model is gone (deleted, or moved off that PC), and nothing else can answer: the hire says so, with
+  // what TOMLIN knows that could take its place. Suggestions only; the owner presses every button they name.
+  if ('error' in pick && cands[0]?.gone) {
+    const input = await replacementInput(m, refs[0], first);
+    const suggest = input ? replacement.replacementLines(input) : [];
+    const goneWhy = replacement.goneWords(goneNameOf(m, refs[0]), await wasOnOf(refs[0]));
+    const message = input ? replacement.goneMessage(input, cands.slice(1).map(c => c.why).filter(Boolean)) : `${first}'s model is gone: ${goneWhy}. Pick another model for ${first} in Team.`;
+    throw Object.assign(new Error(message), { backup: only === undefined ? m.id : undefined, reasons: pick.error, gone: true, goneWhy, suggest });
+  }
   // None can answer: the chat offers "Pick a backup" (the error carries who it is for).
   if ('error' in pick) throw Object.assign(new Error(`${refs.length > 1 ? `Neither of ${first}'s models can` : `${first}'s model cannot`} answer now: ${pick.error.join('; ')}. Pick a backup for ${first} in their chat, connect it, or switch ${first}'s brain.`), { backup: only === undefined ? m.id : undefined, reasons: pick.error });
   const got = await brainForRef(pick.use.ref, first, 'in Team', stage, signal);
@@ -209,9 +227,50 @@ export async function hireBrain(m: StaffMember, stage: (text: string) => void, s
   if (only === undefined && m.cover && (pick.use.ref === own[0] || (covered && m.cover.once))) await d.staff.change(m.id, { cover: null }).catch(() => undefined);
   const intern = pick.use.ref !== own[0] && brains.isIntern(ownModelName(m), got.model);
   const as = intern ? ' as an intern (a smaller model: check what it writes)' : '';
-  const note = covered ? `${first}'s own PC could not answer (${cands[0].why}), so the backup on ${got.pc} did${as}.` : pick.use.ref === refs[0] ? '' : `${first}'s first choice could not answer (${cands[0].why}), so the fallback did${as}.`;
-  if (note) stage(note);
+  const goneNote = cands[0]?.gone && pick.use.ref !== refs[0] ? replacement.backupAnsweredWords(first, replacement.goneWords(goneNameOf(m, refs[0]), await wasOnOf(refs[0])), got.model, got.pc) : '';
+  const note = goneNote ? `${goneNote}${intern ? ' It is a smaller model: check what it writes.' : ''}` : covered ? `${first}'s own PC could not answer (${cands[0].why}), so the backup on ${got.pc} did${as}.` : pick.use.ref === refs[0] ? '' : `${first}'s first choice could not answer (${cands[0].why}), so the fallback did${as}.`;
+  if (note) {
+    stage(note);
+    console.log(`${first}: ${note} (asked for ${refs[0]}, using ${pick.use.ref}).`);
+  }
   return { ...got, ref: pick.use.ref, note, intern };
+}
+
+/** The name of the model a ref names, for "is gone" (a model here that is not in the list any more is named by its file). */
+function goneNameOf(m: StaffMember, ref: string): string {
+  const b = brains.parseRef(ref);
+  if (b.kind === 'remote') return b.model ? sharedName(b.pc, b.model) : lastModel.get(b.pc) ?? 'their model';
+  const id = b.kind === 'here' ? b.id : '';
+  return (d.chatList().find(x => x.id === id)?.name ?? id.split(/[\/]/).pop()!.replace(/.gguf$/i, '')) || ownModelName(m) || 'their model';
+}
+
+/** The linked PC a ref's model was on (null: this PC). */
+async function wasOnOf(ref: string): Promise<string | null> {
+  const b = brains.parseRef(ref);
+  if (b.kind !== 'remote') return null;
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  return r ? brains.pcLabels((await d.store.settings()).remotes)[r.id] ?? r.name : 'a PC that is no longer linked';
+}
+
+/** What replacement.replacementLines needs: the models a hire could use, the network list and this PC's room. Null when it cannot be read. */
+async function replacementInput(m: StaffMember, ref: string, first: string): Promise<replacement.ReplaceInput | null> {
+  try {
+    const { choices } = await backupChoices(m);
+    const net = await (await import('./copies.ts')).network();
+    const free = await carry.freeBytes(d.carry.chatDir).catch(() => null);
+    return {
+      first,
+      goneName: goneNameOf(m, ref),
+      wasOn: await wasOnOf(ref),
+      choices,
+      rows: net.rows,
+      mine: net.mine.filter(x => x.kind === 'chat').map(x => ({ name: x.name, bytes: x.bytes })),
+      pcs: net.pcs.map(p => ({ name: p.name, send: p.send })),
+      freeHere: free !== null && Number.isFinite(free) ? free : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** The model a hire's first choice runs, by name: the model here, or what that PC had loaded when it last answered. */
@@ -246,6 +305,7 @@ export async function backupChoices(m: StaffMember): Promise<{ own: string; choi
     const ref = `remote:${r.id}`;
     const name = label[r.id] ?? r.name;
     if (r.backupsOnly) return void others.push({ pc: name, why: 'it is set to Backups only' });
+    if (clusterHeld(r.id)) return void others.push({ pc: name, why: 'it is in the cluster, which is switched on' });
     try {
       const h = await hello(r, 3000);
       if (h.away) return void others.push({ pc: name, why: 'its owner is using it for now' });

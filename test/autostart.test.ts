@@ -12,9 +12,9 @@ import { autostart, OLD_STARTUP_FILES, STARTUP_FILE, startupDir, startupScript }
 const NO_INSTALL = { TOMLIN_INSTALL_ROOT: join(tmpdir(), 'sm-no-install-here') };
 
 test('the startup file runs this copy\'s Start TOMLIN.cmd, minimised; a % in the folder is doubled for cmd', () => {
-  const text = startupScript('C:\\Apps\\Smart 100%\\shelby-2', NO_INSTALL);
+  const text = startupScript('C:\\Apps\\Smart 100%\\tomlin-src', NO_INSTALL);
   assert.match(text, /^@echo off\r\n/);
-  assert.ok(text.includes('start "TOMLIN" /min "C:\\Apps\\Smart 100%%\\shelby-2\\Start TOMLIN.cmd"'));
+  assert.ok(text.includes('start "TOMLIN" /min "C:\\Apps\\Smart 100%%\\tomlin-src\\Start TOMLIN.cmd"'));
   assert.equal(startupDir({ TOMLIN_STARTUP_DIR: 'X:\\t' }), 'X:\\t');
 });
 

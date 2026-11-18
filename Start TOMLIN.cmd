@@ -21,7 +21,7 @@ if defined SM_NO_VCRT (echo. & echo  This PC does not have the Microsoft Visual 
 rem The browser opens once TOMLIN is ready (src/server.ts), not before.
 if not defined TOMLIN_NO_BROWSER set TOMLIN_OPEN=1
 rem TOMLIN ends with code 75 to start again (to bring in an older copy's data, or put a backup back), and with
-rem code 76 to start a newer copy beside this one (updated from a linked PC): its folder is in next-copy.txt.
+rem code 76 to start a newer copy beside this one (an update from GitHub, a zip or a linked PC): its folder is in next-copy.txt.
 set TOMLIN_LOOP=1
 :run
 node src/server.ts
@@ -53,5 +53,5 @@ if not exist "%TOMLIN_NEXT%\src\server.ts" (echo The new version is not in "%TOM
 set "TOMLIN_PREV=%CD%"
 cd /d "%TOMLIN_NEXT%"
 set TOMLIN_OPEN=
-echo TOMLIN was updated by a linked PC. Starting the new version in %CD% ...
+echo TOMLIN was updated. Starting the new version in %CD% ...
 goto run

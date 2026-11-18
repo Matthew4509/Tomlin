@@ -78,7 +78,7 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     // 1. Not ticked there: the host loads on its own and says why the node did not lend.
     let p = await load();
     assert.equal(p.state, 'connected', JSON.stringify(p));
-    assert.match(p.note ?? '', /Max mode: .*Lend card memory to linked PCs \(Max mode\)/);
+    assert.match(p.note ?? '', /(?:Max mode|Cluster): .*Allow to be used as part of a cluster" \(Max mode\)/);
     await unload();
 
     // 2. Ticked, but someone is using the node.
@@ -87,7 +87,7 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     assert.equal(tick.body.lend.idle, 5);
     p = await load();
     assert.equal(p.state, 'connected');
-    assert.match(p.note ?? '', /Max mode: someone is using "Test node" \(last used \d+ s ago\)\. It lends once Windows is locked there, or after 5 minutes/);
+    assert.match(p.note ?? '', /(?:Max mode|Cluster): someone is using "Test node" \(last used \d+ s ago\)\. It lends once Windows is locked there, or after 5 minutes/);
     await unload();
 
     // 3. Nobody there for 10 minutes: it lends, the host loads through it and answers.
@@ -95,7 +95,7 @@ test('two PCs: Max mode lends the node\'s memory only while nobody uses it, answ
     const before = rpcMemory() + cardMemory();
     p = await load();
     assert.equal(p.state, 'connected', JSON.stringify(p));
-    assert.match(p.note ?? '', /Max mode: borrowing the card memory of "Test node"/);
+    assert.match(p.note ?? '', /(?:Max mode|Cluster): borrowing the card memory of "Test node"/);
     const lent = await lendNow();
     assert.ok(lent.to, JSON.stringify(lent));
     assert.ok(lent.streams >= 1, `llama-server holds a stream to the node: ${JSON.stringify(lent)}`);

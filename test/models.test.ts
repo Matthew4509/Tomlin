@@ -1,7 +1,7 @@
 // The Model menu's parts: Hugging Face links, models in parts, and models in two folders. Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { groupGguf, hfUrl, parseHfLink } from '../src/download.ts';
@@ -53,6 +53,47 @@ test('models in TOMLIN\'s own folder and another folder are listed together and 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('an other folder that is not there now (drive unplugged) is named as missing, and is used again when it comes back', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tomlin-gone-'));
+  try {
+    const own = join(dir, 'own');
+    const other = join(dir, 'usb drive', 'My Models');
+    await mkdir(own, { recursive: true });
+    await mkdir(other, { recursive: true });
+    await writeFile(join(other, 'b.gguf'), 'xx');
+    const models = new Models(own, join(dir, 'models-folder.txt'), undefined, null);
+    assert.equal(models.otherMissing(), null, 'no folder set: nothing is missing');
+    models.setOther(other);
+    assert.equal(models.otherMissing(), null);
+    assert.deepEqual(models.list().map(m => m.id), ['*/b.gguf']);
+    // The drive goes: the setting is kept, the folder is named as missing, and its models are not listed.
+    await rm(join(dir, 'usb drive'), { recursive: true, force: true });
+    assert.equal(models.other(), null);
+    assert.equal(models.otherMissing(), other);
+    assert.deepEqual(models.list(), []);
+    assert.equal(models.path('*/b.gguf'), null);
+    // It comes back: found again with nothing typed again.
+    await mkdir(other, { recursive: true });
+    await writeFile(join(other, 'b.gguf'), 'xx');
+    assert.equal(models.otherMissing(), null);
+    assert.equal(models.path('*/b.gguf'), join(other, 'b.gguf'));
+    // The own folder chosen as the other one is not a missing folder.
+    models.setOther(own);
+    assert.equal(models.otherMissing(), null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the page and the load fault say which models folder is missing', async () => {
+  const page = await readFile(new URL('../public/models.js', import.meta.url), 'utf8');
+  assert.match(page, /mpFolderLine\(m\.folder, m\.copies \?\? \[\], m\.ownFolder, m\.folderMissing\)/);
+  assert.match(page, /The models folder \$\{missing\} is not there now/);
+  const panes = await readFile(new URL('../src/server/panes.ts', import.meta.url), 'utf8');
+  assert.match(panes, /folderMissing: chatModels\.otherMissing\(\)/);
+  assert.match(panes, /that folder is not there now\. Plug its drive in/);
 });
 
 test('models already installed by Ollama are listed by their Ollama names and used from Ollama\'s own store', async () => {

@@ -32,6 +32,8 @@ export interface QItem {
   mode?: string;
   width?: number;
   height?: number;
+  /** Words to leave out of the picture (sent on to a linked PC too). */
+  negative?: string;
   /** Drawn for this step (0-based) of its project: the step is marked done when it comes back. */
   step?: number;
   // ---- A project: its waiting steps, run one after another (the reviewer reads each when `review`) ----
@@ -94,7 +96,7 @@ export function cleanItem(raw: unknown): QItem | null {
   const keep: [keyof QItem, unknown][] = [
     ['started', str(r.started, 40)], ['ended', str(r.ended, 40)], ['projectName', str(r.projectName, 120)],
     ['lanes', Array.isArray(r.lanes) ? r.lanes.filter(x => typeof x === 'string' && /^(here|jobs|pc:[\w-]{1,40})$/.test(x)).slice(0, 3) : undefined],
-    ['laneName', str(r.laneName, 80)], ['prompt', str(r.prompt, 2000)], ['as', id(r.as)], ['mode', str(r.mode, 20)],
+    ['laneName', str(r.laneName, 80)], ['prompt', str(r.prompt, 2000)], ['as', id(r.as)], ['mode', str(r.mode, 20)], ['negative', str(r.negative, 1000)],
     ['width', num(r.width, 64, 4096)], ['height', num(r.height, 64, 4096)], ['step', num(r.step, 0, 999)],
     ['review', r.review === true ? true : undefined], ['waitFor', id(r.waitFor)], ['chat', id(r.chat)], ['message', str(r.message, MESSAGE_MAX)],
     ['think', r.think === true ? true : undefined], ['result', str(r.result, 600)], ['output', str(r.output, 300)], ['handed', str(r.handed, 400)],
@@ -244,7 +246,7 @@ export function countLine(q: Queue): string {
 
 /** True when a fault means the PC was busy or off for now (the item is put back and tried again), not that it failed. */
 export function forNow(error: string): boolean {
-  return /\bbusy\b|answering something else|drawing something else|still drawing|is drawing|could not be reached|not answering|is off\b|log off|being used by its owner|still loading|is answering now|unloaded before the picture started/i.test(error);
+  return /\bbusy\b|answering something else|drawing something else|still drawing|is drawing|could not be reached|not answering|is off\b|log off|being used by its owner|still loading|is answering now|unloaded before the picture started|lost the connection to/i.test(error);
 }
 
 /** The parts of a chat line the queue reads when a message runs again (src/store.ts ChatLine). */

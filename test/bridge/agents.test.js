@@ -13,6 +13,7 @@ const { execFileSync } = require('child_process');
 const { checkSkill, agentAudit } = require('../../src/bridge/agents');
 const { runAudit } = require('../../src/bridge/audit');
 const { makeZip } = require('./museum/kit');
+const { quick } = require('./pace');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-agents-'));
 const w = (rel, text) => { const p = path.join(tmp, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); return p; };
@@ -148,7 +149,8 @@ async function main() {
     ['code-fence lines (blank once blanked)', '```\n'.repeat(100000)], ['blank lines', ' \n'.repeat(200000)]]) {
     const s = Date.now();
     checkSkill({ text });
-    check('400 KB of ' + name + ' is read quickly', () => assert(Date.now() - s < 3000, (Date.now() - s) + ' ms'));
+    const ms = Date.now() - s;
+    check('400 KB of ' + name + ' is read quickly', () => quick(ms, 3000));
   }
 
   // --- found in the second review (30 Oct) ---
@@ -942,7 +944,8 @@ async function main() {
     if (name === 'cmd /c') { const s = {}; for (let n = 0; n < 8000; n++) s['s' + n] = { command: 'cmd', args: ['/c', 'sh', '-c', 'npx pkg' + n + '@1.0.0'], url: 'https://a' + n + '.ab/' }; text = JSON.stringify({ mcpServers: s }); }
     const s = Date.now();
     checkSkill({ text, name: file });
-    check('400 KB of ' + name + ' is read quickly', () => assert(Date.now() - s < 2000, (Date.now() - s) + ' ms'));
+    const ms = Date.now() - s;
+    check('400 KB of ' + name + ' is read quickly', () => quick(ms, 2000));
   }
   // The own-client and named-data patterns: the time is shown, and held under a second.
   const GET = 'requests.get(u)', WEBJS = 'fetch(u)';
@@ -969,7 +972,7 @@ async function main() {
     checkSkill({ text, name: file });
     const ms = Date.now() - s;
     if (ms > worst) { worst = ms; worstName = name; }
-    check('400 KB of ' + name + ' is read in under a second', () => assert(ms < 1000, ms + ' ms'));
+    check('400 KB of ' + name + ' is read in under a second', () => quick(ms, 1000));
   }
   // 200 hosts checked against 400 KB of a doc's words, the way a folder is read.
   const many = path.join(tmp, 'many-hosts');
@@ -979,14 +982,15 @@ async function main() {
   checkSkill({ path: many });
   const manyMs = Date.now() - manyAt;
   if (manyMs > worst) { worst = manyMs; worstName = '200 hosts against 400 KB of words'; }
-  check('200 hosts against 400 KB of words is read in under a second', () => assert(manyMs < 1000, manyMs + ' ms'));
+  check('200 hosts against 400 KB of words is read in under a second', () => quick(manyMs, 1000));
   console.log('slowest new pattern: ' + worstName + ', ' + worst + ' ms');
 
   // --- long and odd lines finish quickly ---
   const t0 = Date.now();
   checkSkill({ text: 'send ' + 'a.'.repeat(60000) + '\n' + '<!--' + 'x '.repeat(100000) + '\n' + 'A'.repeat(300000) + '\n' + 'curl ' + 'x'.repeat(200000) });
   agentAudit(proj);
-  check('long, odd lines are read quickly', () => assert(Date.now() - t0 < 5000, (Date.now() - t0) + ' ms'));
+  const oddMs = Date.now() - t0;
+  check('long, odd lines are read quickly', () => quick(oddMs, 5000));
 
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10 });
   console.log(failures ? failures + ' FAILED' : 'all passed');

@@ -930,31 +930,36 @@ $('#job-final').addEventListener('click', async () => {
 
 async function openJobs() {
   jobFault(null);
+  const late = app.pageTicket();
   try {
     await Promise.all([loadJobs(), loadSetup()]);
   } catch (e) {
     jobFault(e.message, e.data);
   }
+  // Moved on to another page while the jobs were read: it stays there (false: nothing was opened).
+  if (late()) return false;
   if (!jobUi.job) showPart('list');
   app.showAsPage(jobsDlg, 'jobs');
+  return true;
 }
 $('#jobs-open').addEventListener('click', openJobs);
 
 // For Home: open a job (with a step waiting, if any), start a plan from a goal or a project, or go to Other PCs.
 app.openJob = async id => {
-  await openJobs();
-  await openJob(id);
+  if (await openJobs()) await openJob(id);
 };
 // A project (Start project, or "Lets create a project" on Home): the planner reads its Scope card and design brief
 // first; the plan keeps its id, name, folder and team. Typing a different goal plans that goal instead.
 $('#job-goal').addEventListener('input', () => (jobUi.project = null));
 app.planProject = async (id, statement) => {
+  // The plan starts even if the person has moved on to another page meanwhile (it shows on Home); only the page stays put.
   await openJobs();
   jobUi.project = id;
   $('#job-goal').value = statement;
   $('#job-new-form').requestSubmit();
 };
 app.planJob = async goal => {
+  // The plan starts even if the person has moved on to another page meanwhile (it shows on Home); only the page stays put.
   await openJobs();
   // A goal from Home is that goal: not a project an earlier try left behind.
   jobUi.project = null;

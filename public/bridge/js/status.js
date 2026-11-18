@@ -26,6 +26,9 @@ function renderStatus() {
   $('st-running').textContent = run.n ? (run.mine.length ? '● ' : '◐ ') + run.words : '○ none running';
   const g = [gitSummary(), nodeSummary()].filter(Boolean).join(' · ');
   $('st-git').textContent = g; $('st-git').hidden = !g;
+  const bad = gitProblems().length;
+  $('st-gitproblem').textContent = bad ? '✕ ' + plural(bad, 'project', 'projects') + ' with a git problem' : '';
+  $('st-gitproblem').hidden = !bad;
   $('n-projects').textContent = rows.length || '';
   if (!stats) return;
   $('st-tokens').textContent = stats.tokensError ? 'Token count failed: Recount in the This PC panel' : stats.tokensBusy ? 'Counting tokens…' : stats.tokensAt ? 'Tokens counted ' + fmtWhen(Date.parse(stats.tokensAt)) : '';

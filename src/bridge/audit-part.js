@@ -13,9 +13,11 @@ const MARK = 'bridge-audit-part';
 const GRACE_MS = 5000;    // how long past its budget a part has to stop by itself
 const END_WAIT_MS = 2000; // how long an ended thread is waited for: one held by a system call ends when the call returns
 const WARM_MS = 2000;     // how long a thread with nothing to do waits for the next audit
-let alive = 0;
+let alive = 0, startedCount = 0;
 /** How many helper threads are running now, the one waiting for the next audit included. */
 const workersAlive = () => alive;
+/** How many helper threads were started since the Bridge started (for the tests: a thread reused is not started again). */
+const workersStarted = () => startedCount;
 
 // A thread waiting for the next audit. It never holds the process open.
 let warm = null, warmTimer = null;
@@ -55,6 +57,7 @@ class Parts {
     const w = new Worker(this.file, { workerData: MARK, env: SHARE_ENV });
     const t = { w, ready: false, dead: false };
     alive++;
+    startedCount++;
     w.once('exit', () => { alive--; t.dead = true; if (warm && warm.w === w) { warm = null; clearTimeout(warmTimer); } });
     w.on('error', () => {}); // a late error from a thread nothing waits for any more is not the server's to die of
     return t;
@@ -127,7 +130,7 @@ class Parts {
   }
 }
 
-module.exports = { Parts, workersAlive, MARK };
+module.exports = { Parts, workersAlive, workersStarted, MARK };
 
 // Tests only (like BRIDGE_TEST_AUDIT_SPIN_MS): BRIDGE_TEST_AUDIT_SLOW="code=60000" holds the named part that long at its
 // start, "code-file=200" holds it that long after each file it reads, "code=crash" makes it throw.

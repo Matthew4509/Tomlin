@@ -54,8 +54,14 @@ const LIVE_ORDER = { down: 0, unsure: 1, none: 2, up: 3 };
 
 // ---- Git: where each project stands (read only; the Bridge never commits or pushes). Shape + colour, like Live. ----
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+// A row whose git is being read again shows its last known state with "checking"; one never read shows only that.
 function gitLabel(g) {
   if (!g) return null;
+  if (g.state === 'checking') return { mark: '◌', text: 'Checking git…', cls: 'l-none', say: 'The Bridge is reading git for this folder. It shows here in a moment.' };
+  const l = gitLabelNow(g);
+  return g.checking ? { ...l, text: l.text + ' · checking…', say: l.say + '\nThis was the state last time; git is being read again now.' } : l;
+}
+function gitLabelNow(g) {
   switch (g.state) {
     case 'none': return { mark: '○', text: 'No git', cls: 'l-none', say: 'Not in git: no saved history and no backup copy.' };
     case 'empty': return { mark: '○', text: 'Git, nothing saved', cls: 'l-none', say: 'Git is set up here, but nothing has been saved (committed) yet.' };
@@ -64,7 +70,7 @@ function gitLabel(g) {
     case 'ahead': return { mark: '▲', text: plural(g.ahead, 'not pushed', 'not pushed'), cls: 'l-unsure', say: plural(g.ahead, 'save is', 'saves are') + ' not on ' + g.remote + ' yet. Push to back them up.' };
     case 'changes': return { mark: '▲', text: plural(g.changes, 'unsaved', 'unsaved'), cls: 'l-unsure', say: plural(g.changes, 'file has', 'files have') + ' changes not saved in git yet' + (g.ahead ? ', and ' + plural(g.ahead, 'save is', 'saves are') + ' not pushed' : '') + '. Commit, then push, to back them up.' };
     case 'ok': return { mark: '●', text: 'Backed up', cls: 'l-up', say: 'Everything saved is on ' + g.remote + ' (as of this PC\'s last push or fetch).' };
-    default: return { mark: '?', text: 'Git error', cls: 'l-down', say: g.reason || 'git could not read this folder.' };
+    default: return { mark: '✕', text: 'Git problem', cls: 'l-down', say: g.reason || 'git could not read this folder.' };
   }
 }
 function gitChip(r) {
@@ -80,7 +86,8 @@ function gitDialog(r, opts = {}) {
     h('h4', { class: 'split-head' }, 'Git'),
     h('p', null, h('b', { class: l.cls }, l.mark + ' ' + l.text), h('br'), l.say),
     fact('Branch', g.branch),
-    fact('Changed files not saved', g.state === 'none' ? null : String(g.changes || 0)),
+    fact('Changed files not saved', g.state === 'none' || g.state === 'error' || g.state === 'checking' ? null : String(g.changes || 0) + (g.untrackedSkipped ? ' (new files not counted)' : '')),
+    g.untrackedSkipped ? h('p', { class: 'muted', style: 'font-size:13px' }, 'New files that are not in git yet were not counted: looking for them in this folder takes git too long (often a build or download folder missing from .gitignore). Refresh tries the full count again.') : null,
     fact('Last save (commit)', g.lastCommit ? fmtWhen(Date.parse(g.lastCommit)) : null),
     fact('Backup copy', g.remote || (g.state === 'none' || g.state === 'error' ? null : 'none')),
     fact('Folder', r.dir),
@@ -119,12 +126,30 @@ async function changesDialog(r) {
     h('p', { class: 'muted', style: 'font-size:13px' }, 'Green lines are new, red lines are gone. Read only: the Bridge never saves, undoes or changes anything here.'),
     ...d.files.map(fileView)], [close, back], 'wide');
 }
+// The bar's git words. Problems are not in it: they have a link of their own (gitProblems), which names each one.
 function gitSummary() {
   if (!rows.length || !rows.some(r => r.git)) return '';
   const n = f => rows.filter(r => r.git && f(r.git.state)).length;
   const parts = [[n(s => s === 'ok'), 'backed up'], [n(s => s === 'ahead' || s === 'changes' || s === 'unpushed'), 'to save or push'],
-    [n(s => s === 'local'), 'only on this PC'], [n(s => s === 'none' || s === 'empty'), 'no git'], [n(s => s === 'error'), 'git error']];
-  return 'Git: ' + parts.filter(([c]) => c).map(([c, t]) => c + ' ' + t).join(' · ');
+    [n(s => s === 'local'), 'only on this PC'], [n(s => s === 'none' || s === 'empty'), 'no git'],
+    [rows.filter(r => r.git && r.git.checking).length, 'checking…']];
+  const said = parts.filter(([c]) => c).map(([c, t]) => c + ' ' + t);
+  return said.length ? 'Git: ' + said.join(' · ') : '';
+}
+// Projects git could not read (the last state known, while it is read again, counts too).
+const gitProblems = () => rows.filter(r => r.git && r.git.state === 'error');
+function gitProblemsDialog() {
+  const list = gitProblems();
+  dialog(plural(list.length, 'project', 'projects') + ' with a git problem', [
+    h('p', { class: 'muted' }, 'The Bridge could not read git in these folders, so it cannot say whether they are saved and backed up. It only reads git: nothing was changed.'),
+    ...list.map(r => h('div', { class: 'git-wait' }, h('button', { class: 'linkbtn', type: 'button', onclick: () => gitDialog(r) }, r.name),
+      h('span', null, (r.git.reason || 'git could not read this folder.') + (r.git.checking ? ' (Reading it again now.)' : ''))))],
+    [h('button', { class: 'btn accent', type: 'button', onclick: closeDialog }, 'Close')], 'wide');
+}
+// A row git could not read says why under its description, so nobody has to hover to find out.
+function gitProblemLine(r) {
+  if (!r.git || r.git.state !== 'error') return null;
+  return h('div', { class: 'desc git-problem', title: r.git.reason || '' }, 'Git problem: ' + (r.git.reason || 'git could not read this folder.'));
 }
 // Made once and kept: the panel is redrawn every 5 s, which would close an open list.
 let liveEveryEl = null;

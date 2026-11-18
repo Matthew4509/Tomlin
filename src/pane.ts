@@ -7,6 +7,8 @@ import type { Device } from './runtimes.ts';
 import { log } from './log.ts';
 import { MAX_STOPPED, maxFault } from './llama.ts';
 import { RUNNER_WORD } from './vcrt.ts';
+import { LoadTrack, type LoadPlan } from './loadeta.ts';
+import { watchDrive } from './diskwatch.ts';
 
 export interface ConnectRequest {
   model: string;
@@ -16,6 +18,8 @@ export interface ConnectRequest {
   /** Devices to try, best first, already limited to what is installed and what `asked` allows. */
   devices: Device[];
   expectedSeconds: number;
+  /** What the load is (src/loadeta.ts): its size, drive and lenders, for the loading screen's estimate and progress. */
+  plan?: LoadPlan;
   build: (device: Device) => LaunchSpec;
   /** A second try on the same device with other settings, given the runner's last lines (null = no second try). */
   retry?: (device: Device, tail: string) => LaunchSpec | null;
@@ -30,11 +34,27 @@ export interface ConnectRequest {
   note?: string;
 }
 
-const DEVICE_NAME: Record<Device, string> = { cpu: 'the CPU', vulkan: 'the graphics chip (Vulkan)', cuda: 'the NVIDIA card (CUDA)' };
+/** A chat runner that crashed while loaded, or a model that did not load (src/faults.ts keeps the record). */
+export interface PaneFault {
+  kind: 'crash' | 'load';
+  model: string;
+  modelName: string;
+  pin: string;
+  device: Device | '';
+  tail: string;
+  /** What the pane said, in its own words. */
+  error: string;
+}
+
+const DEVICE_NAME: Record<Device, string> ={ cpu: 'the CPU', vulkan: 'the graphics chip (Vulkan)', cuda: 'the NVIDIA card (CUDA)' };
 const ramUsed = () => totalmem() - freemem();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export class Pane {
+  /** Told of every chat runner fault on this PC (set by the server: src/server/faults.ts). */
+  static onFault: ((f: PaneFault) => void) | null = null;
+  /** Every chat pane, so an answer that came back whole can be put down to the runner that wrote it (by its address). */
+  static readonly chats = new Set<Pane>();
   readonly worker: Worker;
   private baseline = 0;
   private connectedRam = 0;
@@ -48,6 +68,7 @@ export class Pane {
   constructor(pane: 'chat' | 'image') {
     this.name = pane;
     this.worker = new Worker(pane);
+    if (pane === 'chat') Pane.chats.add(this);
     this.worker.onExit = () => {
       const v = this.worker.view;
       if (v.state === 'connected') {
@@ -56,6 +77,8 @@ export class Pane {
         setTimeout(() => {
           const tail = this.worker.tail();
           if (this.worker.view.state === 'failed' && maxFault(tail)) this.set({ error: MAX_STOPPED, detail: tail });
+          // A runner crash (not a lending PC that left) is kept as a fault, with its last lines.
+          else if (this.name === 'chat') this.fault('crash', v, tail, 'The model stopped on its own.');
         }, 500);
       }
     };
@@ -63,6 +86,15 @@ export class Pane {
 
   get view(): WorkerView {
     return this.worker.view;
+  }
+
+  private fault(kind: PaneFault['kind'], v: WorkerView, tail: string, error: string): void {
+    if (!v.model) return;
+    try {
+      Pane.onFault?.({ kind, model: v.model, modelName: v.modelName ?? v.model, pin: v.pin ?? '', device: v.device ?? '', tail, error });
+    } catch (e) {
+      console.error('Could not keep the runner fault:', e);
+    }
   }
 
   private set(change: Partial<WorkerView>): void {
@@ -78,7 +110,30 @@ export class Pane {
     return this.view.state === 'loading' || this.view.state === 'unloading';
   }
 
+  /**
+   * Loads the model; while it loads, the bytes read from its drive are counted for the loading screen
+   * (src/diskwatch.ts), and the counting stops when the load ends, however it ends.
+   */
   async connect(req: ConnectRequest): Promise<WorkerView> {
+    let watch: { stop: () => void } | null = null;
+    try {
+      return await this.connectNow(req, () => {
+        // Counted from each start (a new watch counts from nothing): a second start reads the file again.
+        watch?.stop();
+        const track = this.worker.track;
+        if (!track) return;
+        const w = watchDrive(track.plan.drive, (bytes, now) => {
+          if (this.worker.track === track) track.disk(bytes, now);
+        });
+        track.watched = w.counting;
+        watch = w;
+      });
+    } finally {
+      (watch as { stop: () => void } | null)?.stop();
+    }
+  }
+
+  private async connectNow(req: ConnectRequest, started: () => void): Promise<WorkerView> {
     // Drop then Connect at once: the old process is ended first, so the new one is never started beside it unseen.
     if (this.ending) await this.ending;
     if (this.view.state === 'connected' || this.view.state === 'loading') await this.disconnect();
@@ -89,7 +144,9 @@ export class Pane {
     this.baseline = ramUsed();
     const lastUnload = this.view.lastUnload;
     this.worker.view = { ...Worker.empty(req.asked, req.threads), lastUnload };
-    this.set({ state: 'loading', model: req.model, modelName: req.modelName, loadStartedAt: Date.now(), expectedSeconds: req.expectedSeconds });
+    const startedAt = Date.now();
+    this.worker.track = req.plan ? new LoadTrack(req.plan, startedAt) : null;
+    this.set({ state: 'loading', model: req.model, modelName: req.modelName, loadStartedAt: startedAt, expectedSeconds: req.plan ? this.worker.track!.view(startedAt).firstSeconds : req.expectedSeconds });
     const notes: string[] = req.note ? [req.note] : [];
     for (let i = 0; i < req.devices.length; i++) {
       const device = req.devices[i];
@@ -98,11 +155,15 @@ export class Pane {
       let tail = '';
       for (let attempt = 0; spec && attempt < 2; attempt++) {
         this.set({ device, stage: `Starting on ${DEVICE_NAME[device]}` });
+        // A new start reads the weights again: its progress is counted from nothing (the clock runs on).
+        this.worker.track?.restart();
+        started();
         result = await this.worker.launch(spec);
         if (result !== 'failed') break;
         tail = this.worker.tail();
         await this.worker.end();
-        spec = attempt === 0 ? req.retry?.(device, tail) ?? null : null;
+        // A start that ran out of time is not started again: the same file would take as long again (src/loadlimit.ts).
+        spec = attempt === 0 && !this.worker.timedOut ? req.retry?.(device, tail) ?? null : null;
       }
       if (result === 'cancelled' || this.view.state !== 'loading') {
         // Ready, but Disconnect came meanwhile: the runner it started is ended too, never left holding memory.
@@ -131,12 +192,13 @@ export class Pane {
         }
       }
       const why = noCard ? `${noCard[0].toUpperCase()}${noCard.slice(1)}.` : req.why(tail);
-      if (i < req.devices.length - 1) {
+      if (i < req.devices.length - 1 && !this.worker.timedOut) {
         const said = noCard || why.replace(/^This model did not load: /, '').replace(/\.$/, '');
         notes.push(`${DEVICE_NAME[device][0].toUpperCase()}${DEVICE_NAME[device].slice(1)} could not run it (${said}), so it runs on ${DEVICE_NAME[req.devices[i + 1]]}.`);
         continue;
       }
       this.set({ state: 'failed', error: why, detail: tail, stage: null, pid: null, note: notes.join(' ') || null });
+      if (this.name === 'chat' && !maxFault(tail)) this.fault('load', this.view, tail, why);
       return this.view;
     }
     return this.view;
@@ -153,6 +215,7 @@ export class Pane {
     const t0 = Date.now();
     const loaded = this.view.state === 'connected' ? Math.max(this.connectedRam, ramUsed()) : ramUsed();
     this.set({ state: 'unloading', stage: 'Ending the model process' });
+    this.worker.track = null;
     const gone = await this.worker.end();
     // Give Windows a moment to hand the pages back before reading the figure.
     await sleep(1200);

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PACE, WEB_TOOLS } from '../src/webtools.ts';
+import { testEnv } from './env.ts';
 
 const freePort = () => new Promise<number>(resolve => {
   const s = createServer().listen(0, '127.0.0.1', () => {
@@ -23,7 +24,7 @@ test('fresh data folder: New chat has nobody listed, and says what to do', { tim
   writeFileSync(join(home, 'models-folder.txt'), '');
   const port = await freePort();
   const server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_DATA: join(home, 'data'), TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_DATA: join(home, 'data'), TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';

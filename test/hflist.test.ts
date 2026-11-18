@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { HfList, isMoe, listed, nextPage, ordered, pick, type ListedModel } from '../src/hflist.ts';
+import { HfList, hasVisionFlags, isMoe, listed, nextPage, ordered, pick, type ListedModel } from '../src/hflist.ts';
 
 test('Hugging Face list: keeps public chat models (or no task said) that people use', () => {
   const got = listed([
@@ -17,8 +17,26 @@ test('Hugging Face list: keeps public chat models (or no task said) that people 
     { id: 'no-owner', downloads: 100 },
     { id: 'g/Open-3B-GGUF', downloads: 20, gated: false, pipeline_tag: 'image-text-to-text' },
   ]);
-  assert.deepEqual(got, [['a/Qwen3.5-9B-GGUF', 500, 3, 9e9], ['b/Mystery-GGUF', 50, 0, null], ['g/Open-3B-GGUF', 20, 0, 3e9]]);
+  // A model whose task is pictures with text carries a 1 at the end; the others carry nothing extra.
+  assert.deepEqual(got, [['a/Qwen3.5-9B-GGUF', 500, 3, 9e9], ['b/Mystery-GGUF', 50, 0, null], ['g/Open-3B-GGUF', 20, 0, 3e9, 1]]);
   assert.deepEqual(listed({ error: 'x' }), []);
+});
+
+test('Hugging Face list: the picture flag narrows a search, and counts only when the list carries it', () => {
+  const list: ListedModel[] = [['a/Seeing-4B-GGUF', 900, 1, 4e9, 1], ['b/Plain-7B-GGUF', 800, 1, 7e9], ['c/Seeing-9B-GGUF', 700, 1, 9e9, 1]];
+  assert.deepEqual(pick(list, { q: 'all', vision: true }).map(m => m[0]), ['a/Seeing-4B-GGUF', 'c/Seeing-9B-GGUF']);
+  assert.deepEqual(pick(list, { q: 'seeing 9b', vision: true }).map(m => m[0]), ['c/Seeing-9B-GGUF']);
+  assert.deepEqual(pick(list, { q: 'all' }).map(m => m[0]), ['a/Seeing-4B-GGUF', 'b/Plain-7B-GGUF', 'c/Seeing-9B-GGUF']);
+  assert.equal(hasVisionFlags(list), true);
+  // A list scanned before the flag existed carries none: the caller does not narrow by it.
+  assert.equal(hasVisionFlags([['a/Old-4B-GGUF', 900, 1, 4e9], ['b/Old-7B-GGUF', 800, 1, 7e9]]), false);
+  assert.equal(hasVisionFlags([]), false);
+});
+
+test('Hugging Face list: the flag adds almost nothing to the file (one short entry in a few, not one per model)', () => {
+  const plain = JSON.stringify(['a/Some-Model-9B-GGUF', 123456, 78, 9e9]);
+  const flagged = JSON.stringify(['a/Some-Model-9B-GGUF', 123456, 78, 9e9, 1]);
+  assert.equal(flagged.length - plain.length, 2);
 });
 
 test('Hugging Face list: the next page is followed only on Hugging Face', () => {

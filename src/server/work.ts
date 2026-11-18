@@ -16,6 +16,7 @@ import { HOME, ROOT, type Routes, SECURITY_HEADERS, chatModels, chats, json, sho
 import { chat, chatList, contextBytes, fit, images, lastUsed, main, runOf } from './panes.ts';
 import { answeringBusy, askOnce, endAnswer, imageSpecialist, takeChat } from './answering.ts';
 import { jobRoutes } from './jobs.ts';
+import { plainPictureAsk } from '../picturestep.ts';
 import { appLock, appLockOn } from './locks.ts';
 
 // ---- Live preview (PLAN F10 G7): the workspace's pages, shown in a sandbox beside a job ----
@@ -292,13 +293,19 @@ async function projectPlace(b: Record<string, unknown>): Promise<{ folder: strin
  * "Lets create a project" on Home, Lets go!: the project's folder, its Scope card (the person's own words, by code) and
  * the default design brief, then a chat in it with the hire picked under Staff (Default: the hire on the strongest worker
  * available). The page sends the prompt in that chat as a normal message, and its first answer is also kept as a file
- * in the project. No plan is made: Advanced / job planner makes one. Without {go: true} (Claude's own calls) only the
- * project is made, as before.
+ * in the project. Without {go: true} (Claude's own calls) only the project is made, as before.
+ * {go: true, plan: true} (Home's Lets go! now): no chat; the page adds the project to the queue, which plans and splits
+ * it as a project started anywhere else (a plain picture request becomes one picture step) and runs its steps.
  */
 async function projectCreate(b: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
-  const go = b.go === true;
-  const picked = go && typeof b.pm === 'string' && b.pm ? staff.get(b.pm) : undefined;
-  if (go && b.pm && (!picked || roleOf(picked.role).kind)) return { status: 400, body: { error: 'That hire is not on the staff any more (or only draws). Pick another under Staff, or Default, then press Lets go! again.' } };
+  const planned = b.go === true && b.plan === true;
+  const go = b.go === true && !planned;
+  const picked = b.go === true && typeof b.pm === 'string' && b.pm ? staff.get(b.pm) : undefined;
+  if (b.go === true && b.pm && (!picked || roleOf(picked.role).kind)) return { status: 400, body: { error: 'That hire is not on the staff any more (or only draws). Pick another under Staff, or Default, then press Lets go! again.' } };
+  // Planned: a planner is needed, unless the request is a picture alone (that needs an artist, not a planner).
+  const pictureOnly = planned && plainPictureAsk(String(b.prompt ?? '').trim() || String(b.about ?? '').trim());
+  if (planned && !pictureOnly && !picked && !(await jobRoutes.strongestHire())) return { status: 409, body: { error: 'Nobody can plan it now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
+  if (pictureOnly && !staff.list().some(m => roleOf(m.role).kind)) return { status: 409, body: { error: 'Nobody on the team draws: hire an artist (Setup staff), then press Lets go! again. Nothing was made.' } };
   const hire = go ? picked ?? (await jobRoutes.strongestHire()) : null;
   if (go && !hire) return { status: 409, body: { error: 'Nobody can take the prompt now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
   // {fromChat: true}: "+ New project…" in a chat's project list, a name alone (never with Lets go!, which sends a prompt).
@@ -332,7 +339,7 @@ async function projectCreate(b: Record<string, unknown>): Promise<{ status: numb
     await chats.setProject(made.id, id);
     await chats.mark(made.id, { saveAnswer: true });
   }
-  return { status: 200, body: { id, name: q.name, folder: q.folder, path: join(root, ...q.folder.split('/')), ...(made && hire ? { chat: made.id, hire: hire.name } : {}) } };
+  return { status: 200, body: { id, name: q.name, folder: q.folder, path: join(root, ...q.folder.split('/')), ...(made && hire ? { chat: made.id, hire: hire.name } : {}), ...(planned ? { plan: true, picture: pictureOnly } : {}) } };
 }
 
 /** The pencil on the Scope card or the design brief: the person's own text replaces the card the planner and the steps read. */
@@ -442,6 +449,10 @@ export const workPost: Routes = {
     return json(res, 'error' in r ? 400 : 200, r);
   },
   '/api/files/folder': async ({ res, b }) => {
+    // A network folder, or one Windows runs files from (Startup, AppData, Program Files ...): said why, nothing changed.
+    const typed = String(b.path ?? '').trim().replace(/^["“”'](.*)["“”']$/, '$1').trim();
+    const why = typed ? ws.systemFolderWhy(typed) : null;
+    if (why) return json(res, 400, { error: `${why[0].toUpperCase()}${why.slice(1)}. Nothing was changed.` });
     const path = ws.cleanFolder(b.path);
     if (path === null) return json(res, 400, { error: 'Use a full folder path such as C:\\Users\\you\\Documents\\Writing (not a drive root or a Windows folder). Leave it empty for the default folder.' });
     // TOMLIN's own folders (the app, and the home with your chats) are never a workspace: Files could read your

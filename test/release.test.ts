@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { latestOf, publicOf, RELEASE_KEY, repoOf, sigOf, sigWhy, signRelease, signedText, WARN, zipCheck } from '../src/release.ts';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { installRefusal, latestOf, plainLine, publicOf, RELEASE_KEY, repoOf, sigOf, sigWhy, signRelease, signedText, stoppedWhy, WARN, zipCheck } from '../src/release.ts';
 
 const pair = () => {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -86,4 +88,64 @@ test('the newest release: its version from the tag, its zip and signature attach
   const away = { tag_name: 'v2.0.56', assets: [asset('tomlin-2.0.56.zip', 'https://example.com/z.zip'), asset('tomlin-2.0.56.zip.sig')] };
   assert.match(String(latestOf(away)), /not attached/);
   assert.ok(typeof latestOf({ tag_name: 'v2.0.56', assets: [asset('tomlin-2.0.56.zip', 'http://127.0.0.1:9/z.zip'), asset('tomlin-2.0.56.zip.sig', 'http://127.0.0.1:9/z.sig')] }, 'http://127.0.0.1:9/') !== 'string');
+});
+
+test('the notes the page shows: the first four lines as plain words, GitHub marks taken off, 400 characters at most', () => {
+  const asset = (name: string) => ({ name, browser_download_url: `https://github.com/o/r/releases/download/v2.0.99/${name}`, size: 1 });
+  const notes = (body: string) => {
+    const l = latestOf({ tag_name: 'v2.0.99', body, assets: [asset('tomlin-2.0.99.zip'), asset('tomlin-2.0.99.zip.sig')] });
+    return typeof l === 'string' ? l : l.notes;
+  };
+  assert.equal(notes('## TOMLIN 2.0.99\n\n- **Steadier** starts.\n* See [the list](https://example.com/x).\n> Your data is kept.\n1. Not shown.'), 'TOMLIN 2.0.99 Steadier starts. See the list. Your data is kept.');
+  // A version at the start of a line is not a numbered list.
+  assert.equal(plainLine('2.0.99 keeps your chats.'), '2.0.99 keeps your chats.');
+  assert.equal(plainLine('`npm` stays'), 'npm stays');
+  assert.equal(notes('x'.repeat(500)).length, 400);
+});
+
+test('a download that stops says why in plain words, not Node.js words', async () => {
+  // A real connection cut part way, on this PC only.
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-length': 1000 });
+    res.write(Buffer.alloc(100));
+    setTimeout(() => res.destroy(), 50);
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as AddressInfo).port;
+  let cut: unknown;
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/z.zip`);
+    for await (const _ of r.body as unknown as AsyncIterable<unknown>) { /* read to the end */ }
+  } catch (e) {
+    cut = e;
+  } finally {
+    server.close();
+  }
+  assert.ok(cut, 'the cut connection fails the read');
+  assert.equal(stoppedWhy(cut), 'the connection was cut part way (the internet dropped, or GitHub stopped sending)');
+  assert.equal(stoppedWhy(Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' })), 'the disk is full');
+  assert.equal(stoppedWhy(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })), 'it took more than 30 minutes');
+  assert.equal(stoppedWhy(new Error('the download is bigger than a TOMLIN zip can be.')), 'the download is bigger than a TOMLIN zip can be');
+  assert.equal(stoppedWhy(undefined), 'no reason was given');
+});
+
+test('an unsigned zip: never a download, Install anyway for a picked one, and with an app lock set only with its PIN', async () => {
+  const tried: unknown[] = [];
+  const pinCheck = async (pin: unknown) => (tried.push(pin), pin === '2468' ? { ok: true as const } : { status: 403, error: 'Wrong PIN.' });
+  const base = { code: 'none' as const, source: 'file' as const, anyway: true, lockOn: false, pin: undefined, pinCheck };
+  assert.equal(await installRefusal({ ...base, code: '' }), null, 'signed: no question');
+  assert.match((await installRefusal({ ...base, source: 'git' }))!.error, /never installed without its signature/);
+  assert.match((await installRefusal({ ...base, anyway: false }))!.error, /Press Install anyway/);
+  // No app lock: Install anyway is enough, as before.
+  assert.equal(await installRefusal(base), null);
+  assert.deepEqual(tried, [], 'no PIN asked without an app lock');
+  // An app lock: Install anyway alone (as a program on this PC could send) is refused; with the PIN it goes on.
+  const no = await installRefusal({ ...base, lockOn: true });
+  assert.equal(no?.status, 403);
+  assert.equal(no?.needPin, true);
+  assert.match(no!.error, /app lock PIN \(or password\)/);
+  assert.match((await installRefusal({ ...base, lockOn: true, pin: '1111' }))!.error, /app lock PIN/);
+  assert.equal(await installRefusal({ ...base, lockOn: true, pin: '2468' }), null);
+  // The route uses it, with the app lock's own check.
+  assert.match(readFileSync(new URL('../src/server/selfupdate.ts', import.meta.url), 'utf8'), /installRefusal\(\{ code: ready\.check\.code, source: ready\.source, anyway: b\.anyway, lockOn: appLockOn\(\), pin: b\.appPin, pinCheck: appPinCheck \}\)/);
 });

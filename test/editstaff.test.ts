@@ -31,8 +31,10 @@ test('no tabs: one settings page, its parts in this order: Who, Works on, How th
   assert.ok(edit.includes("app.notebookList?.(`staff:${m.id}`, 'Memory', nbHint)"), 'Memory is their notebook');
   assert.ok(edit.includes('memory.replaceChildren(nb)'), 'it loads into its place before the foot');
   // Works on: the PC, the models, and the speed folded under one line (its chart and Find the fastest setup inside).
-  assert.match(edit, /pcPicker\(m, sub\)/);
-  assert.match(edit, /sub\('Models', modelOptions\(m\)\)/);
+  // The models sit in the tile of the PC they work on (pcPicker), or under the tiles when that PC is not in the list.
+  assert.match(edit, /const models = modelOptions\(m\);\r?\n  const pcs = pcPicker\(m, sub, models\);/);
+  assert.match(edit, /models\.parentNode \? null : sub\('Models', models\)/);
+  assert.match(fn('pcPicker'), /if \(here\) body = el\('div', \{ class: 'pc-pick-here' \}, el\('p', \{ class: 'hint', text: `\$\{first\} works here now\.` \}\), theirModels \?\? null\);/);
   assert.match(edit, /el\('details', \{ class: 'sub profile-speed-fold' \}/);
 });
 

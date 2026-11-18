@@ -16,12 +16,16 @@ import { Registry, type RegistryModel } from './registry.ts';
 import { Gallery, type Picture, type Shelf } from './gallery.ts';
 import { fieldSize, parseSize, sizeText, type Size } from './sizes.ts';
 import { boosted, detectMode, forModel, groupAsk, MODES, PORTRAIT_NEGATIVE, PORTRAIT_SIZE, portraitAsk, PRESETS, slug, type Mode } from './modes.ts';
-import { cfgFor, cleanQuality, draftCount, GROUP_SIZE, QUALITIES, qualitySize, type Quality } from './quality.ts';
+import { askedDrawSize, cfgFor, cleanQuality, draftCount, GROUP_SIZE, QUALITIES, qualitySize, shortSizeWords, type Quality } from './quality.ts';
 import { centreIcon, fitTo, hasTransparency, iconSet, webp, withAlpha, type Fit } from './imaging.ts';
 import sharp from 'sharp';
 import { subjectMask } from './rembg.ts';
 import { checkMessage, REFUSAL } from './filter.ts';
 import { RUNNER_FILE_HELP, RUNNER_FILE_LINE, VCRT_HELP, vcrtFault } from './vcrt.ts';
+import type { ImageSource, Made } from './sources.ts';
+
+/** Told when a picture model finished a picture (the server keeps its last-used time, src/lastused.ts). */
+export const drawings: { drawn: ((model: string) => void) | null } = { drawn: null };
 
 type Decoder = 'fast' | 'full';
 const GB = 2 ** 30;
@@ -58,6 +62,17 @@ export interface GenerateOptions {
    * the gallery or its folder, and this pane shows only "Drawing for <that PC>".
    */
   forPc?: string;
+  /**
+   * Drawn from an image source (src/sources.ts): the same words, size and settings, with its seed, or with a new seed
+   * when `newSeed` is set. A source whose settings are not known gives only its words and size, for a new picture.
+   */
+  fromSource?: ImageSource;
+  newSeed?: boolean;
+  /**
+   * The width and height were asked for exactly (a linked PC, a project's picture): drawn at that size when the model
+   * can (src/quality.ts askedDrawSize), not at the quality's smaller one, and said in words when it cannot.
+   */
+  exactSize?: boolean;
 }
 
 interface Job {
@@ -79,6 +94,8 @@ interface Job {
   results: Picture[];
   error: string | null;
   note: string | null;
+  /** Said when the size asked is more than the model draws (src/quality.ts shortSizeWords). */
+  sizeNote?: string;
   done: Promise<void>;
 }
 
@@ -98,6 +115,8 @@ export interface ImagesDeps {
   /** The device the picture runner for `device` is held to (--backend), or null for its own pick. */
   sdDevice?: (device: Device) => Promise<string | null>;
   fit: (bytes: number, pane: 'chat' | 'image') => { level: 'ok' | 'tight' | 'no'; need: number; free: number; otherOn: boolean };
+  /** This TOMLIN's version, written into each picture's image source. */
+  version?: string;
 }
 
 const DEVICE_WORDS: Record<Device, string> = { cpu: 'CPU', vulkan: 'graphics chip', cuda: 'NVIDIA card' };
@@ -376,7 +395,7 @@ export class Images {
     const forPc = j.opts.forPc;
     return {
       id: j.id, state: j.state, mode: j.mode, modeWhy: j.modeWhy, target: j.target, generated: j.generated, count: j.count, steps: j.steps, step: j.step, image: j.image,
-      perStep: j.perStep, etaSeconds: j.etaSeconds, elapsed: Math.round((Date.now() - j.startedAt) / 1000), results: j.results, error: j.error, note: j.note,
+      perStep: j.perStep, etaSeconds: j.etaSeconds, elapsed: Math.round((Date.now() - j.startedAt) / 1000), results: j.results, error: j.error, note: [j.sizeNote, j.note].filter(Boolean).join(' ') || null,
       finalOf: j.opts.finalOf ?? null, queued: this.jobs.length, prompt: j.opts.prompt,
       chat: j.opts.chat ?? null,
       ...(forPc ? { prompt: `Drawing for ${forPc}`, results: [], error: j.error ? `The picture for ${forPc} did not come out.` : null, note: null, forPc } : {}),
@@ -385,7 +404,13 @@ export class Images {
 
   private lastJob: Job | null = null;
   /** Pictures drawn for a linked PC, by job, held in memory only until drawForPc takes them (F7 E2). */
-  private away = new Map<string, { png: Buffer; modelName: string; modelPrompt: string; mode: Mode; seconds: number; note: string }>();
+  private away = new Map<string, { png: Buffer; modelName: string; modelPrompt: string; mode: Mode; seconds: number; note: string; made: Made }>();
+
+  /** The picture model's own file name (no folder), for the image source. */
+  private modelFile(m: RegistryModel): string {
+    const f = m.files.find(x => x.role === 'model' || x.role === 'diffusion') ?? m.files[0];
+    return f ? this.registry.fileName(f) : '';
+  }
 
   /** The picture drawn for a linked PC, handed over once and forgotten here. */
   takeAway(jobId: string) {
@@ -407,10 +432,17 @@ export class Images {
       base = await this.gallery.get((opts.finalOf ?? opts.again)!);
       // Deleted (its files are gone) or from the private chat (never served again): as good as not there.
       if (!base || base.removed || base.private) return { error: 'That picture is not in the gallery any more.', status: 404 };
+      if (base.settingsUnknown) return { error: 'This picture was drawn on a linked PC running an older TOMLIN, so the settings it was drawn with (seed, steps, sampler) are not known and it cannot be drawn again the same. Use its prompt to draw a new one.', status: 409 };
+    }
+    const src = base ? undefined : opts.fromSource;
+    if (src?.settings === 'known') base = pictureFrom(src, opts.newSeed ? randomInt(0, 2 ** 31 - 1) : src.seed);
+    else if (src) {
+      if (!opts.newSeed) return { error: 'The settings this picture was drawn with (seed, steps, sampler) are not known, so it cannot be drawn again the same. Draw it with a new seed.', status: 409 };
+      opts = { ...opts, prompt: src.prompt, mode: src.mode, width: src.target.width, height: src.target.height };
     }
     // A final or a redraw stays in the draft's chat; a new picture goes into the chat its asker names (never the server's
     // open chat: that is whichever window opened one last).
-    const chatId = base ? base.chat : opts.chat;
+    const chatId = base && !src ? base.chat : opts.chat;
     opts = { ...opts, chat: chatId || undefined };
     const typed = (base?.prompt ?? opts.prompt ?? '').trim();
     if (!typed) return { error: 'Type a prompt first: what should the picture show?', status: 400 };
@@ -431,7 +463,8 @@ export class Images {
     const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : opts.mode && MODES.includes(opts.mode as Mode) ? { mode: opts.mode as Mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
     const preset = PRESETS[mode];
     const defaults = m.defaults ?? { steps: 20, cfg: 7, sampler: 'euler_a', scheduler: '', negative: '' };
-    const generated = base ? base.generated : qualitySize(m, quality, target0);
+    const exact = !base && opts.exactSize === true && asked && target0 ? askedDrawSize(m, quality, target0) : null;
+    const generated = base ? base.generated : exact ? exact.size : qualitySize(m, quality, target0);
     // High with the sharpener: drawn at the model's size, then enlarged; with no size asked for, to twice that.
     const upscale = !base && quality === 'high' && this.upscalerReady();
     const target = target0 ?? (upscale ? { width: generated.width * 2, height: generated.height * 2 } : generated);
@@ -449,12 +482,15 @@ export class Images {
       id: randomBytes(6).toString('hex'), state: 'queued', opts: { ...opts, prompt: typed }, mode, modeWhy: why, target, generated, count, steps, step: 0, image: 0, perStep: null,
       startedAt: Date.now(), stepAt: 0, etaSeconds: null, results: [], error: null, note: null, done: Promise.resolve(),
     };
+    // A source made with another model: the same seed does not give the same picture, which is said.
+    if (exact?.short) job.sizeNote = shortSizeWords(m.name.replace(/\s*\(.*\)$/, ''), generated, target0!);
+    if (src && base && src.model && src.model !== m.id) job.note = `Drawn with ${m.name.replace(/\s*\(.*\)$/, '')}: it was made with ${src.modelName || src.model}, so it will not come out the same.`;
     const plan = {
       modelPrompt, negative, seed, steps, final,
       // The fast models' 1 ignores "leave out" words: 1.5 for Mid and High when there are some (src/quality.ts).
       cfg: base && !final ? base.cfg : typeof opts.cfg === 'number' && opts.cfg >= 0 && opts.cfg <= 30 ? opts.cfg : cfgFor(m, quality, negative),
       sampler: base && !final ? base.sampler : opts.sampler && /^[\w+]+$/.test(opts.sampler) ? opts.sampler : defaults.sampler,
-      scheduler: defaults.scheduler,
+      scheduler: base?.scheduler ?? defaults.scheduler,
       fit: (base?.fit ?? opts.fit ?? 'crop') as Fit,
       ico: !!opts.ico,
       draft: !final && quality === 'draft',
@@ -593,6 +629,7 @@ export class Images {
     }
     if (cancelled()) return;
     if (!result?.images?.length) return this.fail(job, 'The image runner finished but sent no picture back.');
+    drawings.drawn?.(this.pane.view.model ?? '');
     job.state = 'finishing';
     try {
       for (let i = 0; i < result.images.length; i++) {
@@ -604,7 +641,8 @@ export class Images {
         if (job.opts.forPc) {
           // For a linked PC: shaped in memory, never saved here (F7 E2). drawForPc takes it at once.
           const shaped = await this.shape(job, plan, png);
-          this.away.set(job.id, { png: shaped.data, modelName: m.name, modelPrompt: plan.modelPrompt, mode: job.mode, seconds: Math.round((seconds / result.images.length) * 10) / 10, note: job.note ?? '' });
+          this.away.set(job.id, { png: shaped.data, modelName: m.name, modelPrompt: plan.modelPrompt, mode: job.mode, seconds: Math.round((seconds / result.images.length) * 10) / 10, note: [job.sizeNote, job.note].filter(Boolean).join(' '),
+            made: { seed: plan.seed + i, steps: plan.steps, cfg: plan.cfg, sampler: plan.sampler, scheduler: plan.scheduler, negative: plan.negative, generated: job.generated, target: job.target, fit: shaped.fit, draft: plan.draft, model: m.id, modelFile: this.modelFile(m), licence: m.licence ?? '', tomlin: this.deps.version ?? '' } });
           continue;
         }
         job.results.push(await this.finish(job, plan, m, png, plan.seed + i, seconds / result.images.length, device));
@@ -724,29 +762,37 @@ export class Images {
     }
     const picture: Picture = {
       id, at: new Date().toISOString(), prompt: job.opts.prompt, modelPrompt: plan.modelPrompt, negative: plan.negative, mode: job.mode, model: m.id, modelName: m.name,
-      seed, steps: plan.steps, cfg: plan.cfg, sampler: plan.sampler, generated: job.generated, target: job.target, fit, device, seconds: Math.round(seconds * 10) / 10,
+      seed, steps: plan.steps, cfg: plan.cfg, sampler: plan.sampler, scheduler: plan.scheduler, generated: job.generated, target: job.target, fit, device, seconds: Math.round(seconds * 10) / 10,
       draft: plan.draft, finalOf: job.opts.finalOf, original, output, format, bytes: data.length, icoFiles, transparent,
       // Every new picture waits as a draft until the person adds it to the gallery.
       kept: false,
       ...(job.opts.chat ? { chat: job.opts.chat } : {}),
     };
     await this.gallery.add(picture);
+    await this.gallery.saveSource(picture, { modelFile: this.modelFile(m), licence: m.licence ?? '', tomlin: this.deps.version ?? '' });
     return picture;
   }
 
-  /** A picture a paired PC drew for this one: saved in the gallery like one drawn here, as a draft in its chat. */
-  async receive(o: { png: Buffer; prompt: string; modelPrompt: string; mode: string; modelName: string; pc: string; seconds: number; chat?: string }): Promise<Picture> {
+  /**
+   * A picture a paired PC drew for this one: saved in the gallery like one drawn here, as a draft in its chat, with the
+   * seed, steps and the rest that PC drew it with (`made`). An older TOMLIN there sends none: the settings are then
+   * marked not known, never saved as noughts that look like settings.
+   */
+  async receive(o: { png: Buffer; prompt: string; modelPrompt: string; mode: string; modelName: string; pc: string; seconds: number; chat?: string; made?: Made | null }): Promise<Picture> {
     const { width = 512, height = 512 } = await sharp(o.png).metadata();
     const size = { width, height };
+    const made = o.made ?? null;
     const output = await this.gallery.save(`${slug(o.prompt)}-${width}x${height}.png`, o.png);
     const picture: Picture = {
-      id: randomBytes(6).toString('hex'), at: new Date().toISOString(), prompt: o.prompt, modelPrompt: o.modelPrompt, negative: '',
+      id: randomBytes(6).toString('hex'), at: new Date().toISOString(), prompt: o.prompt, modelPrompt: o.modelPrompt, negative: made?.negative ?? '',
       mode: (MODES as string[]).includes(o.mode) ? (o.mode as Mode) : 'custom', model: 'remote', modelName: `${o.modelName || 'a picture model'} on ${o.pc}`,
-      seed: 0, steps: 0, cfg: 0, sampler: '', generated: size, target: size, fit: 'crop', device: `on ${o.pc}`, seconds: Math.round(o.seconds * 10) / 10,
+      seed: made?.seed ?? 0, steps: made?.steps ?? 0, cfg: made?.cfg ?? 0, sampler: made?.sampler ?? '', ...(made ? { scheduler: made.scheduler } : { settingsUnknown: true }),
+      generated: made?.generated ?? size, target: size, fit: made?.fit ?? 'crop', device: `on ${o.pc}`, seconds: Math.round(o.seconds * 10) / 10,
       draft: false, original: output, output, format: 'png', bytes: o.png.length, kept: false,
       ...(o.chat ? { chat: o.chat } : {}),
     };
     await this.gallery.add(picture);
+    await this.gallery.saveSource(picture, { model: made?.model ?? '', modelFile: made?.modelFile ?? '', licence: made?.licence ?? '', tomlin: made?.tomlin ?? '' });
     return picture;
   }
 
@@ -922,7 +968,8 @@ export class Images {
         try {
           return send(res, 202, await this.registry.start(String(b.id ?? ''))), true;
         } catch (error) {
-          return send(res, 400, { error: (error as Error).message }), true;
+          const room = (error as { room?: unknown }).room;
+          return send(res, 400, { error: (error as Error).message, ...(room ? { room } : {}) }), true;
         }
       }
       case '/api/downloads/stop':
@@ -985,6 +1032,13 @@ interface Plan {
   /** High with the sharpener: each picture is enlarged after it is drawn (src/quality.ts, registry/realesrgan-x4-anime6b.json). */
   upscale: boolean;
 }
+
+/** An image source as the picture it describes, for drawing it again as a picture from the gallery is. */
+const pictureFrom = (s: ImageSource, seed: number): Picture => ({
+  id: '', at: s.at, prompt: s.prompt, modelPrompt: s.modelPrompt || s.prompt, negative: s.negative, mode: s.mode, model: s.model, modelName: s.modelName,
+  seed, steps: s.steps, cfg: s.cfg, sampler: s.sampler, scheduler: s.scheduler, generated: s.generated, target: s.target, fit: s.fit, device: '', seconds: 0,
+  draft: s.draft, original: '', output: '', format: 'png', bytes: 0,
+});
 
 function clampInt(v: unknown, lo: number, hi: number): number | undefined {
   const n = Number(v);

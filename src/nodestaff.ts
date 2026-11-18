@@ -36,24 +36,37 @@ export interface SharedModel {
   busy: boolean;
   /** Hidden by that PC's owner (Models on this PC, Hide): still usable, left out of the pick lists until "Show hidden". */
   hidden?: boolean;
+  /** When it last answered or drew there (ms); absent when that PC has no record (or runs an older TOMLIN). */
+  usedAt?: number;
   /** A chat model: its Guessing model there ('' = none), and the ones that PC could use (src/runset.ts). An older node sends neither. */
   draft?: string;
   guessers?: string[];
+  /** The hires on that PC who work on it, and as what (first choice, backup), so a linked PC's delete can say so. An older node sends none. */
+  assigned?: { name: string; as: string[]; spare: boolean }[];
 }
 
 /** What a node tells linked PCs: every model on it (nothing to tick), chat models first, each list in its own order. */
-export function sharedList(o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean; runOf?: (id: string) => { draft: string; guessers: string[] } }): SharedModel[] {
+export function sharedList(o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean; usedAt?: (id: string) => number | null; assigned?: (id: string) => { name: string; as: string[]; spare: boolean }[]; runOf?: (id: string) => { draft: string; guessers: string[] } }): SharedModel[] {
   const kindOf = (m: { kind?: 'chat' | 'image' }) => m.kind ?? 'chat';
   return [...o.models.filter(m => kindOf(m) === 'chat'), ...o.models.filter(m => kindOf(m) === 'image')].map(m => {
     const loaded = o.loaded(m.id);
     const kind = kindOf(m);
     const run = kind === 'chat' ? o.runOf?.(m.id) : undefined;
-    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}), ...(run ? { draft: run.draft, guessers: run.guessers } : {}) };
+    const assigned = o.assigned?.(m.id) ?? [];
+    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}), ...(o.usedAt?.(m.id) ? { usedAt: o.usedAt(m.id)! } : {}), ...(run ? { draft: run.draft, guessers: run.guessers } : {}), ...(o.assigned ? { assigned } : {}) };
   });
 }
 
 /** A model id as a node sent it: a short string with no control characters, else ''. */
 const modelId = (v: unknown) => (typeof v === 'string' && v.length <= 300 && !/[\u0000-\u001f\u007f]/.test(v) ? v : '');
+
+/** The hires a node says work on a model: at most 20, names capped, only the known ways of working on it. */
+function cleanAssigned(raw: unknown[]): { name: string; as: string[]; spare: boolean }[] {
+  const ways = ['first choice', 'backup', 'on it now'];
+  return raw.slice(0, 20).map(r => (r && typeof r === 'object' ? r : {}) as Record<string, unknown>)
+    .map(x => ({ name: text(x.name, 40), as: (Array.isArray(x.as) ? x.as : []).filter((a): a is string => typeof a === 'string' && ways.includes(a)), spare: x.spare === true }))
+    .filter(x => x.name && x.as.length);
+}
 
 /** What a node sent as its shared models, made safe to keep and show: at most 40, names capped, numbers only. */
 export function cleanShared(raw: unknown): SharedModel[] {
@@ -66,7 +79,7 @@ export function cleanShared(raw: unknown): SharedModel[] {
     const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
     const kind = x.kind === 'image' ? 'image' : 'chat';
     const run = kind === 'chat' && Array.isArray(x.guessers) ? { draft: modelId(x.draft), guessers: x.guessers.map(modelId).filter(Boolean).slice(0, 40) } : {};
-    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}), ...run });
+    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}), ...(n(x.usedAt) ? { usedAt: n(x.usedAt) } : {}), ...run, ...(Array.isArray(x.assigned) ? { assigned: cleanAssigned(x.assigned) } : {}) });
   }
   return out;
 }
@@ -128,12 +141,13 @@ export function cutWords(pcName: string, message: string): string {
 export type LoadedFor = Map<string, { by: Set<string>; links: Set<string>; at: number }>;
 
 /**
- * The chat models that make way, oldest first, when a model linked PC `pc` asked for (`keep`) does not fit: every one
- * loaded only for that PC and not answering (`idle`). Never one its owner loaded, nor one another PC uses too (P1-4, 3 Nov:
- * one was unloaded, then Gemma 4 was refused with three test models idle).
+ * The chat models that make way, oldest first, when a model the link `link` asked for (`keep`) does not fit: every one
+ * loaded only for that link and not answering (`idle`). Never one its owner loaded, nor one another link uses too (P1-4,
+ * 3 Nov: one was unloaded, then Gemma 4 was refused with three test models idle). Gone by the link's own id, never its
+ * name: a guest picks its own name, and could take another PC's.
  */
-export function makeWayOrder(loaded: LoadedFor, pc: string, keep: string, idle: (id: string) => boolean): string[] {
-  return [...loaded].filter(([id, v]) => id !== keep && v.by.size === 1 && v.by.has(pc) && idle(id)).sort((a, b) => a[1].at - b[1].at).map(([id]) => id);
+export function makeWayOrder(loaded: LoadedFor, link: string, keep: string, idle: (id: string) => boolean): string[] {
+  return [...loaded].filter(([id, v]) => id !== keep && v.links.size === 1 && v.links.has(link) && idle(id)).sort((a, b) => a[1].at - b[1].at).map(([id]) => id);
 }
 
 /** An answer for a linked PC: every chat model loaded for it stays. */
@@ -189,10 +203,15 @@ export function cleanStats(x: unknown): NodeStats | null {
   };
 }
 
-/** Draft, Mid or High and the seed, as a picture asked of a linked PC gives them: what is not good is left to that PC. */
-export function drawChoices(b: Record<string, unknown>): { quality?: string; seed?: number } {
+/**
+ * Draft, Mid or High, the seed and the words to leave out, as a picture asked of a linked PC gives them: what is not
+ * good is left to that PC. The words to leave out go with the PC's own for the style (src/images.ts adds them first).
+ */
+export function drawChoices(b: Record<string, unknown>): { quality?: string; seed?: number; negative?: string } {
+  const negative = typeof b.negative === 'string' ? b.negative.replace(/\s+/g, ' ').trim().slice(0, 1000) : '';
   return {
     ...(b.quality === 'draft' || b.quality === 'mid' || b.quality === 'high' ? { quality: b.quality } : {}),
     ...(Number.isInteger(b.seed) && (b.seed as number) >= 0 && (b.seed as number) < 2 ** 31 ? { seed: b.seed as number } : {}),
+    ...(negative ? { negative } : {}),
   };
 }

@@ -9,7 +9,7 @@ import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { buildLayered, cleanFoldWait, LAYER_MIN_CTX, layeredFor, layerReadSpeed, type Layered } from '../layers.ts';
 import { HOST_NAME, type Routes, chatLogs, chats, json, notebooks, staff, staffId, store } from './core.ts';
-import { chat, lastUsed, main, runOn } from './panes.ts';
+import { chat, lastUsed, main, runOn, runnerSlots } from './panes.ts';
 import { chatPeople, personFor, sendTarget } from './people.ts';
 import { readSpeedsNow } from './thispc.ts';
 import { chatQuery, namedChat, type ChatInfo } from '../chats.ts';
@@ -82,7 +82,8 @@ export const answerPhases = () => phasesByWho([...chatAnswers.values()].map(a =>
 export const chatOfFile = (file: string) => /^chats\/([a-f0-9]{12})\.json$/.exec(file)?.[1] ?? '';
 /** An answer takes its runner (null: it answers on another PC): a job step there stops (a chat outranks a step). */
 export function takeChat(ac: AbortController, pane: Pane | null, chatId = '', who = '', label = '') {
-  if (pane) for (const [s, p] of stepAnswers) if (p === pane) s.abort();
+  // A runner started with more than one slot (At once, src/slots.ts) writes a step beside a chat; with one, the step stops.
+  if (pane && (runnerSlots.get(pane) ?? 1) <= 1) for (const [s, p] of stepAnswers) if (p === pane) s.abort();
   const was = chatAnswers.get(ac);
   chatAnswers.set(ac, { chatId: chatId || was?.chatId || '', who: who || was?.who || '', pane, ...(label || was?.label ? { label: label || was?.label } : {}) });
 }

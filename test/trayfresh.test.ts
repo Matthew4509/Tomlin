@@ -5,17 +5,17 @@ import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { refreshTray, STAMP, traySum, type Build } from '../src/trayfresh.ts';
+import { followAppsEntry, refreshTray, STAMP, traySum, type Build, type Reg } from '../src/trayfresh.ts';
 const OLD_EXE = 'TOMLIN.old.exe';
 import { CURRENT, EXE } from '../src/installer.ts';
 
 /** An install folder with one copy in it, its tray.cs saying `source`. */
 function installed(source: string) {
   const root = mkdtempSync(join(tmpdir(), 'sm-tray-'));
-  const app = join(root, 'shelby-9.9.9');
+  const app = join(root, 'tomlin-9.9.9');
   mkdirSync(join(app, 'tools'), { recursive: true });
   writeFileSync(join(app, 'tools', 'tray.cs'), source);
-  writeFileSync(join(root, CURRENT), 'shelby-9.9.9');
+  writeFileSync(join(root, CURRENT), 'tomlin-9.9.9');
   writeFileSync(join(root, EXE), 'the program built before');
   return { root, app };
 }
@@ -48,6 +48,39 @@ test('a changed tray.cs builds the program again: the old one is renamed, the ne
   writeFileSync(join(app, 'tools', 'tray.cs'), 'class B {}\n');
   assert.equal(await refreshTray(app, fake), 'built');
   assert.equal(builds.length, 2);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('Settings > Apps follows the version that runs after an update made inside the app, and nothing else is touched', async () => {
+  const { root, app } = installed('class A {}');
+  const key = 'HKCU\\Software\\TomlinTestOnly';
+  const env = { TOMLIN_INSTALL_ROOT: root, TOMLIN_UNINSTALL_KEY: key };
+  let listed: string | null = '2.0.81';
+  const calls: string[][] = [];
+  const reg: Reg = async args => {
+    calls.push(args);
+    if (args[0] === 'add') { listed = args[args.indexOf('/d') + 1]; return ''; }
+    if (listed === null) throw new Error('not there');
+    return `\r\n${key}\r\n    DisplayVersion    REG_SZ    ${listed}\r\n\r\n`;
+  };
+  assert.equal(await followAppsEntry(app, '2.0.99', env, reg), 'set');
+  assert.equal(listed, '2.0.99');
+  assert.deepEqual(calls.at(-1), ['add', key, '/v', 'DisplayVersion', '/t', 'REG_SZ', '/d', '2.0.99', '/f']);
+  assert.equal(await followAppsEntry(app, '2.0.99', env, reg), 'same');
+  // No entry: not made here (Repair makes it).
+  listed = null;
+  calls.length = 0;
+  assert.equal(await followAppsEntry(app, '2.0.99', env, reg), 'none');
+  assert.equal(calls.filter(c => c[0] === 'add').length, 0);
+  // An older copy kept beside it, a copy outside the install folder, a test copy, no key: never asked at all.
+  listed = '2.0.81';
+  calls.length = 0;
+  mkdirSync(join(root, 'tomlin-2.0.81'));
+  assert.equal(await followAppsEntry(join(root, 'tomlin-2.0.81'), '2.0.81', env, reg), 'none');
+  assert.equal(await followAppsEntry(app, '2.0.99', { ...env, TOMLIN_INSTALL_ROOT: join(root, 'elsewhere') }, reg), 'none');
+  assert.equal(await followAppsEntry(app, '2.0.99', { ...env, TOMLIN_DATA: join(root, 'data') }, reg), 'none');
+  assert.equal(await followAppsEntry(app, '2.0.99', { ...env, TOMLIN_UNINSTALL_KEY: 'none' }, reg), 'none');
+  assert.equal(calls.length, 0);
   rmSync(root, { recursive: true, force: true });
 });
 

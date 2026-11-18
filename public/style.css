@@ -1,6 +1,6 @@
 :root {
   /* Day (the redesign's colours): cool grey page, white cards, one blue accent; green only
-     means "on". Night (below) is the Bridge's starting look: deep navy, sky-blue accent. Both follow Windows
+     means "on". Night (below) is neutral grey; blue means "press here" in both. Both follow Windows
      unless Day or Night is picked in the app (theme.js). */
   --bg: #f6f7f9;
   --rail: #eff1f4;
@@ -10,7 +10,7 @@
   --line: #d8dde5;
   --accent: #2457d6;
   --accent-ink: #ffffff;
-  --accent-soft: #eaf0ff;
+  --accent-soft: #e3e7ed;
   --field: #ffffff;
   --field-ink: #20252d;
   --warn: #865b00;
@@ -40,61 +40,61 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="day"]) {
-    --bg: #050d1a;
-    --rail: #071426;
-    --panel: #0a1a2f;
-    --ink: #e4f0ff;
-    --ink-soft: #8fa8c8;
-    --line: #1c3653;
-    --accent: #38bbff;
-    --accent-ink: #021019;
-    --accent-soft: #11324e;
-    --field: #0e223a;
-    --field-ink: #e4f0ff;
-    --warn: #ffb648;
-    --warn-bg: #2e2412;
-    --bad: #ff7d5c;
-    --bad-bg: #35191a;
-    --good: #3fe081;
-    --track: #0e223a;
-    --user: #11324e;
-    --select: #1d4f86;
+    --bg: #15171b;
+    --rail: #191c20;
+    --panel: #1e2126;
+    --ink: #eef0f3;
+    --ink-soft: #a3a9b4;
+    --line: #33373f;
+    --accent: #7ea6ff;
+    --accent-ink: #0f1420;
+    --accent-soft: #31353d;
+    --field: #24272d;
+    --field-ink: #eef0f3;
+    --warn: #f0b45a;
+    --warn-bg: #2e2716;
+    --bad: #ff8a80;
+    --bad-bg: #3a1d1d;
+    --good: #3fbf7a;
+    --track: #2a2e35;
+    --user: #262f40;
+    --select: #3a4a6b;
     --select-ink: #ffffff;
-    --hover: rgba(90, 170, 255, .08);
-    --scrim: rgba(0, 4, 14, .6);
+    --hover: rgba(255, 255, 255, .05);
+    --scrim: rgba(0, 0, 0, .6);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
-    --shadow: 0 0 0 1px rgba(90, 170, 255, .1), 0 6px 20px rgba(0, 0, 0, .45);
-    --shadow-lg: 0 0 0 1px rgba(90, 170, 255, .14), 0 14px 44px rgba(0, 0, 0, .65);
+    --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 6px 20px rgba(0, 0, 0, .45);
+    --shadow-lg: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 44px rgba(0, 0, 0, .65);
     color-scheme: dark;
   }
 }
 /* Night picked in the app (theme.js), whatever Windows says; Day picked keeps the colours above. */
 :root[data-theme="night"] {
-  --bg: #050d1a;
-  --rail: #071426;
-  --panel: #0a1a2f;
-  --ink: #e4f0ff;
-  --ink-soft: #8fa8c8;
-  --line: #1c3653;
-  --accent: #38bbff;
-  --accent-ink: #021019;
-  --accent-soft: #11324e;
-  --field: #0e223a;
-  --field-ink: #e4f0ff;
-  --warn: #ffb648;
-  --warn-bg: #2e2412;
-  --bad: #ff7d5c;
-  --bad-bg: #35191a;
-  --good: #3fe081;
-  --track: #0e223a;
-  --user: #11324e;
-  --select: #1d4f86;
+  --bg: #15171b;
+  --rail: #191c20;
+  --panel: #1e2126;
+  --ink: #eef0f3;
+  --ink-soft: #a3a9b4;
+  --line: #33373f;
+  --accent: #7ea6ff;
+  --accent-ink: #0f1420;
+  --accent-soft: #31353d;
+  --field: #24272d;
+  --field-ink: #eef0f3;
+  --warn: #f0b45a;
+  --warn-bg: #2e2716;
+  --bad: #ff8a80;
+  --bad-bg: #3a1d1d;
+  --good: #3fbf7a;
+  --track: #2a2e35;
+  --user: #262f40;
+  --select: #3a4a6b;
   --select-ink: #ffffff;
-  --hover: rgba(90, 170, 255, .08);
-  --scrim: rgba(0, 4, 14, .6);
+  --hover: rgba(255, 255, 255, .05);
+  --scrim: rgba(0, 0, 0, .6);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow: 0 0 0 1px rgba(90, 170, 255, .1), 0 6px 20px rgba(0, 0, 0, .45);
-  --shadow-lg: 0 0 0 1px rgba(90, 170, 255, .14), 0 14px 44px rgba(0, 0, 0, .65);
+  --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 6px 20px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 44px rgba(0, 0, 0, .65);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -171,6 +171,13 @@ button, input, select, textarea { font: inherit; }
   background: var(--field); color: var(--field-ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: var(--fs-md); min-width: 0; width: 100%;
 }
 .field textarea { resize: vertical; }
+/* Every box and list takes the page's colours, Night too (the browser's own grey otherwise): a rule of no weight
+   (:where), so any box styled on its own keeps its look. The lists' choices and the "any" hints follow. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="image"], [type="submit"], [type="button"], [type="reset"]), select, textarea) {
+  background-color: var(--field); color: var(--field-ink); border: 1px solid var(--line); border-radius: 6px;
+}
+:where(input, textarea)::placeholder { color: var(--ink-soft); opacity: 1; }
+:where(option, optgroup) { background-color: var(--field); color: var(--field-ink); }
 .btn {
   border: 1px solid var(--line); background: var(--field); color: var(--field-ink); border-radius: 8px; padding: 7px 14px; cursor: pointer; white-space: nowrap;
 }
@@ -197,6 +204,19 @@ button, input, select, textarea { font: inherit; }
 .fit-note.tight::before { content: "▲ "; }
 .fit-note.no { color: var(--bad); }
 .fit-note.no::before { content: "✕ "; }
+/* A hire who cannot answer as they are (src/hiremodel.ts): the words in the warning colour, a mark, Pick a model. */
+.model-gone { color: var(--warn); }
+.model-warn { color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 6px 10px; margin: 0 0 8px; font-size: var(--fs-sm); }
+.model-warn-mark { font-weight: 700; }
+.btn.pick-model { font-size: var(--fs-sm); padding: 2px 10px; }
+.pick-model-line { margin: 6px 4px 0; font-size: var(--fs-sm); color: var(--warn); }
+/* A chat kept to read: nothing that sends, loads or answers shows, and one line says why. */
+#pane-chat.read-only .connect-row .connect, #pane-chat.read-only .pane-head > .state, #pane-chat.read-only .think-pick,
+#pane-chat.read-only #doc-add, #pane-chat.read-only #notebook-open, #pane-chat.read-only #prompt-save, #pane-chat.read-only #chat-send { display: none; }
+.read-only-line { margin: 0 0 4px; font-size: var(--fs-sm); }
+/* A chat with someone who left the team: their own picture, a little faded. */
+.rail-avatar.left-team, .left-team .rail-avatar { opacity: 0.6; }
+.side-left-bar { list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 6px 8px; font-size: var(--fs-sm); }
 .conn-info .ok::before { content: "✓ "; color: var(--good); font-weight: 700; }
 
 /* Chat */
@@ -263,8 +283,8 @@ dialog#viewer::backdrop { background: rgba(0,0,0,.55); }
 .model-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .model-row.wont-fit b { color: var(--ink-soft); }
 .warn-line { color: var(--warn); font-size: var(--fs-sm); }
-dialog#team, dialog#help { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); width: min(980px, 96vw); max-height: 90vh; padding: 16px; }
-dialog#team::backdrop, dialog#help::backdrop { background: rgba(0,0,0,.55); }
+dialog#team, dialog#help, dialog#sources { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); width: min(980px, 96vw); max-height: 90vh; padding: 16px; }
+dialog#team::backdrop, dialog#help::backdrop, dialog#sources::backdrop { background: rgba(0,0,0,.55); }
 .help-body h2 { margin: 0 0 8px; font-size: var(--fs-xl); }
 .help-body h3 { margin: 18px 0 6px; font-size: var(--fs-md); }
 #help .help-body h3.help-part { margin: 30px 0 4px; padding-top: 14px; border-top: 1px solid var(--line); font-size: var(--fs-xl); }
@@ -418,6 +438,9 @@ dialog#code-save::backdrop { background: rgba(0,0,0,.55); }
 #file-list { display: grid; gap: 4px; max-height: 260px; overflow: auto; margin-bottom: 8px; }
 .file-item { display: flex; justify-content: space-between; gap: 8px; text-align: left; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
 .file-item.current { border-color: var(--accent, currentColor); font-weight: 600; }
+/* The size stays on one line ("3 KB"); the name takes the wrapping. */
+.file-item > :first-child { min-width: 0; }
+.file-item > .hint { flex: none; white-space: nowrap; }
 #file-text, #blog-body { width: 100%; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-md); }
 .blog-form { display: grid; gap: 10px; margin-bottom: 10px; }
 #blog-draft { white-space: pre-wrap; }
@@ -460,7 +483,7 @@ dialog#code-save::backdrop { background: rgba(0,0,0,.55); }
 /* Shell: the rail on the left, then Home or the two panes */
 .shell { flex: 1; display: flex; min-height: 0; }
 .shell > .panes { flex: 1; min-width: 0; }
-.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="updates"]) > #updates-page, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="data"]) > #settings-data, .shell:not([data-view="colours"]) > #settings-colours, .shell:not([data-view="help"]) > #help { display: none; }
+.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="updates"]) > #updates-page, .shell:not([data-view="cluster"]) > #cluster-page, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="data"]) > #settings-data, .shell:not([data-view="perms"]) > #settings-perms, .shell:not([data-view="colours"]) > #settings-colours, .shell:not([data-view="help"]) > #help { display: none; }
 .back { display: none; }
 .rail { flex: 0 0 248px; min-width: 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 8px 16px; display: flex; flex-direction: column; gap: 2px; }
 .rail-head { font-size: var(--fs-md); margin: 14px 8px 4px; }
@@ -560,7 +583,7 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 .home-track { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; margin: 4px 0 2px; }
 .home-fill { height: 100%; background: var(--accent); transition: width .5s; }
 @media (prefers-reduced-motion: reduce) { .home-fill { transition: none; } }
-.home-ask { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 8px; }
+.home-ask { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .home-ask .team-actions { align-items: center; }
 .setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
 .setup-card { display: grid; gap: 6px; align-content: start; justify-items: start; padding: 14px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); }
@@ -604,6 +627,12 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 /* A linked PC's memory, short: the name left, "used of total" right, the bar under them */
 .mbar-short { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
 .mbar-short > .mbar { grid-column: 1 / -1; }
+/* In a narrow tile a long card name ("Graphics card (Quadro P2000)") went one word a line beside its figures: the
+   figures move under the name instead. */
+.mbar-box.mbar-short { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.mbar-short > .mbar-title { flex: 1 1 auto; }
+.mbar-short > .mbar-sum { margin-left: auto; }
+.mbar-short > .mbar { flex: 0 0 100%; }
 .mbar-sum { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: right; }
 .node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .node-head .sdot { position: relative; right: auto; bottom: auto; flex: none; }
@@ -615,9 +644,9 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 .mb-needed { background: repeating-linear-gradient(135deg, var(--accent) 0 5px, var(--accent-soft) 5px 10px); }
 .mb-other { background: var(--ink-soft); opacity: .45; }
 .mb-free { background: transparent; }
-/* Linked PCs: tiles, three across on a wide screen, fewer as it narrows. */
+/* Linked PCs: tiles, as many across as fit at 280px or more. The Network page is at most 820px wide, so that is two;
+   three across made each tile about 240px, too narrow for its memory lines. */
 .node-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-@media (min-width: 1100px) { .node-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .node-tiles > .node-card { min-width: 0; }
 .node-tiles > .hint { grid-column: 1 / -1; }
 .node-models { display: grid; gap: 6px; }
@@ -721,6 +750,13 @@ dialog#new-chat { width: min(1040px, 96vw); }
 .pick-card:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 1px; }
 .role-icon { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--track); color: var(--accent); }
 .team-card { padding: 10px 12px; margin: 8px 0; gap: 10px; }
+/* All staff: each hire a tile under their PC's heading, as New chat's cards are */
+.staff-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; align-items: start; }
+.team-card.staff-card { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0; padding: 16px 10px 12px; text-align: center; background: var(--panel); border-radius: 16px; box-shadow: var(--shadow-sm); }
+.staff-card .rail-avatar { width: 72px; height: 72px; font-size: 22px; margin-bottom: 4px; }
+.staff-card .person-name { margin: 0; font-size: var(--fs-md); }
+.staff-card-go { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; margin-top: 10px; }
+.staff-card-go .btn svg { vertical-align: -3px; }
 .team-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .team-row .rail-text { flex: 1 1 180px; min-width: 0; }
 .team-row .btn svg { vertical-align: -3px; }
@@ -817,6 +853,8 @@ dialog.ask-pop .fault { text-align: left; }
 .mp-row { align-items: start; }
 .mp-name { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .mp-tag { font-size: var(--fs-xs); padding: 0 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--ink-soft); }
+/* What a model can do (Pictures, Tools): a small soft-blue mark beside its name; a tip says what it means */
+.mp-cap { font-size: var(--fs-xs); padding: 0 7px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); cursor: help; }
 .mp-about { margin: 4px 0 0; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mp-about.open { display: block; }
 .mp-more p { margin: 4px 0 0; }
@@ -920,6 +958,7 @@ dialog.small-dlg::backdrop { background: rgba(0,0,0,.55); }
 dialog.finder-dlg { width: min(720px, 96vw); max-height: 92vh; overflow: auto; }
 .finder h3 { margin: 12px 0 4px; font-size: var(--fs-md); }
 .finder-sizes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
+.rcheck-warn { margin: 10px 0; padding: 8px 10px; border-left: 4px solid var(--bad); background: var(--bad-bg); font-size: var(--fs-sm); }
 .finder-plan { margin: 0 0 6px; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .finder-smaller { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 .finder-smaller h3 { margin: 0 0 4px; }
@@ -954,6 +993,13 @@ dialog#backup-dlg { width: min(860px, 96vw); max-height: 92vh; }
 
 .g-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; }
 .g-tools [hidden] { display: none; }
+dialog#sources { overflow: auto; }
+dialog#sources h3 { margin: 0 0 8px; }
+.sources-ask { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 10px 0 6px; }
+.sources-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.source-row { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.source-row .source-prompt { margin: 0 0 2px; overflow-wrap: anywhere; }
+.source-row .source-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .g-picked { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tile.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
 .pick-mark { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.35); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: var(--fs-sm); }
@@ -1091,6 +1137,9 @@ h1, h2, h3 { letter-spacing: -.01em; }
 .rail-new { margin: 0 2px 6px; padding: 10px 14px; border-radius: 12px; display: inline-flex; align-items: center; gap: 8px; }
 .rail-new svg { flex: none; }
 .rail-head { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-soft); margin: 18px 10px 6px; }
+.rail-head-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-right: 8px; }
+.rail-head-row .rail-head { white-space: nowrap; }
+.rail-head-row .rail-fast { display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; padding: 2px 7px; font-size: 12px; white-space: nowrap; }
 .rail-fold > summary.rail-head { margin-left: 8px; }
 .rail-row { border-radius: 10px; padding: 7px 8px; gap: 10px; transition: background .12s; }
 .rail-row:hover { background: var(--hover); }
@@ -1121,8 +1170,8 @@ h1, h2, h3 { letter-spacing: -.01em; }
 .state { border-color: var(--line); color: var(--ink-soft); font-size: var(--fs-xs); padding: 3px 10px; }
 .state .dot { width: 8px; height: 8px; border-width: 1.5px; }
 .state[data-state="connected"] { border-color: transparent; background: #e7f3ec; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .state[data-state="connected"] { background: #0f2e25; } }
-:root[data-theme="night"] .state[data-state="connected"] { background: #0f2e25; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .state[data-state="connected"] { background: #17362a; } }
+:root[data-theme="night"] .state[data-state="connected"] { background: #17362a; }
 .splitter::after { background: transparent; }
 .splitter:hover::after, .splitter:focus-visible::after { background: var(--ink-soft); }
 .avatar { width: 48px; height: 48px; border: 1px solid var(--line); background: var(--accent-soft); }
@@ -1210,8 +1259,8 @@ dialog::backdrop { background: var(--scrim) !important; backdrop-filter: blur(2p
 .rail-room { color: var(--ink); }
 .team-card, .job-step, .job-box, .nb-line, .pj-hire, .pj-preview { border-color: var(--line); border-radius: 12px; }
 .profile-banner { background: linear-gradient(120deg, #dfe7f5, #f0f3f7); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .profile-banner { background: linear-gradient(120deg, #11324e, #0a1a2f); } }
-:root[data-theme="night"] .profile-banner { background: linear-gradient(120deg, #11324e, #0a1a2f); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .profile-banner { background: linear-gradient(120deg, #31353d, #1e2126); } }
+:root[data-theme="night"] .profile-banner { background: linear-gradient(120deg, #31353d, #1e2126); }
 .job-badge.done, .job-ok { background: #e7f3ec; border-color: var(--good); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .job-badge.done, :root:not([data-theme="day"]) .job-ok { background: #0f2e25; } }
 :root[data-theme="night"] .job-badge.done, :root[data-theme="night"] .job-ok { background: #0f2e25; }
@@ -1224,6 +1273,9 @@ dialog::backdrop { background: var(--scrim) !important; backdrop-filter: blur(2p
 @media (max-width: 760px) {
   .home, .nodes, .models-page { padding: 16px 16px 24px; }
   .home-greet h2 { font-size: 24px; }
+  /* "‹ Chats and staff" on a line of its own, so the greeting and its date are not squeezed beside it */
+  .home-main > .home-head { flex-wrap: wrap; }
+  .home-main > .home-head > .back { flex-basis: 100%; justify-content: flex-start; }
   .home-ask-title { font-size: 18px; }
   .rail { padding: 10px 8px 16px; }
 }
@@ -1254,6 +1306,9 @@ dialog::backdrop { background: var(--scrim) !important; backdrop-filter: blur(2p
 @media (min-width: 761px) and (max-width: 900px) { .rail { flex-basis: 212px; } }
 /* A window never scrolls sideways by a few pixels; wide tables keep their own sideways scroll */
 dialog { overflow-x: hidden; }
+/* A window with no padding of its own gets 16px, not the browser's 1em: its top band and its foot reach out by 16px,
+   and with 14px they stuck out by 2px, so a short window scrolled by 2px. */
+dialog { padding: 16px; }
 /* The Home ask box: the card shows focus, not a second box inside it */
 
 /* What can this PC run? (calc.js) */
@@ -1285,7 +1340,6 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .mute-dlg .team-actions { flex-wrap: wrap; }
 .mute-dlg .check { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 4px; }
 #chat-mute-actions .btn { display: inline-flex; align-items: center; gap: 4px; }
-@media (max-width: 760px) { .mute-all-line #mute-all-text { display: none; } }
 
 /* ---- Chat head, like a Staff overview card: photo | "Rosa · Qwen3.5-9B" over the PC | the speed over the chat's
    name | Project, state, Connect, the gear (the model is picked in it), Save, Copy, the chat's menu. One row; it wraps
@@ -1392,6 +1446,13 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .chip-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* The name beside the SM mark goes first when the bar is short of room. */
 @media (max-width: 1280px) { .brand-home .brand-name { display: none; } }
+/* Nothing in the top bar overlaps, from 800 wide up: the models line keeps a width of its own, "No models loaded"
+   keeps all its words on one line (the bar wraps to a second line rather than squeeze it or run items into each
+   other), and while all is muted the bar says only Unmute (the bell beside it, and its tip, say until when). */
+.bar { flex-wrap: wrap; }
+.loaded { min-width: 120px; }
+.loaded > .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loaded:has(> .hint) { flex: none; min-width: max-content; }
 @media (max-width: 760px) {
   .loaded { flex-basis: 100%; order: 5; }
   .chip-size { display: none; }
@@ -1511,9 +1572,9 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 /* Deleting pictures (Edit): a box on every picture that shows a tick, not only a colour, readable on dark and light
    pictures (a white box with a dark edge and a white halo); ticked pictures get a thick blue frame; an × top right deletes
    one, after the picture itself asks. The "picture shown above" ring is hidden while editing so it cannot be taken for a tick. */
-:root { --pick: #2457d6; --pick-ink: #ffffff; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) { --pick: #38bbff; --pick-ink: #021019; } }
-:root[data-theme="night"] { --pick: #38bbff; --pick-ink: #021019; }
+:root { --pick: #20252d; --pick-ink: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) { --pick: #eef0f3; --pick-ink: #15171b; } }
+:root[data-theme="night"] { --pick: #eef0f3; --pick-ink: #15171b; }
 .g-tools { gap: 8px; }
 .g-picked { gap: 8px; }
 .g-picked-n { font-size: var(--fs-sm); color: var(--ink-soft); }
@@ -1542,7 +1603,13 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 /* A question asked on the page (askHere in app.js), in place of a browser pop-up */
 .page-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0; border: 1px solid var(--bad); background: var(--bad-bg); border-radius: var(--r-ctl); font-size: var(--fs-md); color: var(--ink); }
 .page-ask[hidden] { display: none; }
-.page-ask > span { flex: 1 1 220px; }
+.page-ask > span { flex: 1 1 220px; white-space: pre-line; }
+/* Move or copy to another PC: one tile per PC (name, what it is, free space, Move here, Copy here), as many as there are PCs. */
+.move-ask { display: grid; }
+.move-ask > span { flex: none; }
+.move-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.move-tile { display: grid; align-content: start; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.move-ask > .btn { justify-self: start; }
 /* Questions and messages from the top bar float under it (barBox in app.js sets the top) */
 .bar-ask { position: fixed; right: 16px; z-index: 40; max-width: min(480px, calc(100vw - 32px)); margin: 0; box-shadow: var(--shadow); background: var(--panel); }
 /* The Home row at the top of the left panel: a house in place of a face */
@@ -1754,6 +1821,13 @@ dialog#send-to::backdrop { background: rgba(0,0,0,.55); }
 .mp-tile .team-hire { margin: 0; }
 .mp-path { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-sm); overflow-wrap: anywhere; user-select: all; }
 @media (max-width: 760px) { .mp-tiles:not([hidden]) { grid-template-columns: 1fr; } }
+/* Where models are kept: one tile across both columns, with the models on this PC listed by drive */
+.mp-tile-wide { grid-column: 1 / -1; }
+.mp-drives { display: grid; gap: 8px; }
+.mp-drive { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.mp-drive b { font-size: var(--fs-md); }
+.mp-drive ul { margin: 4px 0 0; padding-left: 18px; font-size: var(--fs-sm); }
+.mp-drive.mp-drive-now { border-color: var(--accent, currentColor); }
 
 /* Quick or Think in the chat box, and the working folded above a Think answer */
 .chat-actions .think-pick { padding: 2px; }
@@ -1769,14 +1843,22 @@ dialog#send-to::backdrop { background: rgba(0,0,0,.55); }
 .msg .permit p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .msg .permit .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .msg .permit .btn { padding: 4px 12px; font-size: var(--fs-sm); }
+/* The crash notice (crash.js): the PC and the fault first, then what to try */
+.msg .crash .crash-title { font-weight: 600; }
+.msg .crash select { max-width: 100%; font-size: var(--fs-sm); }
 /* Node network: what linked PCs may do here (Network), and the window of what they share */
-.node-allow .node-allow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; margin: 6px 0; }
-.node-allow .node-allow-grid .hint { margin: 2px 0 0 24px; }
 dialog#net-dlg { background: var(--panel); color: var(--ink); width: min(860px, 96vw); max-height: 90vh; padding: 16px; }
 .net-list { display: grid; gap: 8px; margin-bottom: 8px; }
 .net-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); }
 .net-row .net-name { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
 .net-row .progress { flex-basis: 100%; }
+#net-rows, #net-backups { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); align-items: start; }
+.net-tile { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.net-tile.is-off { opacity: 0.75; }
+.net-tile-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; }
+.net-more > summary { cursor: pointer; color: var(--accent); font-size: var(--fs-sm); }
+.net-more[open] > summary { margin-bottom: 8px; }
+.net-tile .net-row { border-width: 1px 0 0; border-radius: 0; padding: 8px 0; }
 .owner-form { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--line); border-radius: var(--radius); }
 .owner-nudge { display: grid; gap: 8px; }
 .owner-state:empty { display: none; }
@@ -1911,6 +1993,26 @@ dialog#jobs { width: min(1240px, 96vw); max-height: 92vh; min-height: min(640px,
 .desk-face .sdot { width: 12px; height: 12px; border-width: 2px; }
 .desk-face:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .rail-staff-item[draggable="true"] { cursor: grab; }
+/* The Cluster card above My PC (home.js drawClusterCard): its on/off switch sits at the right of the row */
+/* One name line ("Cluster is on") and the PCs under it; the state is in the name, so its own line is not drawn. A small switch. */
+.rail-cluster-item .rail-row { padding-right: 50px; }
+.rail-cluster-item .rail-state { display: none; }
+.rail-cluster-item .rail-sw { width: 34px; height: 20px; }
+.rail-cluster-item .rail-sw i::after { width: 14px; height: 14px; }
+.rail-cluster-item .rail-sw input:checked + i::after { transform: translateX(14px); }
+.rail-cluster-item .rail-sw { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+.rail-cluster { margin-bottom: 4px; }
+/* A PC held by the cluster while it is on: greyed out, no staff go there */
+.pc-held { opacity: .72; background: var(--track); }
+.pc-held .rail-row, .node-card.pc-held .node-head { filter: grayscale(1); }
+/* The risky-message warning (chatview.js app.scanWarn): the whole text in a box that scrolls, flagged parts marked */
+dialog.scan-dlg { width: min(720px, 94vw); max-height: 92vh; overflow: auto; }
+.scan-reasons { margin: 6px 0 8px; padding-left: 20px; }
+.scan-text { max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: var(--fs-md); }
+.scan-text mark { background: color-mix(in srgb, var(--bad) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+.scan-text .scan-hidden { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--track); border-radius: 3px; padding: 0 2px; }
+.cluster-picks { display: grid; gap: 6px; padding: 8px 0 4px; }
+.cluster-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 .pc-card.drop-ok { border-color: var(--good); border-style: dashed; }
 .pc-card.drop-no { opacity: .5; }
 .pc-card.drop-over { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--good); }
@@ -1985,21 +2087,26 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 .upd-steps .p-track { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .upd-steps .p-fill { height: 100%; width: 0; background: var(--accent); transition: width .5s; }
 /* Settings puts its menu at the top of the left panel, alone: no PCs, staff or chats. It stays there on every page it
-   opens, with the page open marked, so the next one is one press away. Every other page shows only TOMLIN - HOME and
-   Settings, at the foot of the panel: the submenu opens on Settings. */
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="colours"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="colours"]) > .rail #rail-settings-sub { padding-left: 14px; }
-.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="colours"]) > .rail #rail-settings-sub { display: none; }
-.rail-links .link[aria-current="page"] { background: var(--hover); font-weight: 600; }
-.rail-links .link[aria-current="page"] svg { color: var(--ink); }
+   opens, with the page open marked, so the next one is one press away. Every other page has no menu at the foot of the
+   panel: the TOMLIN - HOME and Settings lines were removed (Home is the logo and the Home row, Settings is the top bar). */
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail #rail-settings-sub { padding-left: 14px; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]) > .rail #rail-settings-sub { display: none; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]) > .rail > .rail-setup { display: none; }
+/* The page on screen: the selection blue, bold, so the line under the mouse (the faint grey hover) never looks like a
+   second page marked. */
+.rail-links .link[aria-current="page"] { background: var(--select); color: var(--select-ink); font-weight: 600; }
+.rail-links .link[aria-current="page"] svg { color: var(--select-ink); }
 /* On a phone the menu sits above the page */
-@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="colours"]) > .rail { display: flex; } }
+@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail { display: flex; } }
 /* Staff, Jobs and Files as pages (home.js showAsPage): the window's own box, backdrop and height let go */
 .shell:not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > #setup-page { display: none; }
 #setup-page > dialog.as-page { position: static; display: block; inset: auto; width: 100%; max-width: 1240px; height: auto; max-height: none; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: inherit; overflow: visible; }
 #setup-page > dialog.as-page:not([open]) { display: none; }
 #setup-page > dialog.as-page > .help-body { height: auto; }
+/* Shown as a page, a window has one Close: the one in its title bar. The second at its foot stuck over the page. */
+#setup-page > dialog.as-page > .help-body:has(> .dlg-top) > form[method="dialog"]:last-child { display: none; }
 /* Home's right panel: two tabs, Waiting for you | Staff overview, in its fold line (home.js) */
 .home-side-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex: 1 1 auto; min-width: 0; margin-left: -10px; }
 /* On a wide screen Home's right panel runs down the window's right edge, with no gap: the main column and the panel
@@ -2036,6 +2143,10 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 @keyframes office-msg-in { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .office-msg.new { animation: none; } }
 .office-thoughts-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.office-shop-options { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+.office-sound { padding: 4px 8px; line-height: 0; }
+/* Under Thoughts: the speaker sits at the far right of the line, after Show general chit-chat. */
+.office-thoughts-foot .office-sound { margin-left: auto; }
 .office-chit { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); cursor: pointer; }
 .office-strip .office-thoughts .btn { margin-left: 0; }
 .office-chat-label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
@@ -2047,7 +2158,7 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 .so-card { cursor: pointer; }
 dialog.office-full { width: 96vw; max-width: 96vw; height: 94vh; max-height: 94vh; padding: 12px 16px; background: var(--panel); color: var(--ink); }
 dialog.office-full[open] { display: flex; flex-direction: column; }
-.office-full-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.office-full-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .office-full-head h2 { margin: 0; font-size: var(--fs-xl); }
 .office-full-tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .office-said { margin: 6px 0 0; min-height: 1.2em; }
@@ -2130,6 +2241,7 @@ button.office-tile:hover { background: var(--hover); border-color: var(--accent)
 .pc-pick.is-here { border-color: var(--accent); background: var(--accent-soft); }
 .pc-pick-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .pc-pick p { margin: 0; }
+.pc-pick-here { display: grid; gap: 8px; min-width: 0; }
 .pc-pick-move { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .pc-pick-move .field { flex: 1 1 220px; min-width: 0; }
 .pc-pick-move > .hint { flex-basis: 100%; margin: 0; }
@@ -2206,8 +2318,46 @@ dialog#hire-dlg { width: min(1180px, 96vw); max-height: 92vh; padding: 16px; bac
 .hs-all h3 { margin: 0; }
 .hs-net { align-items: center; }
 .hs-net-acts { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
-dialog#hs-push-dlg { width: min(560px, 96vw); max-height: 90vh; padding: 16px; background: var(--panel); color: var(--ink); }
-.hs-push-list { display: grid; gap: 8px; }
+/* A narrow window: the buttons go under the model's name and size, so the words keep the card's whole width. */
+#hs-all { container-type: inline-size; }
+@container (max-width: 760px) {
+  #hs-all .hs-net { grid-template-columns: minmax(0, 1fr); }
+  #hs-all .hs-net-acts { flex-direction: row; flex-wrap: wrap; }
+}
+/* While a part is read: blurred stand-ins keep the page's shape; a PC being asked is soft until it answers. */
+.hs-wait-card { filter: blur(3px); opacity: 0.55; pointer-events: none; user-select: none; }
+.hs-wait-card .role-icon { background: var(--track); border-radius: 50%; }
+.hs-pc.hs-wait .hs-pc-text { opacity: 0.6; }
+#hs-all-block.hs-wait #hs-all-line { color: var(--ink-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .hs-wait-card { animation: hs-breathe 1.4s ease-in-out infinite alternate; }
+  @keyframes hs-breathe { from { opacity: 0.35; } to { opacity: 0.7; } }
+}
+/* Push to node: the PC it is on at the far left, a clear divider, then a tile for every PC it can go to. */
+dialog#hs-push-dlg { width: min(980px, 96vw); max-height: 90vh; overflow: auto; padding: 16px; background: var(--panel); color: var(--ink); }
+.hs-push-flow { display: grid; grid-template-columns: minmax(180px, 230px) auto minmax(0, 1fr); gap: 0 14px; align-items: start; margin-top: 10px; }
+.hs-push-side { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.hs-push-side h3 { margin: 0; }
+.hs-push-side > .hs-warn { margin: 0; }
+.hs-push-arrow { align-self: stretch; display: grid; place-items: center; padding: 0 10px; border-left: 2px solid var(--line); border-right: 2px solid var(--line); color: var(--accent); }
+.hs-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+#hs-push-from.hs-tiles { grid-template-columns: minmax(0, 1fr); }
+.hs-tile { display: grid; justify-items: center; align-content: start; gap: 4px; padding: 14px 12px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: center; overflow-wrap: anywhere; }
+.hs-tile .hint, .hs-tile .hs-warn, .hs-tile .hs-state { font-size: var(--fs-sm); }
+.hs-tile-pic { position: relative; margin-bottom: 4px; }
+.hs-tile-pic .rail-avatar { width: 56px; height: 56px; font-size: 15px; }
+.hs-tile-pic .sdot { right: -2px; bottom: -2px; }
+.hs-tile-name { font-size: var(--fs-md); }
+.hs-tile-state { font-size: var(--fs-sm); color: var(--ink-soft); }
+.hs-tile-state.on { color: var(--good); font-weight: 600; }
+.hs-tile-off { border-style: dashed; }
+.hs-tile-off .hs-tile-pic { opacity: 0.6; }
+.hs-tile .btn { margin-top: 6px; }
+@media (max-width: 700px) {
+  .hs-push-flow { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .hs-push-arrow { border-width: 2px 0 0; padding: 6px 0 0; }
+  .hs-push-arrow svg { transform: rotate(90deg); }
+}
 .hs-models-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .hs-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .hs-tools input[type="search"] { flex: 0 1 340px; min-width: 0; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--field); color: var(--field-ink); font: inherit; font-size: var(--fs-sm); }
@@ -2222,8 +2372,9 @@ dialog#hs-push-dlg { width: min(560px, 96vw); max-height: 90vh; padding: 16px; b
 .hs-look-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .hs-look-box h3 { margin: 0 0 8px; }
 /* Cancel and Hire staff stay in sight at the foot of the window (or the page) while the cards above scroll. */
-.hs-go { justify-content: flex-end; margin-top: 12px; padding: 12px 0 10px; border-top: 1px solid var(--line); position: sticky; bottom: 0; z-index: 3; background: var(--panel); }
-#setup-page > dialog.as-page .hs-go { background: var(--bg); }
+/* In the window it reaches its edges and its foot (the window's 16px padding), so nothing scrolled shows under it. */
+.hs-go { justify-content: flex-end; margin: 12px -16px -16px; padding: 12px 16px 10px; border-top: 1px solid var(--line); position: sticky; bottom: -16px; z-index: 3; background: var(--panel); }
+#setup-page > dialog.as-page .hs-go { margin: 12px 0 0; padding: 12px 0 10px; bottom: 0; background: var(--bg); }
 @media (max-width: 760px) {
   .hs-split { grid-template-columns: minmax(0, 1fr); }
   .hs-profile { border-right: 0; padding-right: 0; }
@@ -2246,6 +2397,24 @@ dialog#hs-push-dlg { width: min(560px, 96vw); max-height: 90vh; padding: 16px; b
 #pc-manage { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 #pc-manage[hidden] { display: none; }
 #pc-manage h3:first-child { margin-top: 0; }
+/* Manage PC and updates: Updates on the left half, Install on the right half; buttons first, the facts under them. */
+.pc-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pc-tile { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+.pc-tile > h3 { margin-top: 0; }
+/* The Updates page's section, lent to the Updates tile: no second heading, border or spacing of its own. */
+.pc-update-host > .home-part { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.pc-update-host > .home-part > h3 { display: none; }
+.pc-install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.pc-done { color: var(--good); font-size: var(--fs-sm); font-weight: 600; }
+.pc-install-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 10px 0 0; font-size: var(--fs-sm); }
+.pc-install-facts dt { color: var(--ink-soft); }
+.pc-install-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 620px) { .pc-tiles { grid-template-columns: minmax(0, 1fr); } }
+/* A model's speed: the button, a line, then the figure in green. */
+.pc-speed { display: grid; justify-items: center; gap: 3px; min-width: 96px; }
+.pc-speed-fig { width: 100%; padding-top: 3px; border-top: 1px solid var(--line); text-align: center; font-size: var(--fs-sm); font-weight: 600; color: var(--good); }
+/* Behind the "…": Hide at the left, Delete at the right of one line. */
+.pc-more-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; }
 .pc-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); }
 .pc-stat { display: grid; gap: 2px; padding: 10px 14px; min-width: 0; overflow-wrap: anywhere; }
 .pc-stat + .pc-stat { border-left: 1px solid var(--line); }
@@ -2267,8 +2436,8 @@ dialog#hs-push-dlg { width: min(560px, 96vw); max-height: 90vh; padding: 16px; b
 .pc-model-state.on { font-weight: 600; }
 .pc-model.hidden-model .pc-model-state { color: var(--ink-soft); }
 .pc-model-acts { display: inline-flex; align-items: center; gap: 8px; }
-.pc-model-said { grid-column: 1 / -1; }
-.pc-bin { margin-left: 0; display: grid; place-items: center; padding: 4px; }
+.pc-model-said, .pc-model-staff { grid-column: 1 / -1; }
+.pc-bin { margin-left: 0; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 12px; }
 .pc-list-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .pc-list-foot:empty { display: none; }
 .pc-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; }
@@ -2463,6 +2632,11 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .settings-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-tile-icon { grid-row: span 2; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
 .settings-tile strong { font-weight: 600; }
+/* Models: the same tile with two buttons stacked on its right, See installed and Add new (it is not one press). */
+.settings-tile-two { cursor: default; }
+.settings-tile-two:hover { background: var(--panel); border-color: var(--line); }
+.settings-tile-two .tile-acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.settings-tile-two .tile-act { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 @media (max-width: 1000px) { .settings-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .settings-tiles { grid-template-columns: minmax(0, 1fr); } }
 /* The My PC window: what matters first, the rest under folds */
@@ -2474,18 +2648,36 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .pc-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-lg); }
 .pc-head-chip { font-size: var(--fs-xs); font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--good); }
 .pc-head-chip.off { background: var(--bad-bg); color: var(--bad); }
+.pc-head-chip.asleep { background: var(--track); color: var(--warn); }
+/* A long folder path in a model row's note wraps inside its column. */
+.pc-model .pc-model-staff { overflow-wrap: anywhere; }
+/* A model on a hard disk: the "HDD" mark beside its name. */
+.pc-hdd { margin-left: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 999px; color: var(--warn); font-size: 12px; font-weight: 600; vertical-align: middle; }
 .pc-dlg .pc-head-name + .pc-head-ver { display: grid; justify-items: end; gap: 2px; padding-left: 0; border-left: 0; text-align: right; }
 .pc-head-ok { color: var(--good); font-size: var(--fs-sm); font-weight: 600; }
+/* A PC that did not answer: its long reason takes its own full row under the name, so the name and the Off chip keep their room (they wrapped a letter to a line) */
+.pc-head-chip { white-space: nowrap; }
+.pc-dlg .pc-head-name + .pc-head-ver.fault-line { grid-column: 1 / -1; justify-items: start; text-align: left; padding-top: 4px; }
+/* A version or build mismatch ("This PC runs 2.0.84, build ...; "X" runs ...") is long: it takes its own full row under the picture, name and button, so the name and specs keep their room (they wrapped a word or a letter to a line) */
+.pc-dlg .pc-head-name + .pc-head-ver.long-line { grid-column: 1 / -1; grid-row: 2; justify-items: start; text-align: left; padding-top: 4px; }
 .pc-warn { margin: 8px 0 0; }
 .pc-card-part { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .pc-card-part .pc-part-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .pc-card-part .pc-part-head h3 { margin: 0; }
+.pc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 2px 2px 0; }
+.pc-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.pc-free { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pc-free .pc-free-space { font-size: 12px; text-align: right; }
 #pc-body > .pc-fold { margin-top: 10px; }
+/* A linked PC's log in its window: a day, a word to look for, the lines as plain text (newest last). */
+.pc-log-ask { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.pc-log-ask input[type=search] { flex: 1 1 180px; }
+.pc-log-lines { margin: 6px 0 0; padding: 8px 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-family: Consolas, "Cascadia Mono", monospace; font-size: var(--fs-xs); }
 .pc-model-more { position: relative; display: inline-block; }
 .pc-model-more > summary { list-style: none; cursor: pointer; padding: 2px 10px; border: 1px solid var(--line); border-radius: var(--r-ctl); font-weight: 700; }
 .pc-model-more > summary::-webkit-details-marker { display: none; }
 .pc-model-more-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; gap: 8px; justify-items: start; min-width: 190px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--panel); box-shadow: var(--shadow-sm); }
-@media (max-width: 620px) { .pc-dlg .pc-head { grid-template-columns: 64px minmax(0, 1fr); } .pc-dlg .pc-head-name + .pc-head-ver { grid-column: 1 / -1; justify-items: start; text-align: left; } }
+@media (max-width: 620px) { .pc-dlg .pc-head { grid-template-columns: 64px minmax(0, 1fr); } .pc-dlg .pc-head-name + .pc-head-ver { grid-column: 1 / -1; grid-row: auto; justify-items: start; text-align: left; } .pc-dlg .pc-head > .btn { grid-column: 1 / -1; justify-self: start; white-space: normal; text-align: left; } }
 
 /* Permissions (Settings and the card a chat shows when it asks): a Manual / Auto switch for each kind. */
 .perm-rows { display: grid; gap: 8px; }
@@ -2509,3 +2701,340 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 #jobs-fault { scroll-margin-top: 72px; }
 .mp-filters input[aria-invalid="true"] { border: 2px solid var(--bad); }
 .mp-filters .fault-line { grid-column: 1 / -1; margin: 0; }
+
+/* Breadcrumb at the top of a Settings page: Settings (a link up one level) then the page's name */
+.crumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); color: var(--ink-soft); }
+.crumbs li + li::before { content: "\203A"; margin-right: 6px; }
+.crumbs li[aria-current] { color: var(--ink); font-weight: 600; }
+
+/* Permissions, the newer kinds: a tier for each, the lists they work from, and the card's picture of a click. */
+.tier-more { margin-top: 10px; }
+.tier-more > summary { cursor: pointer; font-weight: 600; }
+.tier-rows { margin-top: 8px; }
+.tier-row { display: grid; grid-template-columns: 8.5em 10em 1fr; align-items: center; gap: 10px; }
+.tier-row .hint, .tier-list .hint { margin: 0; }
+.tier-list { display: grid; gap: 4px; }
+.tier-list textarea { width: 100%; font-family: Consolas, monospace; font-size: var(--fs-sm); }
+.tier-helpers { display: grid; gap: 4px; }
+.tier-list .row, .tier-helpers .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.msg .permit .permit-detail { margin: 0 0 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); font-family: Consolas, monospace; font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.msg .permit .permit-shot { position: relative; display: inline-block; max-width: 100%; margin: 0 0 8px; border: 1px solid var(--line); line-height: 0; }
+.msg .permit .permit-shot img { max-width: 100%; height: auto; }
+.msg .permit .permit-mark { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 3px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 2px var(--accent-ink); pointer-events: none; }
+.msg .findings .row { align-items: baseline; }
+@media (max-width: 620px) { .tier-row { grid-template-columns: 8.5em 1fr; } .tier-row .hint { grid-column: 1 / -1; } }
+
+.speed-detail { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; font-size: var(--fs-sm); }
+.speed-detail dt { color: var(--ink-soft); }
+.speed-detail dd { margin: 0; }
+.speed-more { margin-top: 4px; }
+.speed-history .link { font-weight: bold; }
+
+/* Free up space (public/cleanup.js): two columns, the choices on the left, what is approved on the right (right-aligned). */
+.cleanup-dlg { width: min(1000px, calc(100vw - 32px)); }
+.cleanup-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.cleanup-bar .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--good); color: var(--good); font-weight: 600; }
+.cleanup-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.cleanup-left { text-align: left; }
+.cleanup-right { text-align: right; position: sticky; top: 0; }
+.cleanup-left h3, .cleanup-right h3 { margin: 6px 0; }
+.cleanup-left hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.cleanup-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.cleanup-list li { padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); }
+.cleanup-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; cursor: pointer; }
+.cleanup-list .cleanup-used { grid-column: 2 / -1; }
+.cleanup-row.blocked label { cursor: default; opacity: .75; }
+/* A row of the left list: name and kind over when it was last used, at the left; Move over where else it is held, at the right. */
+.cleanup-left .cleanup-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
+.cleanup-side { display: grid; justify-items: end; align-content: start; gap: 2px; text-align: right; }
+.cleanup-row .cleanup-note { grid-column: 1 / -1; }
+.cleanup-move, .cleanup-right #cleanup-ask { text-align: left; margin-top: 10px; }
+.cleanup-right .move-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.cleanup-note { margin: 2px 0 0 26px; }
+.cleanup-right .cleanup-list li { display: flex; justify-content: space-between; gap: 10px; }
+.cleanup-size { white-space: nowrap; }
+.cleanup-tally { font-weight: 600; margin: 10px 0 2px; }
+.cleanup-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+@media (max-width: 720px) { .cleanup-cols { grid-template-columns: minmax(0, 1fr); } .cleanup-right { position: static; } }
+
+/* ---- Network, Setup: the models in two columns (text LLMs | image LLMs), and Sharing permissions as tiles: an icon,
+   the name with its (!) (the help shows on hover or focus), and a switch. The tiles' look follows a card grid: white
+   rounded cards with a soft shadow, a tinted icon square at the top left, the switch at the top right. ---- */
+.node-share .node-share-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0; }
+.share-col { min-width: 0; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.share-col h4 { margin: 0 0 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
+.share-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.share-col li { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-sm); }
+.share-col .hint { margin: 0; }
+.share-model-name { min-width: 0; overflow-wrap: anywhere; }
+.share-model-size { flex: none; color: var(--ink-soft); white-space: nowrap; }
+.node-share .node-share-list > .hint { grid-column: 1 / -1; }
+@media (max-width: 560px) { .node-share .node-share-list { grid-template-columns: minmax(0, 1fr); } }
+.share-all { display: flex; align-items: center; gap: 10px; margin: 4px 0 12px; font-weight: 600; }
+.share-all label { cursor: pointer; }
+/* Allow all with some ticked, some not: the knob halfway. */
+.perm-switch input:indeterminate + .perm-knob { background: var(--ink-soft); }
+.perm-switch input:indeterminate + .perm-knob::after { transform: translateX(8px); }
+.share-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 12px; }
+.share-tile { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-sm); transition: box-shadow .2s, border-color .2s; }
+.share-tile:hover { box-shadow: var(--shadow); }
+.share-tile:has(input[data-allow]:checked) { border-color: var(--accent); }
+.share-tile-wide { grid-column: 1 / -1; }
+.share-tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.share-icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.share-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.share-tile-name { position: relative; display: flex; align-items: flex-start; gap: 6px; font-weight: 600; font-size: var(--fs-md); line-height: 1.35; color: var(--ink); }
+.share-tile-name label { min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.share-tile .hint { margin: 0; }
+.share-tile select { font-size: var(--fs-sm); }
+/* The (!): a small round mark; its words show under the name while it is hovered or has the focus. */
+.info { display: inline-flex; flex: none; }
+.info-mark { width: 20px; height: 20px; padding: 0; display: grid; place-items: center; border: 1.5px solid var(--ink-soft); border-radius: 50%; background: none; color: var(--ink-soft); font-size: 12px; font-weight: 700; line-height: 1; cursor: help; }
+.info-mark:hover, .info-mark:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.info-tip { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20; padding: 8px 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-ctl); box-shadow: var(--shadow-lg); font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; }
+.info:hover .info-tip, .info:focus-within .info-tip { display: block; }
+/* The PIN window of a linked PC that holds the host PIN: either PIN opens it. */
+.pin-either:not([hidden]) { display: flex; align-items: center; gap: 6px; }
+.pin-either .info-mark { flex: none; cursor: default; }
+
+/* ---- One look (Nov 2026): a filled shape is a button, a tint is where you are ---- */
+/* Buttons: blue means "press here". The one main action is filled blue; every other button is white with a border, so
+   nothing pressable reads as plain text; links are blue. Where you are is never blue: a grey tint with a dark bar. */
+.btn, .btn.quiet { background: var(--panel); color: var(--ink); border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 7%, transparent); }
+.btn:hover:not(:disabled), .btn.quiet:hover:not(:disabled) { background: var(--track); color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); opacity: .88; }
+/* A button that cannot be pressed now is faint, never a solid grey block. */
+.btn:disabled, .btn.primary:disabled { background: var(--panel); border-color: var(--line); color: var(--ink-soft); opacity: .7; box-shadow: none; }
+.btn.danger-text { color: var(--bad); }
+.btn.danger-text:hover:not(:disabled) { background: var(--bad-bg); color: var(--bad); }
+/* Bare icon buttons and the way back stay bare: they sit in bars, where a box round each would be clutter. */
+.btn.quiet:is(.back, .gear, .chat-whole, .nodes-back), .pane-head .btn.quiet, .chat-actions .btn.quiet, .msg .btn.quiet, .todo-menu-list .btn { border-color: transparent; background: transparent; box-shadow: none; }
+.btn.quiet:is(.back, .gear, .chat-whole, .nodes-back):hover:not(:disabled), .pane-head .btn.quiet:hover:not(:disabled), .chat-actions .btn.quiet:hover:not(:disabled), .msg .btn.quiet:hover:not(:disabled) { background: var(--track); }
+.tile-ask .btn.quiet { background: transparent; box-shadow: none; color: white; border-color: rgb(255 255 255 / .6); }
+/* Where you are, the same mark everywhere: a grey tint with a dark bar on its left (the Settings list, Home and the
+   chats in the left list, a job in Jobs). A picked card, chip or face: grey tint, dark border. Never blue. */
+.rail-links .link[aria-current="page"], .rail-row[aria-current], .side-chats .rail-row[aria-current], .job-nav-item[aria-current] { background: var(--accent-soft); color: var(--ink); font-weight: 600; box-shadow: inset 3px 0 0 var(--ink); }
+.rail-links .link[aria-current="page"] svg { color: var(--ink); }
+.pick-card:has(input:checked), .staff-chip:has(input:checked), .look-text[aria-pressed="true"], .look-face[aria-pressed="true"], .pc-pick.is-here, .mp-cat[aria-current="true"], .g-shelf[aria-pressed="true"], .g-scope[aria-pressed="true"], .finder-result.is-best, .person-look-edit[aria-pressed="true"], .info-bang[aria-expanded="true"] { border-color: var(--ink); background: var(--accent-soft); }
+.pick-card:has(input:checked), .staff-chip:has(input:checked) { box-shadow: inset 0 0 0 1px var(--ink); }
+/* Counts and icon tiles are not buttons: dark, not blue. */
+.rail-count { background: var(--ink); color: var(--panel); }
+.tile.picked .pick-mark { background: var(--pick); color: var(--pick-ink); }
+/* A link in text is something you press, so it is blue too (the Settings list keeps its own dark words). */
+.link { color: var(--accent); text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.settings-tile-icon, .share-icon { background: var(--track); color: var(--ink); }
+.in-progress, .job-chip, .job-badge.done, .job-ok { border-color: var(--line); }
+/* A choice of two or three (PIN or Password, Day or Night, a look's tab, a page of PCs): the one picked is raised and
+   white, the rest plain words. */
+.lock-kind, .theme-switch { background: var(--track); border-color: transparent; }
+.lock-kind button[aria-checked="true"], .theme-switch button[aria-checked="true"], .look-tab[aria-pressed="true"], .pc-page.on { background: var(--panel); color: var(--ink); border-color: var(--line); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 22%, transparent); }
+
+/* A button in a stacked form is as wide as its words, not the whole form (Make a plan, Write the post). */
+.blog-form > .btn { justify-self: start; }
+
+/* ---- Page heads: one head on every Settings page ---- */
+/* Staff, Hire staff, Jobs and Files shown as pages (home.js showAsPage) get the head the other Settings pages have: the
+   breadcrumb ("Settings › Jobs", its first name goes back), then the title in the page's own colours. The window's
+   white title band and its own Close are not shown; opened as a window over a chat, it keeps both. */
+.page-crumbs { display: none; }
+#setup-page > dialog.as-page > .help-body > .page-crumbs { display: block; margin: 0 0 14px; }
+#setup-page > dialog.as-page > .help-body > .dlg-top { position: static; margin: 0 0 12px; padding: 0; background: none; border: 0; box-shadow: none; }
+#setup-page > dialog.as-page > .help-body > .dlg-top h2 { font-size: var(--fs-xl); font-weight: 600; }
+#setup-page > dialog.as-page :is(#team-close, #hs-close), #setup-page > dialog.as-page > .help-body > .dlg-top > form[method="dialog"] { display: none; }
+/* On a phone a page with a breadcrumb needs no "‹ Chats and staff" as well: the breadcrumb is its way back. */
+@media (max-width: 760px) { [data-crumb] .back { display: none; } }
+
+/* ---- Settings rows (app.js setRow): Data and lock, Permissions ---- */
+.app-page .page-body.set-page { max-width: 820px; }
+.set-lead { margin: 0 0 6px; color: var(--ink-soft); }
+.set-part { margin: 22px 0 0; }
+.set-part > h3 { margin: 0 0 8px 2px; font-size: var(--fs-md); font-weight: 600; }
+.set-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); overflow: hidden; }
+.set-card + .set-card { margin-top: 10px; }
+.set-card > .set-row + .set-row { border-top: 1px solid var(--line); }
+.set-row[hidden] { display: none; }
+div.set-row, details.set-row > summary { display: flex; align-items: center; gap: 14px; padding: 12px 16px; min-height: 64px; }
+details.set-row > summary { list-style: none; cursor: pointer; }
+details.set-row > summary::-webkit-details-marker { display: none; }
+details.set-row > summary:hover { background: var(--hover); }
+.set-tile { flex: none; width: 36px; height: 36px; border-radius: 9px; background: var(--track); color: var(--ink); display: grid; place-items: center; }
+.set-tile:empty { background: transparent; }
+.set-txt { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
+.set-txt b { font-weight: 600; font-size: var(--fs-md); }
+.set-about { color: var(--ink-soft); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.set-about:empty { display: none; }
+.set-side { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
+.set-chev { color: var(--ink-soft); display: inline-grid; transition: transform .15s; }
+details[open] > summary .set-chev { transform: rotate(90deg); }
+.set-inside { padding: 2px 16px 16px 66px; display: grid; gap: 12px; }
+.set-inside textarea { width: 100%; box-sizing: border-box; font-family: Consolas, "Cascadia Mono", monospace; font-size: var(--fs-sm); }
+.set-note { margin: 0; color: var(--ink-soft); font-size: var(--fs-xs); }
+.set-said { margin: 8px 2px 0; color: var(--ink-soft); font-size: var(--fs-xs); }
+.set-said:empty { display: none; }
+.set-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.set-line .field { display: grid; gap: 4px; font-size: var(--fs-xs); font-weight: 600; }
+.set-foot { justify-content: space-between; align-items: center; }
+.set-more > summary { cursor: pointer; color: var(--ink-soft); font-size: var(--fs-xs); }
+.set-more[open] > summary { margin-bottom: 6px; }
+.set-helpers { display: grid; gap: 6px; }
+.set-helpers .set-line { align-items: center; font-size: var(--fs-sm); }
+.set-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.set-table th { text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-soft); padding: 0 8px 6px 0; }
+.set-table td { padding: 7px 8px 7px 0; border-top: 1px solid var(--line); }
+.set-table .set-dim { color: var(--ink-soft); }
+.set-table .set-end { text-align: right; padding-right: 0; }
+.set-table .btn { padding: 4px 11px; font-size: var(--fs-xs); }
+.set-vol { width: 110px; }
+/* On and Off as a word in a pill: green when on. */
+.set-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font-size: var(--fs-xs); font-weight: 600; background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.set-tag::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.set-tag.off { background: var(--track); color: var(--ink-soft); }
+/* A switch for on and off: green when on. */
+.set-sw { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
+.set-sw input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.set-sw i { position: absolute; inset: 0; border-radius: 99px; background: color-mix(in srgb, var(--ink) 25%, transparent); transition: background .15s; pointer-events: none; }
+.set-sw i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--panel); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 35%, transparent); transition: transform .15s; }
+.set-sw input:checked + i { background: var(--good); }
+.set-sw input:checked + i::after { transform: translateX(18px); }
+.set-sw input:focus-visible + i { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* A choice of two to four, side by side: the picked one raised and white. */
+.set-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--track); }
+.set-seg button { border: 0; background: none; font: inherit; font-size: var(--fs-xs); color: var(--ink-soft); padding: 5px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.set-seg button:hover { color: var(--ink); }
+.set-seg button[aria-checked="true"] { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 22%, transparent); }
+.set-seg button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 700px) {
+  div.set-row, details.set-row > summary { flex-wrap: wrap; }
+  .set-side { max-width: none; width: 100%; justify-content: flex-start; padding-left: 50px; }
+  .set-inside { padding-left: 16px; }
+}
+
+/* Network, This PC and Manage updates in the same look: each part a heading and a white card of rows, as wide as Data
+   and lock's. What a row shows under it (found PCs, linked PCs, the update's progress) sits in a block under the row. */
+.nodes > .set-part { max-width: 820px; }
+.set-block { padding: 0 16px 12px 66px; display: grid; gap: 8px; }
+.set-block[hidden], .set-block:not(:has(> :not(:empty):not([hidden]))) { display: none; }
+.set-block > .hint { margin: 0; }
+/* A card that starts with a block, not a row (Guest passes, the Cluster page's measured speeds): its words began on the
+   card's top edge, set in as if under an icon that is not there. */
+.set-card > .set-block:first-child { padding: 14px 16px; }
+.set-block > .hint:empty { display: none; }
+.set-card > :is(.set-block, .node-setup) + .set-row { border-top: 1px solid var(--line); }
+/* The Setup block under the node switch is part of the same card, not a card of its own. */
+.set-card > .node-setup { margin: 0; padding: 12px 16px 16px 66px; border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; background: none; }
+.node-scan-port { display: inline-flex; align-items: center; gap: 6px; max-width: none; margin: 0; font-size: var(--fs-xs); color: var(--ink-soft); }
+.node-scan-port input { width: 84px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--field-ink); font: inherit; font-size: var(--fs-sm); }
+@media (max-width: 700px) { .set-block, .set-card > .node-setup { padding-left: 16px; } }
+/* On a phone a row keeps its icon beside its name; its controls go under the name, except a lone switch or fold mark,
+   which stays on the right of the name. */
+@media (max-width: 700px) {
+  div.set-row, details.set-row > summary { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 14px; row-gap: 10px; align-items: center; }
+  .set-side { grid-column: 2 / -1; width: auto; max-width: none; padding-left: 0; justify-content: flex-start; }
+  .set-side:has(> :is(.set-chev, .set-sw):only-child) { grid-column: 3; grid-row: 1; }
+}
+
+/* Colours, in the same look: one card, each choice a row. */
+.set-choices { margin: 14px 0 0; padding: 0; gap: 0; display: block; }
+.set-choices .check { display: flex; align-items: center; gap: 12px; margin: 0; padding: 14px 16px; cursor: pointer; }
+.set-choices .check + .check { border-top: 1px solid var(--line); }
+.set-choices .check:hover { background: var(--hover); }
+.set-choices .check:has(input:checked) { font-weight: 600; }
+
+/* The loading screen in the chat while a model loads (public/loading.js). */
+.load-screen { display: flex; flex-direction: column; gap: 10px; margin: 8px 2px; padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-sm); font-size: var(--fs-sm); }
+.load-screen.big { flex: 1; justify-content: center; }
+.load-screen h3 { margin: 0; font-size: var(--fs-xl); font-weight: 600; }
+.load-screen .ls-doing { color: var(--ink); }
+.load-screen .ls-bar { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
+.load-screen .ls-fill { height: 100%; width: 0; background: var(--accent); transition: width .8s linear; }
+.load-screen .ls-time { font-size: var(--fs-lg); font-weight: 600; }
+.load-screen .ls-left { color: var(--ink); }
+.load-screen .ls-how, .load-screen .ls-why { color: var(--ink-soft); font-size: var(--fs-xs); }
+.load-screen .ls-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.load-screen.small .ls-how, .load-screen.small .ls-why { display: none; }
+
+/* Guest passes (Network page): an ended pass greyed; the pick lists without a frame, each PC's models under it */
+#guest-passes .job-remote.pass-expired { opacity: .6; filter: grayscale(1); }
+.node-pass-pick { border: 0; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+.node-pass-pick legend { font-size: var(--fs-sm); color: var(--ink-soft); padding: 0; margin-bottom: 4px; }
+.node-pass-models { display: grid; gap: 4px; padding-left: 24px; }
+.pass-ask, .pass-ask-line { display: grid; gap: 6px; margin: 6px 0; }
+.pass-ask-line { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.pass-ask-line .team-actions { flex-wrap: wrap; align-items: center; gap: 6px; }
+.node-line { display: grid; gap: 6px; margin: 8px 0; }
+.node-caps { display: flex; flex-wrap: wrap; gap: 12px; }
+.pass-renew { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.node-pass-made { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--good); border-radius: 8px; }
+/* The chat's Max switch when it cannot run now (its tooltip says why): faded, still pressable to switch it off. */
+/* The Max switch when it cannot run: a dashed edge and the softer text colour (readable, not faded); the reason in words in #max-why. */
+.g-shelf.greyed { border-style: dashed; color: var(--ink-soft); }
+.chat-form .max-why { text-align: right; }
+
+/* The Cluster page: linked PCs on the left, the cluster on the right; a PC is dragged across or moved with its button. */
+.cluster-lead { max-width: 820px; margin: 4px 0 12px 2px; }
+#cluster-page > #cluster-body, #cluster-page > #cluster-ask { max-width: 980px; }
+.cluster-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; align-items: start; }
+.cluster-zone { min-height: 220px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); }
+.cluster-zone > h3 { margin: 0 0 2px 2px; font-size: var(--fs-md); font-weight: 600; }
+.cluster-zone > .hint { margin: 0 0 10px 2px; }
+.cluster-zone.cluster-over { border-color: var(--accent); outline: 2px dashed var(--accent); outline-offset: -5px; }
+.cluster-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cluster-pc { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; cursor: grab; }
+.cluster-pc:active { cursor: grabbing; }
+.cluster-pc.cluster-dragged { opacity: 0.45; }
+.cluster-pc b { font-weight: 600; overflow-wrap: anywhere; }
+.cluster-pc .hint { grid-column: 1; margin: 0; }
+.cluster-pc .btn { grid-column: 2; grid-row: 1 / span 3; }
+.cluster-pc[data-cannot] { cursor: default; }
+.cluster-pc[data-cannot] b { opacity: 0.7; }
+.cluster-zone > .cluster-empty { margin: 0; padding: 26px 12px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+.cluster-sum { margin: 10px 2px 0; font-weight: 600; }
+.cluster-under { margin-top: 12px; }
+@media (max-width: 760px) { .cluster-cols { grid-template-columns: 1fr; } }
+.cluster-host { cursor: default; border-style: dashed; }
+.cluster-host:active { cursor: default; }
+.cluster-tag { grid-column: 2; grid-row: 1; justify-self: end; padding: 2px 8px; font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: 99px; color: var(--ink-soft); }
+.cluster-zone > .cluster-empty { margin-top: 8px; }
+.cluster-start { margin-top: 14px; }
+.cluster-start select { max-width: 260px; }
+.cluster-off .btn { display: inline-flex; align-items: center; gap: 6px; }
+.cluster-start input[type="text"] { width: 120px; }
+
+/* The Cluster page as a tree of PCs: the pool on top, this PC (the host), then its nodes hanging under it. */
+.cluster-pool { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.cluster-fig { display: grid; gap: 2px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); }
+.cluster-fig b { font-size: var(--fs-lg); font-weight: 600; }
+.cluster-fig .hint { margin: 0; }
+.cluster-pc { grid-template-columns: auto 1fr auto; }
+.cluster-pc .cluster-mark { grid-column: 1; grid-row: 1 / span 3; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); color: var(--ink-soft); }
+.cluster-pc b { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cluster-pc .hint { grid-column: 2; }
+.cluster-pc .btn { grid-column: 3; grid-row: 1 / span 3; }
+.cluster-tag { grid-column: auto; grid-row: auto; justify-self: auto; font-weight: 400; }
+.cluster-host { border-style: solid; border-color: var(--accent); }
+.cluster-tree { position: relative; margin: 0 0 0 18px; padding: 10px 0 0 22px; border-left: 2px solid var(--line); }
+.cluster-tree > .cluster-pc { position: relative; }
+.cluster-tree > .cluster-pc::before { content: ''; position: absolute; left: -23px; top: 50%; width: 22px; border-top: 2px solid var(--line); }
+.cluster-zone > .cluster-host + .cluster-empty { margin: 10px 0 0 40px; }
+.cluster-table { overflow-x: auto; margin: 8px 0; }
+.cluster-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.cluster-table th, .cluster-table td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.cluster-table th { font-weight: 600; white-space: nowrap; }
+.cluster-notes { display: grid; gap: 6px; margin: 10px 0 0; padding-left: 18px; }
+#cluster-page > #cluster-speed { max-width: 980px; }
+@media (max-width: 760px) { .cluster-pool { grid-template-columns: 1fr 1fr; } }
+/* The Cluster page: this PC above the cluster's box, joined to it by a line with words that say how it takes part. */
+.cluster-side { display: grid; min-width: 0; }
+.cluster-side > .cluster-host { justify-self: center; width: min(100%, 340px); }
+.cluster-link { position: relative; display: grid; place-items: center; min-height: 54px; margin: 0 auto; }
+.cluster-link::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid var(--accent); }
+.cluster-link-out::before { border-left-style: dashed; }
+.cluster-link-words { position: relative; padding: 2px 10px; font-size: var(--fs-xs); color: var(--ink-soft); background: var(--bg); border: 1px solid var(--line); border-radius: 99px; text-align: center; }
+.cluster-host-out { border-style: dashed; }
+.cluster-loads { color: var(--accent); border-color: var(--accent); }
+.cluster-part { margin-top: 12px; }
+/* A section heading with a button at its right (Network, Linked PCs: Fast update). */
+.set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px 2px; }
+.set-part > .set-head > h3 { margin: 0; }
+.fast-update { display: inline-flex; align-items: center; gap: 6px; }

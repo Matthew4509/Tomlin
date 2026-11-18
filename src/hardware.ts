@@ -6,6 +6,7 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { cpus, freemem, totalmem } from 'node:os';
 import { promisify } from 'node:util';
+import { Worker } from 'node:worker_threads';
 import { builtIn } from './devices.ts';
 import { ccFromName, ccNumber } from './runtimes.ts';
 
@@ -181,6 +182,18 @@ export function gpusFrom(cim: string, smi: SmiRow[], caps: (number | null)[], mo
   return gpus;
 }
 
+/**
+ * The cards in the order TOMLIN would use them: a card with memory of its own before a chip in the processor, an NVIDIA
+ * card (the CUDA runners) before any other make, then the most memory first. Windows lists them in slot order, so a
+ * PC with an old 2 GB card in the first slot and a 12 GB RTX in the second showed the old one everywhere.
+ */
+export function strongestFirst<T extends { vendor: string; total: number | null; integrated: boolean }>(gpus: T[]): T[] {
+  return gpus
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => Number(a.g.integrated) - Number(b.g.integrated) || Number(b.g.vendor === 'nvidia') - Number(a.g.vendor === 'nvidia') || (b.g.total ?? 0) - (a.g.total ?? 0) || a.i - b.i)
+    .map(x => x.g);
+}
+
 /** The processor's cores, and each graphics chip with its registry memory size from its own driver key (see gpusFrom). */
 const VIDEO_PS = [
   'Get-CimInstance Win32_Processor | % { "CPU|$($_.NumberOfCores)" }',
@@ -215,7 +228,7 @@ export async function readHardware(): Promise<HardwareInfo> {
   const caps = rows.length ? await smi.caps() : [];
   const modes = rows.length ? await smi.modes() : [];
   info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
-  info.gpus = gpusFrom(cim, rows, caps, modes);
+  info.gpus = strongestFirst(gpusFrom(cim, rows, caps, modes));
   return info;
 }
 
@@ -347,23 +360,33 @@ const smi = new SmiReader();
 /** The last good reading per process: on a busy PC tasklist can time out, and a loaded model then read as 0 MB. */
 const lastRam = new Map<number, number>();
 
+/** The memory of each process in tasklist's lines ("name","pid","session","#","12,345 K"), for the pids in `want` (bytes). */
+export function ramFromTasklist(stdout: string, want: Set<number>): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const cols = [...line.matchAll(/"([^"]*)"/g)].map(m => m[1]);
+    const pid = Number(cols[1]);
+    if (cols.length >= 5 && want.has(pid)) out.set(pid, Number(cols[4].replace(/[^\d]/g, '')) * 1024);
+  }
+  return out;
+}
+
 /** Working-set memory of each process in `pids`, from tasklist (bytes). A process missing from a slow or failed
- * sample keeps its last good reading. */
+ * sample keeps its last good reading. Each process is asked for by its id: a list of every process took about a second
+ * of CPU and up to a minute on a PC with 400 processes, once a second while a model was loaded; one asked for alone
+ * takes about 50 ms. */
 async function processRam(pids: number[]): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   if (!pids.length || process.platform !== 'win32') return out;
   for (const pid of [...lastRam.keys()]) if (!pids.includes(pid)) lastRam.delete(pid);
-  try {
-    const { stdout } = await run('tasklist.exe', ['/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 10_000, maxBuffer: 4 << 20 });
-    const want = new Set(pids);
-    for (const line of stdout.split(/\r?\n/)) {
-      const cols = [...line.matchAll(/"([^"]*)"/g)].map(m => m[1]);
-      const pid = Number(cols[1]);
-      if (want.has(pid)) out.set(pid, Number(cols[4].replace(/[^\d]/g, '')) * 1024);
+  await Promise.all(pids.map(async pid => {
+    try {
+      const { stdout } = await run('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 10_000, maxBuffer: 1 << 20 });
+      for (const [p, bytes] of ramFromTasklist(stdout, new Set([pid]))) out.set(p, bytes);
+    } catch {
+      // the last good reading below stands in
     }
-  } catch {
-    // the last good readings below stand in
-  }
+  }));
   for (const pid of pids) {
     const v = out.get(pid);
     if (v) lastRam.set(pid, v);
@@ -395,14 +418,46 @@ export function unreadOf(adapters: number, sinceStart: number, smi: boolean): 'a
   return smi ? 'busy' : 'all';
 }
 
+type CpuTimes = ReturnType<typeof cpus>[number]['times'];
+
+/** The thread that reads the processor's times: at once, then every `every` ms (the server sets it: 1000 or 10000). */
+export const CPU_READER = `
+const { parentPort } = require('node:worker_threads');
+const { cpus } = require('node:os');
+let every = 1000;
+let timer = null;
+const read = () => { parentPort.postMessage(cpus().map(c => c.times)); timer = setTimeout(read, every); };
+parentPort.on('message', ms => { every = Number(ms) || 1000; clearTimeout(timer); read(); });
+read();
+`;
+
+/** With nothing asking for a reading this long (no page open, no linked PC asking), the costly readings slow down. */
+export const QUIET_AFTER = 30_000;
+/** How often nvidia-smi and the models' memory are read while nothing asks: each is a program started (about 50 ms of CPU). */
+export const QUIET_EVERY = 30_000;
+/** A reading that starts a program is due: every second while something asks for readings, else once in QUIET_EVERY. */
+export const readDue = (now: number, askedAt: number, lastAt: number) => now - askedAt < QUIET_AFTER || now - lastAt >= QUIET_EVERY;
+
 /**
  * Samples once a second. `watch(pids)` names the model processes whose memory the bar shows; the graphics counters
  * are restarted when that list changes (the system's counters only list processes that existed when they started).
+ * While nothing reads `latest` (a node nobody opens, a PC left with no page open), nvidia-smi and the models' memory
+ * are read once in 30 s instead of every second, and the graphics engine counters (how busy the chip is, restarted
+ * every 30 s) stop until the next reading is asked for: on an idle NVIDIA PC that was 3,600 nvidia-smi and 120
+ * typeperf starts an hour.
  */
 export class Sampler {
   info: HardwareInfo;
-  latest: Snapshot;
-  private lastCpu = cpus().map(c => c.times);
+  private snap: Snapshot;
+  private askedAt = Date.now();
+  private smiAt = 0;
+  private smiLast: SmiRow[] = [];
+  private ramAt = 0;
+  private lastCpu: CpuTimes[] = cpus().map(c => c.times);
+  private cpuThread: Worker | null | undefined;
+  private cpuNew: CpuTimes[] | null = null;
+  private cpuQuiet = false;
+  private cpuPercent = 0;
   private pids: number[] = [];
   private typeperf: ChildProcess | null = null;
   private countersStarted = 0;
@@ -417,7 +472,28 @@ export class Sampler {
   constructor(info: HardwareInfo) {
     this.info = info;
     this.nvidia = info.gpus.some(g => g.vendor === 'nvidia');
-    this.latest = { at: Date.now(), cpu: { percent: 0, cores: info.cores, threads: info.threads, name: info.cpuName }, ram: { used: totalmem() - freemem(), total: totalmem() }, gpu: null, processes: {} };
+    this.snap = { at: Date.now(), cpu: { percent: 0, cores: info.cores, threads: info.threads, name: info.cpuName }, ram: { used: totalmem() - freemem(), total: totalmem() }, gpu: null, processes: {} };
+  }
+
+  /** The newest reading, for a page or a caller that reads it again and again: the costly readings run every second from now. */
+  get latest(): Snapshot {
+    this.asked();
+    return this.snap;
+  }
+
+  /** The newest reading without asking for more (a linked PC's hello, once a minute): up to 30 s old while nothing asks. */
+  get last(): Snapshot {
+    return this.snap;
+  }
+
+  private quiet(): boolean {
+    return Date.now() - this.askedAt >= QUIET_AFTER;
+  }
+
+  private asked(): void {
+    const wasQuiet = this.quiet();
+    this.askedAt = Date.now();
+    if (wasQuiet && this.timer && !this.enginePerf) this.restartEngines();
   }
 
   start(): void {
@@ -436,6 +512,9 @@ export class Sampler {
     if (next.join() === this.pids.join()) return;
     this.pids = next;
     this.pidsChanged = Date.now();
+    // A model started or ended: the card and the models' memory are read again at the next tick, asked or not.
+    this.smiAt = 0;
+    this.ramAt = 0;
     this.restartCounters();
   }
 
@@ -447,7 +526,7 @@ export class Sampler {
     const counters = ['\\GPU Adapter Memory(*)\\Dedicated Usage', '\\GPU Adapter Memory(*)\\Shared Usage'];
     for (const pid of this.pids) counters.push(`\\GPU Process Memory(pid_${pid}_*)\\Dedicated Usage`, `\\GPU Process Memory(pid_${pid}_*)\\Shared Usage`);
     this.typeperf = perf(counters, values => { this.gpuValues = values; });
-    this.restartEngines();
+    if (!this.quiet()) this.restartEngines();
   }
 
   /**
@@ -462,20 +541,55 @@ export class Sampler {
     this.enginePerf = perf(['\\GPU Engine(*)\\Utilization Percentage'], values => { this.engineValues = values; });
   }
 
-  private async tick(): Promise<void> {
-    const now = cpus().map(c => c.times);
-    let busy = 0;
-    let all = 0;
-    now.forEach((t, i) => {
-      const p = this.lastCpu[i] ?? t;
-      const idle = t.idle - p.idle;
-      const total = t.user - p.user + t.nice - p.nice + t.sys - p.sys + t.irq - p.irq + idle;
-      busy += total - idle;
-      all += total;
-    });
-    this.lastCpu = now;
+  /**
+   * The processor's times, read on a thread of their own: os.cpus() waited 300 to 500 ms on a busy Windows PC (it reads
+   * the registry for each core), and once a second on the server's own thread that held every request for a third of
+   * the time. Each second while something asks for readings, every 10 s while nothing does. Null where no thread can
+   * start (the times are then read here, as before).
+   */
+  private cpuReader(): Worker | null {
+    if (this.cpuThread !== undefined) return this.cpuThread;
+    try {
+      const w = new Worker(CPU_READER, { eval: true });
+      w.unref();
+      w.on('message', (times: CpuTimes[]) => { this.cpuNew = times; });
+      w.on('error', () => { this.cpuThread = null; });
+      this.cpuThread = w;
+    } catch {
+      this.cpuThread = null;
+    }
+    return this.cpuThread;
+  }
 
-    const since = Date.now() - this.engineStarted;
+  private async tick(): Promise<void> {
+    const reader = this.cpuReader();
+    const quietNow = this.quiet();
+    if (reader && quietNow !== this.cpuQuiet) reader.postMessage(quietNow ? 10_000 : 1000);
+    this.cpuQuiet = quietNow;
+    const now = reader ? this.cpuNew : cpus().map(c => c.times);
+    this.cpuNew = null;
+    if (now) {
+      let busy = 0;
+      let all = 0;
+      now.forEach((t, i) => {
+        const p = this.lastCpu[i] ?? t;
+        const idle = t.idle - p.idle;
+        const total = t.user - p.user + t.nice - p.nice + t.sys - p.sys + t.irq - p.irq + idle;
+        busy += total - idle;
+        all += total;
+      });
+      this.lastCpu = now;
+      if (all) this.cpuPercent = Math.round((busy / all) * 100);
+    }
+
+    const t = Date.now();
+    if (this.quiet() && this.enginePerf) {
+      // Nothing asks: how busy the chip is goes unread (not kept, so an old figure is never shown) until something asks.
+      this.enginePerf.kill();
+      this.enginePerf = null;
+      this.engineValues = new Map();
+    }
+    const since = t - this.engineStarted;
     if (this.enginePerf && (since > 30_000 || (this.engineStarted - this.pidsChanged < 12_000 && since > 5_000))) this.restartEngines();
 
     // Graphics: per adapter (the busiest one is the one in use), per watched process.
@@ -506,10 +620,14 @@ export class Sampler {
       const since = Date.now() - this.countersStarted;
       if (this.nvidia && card.vendor === 'nvidia') {
         // Every NVIDIA card together: a model is split across them, so what fits is what all of them hold.
-        const rows = await smi.rows();
+        if (readDue(t, this.askedAt, this.smiAt)) {
+          this.smiLast = await smi.rows();
+          this.smiAt = t;
+        }
+        const rows = this.smiLast;
         if (smi.takeBack()) {
           // nvidia-smi answered late: the cards' true memory, sm level and the driver, read again in place.
-          this.info.gpus.splice(0, Infinity, ...gpusFrom(lastCim, rows, await smi.caps(), await smi.modes()));
+          this.info.gpus.splice(0, Infinity, ...strongestFirst(gpusFrom(lastCim, rows, await smi.caps(), await smi.modes())));
           this.info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
         }
         const all = cardsTogether(rows);
@@ -524,15 +642,19 @@ export class Sampler {
       }
     }
 
-    const ram = await processRam(this.pids);
+    let ram = lastRam;
+    if (readDue(t, this.askedAt, this.ramAt)) {
+      ram = await processRam(this.pids);
+      this.ramAt = t;
+    }
     const processes: Record<number, ProcessUse> = {};
     for (const pid of this.pids) {
       const g = perPid.get(pid) ?? { dedicated: 0, shared: 0 };
       processes[pid] = { pid, ram: ram.get(pid) ?? 0, gpuDedicated: g.dedicated, gpuShared: g.shared };
     }
-    this.latest = {
+    this.snap = {
       at: Date.now(),
-      cpu: { percent: all ? Math.round((busy / all) * 100) : 0, cores: this.info.cores, threads: this.info.threads, name: this.info.cpuName },
+      cpu: { percent: this.cpuPercent, cores: this.info.cores, threads: this.info.threads, name: this.info.cpuName },
       ram: { used: totalmem() - freemem(), total: totalmem() },
       gpu,
       processes,

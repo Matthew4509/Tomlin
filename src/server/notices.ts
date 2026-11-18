@@ -54,7 +54,10 @@ export async function tellChat(file: string, lines: ChatLine[]): Promise<void> {
     const kind = chatOfficeKind(last);
     if (kind && c.who.startsWith('staff:')) officeFeed.add(c.who.slice(6), { kind, chat: c.title || 'a chat' });
     if (!mute.shouldTell(await mutes.get(), [`chat:${id}`, personKey(c.who)], 'finished')) return;
-    await notifier.tell('finished', notify.chatTold(chatPeople().find(p => p.who === c.who)?.name ?? 'TOMLIN'), `chat:${id}`);
+    const who = chatPeople().find(p => p.who === c.who)?.name ?? 'TOMLIN';
+    // A Speed Test or Crash Test hire answering run after run is not news: it stays in Thoughts, with no sound or pop-up.
+    if (notify.isTestHire(who)) return;
+    await notifier.tell('finished', notify.chatTold(who), `chat:${id}`);
   } catch {
     // A notification is never worth a fault.
   }

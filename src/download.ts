@@ -7,6 +7,7 @@ import { mkdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { capsFromHf, type Caps } from './capabilities.ts';
 
 export async function sha256(path: string): Promise<string> {
   const h = createHash('sha256');
@@ -100,6 +101,8 @@ export interface HfLookup {
   params: number | null;
   /** False when its header has no chat template and its task is not chat (a video or music model): not a chat model. */
   chat: boolean;
+  /** Reads pictures / has a place for tools, from its task, its files and its chat template (src/capabilities.ts). */
+  caps: Caps;
 }
 
 /** A repo's info as a chat model: false only when Hugging Face read its GGUF header, found no chat template, and its task is not a chat one. */
@@ -158,7 +161,7 @@ export async function lookUpHf(link: string): Promise<HfLookup> {
   const info = await fetch(`https://huggingface.co/api/models/${at.repo}/revision/${encodeURIComponent(at.rev)}`, { signal: AbortSignal.timeout(15_000) });
   if (info.status === 401 || info.status === 404) throw new Error(`Hugging Face has no public model ${at.repo}. Check the link.`);
   if (!info.ok) throw new Error(`Hugging Face answered ${info.status}. Try again later.`);
-  const meta = await info.json() as { sha: string; gated?: unknown; cardData?: { license?: string }; gguf?: { total?: number; chat_template?: unknown }; pipeline_tag?: unknown };
+  const meta = await info.json() as { sha: string; gated?: unknown; cardData?: { license?: string }; gguf?: { total?: number; chat_template?: unknown }; pipeline_tag?: unknown; siblings?: { rfilename?: unknown }[] };
   if (meta.gated) throw new Error('This model needs a Hugging Face account and an accepted licence to download. Download it with LM Studio or the website, then use Search this PC.');
   const dir = at.path && !/\.gguf$/i.test(at.path) ? at.path : at.path.split('/').slice(0, -1).join('/');
   // Every folder, not only the top one: bigger models keep each size in a folder of its own (Q4_K_M/...-00001-of-00003.gguf).
@@ -172,7 +175,7 @@ export async function lookUpHf(link: string): Promise<HfLookup> {
   if (!models.length) throw new Error('No .gguf model files at that link. Chat models here are GGUF files: look for a repo whose name ends in -GGUF.');
   const params = paramsOf(at.repo, Number(meta.gguf?.total) > 0 ? Number(meta.gguf!.total) : null);
   if (!/\.gguf$/i.test(at.path)) models = wholeModels(models, params);
-  return { repo: at.repo, rev: meta.sha, licence: meta.cardData?.license ?? 'not stated', models, params, chat: chatMeta(meta) };
+  return { repo: at.repo, rev: meta.sha, licence: meta.cardData?.license ?? 'not stated', models, params, chat: chatMeta(meta), caps: capsFromHf({ pipeline_tag: meta.pipeline_tag, files: (meta.siblings ?? []).map(s => String(s?.rfilename ?? '')), chat_template: meta.gguf?.chat_template }) };
 }
 
 type TreeEntry = { type: string; path: string; size: number; lfs?: { oid: string; size: number } };
@@ -224,7 +227,7 @@ export function paramsFromName(name: string): number | null {
   return n > 0 ? n : null;
 }
 
-export interface HfFound { repo: string; downloads: number; likes: number; gated: boolean; params: number | null }
+export interface HfFound { repo: string; downloads: number; likes: number; gated: boolean; params: number | null; caps: Caps }
 
 const CHAT_TAGS = new Set(['text-generation', 'image-text-to-text', 'conversational', 'text2text-generation']);
 
@@ -245,7 +248,8 @@ export function hfFound(list: unknown): HfFound[] {
     const g = r.gguf as { total?: unknown; chat_template?: unknown } | undefined;
     if (g && !g.chat_template && !CHAT_TAGS.has(String(r.pipeline_tag ?? ''))) return [];
     const params = paramsOf(repo, Number(g?.total) || null);
-    return [{ repo, downloads: Number(r.downloads) || 0, likes: Number(r.likes) || 0, gated: !!r.gated && r.gated !== 'false', params }];
+    const caps = capsFromHf({ pipeline_tag: r.pipeline_tag, files: Array.isArray(r.siblings) ? r.siblings.map(fileName) : [], chat_template: g?.chat_template });
+    return [{ repo, downloads: Number(r.downloads) || 0, likes: Number(r.likes) || 0, gated: !!r.gated && r.gated !== 'false', params, caps }];
   }).sort((a, b) => b.downloads - a.downloads);
 }
 

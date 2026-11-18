@@ -36,6 +36,8 @@ export interface Candidate {
   loadable: boolean;
   /** Why it cannot answer now, in plain words (empty when ready). */
   why: string;
+  /** The model itself is gone (deleted or moved, or its PC no longer linked), not just its PC off or busy. */
+  gone?: boolean;
 }
 
 /**
@@ -110,18 +112,36 @@ export function tidyChoices(list: BackupChoice[]): BackupChoice[] {
   return [...kept.values()];
 }
 
-/** Each linked PC's name for the backup list: with its address when another linked PC has the same name. */
-export function pcLabels(remotes: { id: string; name: string; url: string }[]): Record<string, string> {
+/** A computer's own name as a hello says it: letters, digits, spaces and - _ . only, at most 40; '' when there is none. */
+export function cleanComputer(v: unknown): string {
+  return typeof v === 'string' ? v.replace(/[^\w .-]/g, '').trim().slice(0, 40) : '';
+}
+
+/**
+ * Each linked PC's name as lists show it: its name alone, or, when another linked PC has the same name, with the
+ * computer's own name ("Worker PC (Z820)"), or its address when the computer's name does not tell them apart (an older
+ * TOMLIN does not say it, or both have the same one).
+ */
+export function pcLabels(remotes: { id: string; name: string; url: string; computer?: string }[]): Record<string, string> {
+  const key = (n: string) => n.trim().toLowerCase();
   const count = new Map<string, number>();
-  for (const r of remotes) count.set(r.name, (count.get(r.name) ?? 0) + 1);
-  const host = (url: string) => {
+  for (const r of remotes) count.set(key(r.name), (count.get(key(r.name)) ?? 0) + 1);
+  const host = (url: string, port = false) => {
     try {
-      return new URL(url).hostname;
+      return port ? new URL(url).host : new URL(url).hostname;
     } catch {
       return url;
     }
   };
-  return Object.fromEntries(remotes.map(r => [r.id, (count.get(r.name) ?? 0) > 1 ? `${r.name} (${host(r.url)})` : r.name]));
+  return Object.fromEntries(remotes.map(r => {
+    if ((count.get(key(r.name)) ?? 0) < 2) return [r.id, r.name];
+    const own = cleanComputer(r.computer);
+    const twins = remotes.filter(x => x.id !== r.id && key(x.name) === key(r.name));
+    const tells = own && key(own) !== key(r.name) && twins.every(x => key(cleanComputer(x.computer)) !== key(own));
+    // Two at one address (two copies on one PC) are told apart by their ports, as the page does (public/home.js).
+    const shared = twins.some(x => host(x.url) === host(r.url));
+    return [r.id, `${r.name} (${tells ? own : host(r.url, shared)})`];
+  }));
 }
 
 /** Same model first, then the ones that answer at once, then bigger before smaller. */

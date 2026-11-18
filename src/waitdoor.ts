@@ -12,11 +12,11 @@ export function waitAnswer(url: string, host: string, port: number): { status: n
   if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return { status: 403, type: 'application/json', body: JSON.stringify({ error: `Open TOMLIN at http://127.0.0.1:${port}` }) };
   const path = url.split('?')[0];
   if (path.startsWith('/api/') || path.startsWith('/v1/')) {
-    return { status: 503, type: 'application/json', body: JSON.stringify({ busy: 'starting', error: 'TOMLIN is getting ready (a new version keeps a copy of your data first). Try again in a moment.' }) };
+    return { status: 503, type: 'application/json', body: JSON.stringify({ busy: 'starting', error: 'TOMLIN is getting ready: it was recently updated and is backing up your data before it starts. Try again in a moment.' }) };
   }
   const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="3"><title>TOMLIN is getting ready</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f4ef;color:#222;font:16px/1.5 system-ui,sans-serif}main{max-width:30rem;padding:2rem;background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08)}h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:.5rem 0;color:#555}@media (prefers-color-scheme:dark){body{background:#1b1b1b;color:#eee}main{background:#262626}p{color:#bbb}}</style></head>
-<body><main><h1>TOMLIN is getting ready</h1><p>The first start of a new version keeps a copy of your data before it uses it. This can take a few minutes.</p><p>Please leave TOMLIN running. This page opens TOMLIN by itself when it is ready.</p></main></body></html>`;
+<body><main><h1>TOMLIN is getting ready</h1><p>TOMLIN was recently updated, so it is backing up your data before it starts. This can take a few minutes.</p><p>Please leave TOMLIN running. This page opens TOMLIN by itself when it is ready.</p></main></body></html>`;
   return { status: 503, type: 'text/html; charset=utf-8', body: page };
 }
 

@@ -9,12 +9,20 @@ const base = `http://127.0.0.1:${port}`;
 // About 2,000 tokens of plain text to read (the same every run).
 const LONG = Array.from({ length: 80 }, (_, i) => `Line ${i + 1}: the storage shed holds ${i % 7 + 2} boxes of tiles, ${i % 5 + 1} ladders and a blue tarp.`).join('\n');
 
+// Node's fetch gives up when no answer header comes for 5 minutes, and llama-server sends none until it has read the
+// whole prompt: a 2,000-token read on a slow Max mode set went past that (12 Nov 2026). Its own agent, with no time
+// limits, is made the same way src/engine.ts runnerFetch does; on a Node without it, plain fetch.
+await fetch('data:,').catch(() => undefined);
+const agentType = (globalThis as unknown as Record<symbol, { constructor?: new (o: object) => object } | undefined>)[Symbol.for('undici.globalDispatcher.1')]?.constructor;
+const patient = agentType ? new agentType({ headersTimeout: 0, bodyTimeout: 0 }) : null;
+
 async function ask(content: string, maxTokens: number): Promise<{ read: number; write: number; promptTokens: number; written: number }> {
   const r = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ messages: [{ role: 'user', content }], max_tokens: maxTokens, temperature: 0, cache_prompt: false, chat_template_kwargs: { enable_thinking: false } }),
-  });
+    ...(patient ? { dispatcher: patient } : {}),
+  } as RequestInit);
   const j = (await r.json().catch(() => ({}))) as { timings?: Record<string, number>; error?: { message?: string } | string };
   if (!r.ok || !j.timings) throw new Error(`TOMLIN answered ${r.status}: ${typeof j.error === 'string' ? j.error : j.error?.message ?? 'no timings'}`);
   const t = j.timings;

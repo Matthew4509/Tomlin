@@ -60,7 +60,7 @@ before(async () => {
   writeFileSync(join(home, 'models-folder.txt'), '');
   port = await freePort();
   const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const k of Object.keys(env)) if (/^(TOMLIN|SHELBY)_/.test(k)) delete env[k];
+  for (const k of Object.keys(env)) if (/^TOMLIN_/.test(k)) delete env[k];
   Object.assign(env, { TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(home, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(home, 'startup'), TOMLIN_DESKTOP_DIR: join(home, 'desktop'), TOMLIN_START_MENU_DIR: join(home, 'start-menu'), TOMLIN_INSTALL_ROOT: join(home, 'install'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_OPEN: '' });
   server = spawn(process.execPath, ['--import', HOLD_TO_THIS_PC, fileURLToPath(new URL('../src/server.ts', import.meta.url))], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout!.on('data', d => (said += d));

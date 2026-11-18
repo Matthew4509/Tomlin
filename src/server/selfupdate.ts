@@ -1,5 +1,5 @@
-// Update this install (This PC: models and updates): Check zip takes a TOMLIN zip uploaded from the page, with its .sig when it
-// was picked too; Check git finds the newest GitHub Release of TOMLIN's repo and downloads its zip, which must carry the
+// Update this install (This PC: models and updates): Update via zip takes a TOMLIN zip uploaded from the page, with its .sig when it
+// was picked too; Check for updates finds the newest GitHub Release of TOMLIN's repo and downloads its zip, which must carry the
 // release signature (src/release.ts). A hand-picked zip whose signature is missing or fails is a warning the person may
 // override (Install anyway); a download is refused. Either way the zip's listing is checked, it is opened beside this
 // copy (as an unzip by hand would) and walked again (src/newcopy.ts), and checked as a whole TOMLIN that is newer than
@@ -19,7 +19,8 @@ import { freeBytes, roomWhy } from '../carry.ts';
 import { missingFiles } from '../installer.ts';
 import { moveSure } from '../keep.ts';
 import { entriesWhy, testStart, unpackedWhy, zipEntries } from '../newcopy.ts';
-import { latestOf, noRelease, repoOf, type SigCode, sigOf, WARN, zipCheck, type Latest } from '../release.ts';
+import { installRefusal, latestOf, noRelease, repoOf, type SigCode, sigOf, stoppedWhy, WARN, zipCheck, type Latest } from '../release.ts';
+import { appLockOn, appPinCheck } from './locks.ts';
 import * as update from '../update.ts';
 import { BUILD, ROOT, type Routes, VERSION, json, restartInto } from './core.ts';
 import { backupRunning } from './bridge.ts';
@@ -92,7 +93,7 @@ async function openZip(source: 'file' | 'git', signature: (version: string) => C
   return { version: pkg.version, build: update.shortBuild(build), mine: VERSION, mineBuild: update.shortBuild(BUILD), ...signing(check) };
 }
 
-// ---- Check git: the newest GitHub Release, its signed zip downloaded and opened here ----
+// ---- Check for updates: the newest GitHub Release, its signed zip downloaded and opened here ----
 
 /** TOMLIN's repo on GitHub (package.json `repository`; TOMLIN_RELEASE_REPO for another), and where GitHub answers. */
 const REPO = repoOf(process.env.TOMLIN_RELEASE_REPO || JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')).repository);
@@ -103,16 +104,16 @@ let git: { state: 'downloading' | 'checking' | 'opening' | 'ready' | 'failed'; v
 
 /** The newest release on GitHub, or why it could not be read (fault, reason, way out in one sentence each). */
 async function latest(): Promise<Latest | string> {
-  if (!REPO) return 'This TOMLIN does not name its GitHub repo, so it cannot check git. Use Check zip with a zip from the TOMLIN releases page.';
+  if (!REPO) return 'This TOMLIN does not name its GitHub repo, so it cannot check git. Use Update via zip with a zip from the TOMLIN releases page.';
   let r: Response;
   try {
     r = await fetch(`${API}/repos/${REPO}/releases/latest`, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
   } catch (e) {
-    return `GitHub did not answer (${(e as Error).name === 'TimeoutError' ? 'it took too long' : 'no connection'}). Check this PC is online, then press Check git again; or use Check zip with a zip copied from another PC.`;
+    return `GitHub did not answer (${(e as Error).name === 'TimeoutError' ? 'it took too long' : 'no connection'}). Check this PC is online, then press Check for updates again; or use Update via zip with a zip copied from another PC.`;
   }
   if (r.status === 404) return noRelease(REPO, VERSION);
-  if (r.status === 403 || r.status === 429) return 'GitHub is turning this PC away for asking too often just now. Wait an hour, then press Check git again.';
-  if (!r.ok) return `GitHub answered ${r.status}. Try Check git again later.`;
+  if (r.status === 403 || r.status === 429) return 'GitHub is turning this PC away for asking too often just now. Wait an hour, then press Check for updates again.';
+  if (!r.ok) return `GitHub answered ${r.status}. Try Check for updates again later.`;
   // A stand-in GitHub (TOMLIN_RELEASE_API, for checks) serves its own downloads; the real one's are on github.com.
   const l = latestOf(await r.json().catch(() => null), process.env.TOMLIN_RELEASE_API ? `${API}/` : undefined);
   return typeof l === 'string' ? `Nothing to take: ${l}.` : l;
@@ -145,19 +146,19 @@ async function fetchRelease(l: Latest): Promise<void> {
   try {
     const sigRes = await fetch(l.sig.url, { headers: { 'user-agent': HEADERS['user-agent'] }, redirect: 'follow', signal: AbortSignal.timeout(60_000) });
     const sig = sigRes.ok ? await sigRes.json().catch(() => null) : null;
-    if (!sig) return fail(`Its signature could not be downloaded (GitHub answered ${sigRes.status}). Press Check git again later.`);
+    if (!sig) return fail(`Its signature could not be downloaded (GitHub answered ${sigRes.status}). Press Check for updates again later.`);
     const sha = await download(l.zip.url, ZIP, MAX_ZIP, n => { if (git) git.got = n; });
     git = { ...git, state: 'checking' };
     // A download is never opened without the release signature (a hand-picked zip may be, after a warning).
     const c = zipCheck(sig, l.version, sha);
-    if (c.code === 'newkey') return fail(`TOMLIN ${l.version} on GitHub is signed with a key this TOMLIN does not know, so it was not opened. If TOMLIN's maker changed keys, install this one version by hand once: download tomlin-${l.version}.zip and its .sig from the releases page, then Check zip with both (Install anyway). Check git takes the ones after it.`);
+    if (c.code === 'newkey') return fail(`TOMLIN ${l.version} on GitHub is signed with a key this TOMLIN does not know, so it was not opened. If TOMLIN's maker changed keys, install this one version by hand once: download tomlin-${l.version}.zip and its .sig from the releases page, then Update via zip with both (Install anyway). Check for updates takes the ones after it.`);
     if (c.code) return fail(`TOMLIN ${l.version} was downloaded but not opened: ${c.why}.`);
     git = { ...git, state: 'opening' };
     const opened = await openZip('git', () => c);
     if ('error' in opened) return fail(opened.error);
     git = { ...git, state: 'ready' };
   } catch (e) {
-    fail(`The download stopped: ${(e as Error).message.replace(/\.$/, '')}. Press Check git again to start it again.`);
+    fail(`The download stopped: ${stoppedWhy(e)}. Press Check for updates again to start it again.`);
   } finally {
     await rm(ZIP, { force: true }).catch(() => undefined);
     busy = false;
@@ -211,7 +212,7 @@ export const selfUpdateGet: Routes = {
 };
 
 export const selfUpdatePost: Routes = {
-  // Check git: the newest release on GitHub, and whether it is newer than this copy (nothing is downloaded yet).
+  // Check for updates: the newest release on GitHub, and whether it is newer than this copy (nothing is downloaded yet).
   '/api/install/git-check': async ({ res }) => {
     const l = await latest();
     if (typeof l === 'string') return json(res, 502, { error: l });
@@ -224,7 +225,7 @@ export const selfUpdatePost: Routes = {
     if (busy) return json(res, 409, { error: 'An update is being downloaded or opened already. Wait for it, then try again.' });
     const l = await latest();
     if (typeof l === 'string') return json(res, 502, { error: l });
-    if (l.version !== b.version) return json(res, 409, { error: `GitHub now has TOMLIN ${l.version}, not ${String(b.version)}. Press Check git again.` });
+    if (l.version !== b.version) return json(res, 409, { error: `GitHub now has TOMLIN ${l.version}, not ${String(b.version)}. Press Check for updates again.` });
     if (!update.newer(l.version, VERSION)) return json(res, 409, { error: `This PC runs ${VERSION} already: nothing newer on GitHub.` });
     const room = roomWhy(Math.round((l.zip.bytes || 200 * 1024 ** 2) * 3.5), await freeBytes(PARENT), 'this PC');
     if (room) return json(res, 507, { error: `Not downloaded: ${room}` });
@@ -237,8 +238,10 @@ export const selfUpdatePost: Routes = {
     if (!ready || ready.version !== b.version) return json(res, 409, { error: 'That zip is no longer waiting here (TOMLIN started again, or another was picked). Upload it again.' });
     if (!restarts()) return json(res, 409, { error: notRestarting });
     if (busy) return json(res, 409, { error: 'An update is being opened or tested already. Wait for it, then try again.' });
-    if (ready.check.code && ready.source !== 'file') return json(res, 409, { error: 'A download from GitHub is never installed without its signature.' });
-    if (ready.check.code && b.anyway !== true) return json(res, 409, { error: `This zip is not signed by TOMLIN's maker: ${WARN[ready.check.code]} Press Install anyway only if you trust where it came from.` });
+    // Not signed: never a download; a hand-picked zip only with Install anyway, and with an app lock set only with its PIN.
+    const refused = await installRefusal({ code: ready.check.code, source: ready.source, anyway: b.anyway, lockOn: appLockOn(), pin: b.appPin, pinCheck: appPinCheck });
+    if (refused) return json(res, refused.status, refused);
+    if (!ready) return json(res, 409, { error: 'That zip is no longer waiting here (TOMLIN started again, or another was picked). Upload it again.' });
     const serving = jobRoutes.servingNow();
     if (serving.length) return json(res, 409, { error: 'A linked PC is using this one now (an answer or a picture). Wait for it to finish, then press Update now again.' });
     if (backupRunning()) return json(res, 409, { error: backupRunning() });

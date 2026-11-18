@@ -77,6 +77,73 @@ test('a request opens only at its own door, in time, once', async () => {
   assert.notDeepEqual(toNode(nodeKeys), toHost(nodeKeys));
 });
 
+test('a request taken before a restart is still refused after it: the ids taken are kept on the disk, the old ones dropped', async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'link-seen-'));
+  try {
+    const file = join(dir, 'link-seen.txt');
+    const { host, nodeKeys } = await linked();
+    const now = Date.now();
+    const req = sealRequest(host.keys, '/worker/power-off', { appPin: '1234' }, now);
+    const before = new Seen();
+    before.keepIn(file, now);
+    assert.ok('body' in openRequest(nodeKeys, req, '/worker/power-off', before, now));
+    // TOMLIN starts again five minutes later (the run before has ended, and let go of its file): a fresh memory, the
+    // same file. The recorded copy is refused.
+    before.close();
+    const after = new Seen();
+    after.keepIn(file, now + 5 * 60_000);
+    const again = openRequest(nodeKeys, req, '/worker/power-off', after, now + 5 * 60_000);
+    assert.ok('error' in again && /already taken/.test(again.error), JSON.stringify(again));
+    // A new request still goes through, and ids past twice the window are dropped from the file when it is read again.
+    assert.ok('body' in openRequest(nodeKeys, sealRequest(host.keys, '/worker/hello', {}, now + 5 * 60_000), '/worker/hello', after, now + 5 * 60_000));
+    after.close();
+    const later = new Seen();
+    later.keepIn(file, now + 2 * LINK_WINDOW_MS + 6 * 60_000);
+    assert.equal(readFileSync(file, 'utf8').trim(), '', 'all old: the file is written again empty');
+    // Without a file it is as before: memory only.
+    const plain = new Seen();
+    assert.equal(plain.take('abc', now), true);
+    assert.equal(plain.take('abc', now), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeping the ids on the disk does not open the file again for every request (a scanner checks each one closed)', async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'link-seen-'));
+  try {
+    const file = join(dir, 'link-seen.txt');
+    const now = Date.now();
+    const seen = new Seen();
+    seen.keepIn(file, now);
+    // 2,000 requests took over 400 s on a busy PC with the file opened and closed for each one.
+    const t = Date.now();
+    for (let i = 0; i < 2000; i++) assert.equal(seen.take(`id${String(i).padStart(13, '0')}`, now), true);
+    assert.ok(Date.now() - t < 2000, `${Date.now() - t} ms`);
+    // Every id is in the file, and a restart refuses each of them.
+    assert.equal(readFileSync(file, 'utf8').trim().split('\n').length, 2000);
+    // A second memory reads the file (it takes nothing new, so it never holds the file open).
+    const after = new Seen();
+    after.keepIn(file, now + 60_000);
+    assert.equal(after.take('id0000000001999', now + 60_000), false);
+    // Written whole again once it has grown, and still added to after that.
+    for (let i = 0; i < 5000; i++) seen.take(`more${String(i).padStart(11, '0')}`, now + 2 * LINK_WINDOW_MS + 60_000);
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    assert.ok(lines.length <= 5000 * 2 + 500 && lines.length >= 5000, `${lines.length} lines`);
+    assert.ok(lines.at(-1)!.startsWith('more00000004999'));
+    seen.close();
+    after.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('answers are tied to their request and their place in a stream', async () => {
   const { host, nodeKeys } = await linked();
   const a = sealAnswer(nodeKeys, 'req1', 0, { model: 'Qwen' });

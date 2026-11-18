@@ -11,7 +11,9 @@ import * as mute from '../mute.ts';
 import { cleanTitle, recentEntries, subjectFor, whoKind, type ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
 import { HOME, HOST_NAME, HOST_ON, SECURITY_HEADERS, type Route, type Routes, chatLogs, chats, decoded, faces, json, mutes, publicSettings, shortName, staff, staffId, store, workspaceDir } from './core.ts';
-import { chatList, images } from './panes.ts';
+import { chat, chatList, images, runners } from './panes.ts';
+import { hireModel, type HireModel } from '../hiremodel.ts';
+import { leftPerson } from '../leavers.ts';
 import { chatWork, stopChats } from './answering.ts';
 import { docStore, liveAnswers } from './chat.ts';
 import { jobRoutes } from './jobs.ts';
@@ -93,6 +95,29 @@ export async function setWho(to: string): Promise<string> {
   return (await offHost()) ?? opened;
 }
 
+/**
+ * The model a hire uses now and whether it is here (src/hiremodel.ts): the one answer All staff, Edit staff, New chat,
+ * the chat's head and the left panel all show. A linked PC's models are as it last said (kept while it is off).
+ */
+export function hireModelOf(m: StaffMember): HireModel {
+  const s = store.peek();
+  const picture = !!roleOf(m.role).kind;
+  const here = picture
+    ? images.list().filter(x => x.installed).map(x => ({ id: x.id, name: shortName(x.name.replace(/\s*\(.*\)$/, '')) || x.name }))
+    : chatList().map(x => ({ id: x.id, name: shortName(x.name) || x.name }));
+  const pcs = (s?.remotes ?? []).map(r => {
+    const h = jobRoutes.lastHello(r.id);
+    const list = h?.can?.includes('models') ? h.models : r.models ?? null;
+    const loaded = picture ? h?.image?.name ?? null : h?.model ?? null;
+    return { id: r.id, name: r.name, backupsOnly: r.backupsOnly === true, loaded: loaded ? shortName(loaded) || loaded : null, models: list ? list.filter(x => (x.kind === 'image') === picture).map(x => ({ id: x.id, name: shortName(x.name) || x.name })) : null };
+  });
+  // No model given: the main chat runner answers (else any chat model loaded); an artist, the picture model loaded.
+  const on = picture
+    ? (images.pane.view.state === 'connected' ? images.pane.view.model : null)
+    : chat.view.state === 'connected' ? chat.view.model : runners.find(p => p.view.state === 'connected')?.view.model ?? null;
+  return hireModel(m.model, { picture, here, pcs, connected: on ? here.find(x => x.id === on)?.name ?? on : null });
+}
+
 /** Everyone a new chat can be with: the manager and each hire who chats. */
 export function chatPeople() {
   const s = store.peek()!;
@@ -104,23 +129,26 @@ export function chatPeople() {
     if (b.kind !== 'remote') return { model: modelName(m.model), pc: 'this PC' };
     const r = s.remotes.find(x => x.id === b.pc);
     const h = r ? jobRoutes.lastHello(r.id) : null;
-    const pc = r?.name ?? 'a PC no longer paired';
+    // Two linked PCs with one name ("Worker PC") are told apart (src/brains.ts pcLabels).
+    // On a PC this one is a guest on, said so ("Office Z820, guest").
+    const pc = r ? `${brains.pcLabels(s.remotes)[r.id] ?? r.name}${r.role === 'guest' ? ', guest' : ''}` : 'a PC no longer paired';
     // One of the models that PC lets linked PCs use, by name; else what it had loaded when it last answered.
     if (b.model) return { model: shortName(jobRoutes.sharedName(b.pc, b.model)), pc, ...(r ? { pcId: r.id } : {}) };
     return { model: h?.model ? shortName(h.model) : 'what it has loaded', pc, ...(r ? { pcId: r.id } : {}) };
   };
   const pictures = images.list();
   // roleId: the role by its id ('host' for the host), for what "Write it as a prompt for…" asks (src/sendto.ts).
-  const people: Array<{ who: string; name: string; avatar: string; role: string; roleId: string; model: string; pc: string; pcId?: string; hint: string; kind: 'chat' | 'image'; named?: boolean }> = [
+  const people: Array<{ who: string; name: string; avatar: string; role: string; roleId: string; model: string; pc: string; pcId?: string; hint: string; kind: 'chat' | 'image'; named?: boolean; use?: HireModel }> = [
     // The host: this PC's own assistant, not one of the staff (it answers on the chat model connected here). Off for now.
     ...(HOST_ON ? [{ kind: 'chat' as const, who: 'manager', name: s.managerName || HOST_NAME, avatar: s.managerName ? s.managerName.slice(0, 2).toUpperCase() : 'H', named: !!s.managerName, role: 'Not staff: this PC\'s own assistant', roleId: 'host', model: modelName(s.hostModel || s.chat.model), pc: 'this PC', hint: 'The host: this PC\'s own assistant, not one of the staff. It answers on its own model (the pencil beside it in the left panel), and how it talks (Standard, Professional, Friend) is set in the chat settings.' }] : []),
     ...staff.list().filter(m => !roleOf(m.role).kind).map(m => ({
-      kind: 'chat' as const, who: `staff:${m.id}`, name: m.name, avatar: m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), role: roleOf(m.role).name, roleId: roleOf(m.role).id, ...where(m), hint: roleOf(m.role).hint,
+      kind: 'chat' as const, who: `staff:${m.id}`, name: m.name, avatar: m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), role: roleOf(m.role).name, roleId: roleOf(m.role).id, ...where(m), use: hireModelOf(m), hint: roleOf(m.role).hint,
     })),
     // Artists: their chat is the pictures pane, and what you type there is drawn word for word.
     ...staff.list().filter(m => roleOf(m.role).kind).map(m => ({
       kind: 'image' as const, who: `staff:${m.id}`, name: m.name, avatar: m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), role: `${roleOf(m.role).name} · draws what you ask`, roleId: roleOf(m.role).id,
       model: String(m.model ?? '').startsWith('remote:') ? 'draws on a linked PC' : shortName(pictures.find(x => x.id === m.model)?.name.replace(/\s*\(.*\)$/, '')) || 'the picture model connected here', pc: String(m.model ?? '').startsWith('remote:') ? where(m).pc : 'this PC',
+      use: hireModelOf(m),
       hint: `${m.name} draws: what you type in their chat goes to the picture model just as you type it.`,
     })),
   ];
@@ -154,21 +182,47 @@ function facePeople() {
 
 async function facesView() {
   // looks: each hire's drawn person (src/look.ts), for those with one; lookOptions: the parts and their colours to draw.
-  const looks = Object.fromEntries(staff.list().flatMap(m => { const l = cleanLook(m.look); return l ? [[`staff:${m.id}`, l]] : []; }));
+  // Someone who left keeps the picture they had beside their kept chats (src/staff.ts Leaver).
+  const leavers = [...new Set((await chats.list()).map(c => c.who))].flatMap(who => {
+    const l = who.startsWith('staff:') && !staffId(who) ? staff.leaver(who.slice(6)) : undefined;
+    return l ? [{ id: who.slice(6), look: l.look, initials: l.initials, role: l.role }] : [];
+  });
+  const everyone = [...staff.list(), ...leavers];
+  const looks = Object.fromEntries(everyone.flatMap(m => { const l = cleanLook(m.look); return l ? [[`staff:${m.id}`, l]] : []; }));
   // madeUp: each hire with no saved look who did not choose "Show initials instead", with the role their made-up look
   // comes from (public/look.js fromId: the same look Edit staff > Look shows), drawn as their round picture.
-  return { faces: visibleFaces(await faces.all()), people: facePeople(), looks, madeUp: Object.fromEntries(staff.list().filter(m => !cleanLook(m.look) && !m.initials).map(m => [`staff:${m.id}`, m.role])), lookOptions: LOOK_OPTIONS };
+  return { faces: visibleFaces(await faces.all()), people: facePeople(), looks, madeUp: Object.fromEntries(everyone.filter(m => !cleanLook(m.look) && !m.initials).map(m => [`staff:${m.id}`, m.role])), lookOptions: LOOK_OPTIONS };
 }
+
+/** Deletes one chat: its answer stops, its documents and log go; its pictures are kept in the gallery unless `pictures`. */
+async function dropChat(c: ChatInfo, pictures: boolean) {
+  stopChats(a => a.chatId === c.id);
+  // An answer or picture still running for it saves nothing after this, so its file is never written again.
+  store.chatEmptied(chats.file(c.id));
+  if ((await store.settings()).chatId === c.id) await store.saveSettings({ chatId: '' });
+  const n = await images.gallery.forgetChat(c.id, pictures);
+  await chats.remove(c.id);
+  await docStore.drop(c.id);
+  await chatLogs.drop(c.id);
+  const m = await mutes.get();
+  if (m.items[`chat:${c.id}`]) await mutes.save(mute.set(m, `chat:${c.id}`, 'off'));
+  return n;
+}
+
+/** Whether a chat is with a hire who left the team (not the host, not a linked PC's retired hire). */
+const isLeft = (who: string) => who.startsWith('staff:') && !staffId(who);
 
 /** The Chats tab's list (newest first), each with whom and how many pictures. */
 async function chatsView() {
   const people = chatPeople();
   // A picture list that cannot be read now (the Images pane says so) does not take the chats away.
   const pics = await images.gallery.countByChat().catch(() => ({} as Record<string, number>));
-  const nameOf = (who: string) => people.find(p => p.who === who) ?? (who.startsWith('node:') ? { name: 'Someone on another PC', avatar: '?', role: 'Worked on a linked PC (linked PCs no longer lend staff)' } : who.startsWith('staff:') ? { name: 'Someone who left the team', avatar: '?', role: 'Left the team' } : { name: HOST_NAME, avatar: '?', role: '' });
+  const nameOf = (who: string) => people.find(p => p.who === who) ?? (who.startsWith('node:') ? { name: 'Someone on another PC', avatar: '?', role: 'Worked on a linked PC (linked PCs no longer lend staff)' } : who.startsWith('staff:') ? leftPerson(who.slice(6), staff.leaver(who.slice(6))) : { name: HOST_NAME, avatar: '?', role: '' });
+  // left: with someone who left the team (the Chats tab can hide them, or clear them together).
   const list = (await chats.list()).map(c => {
     const p = nameOf(c.who);
-    return { ...c, name: p.name, avatar: p.avatar, role: p.role, here: chatPersonHere(c.who), pictures: pics[c.id] ?? 0 };
+    const here = chatPersonHere(c.who);
+    return { ...c, name: p.name, avatar: p.avatar, role: p.role, here, ...(isLeft(c.who) ? { left: true } : {}), pictures: pics[c.id] ?? 0 };
   });
   const open = await openChat();
   // "Recent chats" in the left panel: projects as one entry each, chats in no project on their own (src/chats.ts).
@@ -363,16 +417,16 @@ export const peoplePost: Routes = {
   '/api/chats/delete': async ({ res, b }) => {
     const c = await chats.get(b.id);
     if (!c) return json(res, 404, { error: 'That chat is not there any more.' });
-    stopChats(a => a.chatId === c.id);
-    // An answer or picture still running for it saves nothing after this, so its file is never written again.
-    store.chatEmptied(chats.file(c.id));
-    if ((await store.settings()).chatId === c.id) await store.saveSettings({ chatId: '' });
-    const pictures = await images.gallery.forgetChat(c.id, b.pictures === 'delete');
-    await chats.remove(c.id);
-    await docStore.drop(c.id);
-    await chatLogs.drop(c.id);
-    const m = await mutes.get();
-    if (m.items[`chat:${c.id}`]) await mutes.save(mute.set(m, `chat:${c.id}`, 'off'));
+    const pictures = await dropChat(c, b.pictures === 'delete');
     return json(res, 200, { ok: true, pictures, deleted: b.pictures === 'delete' });
+  },
+  // Clear chats from people who left (the Chats tab asks first): every chat with a hire who left the team, with their
+  // photos; their pictures stay in the gallery unless {pictures: 'delete'}.
+  '/api/chats/delete-left': async ({ res, b }) => {
+    const gone = (await chats.list()).filter(c => isLeft(c.who));
+    let pictures = 0;
+    for (const c of gone) pictures += Number(await dropChat(c, b.pictures === 'delete')) || 0;
+    for (const who of new Set(gone.map(c => c.who))) await faces.clear(who);
+    return json(res, 200, { ok: true, removed: gone.length, pictures, deleted: b.pictures === 'delete', ...(await chatsView()) });
   },
 };

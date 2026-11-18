@@ -10,16 +10,16 @@ const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.u
 
 test('the Settings menu stays in the left panel on every page it opens, with that page marked', () => {
   const css = read('style.css');
-  for (const view of ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours']) {
-    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
+  for (const view of ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']) {
+    assert.ok(css.includes(`.shell:is([data-view="settings"], [data-view="models"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }`), 'the menu alone in the left panel');
     assert.ok(css.includes(`:not([data-view="${view}"])`), `${view}: the menu is not hidden there`);
   }
   assert.match(css, /\.rail-links \.link\[aria-current="page"\]/);
   const home = read('home.js');
-  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'colours'\];/);
+  assert.match(home, /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];/);
   assert.match(home, /b\.setAttribute\('aria-current', 'page'\)/);
-  // Settings itself is in the menu, so every page is one press from every other.
-  assert.match(read('index.html'), /data-setup="settings"/);
+  // Settings itself is the top bar's button (the left panel's Settings line was removed), so every page is one press from every other.
+  assert.match(read('index.html'), /id="settings-open"/);
   assert.match(read('homeview.js'), /b\.dataset\.setup === 'settings'\) app\.openSettings/);
 });
 

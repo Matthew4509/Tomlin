@@ -3,7 +3,7 @@
 // Listens on 127.0.0.1 only.
 // The parts live in src/server/ by area, each with its own routes; this file puts them together, guards every
 // request and sends it to the area that answers it.
-import './envnames.ts';
+import { keepSocketsOpen } from './sockettimeouts.ts';
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
@@ -13,30 +13,36 @@ import { takeWaitDoor } from './waitdoor.ts';
 import { followStarted } from './installer.ts';
 import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
-import { refreshTray } from './trayfresh.ts';
+import { followAppsEntry, refreshTray } from './trayfresh.ts';
 import { autostart } from './autostart.ts';
-import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store } from './server/core.ts';
+import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store, modelsHome, runtimes, notifier, mutes } from './server/core.ts';
+import { startDiskCare } from './diskcare.ts';
 import { settingsGet, settingsPost } from './server/settings.ts';
 import { appLock, appLockAction, appLockOn, appLockView, appOk } from './server/locks.ts';
 import { images, loadModel, openAiChat, panesGet, panesPost, unloadPane } from './server/panes.ts';
 import { answeringGet, answeringPost, askOnce } from './server/answering.ts';
 import { faceFile, offHost, peopleGet, peoplePost } from './server/people.ts';
 import { addDoc, chatGet, chatPost } from './server/chat.ts';
-import { picturesPost } from './server/pictures.ts';
+import { picturesGet, picturesPost } from './server/pictures.ts';
 import { previewFile, projectPost, workGet, workPost } from './server/work.ts';
 import { teamGet, teamPost } from './server/team.ts';
 import { hfGet, hfPost } from './server/hf.ts';
+import { modelHomeGet, modelHomePost } from './server/modelhome.ts';
 import { noticesGet, noticesPost, tellChat } from './server/notices.ts';
 import { thispcGet, thispcPost } from './server/thispc.ts';
+import { sitecheckGet, sitecheckPost } from './server/sitecheck.ts';
 import { jobRoutes, startJobs } from './server/jobs.ts';
 import { owedPost, startOwed } from './server/owed.ts';
 import { handInPicture, placesGet, placesPost } from './server/places.ts';
+import { toolsGet, toolsPost } from './server/tools.ts';
 import { todoGet, todoPost } from './server/todo.ts';
 import { costsGet, costsPost, pcPhotoFile } from './server/costs.ts';
 import { queueGet, queuePost, startQueue } from './server/queue.ts';
 import { installGet, installPost } from './server/install.ts';
 import { runtimesGet, runtimesPost } from './server/runtimes.ts';
 import { finderGet, finderPost } from './server/finder.ts';
+import { runnerCheckGet, runnerCheckPost } from './server/runnercheck.ts';
+import { faultsGet, faultsPost, watchRunners } from './server/faults.ts';
 import { selfUpdateGet, selfUpdatePost, takeZip } from './server/selfupdate.ts';
 import { BRIDGE_PATH, bridgeRoute, startBridge } from './server/bridge.ts';
 
@@ -90,10 +96,12 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, todoGet);
-const POST = routesOf(settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, todoPost);
+const GET = routesOf(toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
+const POST = routesOf(toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
 
 // The holding page's socket (src/waitdoor.ts) when it is listening, so the port never goes quiet; else a new one.
+// Runner faults and whole answers go to the run history (the crash notice reads it).
+watchRunners();
 const server = takeWaitDoor() ?? createServer();
 server.on('request', async (req, res) => {
   try {
@@ -180,7 +188,7 @@ const started = () => {
   console.log(`Your chats, staff, pictures and downloaded models are kept in ${HOME.home}`);
   if (TEST_START) return;
   // An install's current.txt follows the copy that started, so the installed program starts this one next time.
-  followStarted(ROOT);
+  followStarted(ROOT, process.env, line => log.info('app', line));
   // A new copy started by Start TOMLIN.cmd after an update from a linked PC: it answered, so it is kept (no going back).
   if (process.env.TOMLIN_PREV) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
   // Started again after a new copy failed to start: "Start TOMLIN when this PC starts", pointed at that copy, points here again.
@@ -199,6 +207,8 @@ const started = () => {
       child.unref();
     }).catch(() => undefined);
   }
+  // What could fill a drive is kept within bounds, and a nearly full drive is said (src/diskcare.ts lists each cleanup).
+  startDiskCare({ data: HOME.data, models: () => [modelsHome.dir(), HOME.models], keptRoot: join(HOME.home, 'backups from other PCs'), runtimes, notifier, mutes });
   // Sharing this PC as a worker is off unless its owner turned it on in Jobs.
   void jobRoutes.startShare().catch(error => console.error(`Sharing as a worker could not start: ${(error as Error).message}`));
   // Linked PCs are asked once at start, so their staff show as on (or off) straight away.
@@ -208,7 +218,10 @@ const started = () => {
     void refreshTray(ROOT)
       .then(r => r === 'built' && console.log('TOMLIN\'s program (by the clock) was built again for this version: the new one runs from the next start.'))
       .catch(error => console.error(`TOMLIN's program (by the clock) could not be built again: ${(error as Error).message}`));
+    // Settings > Apps says this version too, after an update made inside the app (src/trayfresh.ts).
+    void followAppsEntry(ROOT, VERSION).catch(error => console.error(`Settings > Apps still shows the version before this one: ${(error as Error).message}`));
   }
 };
+keepSocketsOpen(server);
 if (server.listening) started();
 else server.listen(PORT, '127.0.0.1', started);

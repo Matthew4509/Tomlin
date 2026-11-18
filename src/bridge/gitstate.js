@@ -53,17 +53,51 @@ function gitConfigRisky(dir) {
   return files.some(f => { try { return RISKY_GIT.some(re => re.test(fs.readFileSync(f, 'utf8'))); } catch { return false; } });
 }
 
-function git(dir, args, big) {
+// How long one git command may take. The list no longer waits for git (it shows what was last known and reads git
+// in the background), so a slow folder is given time: a worktree whose index is out of date makes git re-read every
+// file, which took about 30 s on one project here. Tests shorten these.
+const limits = { quick: 8000, status: 30000, statusTracked: 90000, big: 20000 };
+
+function git(dir, args, big, ms) {
   return new Promise(resolve => {
     const fence = fenced(dir);
+    const limit = ms || (big ? limits.big : limits.quick);
     execFile('git', ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', ...fence.args, '-C', dir, ...args], {
-      timeout: big ? 20000 : 8000, windowsHide: true, maxBuffer: (big ? 32 : 4) * 1024 * 1024,
+      timeout: limit, windowsHide: true, maxBuffer: (big ? 32 : 4) * 1024 * 1024,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...fence.env },
     }, (err, stdout, stderr) => {
       if (err && err.code === 'ENOENT') gitMissing = true;
-      resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || (err && err.message) || '') });
+      // Killed for taking too long: said in words, not as node's "Command failed: git -c ..." line.
+      const slow = !!(err && err.killed);
+      resolve({ ok: !err, slow, limit, out: String(stdout || ''), err: slow ? '' : String(stderr || (err && err.message) || '') });
     });
   });
+}
+
+const secs = ms => Math.round(ms / 1000) + ' seconds';
+// Why git could not read a folder, in plain words: the reasons seen on real PCs get a sentence of their own.
+function whyFailed(dir, st) {
+  if (gitMissing) return 'git is not installed on this PC.';
+  if (st.slow) return 'git took longer than ' + secs(st.limit) + ' to read this folder, so its state is not known. Refresh tries again.';
+  if (/dubious ownership/.test(st.err)) return 'git refuses this folder: it belongs to another user account.';
+  if (/not a git repository|not a gitdir|does not point to a valid repository|invalid gitfile/i.test(st.err)) {
+    const linked = linkedTo(dir);
+    // <main folder>\.git\worktrees\<name>: the main folder is the one a person knows.
+    const main = linked && /^(.*?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(linked);
+    if (linked && !fs.existsSync(linked)) return 'This folder is a git worktree of ' + (main ? main[1] : 'another folder') + ', and that folder\'s git repository is not there any more (moved or deleted), so git cannot read this one.';
+    return 'This folder has a .git entry, but git does not see a repository in it (the .git folder is damaged or incomplete).';
+  }
+  const first = st.err.split('\n').map(l => l.replace(/^(fatal|error):\s*/, '').trim()).find(Boolean) || 'no reason given';
+  return 'git could not read this folder: ' + first.slice(0, 160);
+}
+// The repository a ".git" file points at (a linked worktree), or null when .git is a folder.
+function linkedTo(dir) {
+  try {
+    const dotgit = path.join(dir, '.git');
+    if (fs.statSync(dotgit).isDirectory()) return null;
+    const m = /gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotgit, 'utf8'));
+    return m ? path.resolve(dir, m[1]) : null;
+  } catch { return null; }
 }
 
 // Only host and path leave the server: a remote address can carry a user name and token (https://user:token@host/…).
@@ -74,14 +108,21 @@ function safeRemote(url) {
   try { const x = new URL(u); return x.host + x.pathname.replace(/\.git$/, ''); } catch { return path.basename(u); }
 }
 
-async function read(dir) {
+// skipNew: go straight to the status that leaves new (untracked) files out, for a folder where looking for them took
+// too long last time.
+async function read(dir, skipNew) {
   if (!fs.existsSync(path.join(dir, '.git'))) return { state: 'none' };
   if (gitConfigRisky(dir)) return { state: 'error', reason: 'This folder\'s git settings could run a program (a filter, hook or similar), so the Bridge did not read its git state.' };
-  const st = await git(dir, ['status', '--porcelain=v2', '--branch', '--ignore-submodules=all']);
-  if (!st.ok) {
-    if (gitMissing) return { state: 'error', reason: 'git is not installed on this PC.' };
-    return { state: 'error', reason: /dubious ownership/.test(st.err) ? 'git refuses this folder: it belongs to another user account.' : 'git could not read this folder: ' + st.err.split('\n')[0].slice(0, 160) };
+  const ST = ['status', '--porcelain=v2', '--branch', '--ignore-submodules=all'];
+  let st = skipNew ? { ok: false, slow: true } : await git(dir, ST, false, limits.status);
+  // Looking for new files in a big folder (a build output or a copied site not in .gitignore) can take minutes;
+  // the files git already holds are still read, and the row says new files were not counted.
+  let untrackedSkipped = false;
+  if (!st.ok && st.slow && !gitMissing) {
+    st = await git(dir, [...ST, '--untracked-files=no'], false, limits.statusTracked);
+    untrackedSkipped = st.ok;
   }
+  if (!st.ok) return { state: 'error', reason: whyFailed(dir, st) };
   const info = { branch: null, upstream: null, ahead: 0, behind: 0, changes: 0, commits: true };
   for (const line of st.out.split('\n')) {
     if (line.startsWith('# branch.head ')) info.branch = line.slice(14);
@@ -94,7 +135,8 @@ async function read(dir) {
   const remotes = rem.out.split('\n').filter(Boolean).map(l => { const m = /^remote\.(.+)\.url (.+)$/.exec(l); return m ? { name: m[1], where: safeRemote(m[2]) } : null; }).filter(Boolean);
   const log = info.commits ? await git(dir, ['log', '-1', '--format=%cI']) : { out: '' };
   const out = { state: 'ok', branch: info.branch, changes: info.changes, ahead: info.ahead, behind: info.behind,
-    remote: remotes[0] ? remotes[0].where : null, remoteName: remotes[0] ? remotes[0].name : null, lastCommit: log.out.trim() || null, pushed: null };
+    remote: remotes[0] ? remotes[0].where : null, remoteName: remotes[0] ? remotes[0].name : null, lastCommit: log.out.trim() || null, pushed: null,
+    ...(untrackedSkipped ? { untrackedSkipped: true } : {}) };
   if (!info.commits) out.state = 'empty';
   else if (!remotes.length) out.state = 'local';
   else {
@@ -123,11 +165,77 @@ async function read(dir) {
 async function gitState(dir, fresh) {
   const k = dir.toLowerCase();
   const hit = cache.get(k);
-  if (!fresh && hit && Date.now() - hit.at < TTL) return hit.value;
-  const value = await read(dir).catch(e => ({ state: 'error', reason: String(e.message || e) }));
-  cache.set(k, { at: Date.now(), value });
+  if (!fresh && hit && hit.live && Date.now() - hit.at < TTL) return hit.value;
+  // A folder where looking for new files took too long last time goes straight to the quicker read; Refresh tries
+  // the full one again.
+  const skipNew = !fresh && !!(hit && hit.value && hit.value.untrackedSkipped);
+  const value = await read(dir, skipNew).catch(e => ({ state: 'error', reason: String(e.message || e) }));
+  cache.set(k, { at: Date.now(), value, live: true });
+  rev++;
+  saveSoon();
   return value;
 }
+
+// ---- What was last known, so the list shows at once (git for 50 folders took 9 s and the page waited for all of
+// it). Kept in the Bridge's data folder between runs; a row shows its last state marked "checking" until git has been
+// read again in the background, a few folders at a time.
+let storeFile = null, saveTimer = null, rev = 0;
+function useStore(file) {
+  storeFile = file;
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+  for (const [k, e] of Object.entries((saved && saved.folders) || {})) {
+    // Only what was read in this run counts as fresh: a value from the file is shown, then read again.
+    if (e && e.value && typeof e.value.state === 'string' && !cache.has(k)) cache.set(k, { at: Number(e.at) || 0, value: e.value, live: false });
+  }
+}
+function saveSoon() {
+  if (!storeFile || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const folders = {};
+    for (const [k, e] of cache) folders[k] = { at: e.at, value: e.value };
+    const tmp = storeFile + '.tmp';
+    fs.promises.writeFile(tmp, JSON.stringify({ folders }))
+      .then(() => fs.promises.rename(tmp, storeFile)).catch(() => {});
+  }, 500);
+  if (saveTimer.unref) saveTimer.unref();
+}
+
+// Folders waiting for git, read FEW at a time: 13 repositories at once made each git several times slower.
+const FEW = 4;
+const queue = [], queued = new Set();
+let reading = 0;
+function pump() {
+  while (reading < FEW && queue.length) {
+    const job = queue.shift();
+    reading++;
+    gitState(job.dir, job.fresh).catch(() => {}).finally(() => { reading--; queued.delete(job.dir.toLowerCase()); pump(); });
+  }
+}
+// Reads git again for every folder that needs it (all of them when fresh), in the background. A folder already
+// waiting or being read is not added twice.
+function refresh(dirs, fresh) {
+  for (const dir of dirs) {
+    const k = dir.toLowerCase();
+    const hit = cache.get(k);
+    if (queued.has(k)) continue;
+    if (!fresh && hit && hit.live && Date.now() - hit.at < TTL) continue;
+    queued.add(k);
+    queue.push({ dir, fresh: !!fresh });
+  }
+  pump();
+}
+// What the row shows now, without running git: the state read in this run, else the last one known marked
+// checking, else just "checking". A folder still waiting for git is marked checking too.
+function peek(dir) {
+  const k = dir.toLowerCase();
+  const hit = cache.get(k);
+  const waiting = queued.has(k);
+  if (!hit) return { state: 'checking', checking: true };
+  return waiting || !hit.live ? { ...hit.value, checking: true } : hit.value;
+}
+const pending = () => queued.size;
 
 // ---- What changed since the last save, to read before committing: every changed file with its lines, as git diff
 // shows them against the last commit (saved-for-commit and not, together). Read only, like the rest of this file:
@@ -159,8 +267,8 @@ async function changes(dir) {
   const shown = files.slice(0, MAX_FILES);
   const head = (await git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])).ok;
   // Against the last commit; before the first commit, what is staged is all there is to compare.
-  const d = await git(dir, ['-c', 'core.quotePath=false', 'diff', ...(head ? ['HEAD'] : ['--cached']), '--ignore-submodules=all', '--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'], true);
-  if (!d.ok) return { ok: false, error: /maxBuffer/i.test(d.err) ? 'The changes are too big to show here (over 32 MB). Use a git program to read them.' : 'git could not compare this folder: ' + d.err.split('\n')[0].slice(0, 160) };
+  const d = await git(dir, ['-c', 'core.quotePath=false', 'diff', ...(head ? ['HEAD'] : ['--cached']), '--ignore-submodules=all', '--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'], true, limits.status);
+  if (!d.ok) return { ok: false, error: d.slow ? whyFailed(dir, d) : /maxBuffer/i.test(d.err) ? 'The changes are too big to show here (over 32 MB). Use a git program to read them.' : 'git could not compare this folder: ' + d.err.split('\n')[0].slice(0, 160) };
   const byPath = new Map(shown.map(f => [f.path, f]));
   for (const chunk of d.out.split(/^diff --git /m).slice(1)) {
     const lines = chunk.split('\n');
@@ -193,4 +301,5 @@ async function changes(dir) {
   return { ok: true, files: shown, more: files.length - shown.length, against: head ? 'last save' : 'nothing saved yet' };
 }
 
-module.exports = { gitState, changes, safeRemote, gitConfigRisky, fenced, isMissing: () => gitMissing };
+module.exports = { gitState, changes, safeRemote, gitConfigRisky, fenced, isMissing: () => gitMissing,
+  refresh, peek, pending, useStore, rev: () => rev, limits };

@@ -146,7 +146,7 @@ export async function testStart(dir: string, version: string, o: { ms?: number }
   const port = await freePort();
   const env: NodeJS.ProcessEnv = { ...process.env, TOMLIN_HOME: home, TOMLIN_PORT: String(port), TOMLIN_TEST_START: '1' };
   // Nothing of the running copy's own: its launcher loop, its window, its data and models, its Bridge part's settings.
-  for (const k of Object.keys(env)) if (/^(TOMLIN|SHELBY)_(DATA|LOOP|OPEN|TRAY|PREV|FAILED|MODELS_FILE)$|^BRIDGE_/.test(k)) delete env[k];
+  for (const k of Object.keys(env)) if (/^TOMLIN_(DATA|LOOP|OPEN|TRAY|PREV|FAILED|MODELS_FILE)$|^BRIDGE_/.test(k)) delete env[k];
   const own = join(dir, 'runtime', 'node', 'node.exe');
   let out = '';
   let ended = false;

@@ -33,8 +33,10 @@ test('a hire keeps "initials" as a choice of its own; a saved look clears it, an
 
 test('the page draws the made-up look in the round picture when there is no photo, no saved look and no "initials"', async () => {
   const people = await read('src/server/people.ts');
-  // Each hire to draw a made-up look for, with the role the look is made from (as Edit staff makes it).
-  assert.match(people, /madeUp: Object\.fromEntries\(staff\.list\(\)\.filter\(m => !cleanLook\(m\.look\) && !m\.initials\)\.map\(m => \[`staff:\$\{m\.id\}`, m\.role\]\)\)/);
+  // Each hire (and each leaver with kept chats) to draw a made-up look for, with the role the look is made from (as
+  // Edit staff makes it).
+  assert.match(people, /const everyone = \[\.\.\.staff\.list\(\), \.\.\.leavers\];/);
+  assert.match(people, /madeUp: Object\.fromEntries\(everyone\.filter\(m => !cleanLook\(m\.look\) && !m\.initials\)\.map\(m => \[`staff:\$\{m\.id\}`, m\.role\]\)\)/);
   const faces = await read('public/faces.js');
   assert.match(faces, /faceUi\.madeUp = d\.madeUp \?\? \{\};/);
   assert.match(faces, /app\.look\.fromId\(who\.slice\(6\), faceUi\.madeUp\[who\]\)/);

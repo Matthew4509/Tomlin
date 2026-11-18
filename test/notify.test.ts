@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chatTold, clean, DEFAULTS, jobTold, Notifier, toastScript } from '../src/notify.ts';
+import { chatTold, clean, DEFAULTS, isTestHire, jobTold, Notifier, toastScript, toastXml } from '../src/notify.ts';
 
 const at = '2026-10-04T12:00:00Z';
 const who = (role: string | null) => (role === 'coder' ? 'Sam' : role === 'planner' ? 'the planner' : 'the reviewer');
@@ -34,10 +34,23 @@ test('settings: defaults, volume kept 0-100', () => {
 });
 
 test('the notification is silent, its words are escaped, a click opens the address', () => {
-  const s = toastScript(`Sam's step <1> & "2"`, 'http://127.0.0.1:8740/?room=20261004-1000-aaaa');
+  const s = toastXml(`Sam's step <1> & "2"`, 'http://127.0.0.1:8740/?room=20261004-1000-aaaa');
   assert.match(s, /<audio silent="true"\/>/);
   assert.match(s, /activationType="protocol" launch="http:\/\/127\.0\.0\.1:8740\/\?room=20261004-1000-aaaa"/);
-  assert.ok(s.includes('Sam&apos;s step &lt;1&gt; &amp; &quot;2&quot;'), 'XML escaped: no bare quote reaches the PowerShell string');
+  assert.ok(s.includes('Sam&apos;s step &lt;1&gt; &amp; &quot;2&quot;'), 'XML escaped');
+});
+
+test('the words of a notification never stand in the PowerShell script: a curly quote cannot end its string', () => {
+  // PowerShell ends a single-quoted string at ’ as well as at ': a name holding one ran the rest as a command.
+  const name = 'Bob’); Start-Process calc; #';
+  const script = toastScript(`${name} answered.\r\nsecond line`, 'http://127.0.0.1:8740/');
+  assert.doesNotMatch(script, /Start-Process|’|Bob/);
+  assert.match(script, /^[\x20-\x7e\n]+$/, 'plain characters only');
+  const sent = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/.exec(script)![1];
+  const doc = Buffer.from(sent, 'base64').toString('utf8');
+  assert.equal(doc, toastXml(`${name} answered.\r\nsecond line`, 'http://127.0.0.1:8740/'));
+  assert.ok(doc.includes('Bob’); Start-Process calc; # answered. second line'), 'the words are whole, on one line');
+  assert.ok(toastXml('x'.repeat(5000), 'http://127.0.0.1:8740/').length < 600);
 });
 
 test('the page list: numbered, last 20, the same words within 5 s told once; settings survive a fresh read', async () => {
@@ -56,6 +69,30 @@ test('the page list: numbered, last 20, the same words within 5 s told once; set
     await n.save({ volume: 30 });
     const again = new Notifier(dir);
     assert.equal((await again.settings()).volume, 30);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a Speed Test or Crash Test hire answering makes no sound or pop-up; a real person does', () => {
+  assert.equal(isTestHire('Speed Test'), true);
+  assert.equal(isTestHire(' crash test '), true);
+  assert.equal(isTestHire('Rosa'), false);
+  assert.equal(isTestHire('Speed Tester Sam'), false);
+});
+
+// Every text told was kept (to tell the same words once in 5 seconds) for as long as TOMLIN ran.
+test('the words told stay only for the 5 seconds they are checked against, over 100,000 notifications', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'notify-many-'));
+  try {
+    const n = new Notifier(dir);
+    const t0 = Date.now();
+    for (let i = 0; i < 100_000; i++) await n.tell('finished', `Answer ${i} is ready.`, 'chat:x', t0 + i * 100);
+    const kept = (n as unknown as { lastText: Map<string, number> }).lastText.size;
+    assert.ok(kept <= 51, `kept ${kept}`);
+    // The same words within 5 seconds are still told once.
+    assert.equal(await n.tell('finished', 'Answer 99999 is ready.', 'chat:x', t0 + 99_999 * 100 + 1000), null);
+    assert.equal(n.recent().told.length, 20);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

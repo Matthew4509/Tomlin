@@ -41,3 +41,25 @@ export function cfgFor(m: Model, q: Quality, negative: string): number {
   const cfg = m.defaults?.cfg ?? 7;
   return cfg <= 1 && q !== 'draft' && negative.trim() ? 1.5 : cfg;
 }
+
+/** The largest side (of a square worth of pixels) this model draws at: its High, or its native size when that is more. */
+export const topSide = (m: Model): number => Math.max(qualitySide(m, 'high'), m.native ?? 512);
+
+/**
+ * The size drawn when a size was asked for exactly (a linked PC asking with a width and height, a project's picture):
+ * that many pixels when the model draws that many, never fewer than the quality's own; a Draft keeps its own smaller
+ * size, as asked. `short`: the model's largest is less than asked, so the picture is drawn at that and enlarged, and the
+ * words say so (it is never drawn smaller without saying).
+ */
+export function askedDrawSize(m: Model, q: Quality, target: Size): { size: Size; short: boolean } {
+  const own = qualitySize(m, q, target);
+  if (q === 'draft') return { size: own, short: false };
+  const top = topSide(m);
+  const want = Math.round(Math.sqrt(target.width * target.height) / 64) * 64;
+  const size = generationSize(target, Math.max(qualitySide(m, q), Math.min(want, top)));
+  return { size, short: want > top };
+}
+
+/** What is said when the model's largest is less than the size asked (askedDrawSize `short`). */
+export const shortSizeWords = (name: string, drawn: Size, target: Size): string =>
+  `${name} draws at most ${drawn.width} x ${drawn.height} pixels, less than the ${target.width} x ${target.height} asked for: it was drawn at ${drawn.width} x ${drawn.height} and enlarged to ${target.width} x ${target.height}.`;

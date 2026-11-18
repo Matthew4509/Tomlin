@@ -74,8 +74,10 @@ app.openBackup = (data, message) => {
   const goBtns = () => { for (const b of buttons) b.disabled = !pick; };
 
   backupDlg.replaceChildren(el('div', { class: 'help-body' },
-    el('h2', { id: 'backup-title', text: data.off ? `${first}'s PC is offline.` : `${first}'s own model cannot answer now.` }),
+    el('h2', { id: 'backup-title', text: data.gone ? `${first}'s model is gone.` : data.off ? `${first}'s PC is offline.` : `${first}'s own model cannot answer now.` }),
     data.why ? el('p', { class: 'hint', text: `Why: ${data.why}.` }) : null,
+    // The model itself is gone: what TOMLIN knows that could take its place. Only said; each action named is a button of its own.
+    ...(data.gone ? [el('p', { text: data.suggest?.length ? 'Suggested:' : `TOMLIN knows of no close match: pick another model for ${first} below, or in Team.` }), ...(data.suggest ?? []).map(s => el('p', { class: 'hint', text: s })), el('p', { class: 'hint', text: 'Nothing is copied, sent or changed until you press it.' })] : []),
     sendTo,
     el('h3', { text: `Or use another model for ${first}` }),
     ...(data.choices.length ? [chips, list] : [el('p', { text: `No PC that is on has a chat model that fits. Connect one on another PC, or wait for ${first}'s PC.` })]),

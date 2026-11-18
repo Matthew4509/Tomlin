@@ -10,5 +10,6 @@ src/partner.ts
 src/scene.ts
 test/partner.test.ts
 test/scene.test.ts
+*.source.json
 
 .claude/worktrees/

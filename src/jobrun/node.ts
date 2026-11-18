@@ -1,6 +1,8 @@
 // This PC as a node for other PCs: its share settings and its worker door. Linking other PCs to this one is
 // linking.ts; giving way to its owner ("I need to use the pc") is giveway.ts.
+import { execFile } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { TooLarge, readBody } from '../bodyread.ts';
 import { callWords, cleanWebAsk, WEB_ROUNDS, WEB_TOOLS, WebTurn } from '../webtools.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces, uptime } from 'node:os';
@@ -9,28 +11,53 @@ import { randomBytes } from 'node:crypto';
 import * as jobs from '../jobs.ts';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
-import { everyFew, paced, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
+import * as guestpass from '../guestpass.ts';
+import * as nodeline from '../nodeline.ts';
+import * as slotsLib from '../slots.ts';
+import { everyFew, paced, runnerFetch, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
+import * as tooltalk from './tooltalk.ts';
+import { runnerHeaders } from '../runnerkeys.ts';
 import * as brains from '../brains.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import * as nodestaff from '../nodestaff.ts';
+import { assignedTo } from '../assigned.ts';
 import type { Place } from '../runners.ts';
 import * as carry from '../carry.ts';
+import { driveOf, driveReportNow } from '../modelhome.ts';
 import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
+import { CONTEXT_SIZES, planWebContext } from '../webctx.ts';
 import * as owner from '../owner.ts';
 import * as update from '../update.ts';
+import { POWER_DOOR, USED_MINUTES, powerOffSide, shutdownArgs } from '../poweroff.ts';
+import * as hostpin from '../hostpin.ts';
 import { lastStart } from '../worker.ts';
-import { cleanRid, Outbox, type Follower, type Kept, type Lock } from '../outbox.ts';
+import { loads } from '../loadlog.ts';
+import { cleanRid, GUEST_KEPT, HOST_KEPT, Outbox, replayOf, type Follower, type Kept, type Lock } from '../outbox.ts';
 import { inScope, scope } from '../meter.ts';
-import { lastLines, log } from '../log.ts';
+import { askLog, log } from '../log.ts';
+import { faultHook } from '../faults.ts';
 import { PICTURE_DROP_MS, unloadWhileLocked } from '../picturelock.ts';
 import { type Send, d, sleep } from './shared.ts';
 import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
+import { awake, nodeBusy } from '../keepawake.ts';
 import { endLoan, lendingTo, lendView, lentTo, loanBusyNow, maxUpgrade } from './maxnode.ts';
-import { cleanLendIdle, maxShown } from '../maxlend.ts';
+import { maxPcs } from './maxhost.ts';
+import { clusterTestUpgrade, isClusterTest } from '../cluster/testdoor.ts';
+import { checkSpeed, forHello, speedNow } from '../speedtest.ts';
+import { nodeTestDeps } from '../cluster/testdoornode.ts';
+import { CACHE_LIMIT as maxlendLimit, PresenceReader, cacheDirOf, cleanLendIdle, nobodyThere, presenceWords, pruneCache } from '../maxlend.ts';
+import { oncePerFile } from '../models.ts';
 import { adapterKind } from '../linkhelp.ts';
+import { startDiskLog } from '../disklog.ts';
+
+/** A change a linked PC made here, or one made for it, that the owner may want to read later: in the window and the log. */
+const noted = (line: string) => {
+  console.log(line);
+  log.info('node', line);
+};
 
 // ---- This PC as a worker for other PCs (off unless its owner turns it on) ----
 
@@ -60,11 +87,27 @@ export function lanList(): { address: string; via: string }[] {
     .map(n => ({ address: n.address, via })));
 }
 
+/**
+ * For an admin's hello, the cluster part (src/cluster/loader.ts): the linked PCs this PC would borrow from now for a model
+ * too big for it (its own links and its own cluster, read as its own Max mode reads them), and the name of the network
+ * adapter the request came in on, so the host can tell a wired PC from one on Wi-Fi. A host that stays out of its
+ * cluster needs both to pick this PC to load the model. A guest is never told.
+ */
+function clusterHello(local: string | undefined): { borrows: string[]; via: string } {
+  const at = String(local ?? '').replace(/^::ffff:/, '');
+  return { borrows: maxPcs().map(r => r.id), via: lanList().find(n => n.address === at)?.via ?? '' };
+}
+
 /** True while the node port is open for other PCs (the link helper's checklist). */
 export const shareListening = () => !!shareServer;
 
 export function shareView() {
-  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12) })), away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...d.chatList().map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash, role, passId, expires }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12), ...(role === 'guest' ? { guest: true, passId, expires: expires ?? null } : {}) })), passes: guestpass.passView(shareState.passes, Date.now(), shareState.paired), passNodes: passHooks.nodes(), passesMade: !!shareState.passGen, passLastLength: shareState.passLastLength ?? 'week', renewLengths: guestpass.RENEW_LENGTHS, line: line.view(id => d.chatList().find(m => m.id === id)?.name ?? pictureName(d.pictureModels().find(m => m.id === id)) ?? id), guestCaps: nodeline.cleanCaps(shareState.guestCaps), hostFirst: shareState.hostFirst !== false, atOnce: slotsLib.cleanAtOnce(shareState.atOnce), slotsNow: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => ({ name: m.name, slots: d.slotsOf?.(m.id) ?? 1, note: d.slotNote?.(m.id) ?? '' })), passAsks: [...ownAsks(), ...(passHooks.asks() as object[])], away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...oncePerFile(d.chatList()).map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+}
+
+/** Requests for more time from guests on passes made here (the node's own), for this PC's page. */
+function ownAsks() {
+  return (shareState.passAsks ?? []).filter(a => !a.answer && !a.by).map(a => ({ pc: null, pcName: shareState.name, id: a.id, name: a.name, expired: a.expired, text: a.text, at: a.at, defaultLength: shareState.passLastLength ?? 'week' }));
 }
 
 /** Restore points kept here for linked PCs (whose, how many), read again after one comes in and once a minute. */
@@ -132,6 +175,170 @@ function nodePairKey(): Promise<Buffer> {
   if (!pairKeyNow || pairKeyNow.code !== shareState.code || pairKeyNow.pin !== pin) pairKeyNow = { code: shareState.code, pin, key: link.pairKey(shareState.code, pin) };
   return pairKeyNow.key;
 }
+
+/**
+ * Copying this PC's passes to the nodes it is linked to (src/jobrun/passsync.ts sets these when it starts): `changed`
+ * sends them now; `nodes` is each PC a pass can be for, with its models and whether it holds the latest.
+ */
+export const passHooks: { changed: () => void; nodes: () => unknown[]; asks: () => unknown[]; answer: (pc: string, b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }> } = {
+  changed: () => undefined,
+  nodes: () => [],
+  asks: () => [],
+  answer: async () => ({ status: 409, body: { error: 'This PC is not ready to answer requests yet.' } }),
+};
+
+/** What a guest's hello says this PC can do (src/guestpass.ts GUEST_DOORS): using its pass's models and pulling updates. */
+const GUEST_CAN = ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'outbox', 'usage', 'web', 'give', 'tooltalk'];
+/** A guest asking for a model its pass does not name. */
+const notOnPass = () => ({ error: `your guest pass on "${shareState.name}" does not include that model. Its owner can make a pass that does.`, guest: 'scope' });
+
+// ---- The line (src/nodeline.ts): every request for an answer or a picture from a linked PC waits its turn ----
+
+/**
+ * Answers on chat model `id` that may run together here (At once, src/slots.ts): the node's setting, but no more than
+ * its runner was started with (1 until it loads again after the setting is turned up). 1: the line, one at a time.
+ */
+const atOnceFor = (id: string) => Math.min(slotsLib.cleanAtOnce(shareState.atOnce), d.slotsOf?.(id) ?? 1);
+const line = new nodeline.NodeLine({ hostFirst: () => shareState.hostFirst !== false, slots: atOnceFor });
+/** How long each model's work took here lately: the estimate a waiting PC is told. */
+const answerTimes = new nodeline.AnswerTimes();
+/** A turn's end, by its request: called once its work ends (or it never started). */
+const lineEnds = new Map<ServerResponse, () => void>();
+/** Requests whose work started (runFor or drawFor): their end comes from there. */
+const lineStarted = new WeakSet<ServerResponse>();
+/** Woken when the line moves (a turn ended, one left). */
+let lineWaiters: (() => void)[] = [];
+function lineKick(): void {
+  const w = lineWaiters;
+  lineWaiters = [];
+  for (const f of w) f();
+}
+function lineEnd(res: ServerResponse): void {
+  const end = lineEnds.get(res);
+  lineEnds.delete(res);
+  end?.();
+}
+const lineNap = (ms: number) => new Promise<void>(r => {
+  const t = setTimeout(r, ms);
+  lineWaiters.push(() => { clearTimeout(t); r(); });
+});
+
+/** What a request at the head of the line is waiting for, if anything ('go': its turn has come). */
+async function lineReady(what: 'chat' | 'picture', b: Record<string, unknown>, guest: boolean, forPc: string, forLink: string): Promise<'go' | { wait: string } | { refuse: string }> {
+  const tuning = d.tuneBusy?.() ?? '';
+  if (tuning) return { wait: `a speed test is running there (${tuning}).` };
+  const want = typeof b.model === 'string' && b.model ? b.model : '';
+  const recent = (id: string) => d.usedAt?.(id) ?? null;
+  if (what === 'picture') {
+    const v = d.imagePane.view;
+    if (drawing || d.imageBusy() || (v.state === 'loading' && v.model !== want)) return { wait: 'the picture model there is drawing something else.' };
+    // A guest's picture never takes the place of the owner's picture model in use (L3).
+    const swap = want && v.state === 'connected' && v.model && v.model !== want && pictureFor?.id !== v.model ? v.model : '';
+    if (guest && swap && (recent(swap) ?? 0) > Date.now() - nodeline.OWNER_IDLE_MS) return { wait: `the picture model there waits until its owner has not used theirs for ${nodeline.OWNER_IDLE_MS / 60_000} minutes.` };
+    return 'go';
+  }
+  if (!want) return d.busy() || line.running().length > 0 ? { wait: 'its model is answering someone else there.' } : 'go';
+  const runner = d.runnerFor(want);
+  let at = runner ? null : d.place(want);
+  if (at && 'error' in at && d.chatList().some(m => m.id === want)) at = await chatsMakeRoomFor(want, forPc, forLink, at);
+  const swapped = at && !('error' in at) && !at.already && at.replaces ? d.runnerFor(at.replaces) : null;
+  const replaces = at && !('error' in at) && !at.already && at.replaces ? { forLinked: loadedForPc.has(at.replaces), busy: !!swapped && d.busy(swapped), usedAt: recent(at.replaces) } : null;
+  // At once: a runner with a slot free takes another answer beside the ones it writes.
+  const slots = runner ? atOnceFor(want) : 1;
+  const busy = slots > 1 ? lending.count(want) >= slots : lending.has(want) || (!!runner && d.busy(runner)) || (!!swapped && (d.busy(swapped) || lending.has(swapped.view.model ?? '')));
+  const loadedOrBusy = d.chatList().some(m => d.runnerFor(m.id)?.view.state === 'connected' || d.runnerFor(m.id)?.view.state === 'loading') || serving.size > 0 || drawing || d.imagePane.view.state === 'connected';
+  const name = d.chatList().find(m => m.id === want)?.name ?? want;
+  return nodeline.chatTurn({ placeError: at && 'error' in at ? at.error : null, busy, loadedOrBusy, guest, replaces, name, pc: shareState.name }, Date.now());
+}
+
+/**
+ * A request from a linked PC that knows the line: it joins, its answer is opened at once and it is told its place
+ * (and again as it moves up); its work starts here when its turn comes. Gone (closed, Stopped) or waiting too long: it
+ * leaves. Null: answered already (refused or gone); else its turn came.
+ */
+async function lineTurn(res: ServerResponse, who: share.ShareState['paired'][number], b: Record<string, unknown>, what: 'chat' | 'picture'): Promise<boolean> {
+  const model = typeof b.model === 'string' && b.model ? b.model : what === 'chat' ? d.chat.view.model ?? '' : d.imagePane.view.model ?? '';
+  const guest = who.role === 'guest';
+  const entry = line.join({ link: keepOf(who), name: who.name, guest, what, model });
+  if ('error' in entry) return workerJson(res, 409, { error: `${entry.error} (${nodeline.ordinal(entry.place)} in line).`, busy: true }), false;
+  let gone = false;
+  res.on('close', () => {
+    if (lineStarted.has(res) || lineEnds.has(res)) return;
+    gone = true;
+    line.leave(entry.id);
+    lineKick();
+  });
+  const send = streamTo(res);
+  const beat = setInterval(() => { if (!res.destroyed) res.write(': still waiting\n\n'); }, 20_000);
+  let said = '';
+  const say = (text: string) => {
+    if (text === said) return;
+    said = text;
+    if (what === 'chat') send('status', { text });
+    else send('progress', { state: 'queued', text });
+  };
+  try {
+    for (;;) {
+      if (gone || res.destroyed) return false;
+      if (Date.now() - entry.at > nodeline.LINE_WAIT_MS) {
+        line.leave(entry.id);
+        lineKick();
+        send('error', { text: nodeline.STUCK_WORDS });
+        res.end();
+        return false;
+      }
+      if (line.mayStart(entry.id)) {
+        const v = await lineReady(what, b, guest, who.name, keepOf(who));
+        if (gone || res.destroyed) return false;
+        if (v === 'go') {
+          line.start(entry.id);
+          const began = Date.now();
+          lineEnds.set(res, () => {
+            line.leave(entry.id);
+            answerTimes.note(model, Date.now() - began);
+            lineKick();
+          });
+          return true;
+        }
+        if ('refuse' in v) {
+          line.leave(entry.id);
+          lineKick();
+          send('error', { text: v.refuse });
+          res.end();
+          return false;
+        }
+        say(`1st in line: ${v.wait} It starts when that is done (or press Stop).`);
+      } else say(nodeline.lineWords(line.place(entry.id), line.running().length, answerTimes.average(model)));
+      await lineNap(1000);
+    }
+  } finally {
+    clearInterval(beat);
+  }
+}
+
+/**
+ * A linked PC from before the line: told busy, as before, while anyone is in it (it asks again by itself); else its
+ * work counts in the line as running now.
+ */
+function lineOld(res: ServerResponse, who: share.ShareState['paired'][number], b: Record<string, unknown>, what: 'chat' | 'picture'): boolean {
+  if (line.busyForOld()) return workerJson(res, 409, { error: what === 'chat' ? 'that PC is busy answering something else. Try again in a moment.' : 'that PC is drawing or answering something else. Try again in a minute.', busy: true }), false;
+  const entry = line.join({ link: keepOf(who), name: who.name, guest: who.role === 'guest', what, model: typeof b.model === 'string' ? b.model : '' });
+  if ('error' in entry) return workerJson(res, 409, { error: `${entry.error}.`, busy: true }), false;
+  line.start(entry.id);
+  lineEnds.set(res, () => {
+    line.leave(entry.id);
+    lineKick();
+  });
+  return true;
+}
+
+/** A turn whose work never started (refused on the way): it leaves the line. */
+function lineNotStarted(res: ServerResponse): void {
+  if (!lineStarted.has(res)) lineEnd(res);
+}
+
+// A request that waited too long is let go even when nothing wakes the line.
+setInterval(() => { if (line.stuck().length) lineKick(); }, 30_000).unref();
 
 /** Where a link's restore points and pushed update are kept here (see share.ts `keep`). */
 const keepOf = (who: share.ShareState['paired'][number]) => who.keep ?? who.from ?? who.hash.slice(0, 16);
@@ -236,11 +443,13 @@ function runnerHello(): runnerpush.RunnerHello {
   const pins = Object.fromEntries(rt.idsOf('llama', 'cuda').map(id => [id, { state: runnerNode?.state(id).state ?? 'none', why: d.runner.why(id, shareState.name) }]));
   const best = rt.order('llama', 'cuda')[0];
   const said = Object.keys(pins).map(id => runnerNode?.state(id).said ?? '').find(Boolean) ?? s.said;
-  return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('llama-cuda', shareState.name), cuda: s.state, pins, ...(best ? { best } : {}), said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null };
+  return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('llama-cuda', shareState.name), cuda: s.state, pins, ...(best ? { best } : {}), ...(d.rpcBuilds ? { rpc: d.rpcBuilds() } : {}), ...(d.runner.options ? { can: d.runner.options() } : {}), ...(d.runner.check ? { check: d.runner.check() } : {}), said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null, loads: loads.recent(5) };
 }
 
 /** The doors for updates pushed by a linked PC (src/update.ts). Made by startNode. */
 let updateNode: ReturnType<typeof update.updateSide>;
+/** A host turning this PC off (src/poweroff.ts). */
+let powerOffNode: ReturnType<typeof powerOffSide>;
 /** The doors a linked PC pulls this PC's TOMLIN through, behind "Let linked PCs pull TOMLIN updates from here". Made by startNode. */
 let giveNode: ReturnType<typeof update.giveSide>;
 /** An update this PC pulls from the linked PC `from` (src/jobrun/copies.ts pullFrom): the same steps as one pushed here. */
@@ -248,14 +457,12 @@ export const pullHere: (from: string) => update.Here = from => (p, b, piece) => 
 
 /** A request's body as bytes (a piece of a file), refused past `limit`. */
 async function rawBody(req: IncomingMessage, limit: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > limit) throw new Error('a piece of a file was larger than a piece may be.');
-    chunks.push(c as Buffer);
+  try {
+    return await readBody(req, limit);
+  } catch (e) {
+    if (e instanceof TooLarge) throw new Error('a piece of a file was larger than a piece may be.');
+    throw e;
   }
-  return Buffer.concat(chunks);
 }
 
 /** Each answer to a linked PC is sealed with that link's keys (src/link.ts); set per request once its token and seal are checked. */
@@ -264,6 +471,14 @@ export const taken = new link.Seen();
 
 function workerJson(res: ServerResponse, status: number, value: unknown) {
   const s = sealers.get(res);
+  // Its answer was opened already (it waited its turn in the line on it): a refusal now is that answer's error event.
+  if (res.headersSent) {
+    if (s && !res.writableEnded) {
+      res.write(link.sealedEvent(s.keys, s.id, ++s.n, 'error', { text: String((value as { error?: unknown })?.error ?? `refused (${status})`) }));
+      res.end();
+    }
+    return;
+  }
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(JSON.stringify(s ? { v: link.LINK_VERSION, box: link.sealAnswer(s.keys, s.id, 0, value) } : value));
 }
@@ -272,7 +487,8 @@ function workerJson(res: ServerResponse, status: number, value: unknown) {
 function streamTo(res: ServerResponse): Send {
   const s = sealers.get(res);
   if (!s) throw new Error('no sealed link for this answer.');
-  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
+  // Opened already when it waited in the line: the same answer goes on.
+  if (!res.headersSent) res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
   return (event, data) => {
     if (event === 'error') log.error('serving a linked PC', (data as { text?: string }).text);
     if (!res.destroyed) res.write(link.sealedEvent(s.keys, s.id, ++s.n, event, data));
@@ -287,12 +503,10 @@ function followerOf(res: ServerResponse): Follower {
   return { send, end: () => { clearInterval(beat); if (!res.writableEnded) res.end(); } };
 }
 
-/** A finished answer from the outbox, sent again as if it were being written (its words, then done or the fault). */
+/** A finished answer or picture from the outbox, sent again as if it were being made (its words, then its last line or the fault). */
 function replay(res: ServerResponse, k: Kept) {
   const send = streamTo(res);
-  if (k.text) send('text', { text: k.text });
-  if (k.state === 'done') send('done', k.done ?? {});
-  else send('error', { text: k.error ?? 'it stopped part-way.' });
+  for (const [event, data] of replayOf(k)) send(event, data);
   res.end();
 }
 
@@ -315,7 +529,12 @@ type ForPc = { pc: string; link: string; project: string };
 const projectOf = (b: Record<string, unknown>) => (typeof b.project === 'string' && /^[\w-]{1,40}$/.test(b.project) ? b.project : '');
 
 function runFor(res: ServerResponse, keep: KeepAt | null, label: string, forPc: ForPc, work: (send: Send, signal: AbortSignal) => Promise<void>): Promise<void> {
-  const served = servingFor(label);
+  lineStarted.add(res);
+  const served0 = servingFor(label);
+  const served = () => {
+    served0();
+    lineEnd(res);
+  };
   // Work for a linked PC: what its answers use is added up for the done line (src/meter.ts), not to a project here.
   if (keep) {
     box.start(keep.owner, keep.rid, keep.lock, followerOf(res), (send, signal) => inScope({ project: '', forPc: forPc.pc, forLink: forPc.link, forProject: forPc.project }, () => work(send, signal)).finally(served));
@@ -356,7 +575,38 @@ function imageHello() {
 }
 
 /** Models answering a linked PC now: one answer per model at a time (a second PC is told "busy" and asks again). */
-const lending = new Set<string>();
+/** Models answering for linked PCs now, each with how many answers (more than one with At once). */
+class Counts implements Iterable<string> {
+  private m = new Map<string, number>();
+  add(k: string): this {
+    this.m.set(k, (this.m.get(k) ?? 0) + 1);
+    return this;
+  }
+  delete(k: string): boolean {
+    const n = (this.m.get(k) ?? 0) - 1;
+    if (n > 0) this.m.set(k, n);
+    else this.m.delete(k);
+    return true;
+  }
+  has(k: string): boolean {
+    return this.m.has(k);
+  }
+  count(k: string): number {
+    return this.m.get(k) ?? 0;
+  }
+  /** Answers in all. */
+  get size(): number {
+    let t = 0;
+    for (const n of this.m.values()) t += n;
+    return t;
+  }
+  [Symbol.iterator](): Iterator<string> {
+    return this.m.keys();
+  }
+}
+const lending = new Counts();
+/** Tool calls this PC's model made for an asking PC, waiting for that PC to run them (src/jobrun/tooltalk.ts). */
+const toolWaits = new tooltalk.ToolWaits();
 
 /**
  * Models this PC loaded because a linked PC asked for them (not loaded here by its owner), with the PCs using each and
@@ -432,6 +682,8 @@ async function sharedNow(): Promise<nodestaff.SharedModel[]> {
     },
     loaded: id => (isPicture(id) ? v.model === id && v.state === 'connected' : d.runnerFor(id)?.view.state === 'connected'),
     hidden: id => d.isHidden?.(id) === true,
+    usedAt: id => d.usedAt?.(id) ?? null,
+    assigned: id => assignedTo(d.staff.list(), id),
     runOf: id => {
       const m = chats.find(x => x.id === id);
       return { draft: d.runOf(s, id).draft ?? '', guessers: m ? runset.guessersFor(m, chats) : [] };
@@ -451,6 +703,7 @@ async function sharedNow(): Promise<nodestaff.SharedModel[]> {
  * going and uses it from its next load.
  */
 async function runSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  if (typeof b.runner === 'string' || typeof b.fallback === 'boolean') return runnerSetHere(b, by);
   const chats = d.chatList();
   const ask = runset.runSetAsk(b, chats);
   if ('error' in ask) return { status: ask.status, json: { error: ask.error } };
@@ -463,12 +716,112 @@ async function runSetHere(b: Record<string, unknown>, by: string): Promise<{ sta
   const draftName = builtIn ? 'its own built-in guesser (MTP)' : chats.find(m => m.id === draft)?.name ?? '';
   runChanges.unshift({ model: model.id, name: model.name, draft, draftName, by, at: new Date().toISOString() });
   runChanges.length = Math.min(runChanges.length, 5);
-  console.log(`"${by}" set the guessing model for ${model.name} on this PC to ${draftName || 'none'}.`);
+  noted(`"${by}" set the guessing model for ${model.name} on this PC to ${draftName || 'none'}.`);
   const p = d.runnerFor(model.id);
   const letGo = !!p && p.view.state === 'connected' && !d.busy(p);
   if (letGo) await p!.disconnect();
   const when = letGo ? 'It was loaded there and not answering, so it was let go: its next answer starts it with this.' : p ? 'It is answering there now: it uses this from its next load.' : 'It uses this from its next load.';
   return { status: 200, json: { said: `${model.name} on "${shareState.name}": guessing model ${draftName || 'none'}. ${when}`, letGo } };
+}
+
+/**
+ * Holds one of this PC's models to a runner (or back to Auto) for a linked PC: the crash notice's "Use this runner",
+ * after the person said yes there. Only a runner this PC pins, has unpacked and can use (src/runset.ts runnerSetAsk). A
+ * model loaded here and not answering is let go, so its next answer starts on the new runner.
+ */
+async function runnerSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const rt = d.runner.runtimes;
+  const ask = runset.runnerSetAsk(b, d.chatList(), rt.pins, id => rt.installedPin(id), id => d.runner.why(id, shareState.name));
+  if ('error' in ask) return { status: ask.status, json: { error: ask.error } };
+  const s = await d.store.settings();
+  const { runner: was, fallback: wasFallback, ...rest } = d.runOf(s, ask.model.id);
+  const runner = ask.runner === null ? was : ask.runner || undefined;
+  const fallback = ask.fallback ?? wasFallback;
+  await d.store.saveSettings({ run: { [ask.model.id]: { ...rest, ...(runner ? { runner } : {}), ...(fallback ? { fallback: true } : {}) } } });
+  if (ask.runner === null) {
+    noted(`"${by}" turned the automatic runner fallback for ${ask.model.name} on this PC ${fallback ? 'on' : 'off'}.`);
+    return { status: 200, json: { said: `${ask.model.name} on "${shareState.name}": ${fallback ? 'after a crash it moves to the next runner on its own, and says so' : 'after a crash the notice asks again'}.` } };
+  }
+  const name = ask.runner ? rt.pins[ask.runner]?.name ?? ask.runner : 'Auto';
+  noted(`"${by}" set the runner for ${ask.model.name} on this PC to ${name}.`);
+  const p = d.runnerFor(ask.model.id);
+  const letGo = !!p && p.view.state === 'connected' && !d.busy(p);
+  if (letGo) await p!.disconnect();
+  const when = letGo ? 'It was loaded there and not answering, so it was let go: its next answer starts it on this runner.' : p ? 'It is answering there now: it uses this runner from its next load.' : 'It uses this runner from its next load.';
+  return { status: 200, json: { said: `${ask.model.name} on "${shareState.name}": runner ${name}. ${when}`, letGo } };
+}
+
+/**
+ * A larger context for one of this PC's chat models, asked for by a linked PC for the web. The size is worked out here
+ * (src/webctx.ts) from this PC's own list, memory and the model's training, not taken as sent: the most that fits, up to
+ * what was asked.
+ */
+async function ctxSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const id = typeof b.model === 'string' ? b.model : '';
+  const model = d.chatList().find(m => m.id === id);
+  if (!model) return { status: 404, json: { error: `${shareState.name} has no such model.` } };
+  const asked = Number(b.ctx);
+  if (!CONTEXT_SIZES.includes(asked)) return { status: 400, json: { error: 'That is not a context size TOMLIN offers.' } };
+  const s = await d.store.settings();
+  const run = d.runOf(s, id);
+  const plan = planWebContext({ current: run.ctx, contexts: CONTEXT_SIZES, trained: model.trained ?? null, fits: ctx => d.fit(id, { ...run, ctx }).level === 'ok', want: asked });
+  if (!plan.change) return { status: 200, json: { changed: false, ctx: run.ctx, said: plan.limit || `${model.name} on "${shareState.name}" already runs with ${run.ctx.toLocaleString('en-GB')} tokens.` } };
+  await d.store.saveSettings({ run: { [id]: { ...run, ctx: plan.ctx } } });
+  noted(`"${by}" set the context for ${model.name} on this PC to ${plan.ctx} (it was ${run.ctx}), for the web.`);
+  const p = d.runnerFor(id);
+  const letGo = !!p && p.view.state === 'connected' && !d.busy(p);
+  if (letGo) await p!.disconnect();
+  return { status: 200, json: { changed: true, ctx: plan.ctx, was: run.ctx, letGo, said: `${model.name} on "${shareState.name}": context ${plan.ctx.toLocaleString('en-GB')} tokens (it was ${run.ctx.toLocaleString('en-GB')}). ${plan.limit} ${letGo ? 'It was loaded and not answering, so it was let go: its next answer starts it with this.' : p ? 'It is answering there now: it uses this from its next load.' : 'It uses this from its next load.'}`.replace(/\s+/g, ' ').trim() } };
+}
+
+/**
+ * A linked PC asks this PC to let go of the models it loaded for linked PCs, now (not after the idle minutes), so another
+ * model can load. A model answering or drawing is left to finish and named; a model this PC's own owner loaded is never
+ * let go, only named.
+ */
+async function freeHere(by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const freed: string[] = [];
+  const busy: string[] = [];
+  const v = d.imagePane.view;
+  if (pictureFor && v.model === pictureFor.id && v.state === 'connected') {
+    const name = pictureName(d.pictureModels().find(m => m.id === pictureFor!.id)) ?? pictureFor.id;
+    if (drawing || d.imageBusy()) busy.push(name);
+    else {
+      pictureFor = null;
+      await d.imagePane.disconnect();
+      freed.push(name);
+    }
+  }
+  for (const [id] of [...loadedForPc]) {
+    const r = d.runnerFor(id);
+    if (!r || r.view.state === 'disconnected') {
+      loadedForPc.delete(id);
+      continue;
+    }
+    const name = d.chatList().find(m => m.id === id)?.name ?? id;
+    if (lending.has(id) || d.busy(r)) {
+      busy.push(name);
+      continue;
+    }
+    loadedForPc.delete(id);
+    await r.disconnect();
+    freed.push(name);
+  }
+  if (freed.length) await sleep(1500);
+  // Still loaded and not let go: this PC's own owner loaded it (or it is the one being used).
+  const own: string[] = [];
+  if (d.imagePane.view.state === 'connected' && !busy.length && !freed.length) own.push(d.imagePane.view.modelName ?? d.imagePane.view.model ?? 'a picture model');
+  for (const m of d.chatList()) {
+    const r = d.runnerFor(m.id);
+    if (r && r.view.state === 'connected' && !loadedForPc.has(m.id) && !busy.includes(m.name)) own.push(m.name);
+  }
+  if (freed.length) noted(`"${by}" asked this PC to let go of ${freed.join(' and ')}: done.`);
+  const parts = [
+    freed.length ? `Let go on "${shareState.name}": ${freed.join(', ')}.` : `Nothing to let go on "${shareState.name}" that a linked PC loaded.`,
+    busy.length ? `Left to finish (answering or drawing): ${busy.join(', ')}.` : '',
+    own.length ? `Loaded by its own owner, left alone: ${own.join(', ')}.` : '',
+  ].filter(Boolean);
+  return { status: 200, json: { said: parts.join(' '), freed, busy, own } };
 }
 
 /**
@@ -485,6 +838,27 @@ function askOpts(b: Record<string, unknown>, send: Send): AskOpts {
  * The web tools for an answer a linked PC asked with Web on: run here, with this PC's own search engine (Settings, Web
  * search) and its own home network kept out; what they did goes back with the answer. Null when it was not asked.
  */
+/**
+ * The tools the asking PC offered for this answer (it said `tools`, 2.0.82 on): this PC's model calls them, the asking PC
+ * runs them and gives the results back (src/jobrun/tooltalk.ts). Null when none were offered, or the answer has no
+ * request id (the results are matched by it).
+ */
+function hostToolsFor(b: Record<string, unknown>, send: Send, link: string, rid: string | undefined): ToolBox | null {
+  const wire = tooltalk.cleanWire(b.tools);
+  return wire && rid ? tooltalk.nodeBox(wire, send, toolWaits, `${link}|${rid}|`) : null;
+}
+
+/** Whether the model loaded at `base` can call tools (its chat format says so): the same question the asking PC puts to its own. */
+async function callsTools(base: string | null | undefined): Promise<boolean> {
+  if (!base) return false;
+  try {
+    const r = await runnerFetch(`${base}/props`, { headers: runnerHeaders(base), signal: AbortSignal.timeout(5000) });
+    return r.ok && ((await r.json()) as { chat_template_caps?: { supports_tools?: boolean } }).chat_template_caps?.supports_tools === true;
+  } catch {
+    return false;
+  }
+}
+
 async function webFor(b: Record<string, unknown>, send: Send): Promise<{ turn: WebTurn; box: ToolBox } | null> {
   const ask = cleanWebAsk(b.web);
   if (!ask) return null;
@@ -501,7 +875,7 @@ async function webFor(b: Record<string, unknown>, send: Send): Promise<{ turn: W
 async function pictureMakesWay(): Promise<boolean> {
   const v = d.imagePane.view;
   if (!pictureFor || v.model !== pictureFor.id || v.state !== 'connected' || drawing || d.imageBusy()) return false;
-  console.log(`Unloading ${pictureName(d.pictureModels().find(m => m.id === pictureFor!.id)) ?? pictureFor.id} to make room for a chat model a linked PC's queue asked for.`);
+  noted(`Unloading ${pictureName(d.pictureModels().find(m => m.id === pictureFor!.id)) ?? pictureFor.id} to make room for a chat model a linked PC's queue asked for.`);
   pictureFor = null;
   await d.imagePane.disconnect();
   await sleep(1500);
@@ -513,10 +887,10 @@ async function pictureMakesWay(): Promise<boolean> {
  * unloaded one at a time, oldest first, until it fits (P1-4, 3 Nov: one was unloaded, then Gemma 4 was refused with three
  * test models idle). Returns where it goes now, or `refused` when it still does not fit with all of them gone.
  */
-async function chatsMakeRoomFor(id: string, pc: string, refused: Place): Promise<Place> {
+async function chatsMakeRoomFor(id: string, pc: string, link: string, refused: Place): Promise<Place> {
   const out: string[] = [];
   let at = refused;
-  for (const other of nodestaff.makeWayOrder(loadedForPc, pc, id, x => { const r = d.runnerFor(x); return !!r && r.view.state === 'connected' && !d.busy(r) && !lending.has(x); })) {
+  for (const other of nodestaff.makeWayOrder(loadedForPc, link, id, x => { const r = d.runnerFor(x); return !!r && r.view.state === 'connected' && !d.busy(r) && !lending.has(x); })) {
     const r = d.runnerFor(other);
     if (!r) continue;
     out.push(d.chatList().find(m => m.id === other)?.name ?? other);
@@ -526,7 +900,7 @@ async function chatsMakeRoomFor(id: string, pc: string, refused: Place): Promise
     at = d.place(id);
     if (!('error' in at)) break;
   }
-  if (out.length) console.log(`Unloaded ${out.join(' and ')} (loaded for "${pc}", not answering) to make room for a chat model it asked for.`);
+  if (out.length) noted(`Unloaded ${out.join(' and ')} (loaded for "${pc}", not answering) to make room for a chat model it asked for.`);
   return at;
 }
 
@@ -543,18 +917,25 @@ async function chatsMakeWay(model: string): Promise<string[]> {
     await r.disconnect();
     await sleep(1500);
   }
-  if (out.length) console.log(`Unloaded ${out.join(' and ')} to make room for a picture model a linked PC asked for.`);
+  if (out.length) noted(`Unloaded ${out.join(' and ')} to make room for a picture model a linked PC asked for.`);
   return out;
 }
 
-async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, ask: { system: string; user: string }, maxTokens: number, res: ServerResponse, forPc: string, keep: KeepAt | null, link: string) {
+/** A guest's tools (src/nodeline.ts guestBox): fewer rounds, and their results count against its prompt cap. Others: as given. */
+function boxFor(box: ToolBox | undefined, guestRoom: number | null): ToolBox | undefined {
+  return box && guestRoom !== null ? nodeline.guestBox(box, guestRoom) : box;
+}
+
+async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, ask: { system: string; user: string }, maxTokens: number, res: ServerResponse, forPc: string, keep: KeepAt | null, link: string, guestRoom: number | null = null) {
   const id = String(b.model ?? '');
   const runner = d.runnerFor(id);
   let at = runner ? null : d.place(id);
   if (at && 'error' in at && b.queue === true && (await pictureMakesWay())) at = d.place(id);
-  if (at && 'error' in at && d.chatList().some(m => m.id === id)) at = await chatsMakeRoomFor(id, forPc, at);
+  if (at && 'error' in at && d.chatList().some(m => m.id === id)) at = await chatsMakeRoomFor(id, forPc, link, at);
   const swapped = at && !('error' in at) && !at.already && at.replaces ? d.runnerFor(at.replaces) : null;
-  const busy = lending.has(id) || (!!runner && d.busy(runner)) || (!!swapped && (d.busy(swapped) || lending.has(swapped.view.model ?? '')));
+  // At once: a runner with a slot free takes another answer beside the ones it writes (the line let it in).
+  const slots = runner ? atOnceFor(id) : 1;
+  const busy = slots > 1 ? lending.count(id) >= slots : lending.has(id) || (!!runner && d.busy(runner)) || (!!swapped && (d.busy(swapped) || lending.has(swapped.view.model ?? '')));
   const why = nodestaff.modelRefusal(id, { onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy, pcName: shareState.name });
   if (why) return workerJson(res, why.busy ? 409 : 403, why);
   // The asking PC names this one before it ("Worker PC": ...): said once, not twice.
@@ -565,6 +946,7 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
   const fresh = runner?.view.state !== 'connected';
   lending.add(id);
   let answered = false;
+  const asked = Date.now();
   await runFor(res, keep, `Answering for ${forPc}`, { pc: forPc, link, project: projectOf(b) }, async (send, signal) => {
     // The answer so far is sealed and sent as it grows, not at every word-piece (src/engine.ts paced).
     const words = paced(text => send('text', { text }));
@@ -572,19 +954,25 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
       const got = await brainForRef(id, forPc, 'on that PC', text => send('status', { text }), signal);
       loadedFor(id, forPc, link, fresh);
       // Someone at this PC started a chat on it while it loaded: theirs finishes first (it is never cut for a linked PC).
-      for (let told = false; !!got.pane && d.busy(got.pane) && !signal.aborted; await sleep(1000)) {
+      for (let told = false; slots <= 1 && !!got.pane && d.busy(got.pane) && !signal.aborted; await sleep(1000)) {
         if (!told) send('status', { text: `${name} is answering someone at that PC first.` });
         told = true;
       }
       const web = got.here ? await webFor(b, send) : null;
-      if (turns) await got.brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
-      else await got.brain.ask(ask.system, ask.user, maxTokens, words.push, signal, web ? { tools: web.box } : undefined);
+      // The asking PC's own tools (files, web, research ...): this model calls them, that PC runs them.
+      const offered = got.here ? hostToolsFor(b, send, link, keep?.rid) : null;
+      const hostTools = offered && (await callsTools(got.pane?.worker.base ?? d.runnerFor(id)?.worker.base ?? d.chat.worker.base)) ? offered : null;
+      const box = boxFor(hostTools ?? web?.box, guestRoom);
+      if (turns) await got.brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(box ? { tools: box } : {}) });
+      else await got.brain.ask(ask.system, ask.user, maxTokens, words.push, signal, box ? { tools: box } : undefined);
       words.flush();
-      send('done', { model: name, speed: got.brain.last ?? null, thought: got.brain.thought ?? null, usage: usedHere(), ...(got.brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
+      send('done', { model: name, speed: got.brain.last ?? null, thought: got.brain.thought ?? null, usage: usedHere(), ...(got.brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}), ...(offered && !hostTools ? { toolsOff: `${name} cannot call tools` } : {}) });
       answered = true;
     } catch (e) {
       words.flush();
-      send('error', { text: (e as Error).message });
+      // The runner crashed here: the fault goes with the error, so the asking PC's notice names it (src/faults.ts).
+      const fault = signal.aborted ? null : await faultHook.find?.(id, asked).catch(() => null);
+      send('error', { text: (e as Error).message, ...(fault ? { fault } : {}) });
     } finally {
       lending.delete(id);
       // Stopped (or failed) after it had loaded but before it was counted: still loaded for that PC, so it drops too.
@@ -603,7 +991,7 @@ export let drawing = false;
  * PC): on the picture model connected here, or another of this PC's own for the style. One picture at a time: a second
  * PC is told busy and asks again.
  */
-async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc: string, link: string) {
+async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc: string, link: string, keep: KeepAt | null = null, may: (id: string) => boolean = () => true) {
   const prompt = String(b.prompt ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000);
   if (!prompt) return workerJson(res, 400, { error: 'no prompt was sent.' });
   if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
@@ -612,43 +1000,67 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
   const choices = nodestaff.drawChoices(b);
   const models = d.pictureModels();
   const want = typeof b.model === 'string' && b.model ? b.model : null;
+  if (want && !may(want)) return workerJson(res, 403, notOnPass());
   if (want) {
     const v = d.imagePane.view;
     const busy = drawing || d.imageBusy() || (v.state === 'loading' && v.model !== want);
     const why = nodestaff.modelRefusal(want, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy, pcName: shareState.name });
     if (why) return workerJson(res, why.busy ? 409 : 403, why.busy ? { ...why, error: why.error.replace('is answering something else', 'is drawing something else') } : why);
-    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height), ...choices }, res, forPc, link, b.queue === true);
+    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height), ...choices }, res, forPc, link, keep);
   }
   const v = d.imagePane.view;
   if (v.state !== 'connected') return workerJson(res, 409, { error: 'no picture model is connected on that PC. Its owner connects one in an artist\'s chat there; nothing loads by itself.' });
   if (drawing) return workerJson(res, 409, { error: 'that PC is already drawing a picture for another PC. Try again in a minute.' });
   const loaded = models.find(m => m.id === v.model);
   if (!loaded) return workerJson(res, 409, { error: 'its connected picture model is not one TOMLIN knows.' });
+  if (!may(loaded.id)) return workerJson(res, 403, notOnPass());
   // The connected picture model draws for them; a swap for the style goes to another installed one.
   const notLent = nodestaff.modelRefusal(loaded.id, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy: false, pcName: shareState.name });
   if (notLent) return workerJson(res, 403, notLent);
+  drawFor(res, keep, `Drawing for ${forPc}`, async (send, signal) => {
+    try {
+      // A guest's style swap goes only to a picture model its pass names.
+      const plan = brains.modelForStyle(style, loaded, models.filter(m => m.installed && may(m.id)), true);
+      if (plan.swap) {
+        send('progress', { state: 'starting', text: `Switching to ${plan.use.name.replace(/\s*\(.*\)$/, '')} for the style` });
+        if (!(await d.swapImage(plan.use.id))) throw new Error(`${plan.use.name} did not load there. Its owner can connect it in an artist's chat there.`);
+      }
+      const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices }, p => send('progress', p), signal);
+      if ('error' in r) throw new Error(r.error);
+      send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, made: r.made, note: [plan.note, r.note ? `says: ${r.note}` : ''].filter(Boolean).join('; ') });
+    } catch (e) {
+      send('error', { text: (e as Error).message });
+    }
+  });
+}
+
+/**
+ * A drawing for a linked PC, one at a time. Asked with a request id (`keep`, 2.0.89 on) it runs to its end when that PC
+ * goes away, and the picture waits in the outbox until that PC collects it (src/outbox.ts); without (an older PC),
+ * closing the connection stops it, as before. `after` runs once it has ended either way.
+ */
+function drawFor(res: ServerResponse, keep: KeepAt | null, label: string, work: (send: Send, signal: AbortSignal) => Promise<void>, after?: () => void): void {
   drawing = true;
-  const send = streamTo(res);
+  lineStarted.add(res);
+  const served = servingFor(label);
+  const end = () => {
+    drawing = false;
+    served();
+    lineEnd(res);
+    after?.();
+  };
+  if (keep) {
+    box.start(keep.owner, keep.rid, keep.lock, followerOf(res), (send, signal) => work(send, signal).finally(end));
+    return;
+  }
+  // The follower writes a line every 20 s while the model works, so the manager PC does not give up on a long silence.
+  const f = followerOf(res);
   const ac = new AbortController();
   res.on('close', () => ac.abort());
-  // A line every 20 s while the model works, so the manager PC does not give up on a long silence.
-  const beat = setInterval(() => { if (!res.destroyed) res.write(': still working\n\n'); }, 20_000);
-  res.on('close', () => clearInterval(beat));
-  try {
-    const plan = brains.modelForStyle(style, loaded, models.filter(m => m.installed), true);
-    if (plan.swap) {
-      send('progress', { state: 'starting', text: `Switching to ${plan.use.name.replace(/\s*\(.*\)$/, '')} for the style` });
-      if (!(await d.swapImage(plan.use.id))) throw new Error(`${plan.use.name} did not load there. Its owner can connect it in an artist's chat there.`);
-    }
-    const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices }, p => send('progress', p), ac.signal);
-    if ('error' in r) throw new Error(r.error);
-    send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: [plan.note, r.note ? `says: ${r.note}` : ''].filter(Boolean).join('; ') });
-  } catch (e) {
-    send('error', { text: (e as Error).message });
-  } finally {
-    drawing = false;
-    res.end();
-  }
+  void work(f.send, ac.signal).finally(() => {
+    end();
+    f.end();
+  });
 }
 
 /** A picture model's name as people read it ("DreamShaper 8", not its file details), or null when it is not here. */
@@ -660,38 +1072,31 @@ const pictureName = (m: brains.PictureModel | undefined) => (m ? m.name.replace(
  * already in the prompt). A picture model loaded for a linked PC is dropped by itself 10 minutes after its last picture
  * (src/picturelock.ts PICTURE_DROP_MS): long enough for pictures one after another, short while the PC is locked.
  */
-async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number; quality?: string; seed?: number }, res: ServerResponse, forPc: string, link: string, queue = false) {
-  drawing = true;
-  const send = streamTo(res);
-  const ac = new AbortController();
-  res.on('close', () => ac.abort());
-  const beat = setInterval(() => { if (!res.destroyed) res.write(': still working\n\n'); }, 20_000);
-  res.on('close', () => clearInterval(beat));
-  res.on('close', servingFor(`Drawing for ${forPc}`));
+async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number; quality?: string; seed?: number; negative?: string }, res: ServerResponse, forPc: string, link: string, keep: KeepAt | null) {
   const name = pictureName(model)!;
-  try {
-    const v = d.imagePane.view;
-    const fresh = !(v.model === model.id && v.state === 'connected');
-    if (fresh) {
-      // Chat models loaded here for linked PCs make way when it does not fit, in RAM or on the card.
-      const made = await chatsMakeWay(model.id);
-      send('progress', { state: 'starting', text: `${made.length ? `Unloaded ${made.join(' and ')} there to make room. ` : ''}${v.state === 'connected' && v.model ? `Switching to ${name} there` : `Loading ${name} there`}` });
-      if (!(await d.loadImage(model.id))) throw new Error(`${name} did not load on "${shareState.name}" (its owner may have started a picture there, or it is too big for that PC's memory now).`);
-      pictureFor = { id: model.id, by: new Set([forPc]), links: new Set([link]), at: Date.now() };
-    } else if (pictureFor?.id === model.id) {
-      pictureFor.by.add(forPc);
-      pictureFor.links.add(link);
+  drawFor(res, keep, `Drawing for ${forPc}`, async (send, signal) => {
+    try {
+      const v = d.imagePane.view;
+      const fresh = !(v.model === model.id && v.state === 'connected');
+      if (fresh) {
+        // Chat models loaded here for linked PCs make way when it does not fit, in RAM or on the card.
+        const made = await chatsMakeWay(model.id);
+        send('progress', { state: 'starting', text: `${made.length ? `Unloaded ${made.join(' and ')} there to make room. ` : ''}${v.state === 'connected' && v.model ? `Switching to ${name} there` : `Loading ${name} there`}` });
+        if (!(await d.loadImage(model.id))) throw new Error(`${name} did not load on "${shareState.name}" (its owner may have started a picture there, or it is too big for that PC's memory now).`);
+        pictureFor = { id: model.id, by: new Set([forPc]), links: new Set([link]), at: Date.now() };
+      } else if (pictureFor?.id === model.id) {
+        pictureFor.by.add(forPc);
+        pictureFor.links.add(link);
+      }
+      const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed, negative: ask.negative }, p => send('progress', p), signal);
+      if ('error' in r) throw new Error(r.error);
+      send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, made: r.made, note: r.note ? `says: ${r.note}` : '' });
+    } catch (e) {
+      send('error', { text: (e as Error).message });
     }
-    const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed }, p => send('progress', p), ac.signal);
-    if ('error' in r) throw new Error(r.error);
-    send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, note: r.note ? `says: ${r.note}` : '' });
-  } catch (e) {
-    send('error', { text: (e as Error).message });
-  } finally {
-    drawing = false;
+  }, () => {
     if (pictureFor?.id === model.id) pictureFor.at = Date.now();
-    res.end();
-  }
+  });
 }
 
 /** The worker side: pair, hello, run, draw. Home network only, no browser pages (no Origin), a paired token for all but pair. */
@@ -713,7 +1118,10 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const b = await d.body(req, 4096);
       // F7 E1: only the encrypted link. A main PC from before it is told to update.
       if (Number(b.v) !== link.LINK_VERSION || typeof b.pub !== 'string') return workerJson(res, 426, { error: 'this PC now uses an encrypted link. Update TOMLIN on this main PC, then link again.' });
-      if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
+      // A guest pass (src/guestpass.ts) needs no PIN: while a live pass is here, a PC that typed none may be a guest, so
+      // its code is tried (and a wrong one counted) before it is told about the PIN. With no pass here, as before.
+      const passHere = () => (shareState.passes ?? []).filter(x => guestpass.passUsable(shareState, x));
+      if (shareState.pinOn && b.pinGiven !== true && !passHere().length) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
       if (!shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
@@ -722,8 +1130,23 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       if (tooMany()) return;
       guard.wrong(ip);
       const token = share.newToken();
-      const got = link.nodeAnswer(await nodePairKey(), b, { id: shareState.id, name: shareState.name }, token);
+      const me = { id: shareState.id, name: shareState.name };
+      // The setup code (with the PIN when this PC asks for one), then each live guest pass (no PIN): each a cheap check
+      // of the key already made, so trying them all costs no more than one.
+      const setupKey = await nodePairKey();
+      let got = shareState.pinOn && b.pinGiven !== true ? null : link.nodeAnswer(setupKey, b, me, token);
+      let pass: guestpass.GuestPass | undefined;
+      if (!got && b.pinGiven !== true) {
+        for (const x of passHere()) {
+          got = link.nodeAnswer(Buffer.from(x.key, 'base64url'), b, me, token);
+          if (got) {
+            pass = x;
+            break;
+          }
+        }
+      }
       if (!got) {
+        if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'that is not a guest pass of this PC, and it also asks for its 6-digit link PIN, shown under Network there. Type the setup code and the PIN and link again.', needPin: true });
         return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network.' : 'wrong setup code. Type the code shown on that PC under Network (8 letters and numbers).' });
       }
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a
@@ -735,22 +1158,32 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // that link's keys. Without the proof (a PC that knows only the setup code and an id) it gets a link of its own.
       const from = typeof b.from === 'string' && /^[0-9a-f]{8}$/.test(b.from) ? b.from : undefined;
       // The link whose keys made the proof (two can claim one id: the real one and one made with only the code).
+      // A guest takes over only a guest link of its own: never a full one.
       const old = from ? shareState.paired.find(x => {
-        const k = x.from === from ? link.keysOf(x.key) : null;
+        const k = x.from === from && (!pass || x.role === 'guest') ? link.keysOf(x.key) : null;
         return !!k && [b.proof, ...(Array.isArray(b.proofs) ? b.proofs.slice(0, 16) : [])].some(pr => link.takeOverProven(k, String(b.pub), pr));
       }) : undefined;
       const proven = !!old;
       const kept = proven ? shareState.paired.filter(x => x !== old) : shareState.paired;
       const keep = proven ? keepOf(old!) : randomBytes(8).toString('hex');
       const name = String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'A manager PC';
-      // Ten links at most: the oldest goes, and the owner is told which.
-      const dropped = kept.slice(0, Math.max(0, kept.length - 9)).map(x => x.name).join(', ');
-      shareState.paired = [...kept.slice(-9), { ...(from ? { from } : {}), keep, name, hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString() }];
-      // The code is used up (audit X4): someone who once saw it cannot link later, unseen. The owner sees who linked.
-      shareState.code = share.newCode();
-      shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
+      // Ten links at most: the oldest goes, and the owner is told which. A guest's link never pushes one out (three per
+      // pass at most, its own oldest goes: src/guestpass.ts addLink).
+      const added = guestpass.addLink(kept, { ...(from ? { from } : {}), keep, name, hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString(), ...(pass ? { role: 'guest' as const, passId: pass.id, expires: pass.expires } : {}) });
+      const dropped = added.dropped;
+      shareState.paired = added.paired;
+      if (pass) {
+        // A pass is not used up: its owner made it for this PC, and its end date (or Remove) ends it.
+        pass.uses += 1;
+        pass.lastSeen = new Date().toISOString();
+      } else {
+        // The code is used up (audit X4): someone who once saw it cannot link later, unseen. The owner sees who linked.
+        shareState.code = share.newCode();
+        shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
+      }
       await saveShare();
-      d.onLinked?.(name, dropped);
+      log.info('link', `"${name}" linked to this PC${pass ? ` with the guest pass "${pass.label}"` : ''}.${dropped ? ` The oldest link, "${dropped}", was removed.` : ''}`);
+      d.onLinked?.(name, dropped, pass?.label);
       return workerJson(res, 200, got.answer);
     }
     // Only enough to be found on the home network: that this is TOMLIN, its name, whether it asks for a PIN.
@@ -766,7 +1199,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     // A piece of a file (a model or a restore point sent here): the request rides in a header, the piece is the body.
     const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put' || p === '/worker/runner-put';
     // A project backup's file list and the ids asked about are long (up to 100,000 files).
-    const limit = p === '/worker/run' ? 600_000 : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' ? 1 << 20 : 16_384;
+    const limit = p === '/worker/run' || p === '/worker/tool-result' ? 600_000 : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' || p === '/worker/passes-put' ? 1 << 20 : 16_384;
     // Read whole before the seal can be checked: refused at once when it says it is larger than this door takes, or when
     // this link (or all of them) already has that much being read (S4). A piece is read only after its header opens.
     const declared = Number(req.headers['content-length']);
@@ -781,6 +1214,21 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     const opened = link.openRequest(keys, sent, p, taken);
     if ('error' in opened) return workerJson(res, 400, { error: opened.error });
+    // Guests (src/guestpass.ts): THE check of role and end date, for every door, before anything here is read or done.
+    const refusedHere = guestpass.doorRefusal(shareState, who, p);
+    if (refusedHere) {
+      sealers.set(res, { keys, id: opened.id, n: 0 });
+      // An expired (or blocked) guest is told whether it may ask its host, and what became of its last request.
+      const told = refusedHere.guest === 'expired' || refusedHere.guest === 'blocked' ? { ...refusedHere, ...guestpass.askState(shareState.passAsks ?? [], who) } : refusedHere;
+      return workerJson(res, refusedHere.status, told);
+    }
+    const guest = who.role === 'guest';
+    if (guest) {
+      const used = guestpass.passOf(shareState, who);
+      if (used && guestpass.touchSeen(used)) void saveShare().catch(() => undefined);
+    }
+    /** Whether this link may use model `id` here (a guest: only its pass's). */
+    const may = (id: string | null | undefined) => guestpass.modelAllowed(shareState, who, id);
     // A piece (up to 16 MB) is read only once its sealed request has opened: the fingerprint alone gets nothing read.
     const raw = putDoor ? await rawBody(req, carry.PIECE + 1024) : null;
     sealers.set(res, { keys, id: opened.id, n: 0 });
@@ -791,23 +1239,94 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     const away = shareState.away;
     if (p === '/worker/hello') {
       const v = d.chat.view;
-      const models = await sharedNow();
-      const allow = carry.cleanAllow(shareState.allow, maxShown());
+      const models = (await sharedNow()).filter(m => may(m.id));
+      const allow = carry.cleanAllow(shareState.allow);
+      // A guest is told only what it may use: its pass's models, no tick but pulling updates, nothing about other links,
+      // drives or backups, and what it may not do left out of "can" (the doors refuse it anyway). Nor this PC's memory
+      // (it holds the Windows computer name and every loaded model's name), its total meter, its runner, speed, how
+      // long it has been up, or when its owner is at it: only whether it is busy. Its own tally is at /worker/usage.
+      const asGuest = <T extends Record<string, unknown>>(h: T) => {
+        // A host's link may give this PC a host PIN (src/hostpin.ts): it is told so, and whether it holds one here now.
+        if (!guest) return { ...h, can: [...(h.can as string[]), hostpin.CAN], hostPin: d.hostPinHeld(who.hash) };
+        const pass = guestpass.passOf(shareState, who);
+        const busy = !!away || line.running().length > 0 || line.waiting().length > 0;
+        return { ...h, state: h.state === 'away' ? 'busy' : h.state, busy, away: null, memory: null, meter: null, up: null, installed: null, restarts: false, runner: null, speed: null, can: (h.can as string[]).filter(c => GUEST_CAN.includes(c)), allow: { ...carry.NO_ALLOW, give: allow.give, off: false }, ask: null, lentTo: null, cluster: null, disk: null, drives: [], modelsDrive: '', cpu: null, passAsks: [], guest: { label: pass?.label ?? '', expires: pass ? guestpass.linkEnds(who, pass) : who.expires ?? null, caps: nodeline.cleanCaps(shareState.guestCaps) } };
+      };
       const up = { since: d.startedAt, pc: Math.round(uptime()) };
       const installed = installedAt();
+      // Requests from guests whose pass this host made: its own to answer (on its screen).
+      const giver = keepOf(who);
+      const passAsks = (shareState.passAsks ?? []).filter(a => !a.answer && a.by === giver).map(a => ({ id: a.id, name: a.name, expired: a.expired, text: a.text, at: a.at }));
       // The disk that keeps other PCs' backups here (read at once, no program started), so they see the room left.
       const disk = await carry.diskOf(d.carry.keptRoot);
+      // As last read, never waited for (src/modelhome.ts driveReportNow): this answer has 3 s.
+      const drives = driveReportNow();
+      // The drive a model sent here is written to (its models folder): the Move window's free space is that drive's.
+      const modelsDrive = driveOf(d.carry.chatDir);
+      // Its processor: name, cores and threads, for the host's Cluster page (not told to a guest: asGuest).
+      const cpu = d.cpu?.() ?? null;
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'update-pin', 'give'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
-      // The connected models are named (every model here is lent).
-      const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id);
+      if (away) return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length } }));
+      // The connected models are named (every model here is lent; to a guest, only its pass's).
+      const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id) && may(id);
       const img = imageHello();
-      return workerJson(res, 200, { name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'update-pin', 'give'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, runner: runnerHello(), lentTo: lentTo() });
+      return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length }, cluster: guest ? null : clusterHello(req.socket.localAddress) }));
+    }
+    // An expired guest asks its host for more (src/guestpass.ts): only a guest link whose pass expired gets here (the
+    // check above), one request waiting at a time, 10 minutes apart, 5 a day, plain text of 200 characters at most.
+    if (p === guestpass.ASK_DOOR) {
+      const pass = guest ? guestpass.passOf(shareState, who) : undefined;
+      if (!pass) return workerJson(res, 403, { error: 'only a guest whose pass ended can ask for more time.' });
+      const text = guestpass.cleanAskText(body.text);
+      if (!text) return workerJson(res, 400, { error: 'write a few words for the owner first.' });
+      const why = guestpass.askWhy(shareState.passAsks ?? [], who.hash);
+      if (why) return workerJson(res, 409, { error: `${why}.` });
+      const asked: guestpass.PassAsk = { id: randomBytes(4).toString('hex'), link: who.hash, name: who.name, passId: pass.id, ...(pass.by ? { by: pass.by } : {}), expired: guestpass.linkEnds(who, pass) ?? new Date().toISOString(), text, at: new Date().toISOString() };
+      shareState.passAsks = guestpass.keepAsks([...(shareState.passAsks ?? []), asked]);
+      await saveShare();
+      if (!pass.by) d.onPassAsk?.('', who.name);
+      return workerJson(res, 200, { ok: true, state: 'waiting' });
+    }
+    // The host that made a guest's pass answers its request: renew the same link, deny with a reason, or block it.
+    if (p === '/worker/pass-answer') {
+      if (who.role !== undefined) return workerJson(res, 403, { error: 'only the host that made the pass can answer.' });
+      const q = (shareState.passAsks ?? []).find(a => a.id === body.id);
+      if (!q || q.by !== keepOf(who)) return workerJson(res, 404, { error: 'that request is not here, or is not yours to answer.' });
+      const done = guestpass.answerAsk(shareState.passAsks ?? [], shareState.paired, body.id, { answer: body.answer, length: body.length, reason: body.reason });
+      if ('error' in done) return workerJson(res, 409, { error: done.error });
+      shareState.passAsks = done.asks;
+      shareState.paired = done.paired;
+      await saveShare();
+      // The host notes the renewed link's new end on its own pass (its list shows it).
+      const renewed = done.paired.find(x => x.role === 'guest' && x.hash === done.ask.link);
+      return workerJson(res, 200, { ok: true, answer: done.ask.answer, passId: done.ask.passId, name: done.ask.name, until: done.ask.answer === 'renewed' ? renewed?.expires ?? null : undefined });
+    }
+    // A host's guest passes for this PC (src/guestpass.ts mergeFrom): only from a link with no role (an admin link; a guest
+    // was refused above), kept as given by that link, an older set or revision never taken over a newer one. A pass it
+    // ended takes the links made with it. Taken while someone here uses the PC too: it is a list, not work.
+    if (p === '/worker/passes-put') {
+      if (who.role !== undefined) return workerJson(res, 403, { error: 'only a host linked here can send guest passes.' });
+      const gen = Number(body.gen);
+      if (!Number.isSafeInteger(gen) || gen <= 0) return workerJson(res, 400, { error: 'the guest passes sent were not in the expected form.' });
+      const by = keepOf(who);
+      const was = shareState.passes ?? [];
+      const linked = new Set(shareState.paired.filter(l => l.role === undefined).map(l => keepOf(l)));
+      const got = guestpass.mergeFrom(was, body.passes, { by, gen, lastGen: shareState.passGens?.[by], nodeId: shareState.id, gone: k => !linked.has(k) });
+      if (!got.stale) {
+        const ended = new Set(got.passes.filter(x => x.revoked && was.some(w => w.id === x.id && !w.revoked)).map(x => x.id));
+        shareState.passes = got.passes;
+        shareState.paired = guestpass.dropEnded(guestpass.stampEnded(shareState.paired, ended));
+        shareState.passGens = { ...shareState.passGens, [by]: gen };
+        await saveShare();
+        if (got.taken) noted(`"${who.name}" sent its guest passes for this PC (${got.taken} changed).`);
+      }
+      return workerJson(res, 200, { ok: true, gen: got.stale ? shareState.passGens?.[by] ?? gen : gen, stale: got.stale, held: (shareState.passes ?? []).filter(x => x.by === by && !x.revoked).length });
     }
     // This PC's meters for the head of a paired PC's chat with someone here: read from what the sampler measured in
     // the last second for this PC's own top bar, so asking every few seconds adds no measuring here.
     if (p === '/worker/stats') {
-      nodestaff.keepChat(loadedForPc, keepOf(who), typeof body.model === 'string' ? body.model : '', Date.now());
+      // A guest keeps loaded only a model its pass names.
+      if (!guest || (typeof body.model === 'string' && may(body.model))) nodestaff.keepChat(loadedForPc, keepOf(who), typeof body.model === 'string' ? body.model : '', Date.now());
       return workerJson(res, 200, d.stats());
     }
     // The main PC's answer to "I need to use the pc, please log out for N hours": yes logs out here for those hours.
@@ -833,6 +1352,13 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       return c ? workerJson(res, 200, claimView(c)) : workerJson(res, 404, { error: 'no request from this PC was made there.' });
     }
     const carryDoor = p.startsWith('/worker/carry-') || p.startsWith('/worker/backup-') || p.startsWith('/worker/update-') || p.startsWith('/worker/git-');
+    // Work asked before with a request id is handed back first: followed while it still runs, or given at once when it
+    // is kept (src/outbox.ts). Also while this PC's owner uses it, or a speed test runs: it is done (or being done)
+    // already, so a host that was away gets what it is owed whatever this PC is doing now.
+    const askedRid = p === '/worker/run' || p === '/worker/draw' ? cleanRid(body.rid) : null;
+    if (askedRid && (await box.collect(keepOf(who), askedRid, lockOf(keys), () => followerOf(res), k => replay(res, k)))) return;
+    // A guest is told only that this PC is busy, not when its owner came to it.
+    if (away && guest && (p === '/worker/draw' || p === '/worker/run')) return workerJson(res, 503, { error: `"${shareState.name}" is busy for now. Try again later.` });
     if (away && (carryDoor || ['/worker/switch', '/worker/draw', '/worker/run'].includes(p))) return workerJson(res, 503, { error: `I need to log off for now: someone is using ${shareState.name} (since ${new Date(away.since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}). Its work goes to other PCs until it is started again.`, away: away.since });
     // Download to this PC, asked by a linked main PC (no tick needed, as for a model it sends), not while someone here
     // is using it.
@@ -855,7 +1381,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p.startsWith('/worker/tune-')) {
       const action = p.slice('/worker/tune-'.length);
       if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
-      if (away && (action === 'start' || action === 'apply' || action === 'undo' || action === 'smaller')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (away && (action === 'start' || action === 'apply' || action === 'undo' || action === 'smaller' || action === 'runner-check-start' || action === 'runner-test-start')) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
       if (!d.tune) return workerJson(res, 404, { error: `${shareState.name} cannot test setups.` });
       const a = await d.tune(action, body, who.name);
       return workerJson(res, a.status, a.json);
@@ -864,6 +1390,38 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
       if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
       const a = await runSetHere(body, who.name);
+      return workerJson(res, a.status, a.json);
+    }
+    // A linked PC deletes a model from this PC's disk: only with the owner's "Accept models from linked PCs" tick (the one
+    // that lets it send models here), only a model on this PC's own list by id, and the same refusals as its own Delete
+    // (hidden, loaded, kept by Ollama). Nothing but a kind and an id crosses.
+    if (p === '/worker/model-remove') {
+      if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (!carry.cleanAllow(shareState.allow).receive) return workerJson(res, 403, { error: `${carry.receiveRefused(shareState.name)}.` });
+      const kind = body.kind === 'image' ? 'image' : 'chat';
+      const id = typeof body.id === 'string' ? body.id.slice(0, 300) : '';
+      if (!id || !d.removeModel) return workerJson(res, 400, { error: `${shareState.name} cannot delete a model for another PC.` });
+      // The app lock PIN (or password) of this PC, typed on the linked PC, like an update (audit X2): the tick alone is not enough to delete.
+      const pin = await d.updatePinCheck(body.appPin, keepOf(who), true, body.hostPin !== undefined ? { pin: body.hostPin, link: who.hash } : undefined);
+      if ('error' in pin) return workerJson(res, pin.status, { error: `"${shareState.name}" ${pin.error}.`, needPin: pin.status === 403 });
+      const a = await d.removeModel(kind, id);
+      if (a.status === 200) noted(`"${who.name}" deleted ${id} from this PC.`);
+      return workerJson(res, a.status, a.body);
+    }
+    // A linked PC asks for a larger context for one of this PC's chat models, for the web (src/webctx.ts): the same owner's
+    // tick as the run settings, only a size from the list that fits the memory and the model's training, kept as that
+    // model's context setting (the owner sees it under Models), and the model let go when it is not answering.
+    if (p === '/worker/ctx-set') {
+      if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
+      const a = await ctxSetHere(body, who.name);
+      return workerJson(res, a.status, a.json);
+    }
+    // A linked PC lets go of the models it loaded here, now: the same owner's tick as the run settings.
+    if (p === '/worker/free') {
+      if (away) return workerJson(res, 503, { error: `${shareState.name} is being used by its owner for now. Try again later.` });
+      if (!carry.cleanAllow(shareState.allow).tune) return workerJson(res, 403, { error: runset.tuneRefused(shareState.name) });
+      const a = await freeHere(who.name);
       return workerJson(res, a.status, a.json);
     }
     // This PC's own app files, read-only, for a linked PC that pulls its TOMLIN (only with its owner's tick).
@@ -875,8 +1433,19 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       }
       return workerJson(res, a.status, a.json);
     }
+    // A linked PC turns this PC off: only with its owner's tick (on unless unticked), nobody using it, and this PC's app lock
+    // PIN typed there. A guest never gets here (doorRefusal above allows only GUEST_DOORS).
+    if (p === POWER_DOOR) {
+      const a = await powerOffNode(body, { key: keepOf(who), name: who.name, link: who.hash });
+      return workerJson(res, a.status, a.json);
+    }
     if (p.startsWith('/worker/update-')) {
-      const a = await updateNode(p, body, { key: keepOf(who), name: who.name }, piece ?? undefined);
+      const a = await updateNode(p, body, { key: keepOf(who), name: who.name, link: who.hash }, piece ?? undefined);
+      return workerJson(res, a.status, a.json);
+    }
+    // A host gives this PC its host PIN (with this PC's own PIN, in this one sealed request) or takes it away (src/hostpin.ts).
+    if (p === hostpin.SET_DOOR || p === hostpin.DROP_DOOR) {
+      const a = await d.hostPinDoor(p, body, { key: keepOf(who), link: who.hash, name: who.name, guest: who.role !== undefined }, () => shareState.name);
       return workerJson(res, a.status, a.json);
     }
     if (carryDoor) {
@@ -892,27 +1461,48 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p === '/worker/switch') return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
     // Awaited, so a fault in it is answered below (not left hanging until the linked PC gives up).
     // A speed test running here: work from linked PCs waits for it (they ask again).
-    const tuning = d.tuneBusy?.() ?? '';
+    const lined = p === '/worker/run' || p === '/worker/draw';
+    // A guest's prompt over the cap here is refused before it joins the line (src/nodeline.ts).
+    if (p === '/worker/run' && guest) {
+      const no = nodeline.promptRefusal(body, nodeline.cleanCaps(shareState.guestCaps));
+      if (no) return workerJson(res, 400, { error: no });
+    }
+    // A guest asking for a model its pass does not name is refused before it joins the line, so it never makes room.
+    if (lined && guest && typeof body.model === 'string' && body.model && !may(body.model)) return workerJson(res, 403, notOnPass());
+    // A guest always goes through the line, whatever it says: only the line holds the rule that it waits while the
+    // owner used the model it would take the place of (a guest that said "no line" skipped it).
+    const viaLine = body.line === true || guest;
+    if (lined) {
+      const what = p === '/worker/draw' ? 'picture' : 'chat';
+      const turn = viaLine ? await lineTurn(res, who, body, what) : lineOld(res, who, body, what);
+      if (!turn) return;
+    }
+    try {
+    // A linked PC from before the line: told busy during a speed test, as before (one in the line waited for it).
+    const tuning = viaLine ? '' : d.tuneBusy?.() ?? '';
     if (tuning && (p === '/worker/draw' || p === '/worker/run')) return workerJson(res, 409, { error: `Busy: ${tuning}.`, busy: true });
-    if (p === '/worker/draw') return await workerDraw(body, res, who.name, keepOf(who));
+    if (p === '/worker/draw') return await workerDraw(body, res, who.name, keepOf(who), askedRid ? { owner: keepOf(who), rid: askedRid, lock: lockOf(keys) } : null, may);
     if (p === '/worker/run') {
       const b = body;
       // Asked with a request id (2.0.38 on): the answer finishes here even if that PC goes away, and asking again with
       // the same id follows it, or gets it at once when it is done (src/outbox.ts). Never run twice.
-      const rid = cleanRid(b.rid);
-      const keep = rid ? { owner: keepOf(who), rid, lock: lockOf(keys) } : null;
-      if (keep && box.isRunning(keep.owner, keep.rid)) return void box.join(keep.owner, keep.rid, followerOf(res));
-      const had = keep ? await box.kept(keep.owner, keep.rid, keep.lock) : null;
-      if (had) return replay(res, had);
+      // Already running or kept for this id: handed back above.
+      const keep = askedRid ? { owner: keepOf(who), rid: askedRid, lock: lockOf(keys) } : null;
       const system = String(b.system ?? '').slice(0, 30_000);
       const user = String(b.user ?? '').slice(0, 200_000);
       // A whole chat (a manager PC's hire talking here), or one prompt (a job step).
       const turns = b.turns === undefined ? null : brains.cleanTurns(b.turns);
       if (b.turns !== undefined && !turns) return workerJson(res, 400, { error: 'the conversation sent was not in the expected form.' });
-      const maxTokens = Math.max(64, Math.min(jobs.STEP_CEILING, Math.floor(Number(b.maxTokens) || 1000)));
+      const asked = Math.max(64, Math.min(jobs.STEP_CEILING, Math.floor(Number(b.maxTokens) || 1000)));
+      // A guest's answer is capped here (the cap is in its hello).
+      const maxTokens = guest ? nodeline.capAnswer(asked, nodeline.cleanCaps(shareState.guestCaps)) : asked;
+      // What a guest's tools may give back: the room left under its prompt cap.
+      const guestRoom = guest ? nodeline.cleanCaps(shareState.guestCaps).prompt - nodeline.promptSize(b) : null;
       if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
-      if (typeof b.model === 'string' && b.model) return await modelChat(b, turns, { system, user }, maxTokens, res, who.name, keep, keepOf(who));
+      if (typeof b.model === 'string' && b.model && !may(b.model)) return workerJson(res, 403, notOnPass());
+      if (typeof b.model === 'string' && b.model) return await modelChat(b, turns, { system, user }, maxTokens, res, who.name, keep, keepOf(who), guestRoom);
       if (d.chat.view.state !== 'connected' || !d.chat.worker.base) return workerJson(res, 409, { error: 'no chat model is connected on the worker PC. Press Connect there.' });
+      if (!may(d.chat.view.model)) return workerJson(res, 403, notOnPass());
       // The model connected here answers for linked PCs (every model on this PC is lent).
       const notLent = nodestaff.modelRefusal(d.chat.view.model ?? '', { onPc: x => d.chatList().find(m => m.id === x)?.name ?? null, busy: false, pcName: shareState.name });
       if (notLent) return workerJson(res, 403, notLent);
@@ -921,18 +1511,35 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       if (!verdict.ok) return workerJson(res, 400, { error: REFUSAL[verdict.reason] });
       return await runFor(res, keep, `Working on a step for ${who.name}`, { pc: who.name, link: keepOf(who), project: projectOf(b) }, async (send, signal) => {
         const words = paced(text => send('text', { text }));
+        const asked = Date.now();
         try {
           const brain = localBrain('');
           const web = await webFor(b, send);
-          if (turns) await brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(web ? { tools: web.box } : {}) });
-          else await brain.ask(system, user, maxTokens, words.push, signal, web ? { tools: web.box } : undefined);
+          const offered = hostToolsFor(b, send, keepOf(who), keep?.rid);
+          const hostTools = offered && (await callsTools(d.chat.worker.base)) ? offered : null;
+          const box = boxFor(hostTools ?? web?.box, guestRoom);
+          if (turns) await brain.chat(turns, maxTokens, words.push, signal, { ...askOpts(b, send), ...(box ? { tools: box } : {}) });
+          else await brain.ask(system, user, maxTokens, words.push, signal, box ? { tools: box } : undefined);
           words.flush();
-          send('done', { model: d.chat.view.modelName ?? '', speed: brain.last ?? null, thought: brain.thought ?? null, usage: usedHere(), ...(brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}) });
+          send('done', { model: d.chat.view.modelName ?? '', speed: brain.last ?? null, thought: brain.thought ?? null, usage: usedHere(), ...(brain.cut ? { cut: true } : {}), ...(web?.turn.uses.length ? { tools: web.turn.uses } : {}), ...(offered && !hostTools ? { toolsOff: `${d.chat.view.modelName ?? 'This model'} cannot call tools` } : {}) });
         } catch (e) {
           words.flush();
-          send('error', { text: (e as Error).message });
+          const fault = signal.aborted ? null : await faultHook.find?.(d.chat.view.model, asked).catch(() => null);
+          send('error', { text: (e as Error).message, ...(fault ? { fault } : {}) });
         }
       });
+    }
+    } finally {
+      if (lined) lineNotStarted(res);
+    }
+    // A tool the asking PC ran for this PC's model (src/jobrun/tooltalk.ts): the model's loop goes on with the result.
+    if (p === '/worker/tool-result') {
+      const rid = cleanRid(body.rid);
+      const id = typeof body.id === 'string' ? body.id.slice(0, 40) : '';
+      if (!rid || !id) return workerJson(res, 400, { error: 'no request id or call id was sent.' });
+      return toolWaits.give(`${keepOf(who)}|${rid}|${id}`, typeof body.result === 'string' ? body.result : '')
+        ? workerJson(res, 200, { ok: true })
+        : workerJson(res, 404, { error: 'No call is waiting for that result any more.' });
     }
     // The outbox (src/outbox.ts): where an answer asked with a request id is (still working, finished, or not here),
     // "taken" once that PC has it, and Stop pressed there. Open while this PC's owner uses it ("away"): only collecting.
@@ -944,9 +1551,13 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     // This PC's own log of the work it did for that PC, per project (2.0.40 on): that PC's final tally (src/meter.ts).
     if (p === '/worker/usage') return workerJson(res, 200, { rows: d.ledgerRows(`for-${keepOf(who)}`) });
-    // This PC's log today, its last lines: a test across PCs is checked from the main PC (3 Nov: Max mode's refusals were
-    // only on this PC). The log holds no chat's words, prompts or file text (src/log.ts).
-    if (p === '/worker/log') return workerJson(res, 200, lastLines(Number(body.lines) || 300));
+    // This PC's log, its last lines: today's, or one of the days kept (day), only those with a word in them (find). A test
+    // across PCs is checked from the main PC (3 Nov: Max mode's refusals were only on this PC). The log holds no chat's
+    // words, prompts or file text (src/log.ts).
+    if (p === '/worker/log') {
+      const got = askLog({ lines: body.lines, day: body.day, find: body.find });
+      return workerJson(res, 'error' in got ? 400 : 200, got);
+    }
     if (p === '/worker/taken') {
       for (const rid of (Array.isArray(body.rids) ? body.rids : []).slice(0, 100).map(cleanRid)) if (rid) await box.take(keepOf(who), rid);
       return workerJson(res, 200, { ok: true });
@@ -957,7 +1568,9 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     }
     return workerJson(res, 404, { error: 'Not found.' });
   } catch (e) {
-    if (!res.headersSent) workerJson(res, 400, { error: (e as Error).message });
+    // A system fault (a full disk, a file held) is said plainly over the link; its detail, with this PC's folders, stays in this log.
+    if (typeof (e as NodeJS.ErrnoException).code === 'string') console.error(`A linked PC's request (${String(req.url ?? '').split('?')[0]}) failed here:`, e);
+    if (!res.headersSent) workerJson(res, 400, { error: carry.doorFault(e) });
     else res.end();
   }
 }
@@ -985,8 +1598,9 @@ async function applyNow(): Promise<void> {
     return;
   }
   const srv = createServer(workerRoute);
-  // Max mode's sealed stream (src/jobrun/maxnode.ts) opens as an Upgrade on the same port.
-  srv.on('upgrade', (req, socket, head) => void maxUpgrade(req, socket, head));
+  // Max mode's sealed stream (src/jobrun/maxnode.ts) opens as an Upgrade on the same port, and so does the cluster test
+  // door (src/cluster/testdoor.ts: timing the network and this PC's RPC server for the cluster engine).
+  srv.on('upgrade', (req, socket, head) => void (isClusterTest(req) ? clusterTestUpgrade(req, socket, head, nodeTestDeps()) : maxUpgrade(req, socket, head)));
   await new Promise<void>(resolve => {
     srv.once('error', e => {
       shareError = `Could not open port ${shareState.port}: ${(e as NodeJS.ErrnoException).code === 'EADDRINUSE' ? 'another program is using it. Choose another port.' : (e as Error).message}`;
@@ -1002,6 +1616,17 @@ async function applyNow(): Promise<void> {
 export async function startShare() {
   try {
     shareState = { ...share.DEFAULT_SHARE, ...(await d.store.readJson<Partial<share.ShareState>>('share.json', {})) };
+    // Guest passes as kept (src/guestpass.ts): one that is not whole is dropped.
+    shareState.passes = guestpass.cleanPasses(shareState.passes);
+    shareState.passAsks = guestpass.keepAsks(guestpass.cleanAsks(shareState.passAsks));
+    shareState.paired = guestpass.dropEnded(shareState.paired ?? []);
+    const last = guestpass.cleanRenew(shareState.passLastLength);
+    if (last) shareState.passLastLength = last;
+    else delete shareState.passLastLength;
+    const counts = (v: unknown) => Object.fromEntries(Object.entries(v && typeof v === 'object' ? v : {}).filter(([k, n]) => /^[\w-]{1,64}$/.test(k) && Number.isSafeInteger(n) && (n as number) > 0)) as Record<string, number>;
+    shareState.passAcks = counts(shareState.passAcks);
+    shareState.passGens = counts(shareState.passGens);
+    if (!Number.isSafeInteger(shareState.passGen)) delete shareState.passGen;
   } finally {
     shareRead();
   }
@@ -1014,6 +1639,8 @@ export async function startShare() {
   }
   autostart = await d.autostart.on().catch(() => false);
   if (shareState.on) await applyShare();
+  // A node in use (a model loaded for a linked PC, or a request running) asks Windows to stay awake; idle, it may sleep and be woken (src/keepawake.ts).
+  setInterval(() => awake.set(shareState.on && nodeBusy({ linkedModels: loadedForPc.size + (pictureFor ? 1 : 0), requests: serving.size + lending.size + (drawing ? 1 : 0) })), 15_000).unref();
 }
 
 /** "Start TOMLIN when this PC starts" is ticked (read at start and after each change). */
@@ -1038,6 +1665,29 @@ export async function projectsCopy(b: Record<string, unknown>) {
   }
 }
 
+/**
+ * The PCs a new pass is for, each with its models, as asked (`nodes`: [{ id, models }]) and checked: this PC only when it
+ * is a node, a linked node by its id, a model only one that PC has. An older page sends `models` alone: this PC.
+ */
+async function passScope(ask: Record<string, unknown>): Promise<{ scope: { id: string; models: string[] }[] } | { error: string }> {
+  const remotes = (await d.store.settings()).remotes;
+  // A PC this one is a guest on is not one it makes passes for.
+  const admin = remotes.filter(r => r.role !== 'guest');
+  const modelsOf = (id: string): string[] | null => (id === shareState.id ? (shareState.on ? onThisPc() : null) : admin.find(r => r.id === id)?.models?.map(m => m.id) ?? (admin.some(r => r.id === id) ? [] : null));
+  const asked = Array.isArray(ask.nodes) ? ask.nodes.slice(0, 50) : [{ id: shareState.id, models: ask.models }];
+  const scope: { id: string; models: string[] }[] = [];
+  for (const x of asked) {
+    const id = String((x as { id?: unknown })?.id ?? '');
+    const has = modelsOf(id);
+    if (!has) return { error: id === shareState.id ? 'Turn on sharing first: this PC is not a node, so a pass cannot be for it.' : 'One of the PCs picked is not linked to this one any more. Open the page again.' };
+    if (scope.some(s => s.id === id)) continue;
+    const want = (x as { models?: unknown })?.models;
+    scope.push({ id, models: (Array.isArray(want) ? want : []).filter((m): m is string => typeof m === 'string' && has.includes(m)) });
+  }
+  if (!scope.length) return { error: 'Pick at least one PC the pass is for.' };
+  return { scope };
+}
+
 export async function setShare(b: Record<string, unknown>) {
   // A node must have the app lock (F7 E3): other PCs reach it, so it is never open without one. Turning it on needs a PIN set; while it is a node, every change
   // here (turning it off too) needs that PIN typed again.
@@ -1049,9 +1699,68 @@ export async function setShare(b: Record<string, unknown>) {
   // Checked before anything is changed, so a refused port never leaves half of the other changes made.
   const port = 'port' in b ? Math.floor(Number(b.port)) : shareState.port;
   if ('port' in b && (!(port >= 1024 && port <= 65535) || port === Number(process.env.TOMLIN_PORT ?? 8740))) return { status: 400, body: { error: 'Use a port number from 1024 to 65535, not TOMLIN\'s own.' } };
-  if (shareState.on && !turningOn) {
+  const pinChecked = shareState.on && !turningOn;
+  // What the file holds now: a change the disk refuses to save (a full disk) is undone here too, so it never shows as
+  // made, and is never saved later by another change.
+  const asSaved = structuredClone(shareState);
+  if (pinChecked) {
     const ok = await d.appPinCheck(b.appPin);
     if ('error' in ok) return { status: ok.status, body: { error: ok.error, needAppPin: true } };
+  }
+  // A guest pass (src/guestpass.ts) lets another PC in: made or removed only with the app lock PIN when there is one,
+  // whether or not this PC is a node itself (a host makes passes for the nodes it is linked to).
+  const passChange = (b.passMake && typeof b.passMake === 'object') || (typeof b.passRemove === 'string' && !!b.passRemove) || (!!b.passAnswer && typeof b.passAnswer === 'object');
+  if (passChange && !pinChecked && d.appLockOn()) {
+    const ok = await d.appPinCheck(b.appPin);
+    if ('error' in ok) return { status: ok.status, body: { error: ok.error, needAppPin: true } };
+  }
+  // Made here, for this PC (when it is a node) and the nodes it is linked to, each with the models picked for it;
+  // checked before anything changes. Its code is in this answer only: kept nowhere, shown once.
+  let made: { pass: guestpass.GuestPass; code: string } | null = null;
+  let ownChanged = false;
+  if (b.passMake && typeof b.passMake === 'object') {
+    const live = (shareState.passes ?? []).filter(x => guestpass.passLive(x) && !x.by);
+    if (live.length >= guestpass.MAX_PASSES) return { status: 409, body: { error: `There are ${guestpass.MAX_PASSES} guest passes already. Remove one first.` } };
+    const ask = b.passMake as Record<string, unknown>;
+    const scope = await passScope(ask);
+    if ('error' in scope) return { status: 400, body: scope };
+    const m = await guestpass.makePass({ label: ask.label, length: ask.length, scope: scope.scope }, shareState.id, Date.now(), { codes: [shareState.code], keys: live.map(x => x.key) });
+    if ('error' in m) return { status: 400, body: m };
+    made = m;
+  }
+  if (made) {
+    shareState.passes = [...(shareState.passes ?? []), made.pass];
+    ownChanged = true;
+  }
+  // Remove: the pass ends now and the links made with it go (a guest is not told why). One this PC made is removed on
+  // its nodes too (sent at once, and again until each says it has it); one a host gave ends here only.
+  if (typeof b.passRemove === 'string' && b.passRemove) {
+    const gone = (shareState.passes ?? []).find(x => x.id === b.passRemove);
+    const r = guestpass.revokePass(shareState.passes ?? [], shareState.paired, b.passRemove);
+    shareState.passes = r.passes;
+    shareState.paired = r.paired;
+    if (gone && !gone.by) ownChanged = true;
+  }
+  if (ownChanged) shareState.passGen = guestpass.nextGen(shareState.passGen);
+  // A guest's request answered: on a pass made here, here; on a pass this PC made for a node, on that node (sent now).
+  if (b.passAnswer && typeof b.passAnswer === 'object') {
+    const a = b.passAnswer as Record<string, unknown>;
+    const length = guestpass.cleanRenew(a.length);
+    if (a.answer === 'renew' && length) shareState.passLastLength = length;
+    if (typeof a.pc === 'string' && a.pc) {
+      const r = await passHooks.answer(a.pc, a);
+      if (r.status !== 200) return r;
+      // Renewed there: noted on this PC's pass, so its list shows that guest's new end (not only the ended pass).
+      if (a.answer === 'renew' && typeof r.body.passId === 'string') shareState.passes = guestpass.noteRenewal(shareState.passes ?? [], r.body.passId, { pc: a.pc, pcName: String(r.body.pcName ?? ''), name: String(r.body.name ?? ''), until: typeof r.body.until === 'string' ? r.body.until : null });
+    } else {
+      const q = (shareState.passAsks ?? []).find(x => x.id === a.id && !x.by);
+      if (!q) return { status: 404, body: { error: 'That request is not here any more.' } };
+      const done = guestpass.answerAsk(shareState.passAsks ?? [], shareState.paired, a.id, { answer: a.answer, length: a.length, reason: a.reason });
+      if ('error' in done) return { status: 409, body: done };
+      shareState.passAsks = done.asks;
+      shareState.paired = done.paired;
+      if (done.ask.answer === 'renewed') shareState.passes = guestpass.noteRenewal(shareState.passes ?? [], done.ask.passId, { pc: null, pcName: shareState.name, name: done.ask.name, until: done.paired.find(x => x.role === 'guest' && x.hash === done.ask.link)?.expires ?? null });
+    }
   }
   // A4: Allow / Don't allow a new PC's request for a linked PC's backups.
   if (typeof b.claimId === 'string') {
@@ -1075,28 +1784,71 @@ export async function setShare(b: Record<string, unknown>) {
   if ('name' in b) shareState.name = String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'Worker PC';
   shareState.port = port;
   if ('pinOn' in b) shareState.pinOn = b.pinOn === true;
-  if ('allow' in b) shareState.allow = carry.cleanAllow(b.allow, maxShown());
+  if ('allow' in b) {
+    const was = carry.cleanAllow(shareState.allow).lend === true;
+    shareState.allow = carry.cleanAllow(b.allow);
+    // Ticked into the cluster: its speed test runs now when its figures are missing or stale (src/speedtest.ts).
+    if (!was && shareState.allow.lend === true) void checkSpeed('ticked');
+  }
   if ('lendIdle' in b) shareState.lendIdle = cleanLendIdle(b.lendIdle);
+  if ('guestCaps' in b) shareState.guestCaps = nodeline.cleanCaps(b.guestCaps);
+  if ('hostFirst' in b) shareState.hostFirst = b.hostFirst !== false;
+  if ('atOnce' in b) shareState.atOnce = slotsLib.cleanAtOnce(b.atOnce);
   if (b.newPin === true || (shareState.pinOn && !shareState.pin)) shareState.pin = share.newPin();
   if (b.newCode === true) shareState.code = share.newCode();
+  // This PC's owner takes a linked host's host PIN away (src/hostpin.ts), by the link's id: that host asks this PC's own PIN again.
+  if (typeof b.hostPinDrop === 'string' && b.hostPinDrop) await d.hostPinDrop(b.hostPinDrop);
   // By the link's own id (its token's fingerprint): the list can change while the page shows it (a PC links meanwhile).
+  const before = shareState.paired;
   if (typeof b.unpairId === 'string' && b.unpairId) shareState.paired = shareState.paired.filter(x => String(x.hash ?? '').slice(0, 12) !== b.unpairId);
   else if ('unpair' in b) shareState.paired = shareState.paired.filter((_, k) => k !== Number(b.unpair));
   if (b.unpairAll === true) shareState.paired = [];
+  // A host's link removed: the guest passes it gave end here now (their guests may collect work for a while).
+  for (const gone of before.filter(x => x.role === undefined && !shareState.paired.includes(x))) {
+    const r = guestpass.endGiver(shareState.passes ?? [], shareState.paired, keepOf(gone));
+    shareState.passes = r.passes;
+    shareState.paired = r.paired;
+    // Its host PIN goes with it (it could never be used again: it was good only from that link).
+    if (gone.hash) await d.hostPinDrop(gone.hash).catch(() => false);
+  }
+  shareState.paired = guestpass.dropEnded(shareState.paired);
   if ('on' in b) shareState.on = b.on === true;
-  await saveShare();
+  try {
+    await saveShare();
+  } catch (e) {
+    shareState = asSaved;
+    throw e;
+  }
+  const unlinked = before.filter(x => !shareState.paired.includes(x)).map(x => `"${x.name}"`);
+  if (unlinked.length) log.info('link', `The link${unlinked.length > 1 ? 's' : ''} to ${unlinked.join(', ')} ended on this PC (removed under Network, or a guest pass ran out).`);
   // A PC borrowing this one's card whose link was just removed: its loan ends now, not at the next check.
   const borrower = lentTo();
   if (borrower && !shareState.paired.some(p => lendingTo(String(p.hash ?? '')))) await endLoan(`the link to "${borrower}" was removed`);
   // The link part restarts only when it has to (turned on or off, a new port, or not listening): a restart cuts every
   // answer, step and picture the host is waiting for, and a name, a code or "Start when this PC starts" is read live.
   if (shareState.on !== was.on || shareState.port !== was.port || (shareState.on && !shareServer)) await applyShare();
-  return { status: 200, body: shareView() };
+  if (ownChanged) passHooks.changed();
+  return { status: 200, body: made ? { ...shareView(), madePass: { id: made.pass.id, code: made.code, label: made.pass.label, expires: made.pass.expires } } : shareView() };
 }
 
 /** What creating the jobs started: the restore points read once a minute, the copy and update doors, the drop of unused models. */
 export function startNode(): void {
-  box = new Outbox(join(d.store.dir, 'outbox'));
+  // A chat model loads with as many slots as At once asks (src/slots.ts), when this PC is a node.
+  slotsLib.slotWant.want = () => (shareState.on ? slotsLib.cleanAtOnce(shareState.atOnce) : 1);
+  // The requests taken on the link are kept on the disk too, so none can be sent again after a restart (src/link.ts).
+  taken.keepIn(join(d.store.dir, 'link-seen.txt'));
+  // A guest's link may keep only a few answers here; a host's own many (src/outbox.ts).
+  box = new Outbox(join(d.store.dir, 'outbox'), owner => (shareState.paired.some(l => l.role === 'guest' && keepOf(l) === owner) ? GUEST_KEPT : HOST_KEPT));
+  // The weight cache is brought down to its limit at every start and once an hour, even on a PC that never lends again
+  // (122.6 GB on one node, 17 Nov 2026). Not while a loan runs: the RPC server has its files open then.
+  const tidyCache = () => {
+    if (lentTo()) return;
+    void pruneCache(join(cacheDirOf(d.store.dir), 'rpc')).then(r => { if (r.files) log.info('max', `Weight cache: removed ${r.files} old file${r.files > 1 ? 's' : ''} (${(r.bytes / 2 ** 30).toFixed(1)} GB) to keep it under ${Math.round(maxlendLimit / 2 ** 30)} GB.`); });
+  };
+  setTimeout(tidyCache, 20_000).unref();
+  setInterval(tidyCache, 3600_000).unref();
+  // A line about drive space and the weight cache in the log, soon after the start and every 6 hours (src/disklog.ts).
+  startDiskLog({ dataDir: d.store.dir, modelsDir: () => d.carry.chatDir, cacheDir: cacheDirOf(d.store.dir), say: line => log.info('disk', line), firstMs: 30_000 });
   // Answers no linked PC came back for in three days are removed (at the start, then once an hour).
   void box.sweep();
   setInterval(() => void box.sweep(), 3600_000).unref();
@@ -1108,13 +1860,14 @@ export function startNode(): void {
     pcName: () => shareState.name,
     chatFiles: d.carry.chatFiles,
     pictureFiles: d.carry.pictureFiles,
-    chatDir: d.carry.chatDir,
+    // Read each time: the folder models are kept in can be changed while TOMLIN runs.
+    get chatDir() { return d.carry.chatDir; },
     chatHas: d.carry.chatHas,
     pictureDest: d.carry.pictureDest,
     keptRoot: d.carry.keptRoot,
     onProjects: () => void readKept(),
     onInstalled: (name, model) => {
-      console.log(`A linked PC installed ${name} on this PC.`);
+      noted(`A linked PC installed ${name} on this PC.`);
       d.carry.onInstalled();
     },
   });
@@ -1124,7 +1877,7 @@ export function startNode(): void {
     pcName: () => shareState.name,
     why: id => d.runner.why(id, shareState.name),
     inUse: device => d.runner.inUse(device),
-    onChange: () => console.log(`The CUDA runner on this PC changed (a linked PC sent it, or took it away).`),
+    onChange: () => noted(`The CUDA runner on this PC changed (a linked PC sent it, or took it away).`),
   });
 
   // Logged out for the hours the main PC agreed to: it starts again by itself when they are up.
@@ -1132,6 +1885,8 @@ export function startNode(): void {
     const until = shareState.away?.until;
     if (until && Date.now() >= Date.parse(until)) void comeBack(true, 'the end of the time asked for').catch(() => undefined);
   }, 30_000).unref();
+  /** Why this PC cannot restart or go off now (someone at it, or work for a linked PC), or null. */
+  const nodeBusyNow = () => loanBusyNow() ?? [...serving.values()][0] ?? (lending.size || drawing ? 'answering for a linked PC' : d.busy() ? 'someone at that PC is getting an answer' : d.imageBusy() ? 'someone at that PC is drawing a picture' : actionBusy() ? 'a job is running on that PC' : d.chat.view.state === 'loading' || d.imagePane.view.state === 'loading' ? 'a model is loading on that PC' : null);
   updateNode = update.updateSide({
     root: d.update.root,
     version: d.version,
@@ -1139,14 +1894,32 @@ export function startNode(): void {
     allowed: () => shareState.allow?.update === true,
     pcName: () => shareState.name,
     restarts: d.update.restarts,
-    pinCheck: (pin, who) => d.updatePinCheck(pin, who),
+    pinCheck: (pin, who, host) => d.updatePinCheck(pin, who, false, host),
     // A restart cuts what is running: someone at this PC, or work for a linked PC, finishes first.
-    busy: () => loanBusyNow() ?? [...serving.values()][0] ?? (lending.size || drawing ? 'answering for a linked PC' : d.busy() ? 'someone at that PC is getting an answer' : d.imageBusy() ? 'someone at that PC is drawing a picture' : actionBusy() ? 'a job is running on that PC' : d.chat.view.state === 'loading' || d.imagePane.view.state === 'loading' ? 'a model is loading on that PC' : null),
+    busy: nodeBusyNow,
     done: async (dir, version, by, pulled) => {
       shareState.updated = { version, by: String(by).slice(0, 40), at: new Date().toISOString(), ...(pulled ? { pulled: true } : {}) };
       await saveShare();
-      console.log(pulled ? `TOMLIN ${version} was pulled here from "${by}": starting it from ${dir}.` : `"${by}" updated TOMLIN here to ${version}: starting it from ${dir}.`);
+      noted(pulled ? `TOMLIN ${version} was pulled here from "${by}": starting it from ${dir}.` : `"${by}" updated TOMLIN here to ${version}: starting it from ${dir}.`);
       await d.update.switchTo(dir);
+    },
+  });
+  // Whether someone is at this PC (keys, mouse, Windows locked), read only when a turn-off is asked for.
+  const offPresence = new PresenceReader();
+  powerOffNode = powerOffSide({
+    allowed: () => carry.cleanAllow(shareState.allow).off,
+    pcName: () => shareState.name,
+    away: () => !!shareState.away,
+    busy: nodeBusyNow,
+    inUse: async () => {
+      const p = offPresence.now() ?? (await offPresence.first(4000));
+      return p && !nobodyThere(p, USED_MINUTES) ? presenceWords(p) : null;
+    },
+    pinCheck: (pin, who, host) => d.updatePinCheck(pin, who, 'power', host),
+    supported: process.platform === 'win32',
+    run: (seconds, by) => {
+      noted(`"${by}" turned this PC off: it shuts down in ${seconds} seconds.`);
+      execFile('shutdown.exe', shutdownArgs(seconds, by), { windowsHide: true }, () => undefined);
     },
   });
   giveNode = update.giveSide({
@@ -1167,14 +1940,14 @@ export function startNode(): void {
     if (pictureFor && picture === 'keep') pictureFor.at = Date.now();
     else if (picture === 'gone' || picture === 'theirs') pictureFor = null;
     else if (pictureFor && picture === 'drop') {
-      console.log(`Dropping ${v.modelName ?? pictureFor.id}: loaded for a linked PC, and no linked PC used it for ${PICTURE_DROP_MS / 60_000} minutes.`);
+      noted(`Dropping ${v.modelName ?? pictureFor.id}: loaded for a linked PC, and no linked PC used it for ${PICTURE_DROP_MS / 60_000} minutes.`);
       pictureFor = null;
       dropped = true;
       void d.imagePane.disconnect().catch(() => undefined);
     }
     // sd-server takes no key: while TOMLIN is locked, a picture model of this PC's own does not stay loaded with nothing to do.
     if (!dropped && unloadWhileLocked({ locked: d.appLocked(), state: v.state, forLinked: !!pictureFor, busy: drawing || d.imageBusy(), idleMs: Date.now() - pictureUsedAt })) {
-      console.log(`Unloading ${v.modelName ?? v.model}: TOMLIN is locked, and the picture runner takes no key. It loads again for the next picture.`);
+      noted(`Unloading ${v.modelName ?? v.model}: TOMLIN is locked, and the picture runner takes no key. It loads again for the next picture.`);
       void d.imagePane.disconnect().catch(() => undefined);
     }
     for (const [id, v] of loadedForPc) {
@@ -1185,7 +1958,7 @@ export function startNode(): void {
       else if (verdict === 'gone' || verdict === 'theirs') loadedForPc.delete(id);
       else if (verdict === 'drop' && r) {
         loadedForPc.delete(id);
-        console.log(`Dropping ${r.view.modelName ?? id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 60_000} minutes.`);
+        noted(`Dropping ${r.view.modelName ?? id}: loaded for a linked PC, and no linked PC used it for ${UNUSED_DROP_MS / 60_000} minutes.`);
         void r.disconnect().catch(() => undefined);
       }
     }

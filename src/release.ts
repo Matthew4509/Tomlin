@@ -1,7 +1,7 @@
-// Updates from git (This PC: models and updates, Update this install, Check git): the newest GitHub Release of TOMLIN's repo
+// Updates from git (This PC: models and updates, Update this install, Check for updates): the newest GitHub Release of TOMLIN's repo
 // (package.json `repository`) carries tomlin-<version>.zip and its signature beside it, tomlin-<version>.zip.sig, made
 // by npm run pack with the release key (tools/sign.ts). That key never ships: TOMLIN carries only its public half,
-// below, and a downloaded zip whose signature does not match it is never opened. A zip picked by hand (Check zip) is
+// below, and a downloaded zip whose signature does not match it is never opened. A zip picked by hand (Update via zip) is
 // checked too, with its .sig picked beside it; a missing or failing one is a warning the person may override (Install
 // anyway), so an offline PC can still be updated from a copy. Plain parts here, tested in test/release.test.ts; the
 // server's doors are in src/server/selfupdate.ts.
@@ -80,7 +80,23 @@ export function sigOf(header: unknown): unknown {
   }
 }
 
-/** What the person is told about a signature that does not pass, for a zip picked by hand (Check zip). */
+/** What the person is told about a signature that does not pass, for a zip picked by hand (Update via zip). */
+/**
+ * Whether a checked zip may be installed (Update now), and if not why: a download from GitHub never without its
+ * signature; a hand-picked zip whose signature failed only with Install anyway; and, while an app lock is set, Install
+ * anyway only with the app lock PIN (or password) typed with it: a program on this PC could otherwise press it.
+ * `pinCheck` is the app lock's own check (src/server/locks.ts appPinCheck: wrong tries count there). Null: it may.
+ */
+export async function installRefusal(o: { code: SigCode; source: 'file' | 'git'; anyway: unknown; lockOn: boolean; pin: unknown; pinCheck: (pin: unknown) => Promise<{ ok: true } | { status: number; error: string }> }): Promise<{ status: number; error: string; needPin?: true } | null> {
+  if (!o.code) return null;
+  if (o.source !== 'file') return { status: 409, error: 'A download from GitHub is never installed without its signature.' };
+  if (o.anyway !== true) return { status: 409, error: `This zip is not signed by TOMLIN's maker: ${WARN[o.code]} Press Install anyway only if you trust where it came from.` };
+  if (!o.lockOn) return null;
+  const ok = await o.pinCheck(o.pin);
+  if ('ok' in ok) return null;
+  return { status: ok.status, error: ok.status === 403 ? 'A zip that is not signed by TOMLIN\'s maker is installed only with the app lock PIN (or password) typed with Install anyway. Nothing was changed.' : ok.error, needPin: true };
+}
+
 export const WARN: Record<Exclude<SigCode, ''>, string> = {
   none: 'There is no signature with it (tomlin-<version>.zip.sig, picked together with the zip).',
   format: 'The signature picked with it is not one TOMLIN\'s maker makes.',
@@ -90,7 +106,7 @@ export const WARN: Record<Exclude<SigCode, ''>, string> = {
   bad: 'Its signature was not made with TOMLIN\'s release key.',
 };
 
-/** The newest release, as Check git shows it. */
+/** The newest release, as Check for updates shows it. */
 export interface Latest {
   version: string;
   tag: string;
@@ -104,9 +120,30 @@ export interface Latest {
 /** Only GitHub's own download addresses are followed (a release's assets live there); a test's stand-in names its own. */
 const fromBase = (url: unknown, base: string) => typeof url === 'string' && url.startsWith(base) && url.length < 600;
 
-/** Check git's answer when the repo has no release at all (GitHub's 404 for releases/latest): what to do instead. */
+/** Check for updates's answer when the repo has no release at all (GitHub's 404 for releases/latest): what to do instead. */
 export const noRelease = (repo: string, version: string): string =>
-  `There is no release of TOMLIN on GitHub yet (github.com/${repo}). This PC runs ${version}. To update by hand: Check zip with a tomlin-<version>.zip and its .zip.sig copied from another PC, or unzip that zip and run its Install TOMLIN.cmd.`;
+  `There is no release of TOMLIN on GitHub yet (github.com/${repo}). This PC runs ${version}. To update by hand: Update via zip with a tomlin-<version>.zip and its .zip.sig copied from another PC, or unzip that zip and run its Install TOMLIN.cmd.`;
+
+/**
+ * A line of the release notes as plain words, as the page shows them: the marks GitHub turns into headings, lists,
+ * quotes, bold, code and links are taken off ("## What is new" reads "What is new").
+ */
+export const plainLine = (line: string): string =>
+  line.trim().replace(/^(#{1,6}\s+|[-*+]\s+|>\s*|\d{1,3}\.\s+)/, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').trim();
+
+/**
+ * Why a download stopped, in plain words. Node.js says only "terminated" or "fetch failed" when the connection is cut
+ * part way, which tells a person nothing.
+ */
+export function stoppedWhy(e: unknown): string {
+  const err = (e ?? {}) as { name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown } };
+  const message = String(err.message ?? '').replace(/\.$/, '');
+  const code = String(err.code ?? err.cause?.code ?? '');
+  if (code === 'ENOSPC') return 'the disk is full';
+  if (err.name === 'TimeoutError') return 'it took more than 30 minutes';
+  if (message === 'terminated' || message === 'fetch failed' || /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|UND_ERR_\w+)$/.test(code)) return 'the connection was cut part way (the internet dropped, or GitHub stopped sending)';
+  return message || 'no reason was given';
+}
 
 /**
  * GitHub's answer for the newest release -> what to download, or why there is nothing to take: no version in its tag
@@ -123,6 +160,6 @@ export function latestOf(raw: unknown, base = 'https://github.com/'): Latest | s
   const sig = assets.find(a => a.name === `${name}.sig`);
   if (!zip || !fromBase(zip.browser_download_url, base)) return `TOMLIN ${version} is on GitHub, but its ${name} is not attached to the release yet`;
   if (!sig || !fromBase(sig.browser_download_url, base)) return `TOMLIN ${version} is on GitHub, but its signature (${name}.sig) is not attached, so it cannot be checked`;
-  const notes = String(r.body ?? '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 4).join(' ').slice(0, 400);
+  const notes = String(r.body ?? '').replace(/\r/g, '').split('\n').map(plainLine).filter(Boolean).slice(0, 4).join(' ').slice(0, 400);
   return { version, tag, published: String(r.published_at ?? ''), notes, zip: { name, url: String(zip.browser_download_url), bytes: Math.max(0, Number(zip.size) || 0) }, sig: { url: String(sig.browser_download_url) } };
 }

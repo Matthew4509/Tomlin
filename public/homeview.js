@@ -141,9 +141,12 @@ function setupCards() {
   }
   box.hidden = false;
   const steps = [u.chatModels > 0, u.staff > 0, u.pcs > 0, !!u.node];
+  // Only the next step to do has the filled (blue) button; the rest are ordinary buttons.
+  const next = steps.indexOf(false);
+  let at = 0;
   const card = (done, title, text, button, onClick) => el('article', { class: `setup-card${done ? ' done' : ''}` },
     el('strong', { text: `${done ? '✓ ' : ''}${title}` }), el('p', { class: 'hint', text }),
-    el('button', { class: `btn${done ? '' : ' primary'}`, type: 'button', text: button, onclick: onClick }));
+    el('button', { class: `btn${at++ === next ? ' primary' : ''}`, type: 'button', text: button, onclick: onClick }));
   box.replaceChildren(
     el('h3', { text: `Setup progress ${steps.filter(Boolean).length}/${steps.length} start setup now:` }),
     el('div', { class: 'setup-grid' },
@@ -241,7 +244,9 @@ async function refreshPcs() {
   if (pcsAsking) { pcsAgain = true; return; }
   pcsAsking = true;
   try {
-    homeUi.pcs = (await api('/api/home/pcs')).pcs;
+    const got = await api('/api/home/pcs');
+    homeUi.pcs = got.pcs;
+    homeUi.cluster = got.cluster ?? { on: false, members: [] };
     drawRail();
   } catch {
     // Kept as they were.
@@ -271,24 +276,38 @@ app.onStatus.push(() => {
 
 for (const b of document.querySelectorAll('[data-setup]')) {
   b.addEventListener('click', () => {
+    // Staff, Jobs and Files opened from here close back to Settings (home.js showAsPage).
+    asPage.fromMenu = true;
     if (b.dataset.setup === 'settings') app.openSettings?.();
     else if (b.dataset.setup === 'staff') app.openStaffMenu();
     else if (b.dataset.setup === 'models') app.openModels();
     else if (b.dataset.setup === 'nodes') openNodes();
+    else if (b.dataset.setup === 'cluster') app.openCluster?.();
     else if (b.dataset.setup === 'thispc') openThisPc();
     else if (b.dataset.setup === 'updates') app.openUpdateInstall?.();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();
     else if (b.dataset.setup === 'files') $('#files-open').click();
     else if (b.dataset.setup === 'data') app.openDataLock?.();
+    else if (b.dataset.setup === 'perms') app.openPermissions?.();
     else if (b.dataset.setup === 'colours') app.openColours?.();
     else app.openPcs();
   });
 }
 // Settings' tiles are the submenu's own lines, so the two always match: a tile does what its line does.
-$('#settings-tiles').replaceChildren(...[...document.querySelectorAll('#rail-settings-sub [data-setup]')].map(b => el('button', { class: 'settings-tile', type: 'button', onclick: () => b.click() },
-  el('span', { class: 'settings-tile-icon' }, b.querySelector('svg').cloneNode(true)),
-  el('strong', { text: b.textContent.trim() }),
-  el('span', { class: 'hint', text: b.dataset.about }))));
+// Models is the one tile with two buttons on its right, not one press: See installed (This PC) and Add new (the Models page).
+const TILE_PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z';
+const TILE_LIST = 'M4 6h2v2H4zM9 6h11v2H9zM4 11h2v2H4zM9 11h11v2H9zM4 16h2v2H4zM9 16h11v2H9z';
+const tileButton = (text, path, onclick) => el('button', { class: 'btn tile-act', type: 'button', onclick }, text, svgIcon(path, 16));
+$('#settings-tiles').replaceChildren(...[...document.querySelectorAll('#rail-settings-sub [data-setup]')].map(b => {
+  const icon = el('span', { class: 'settings-tile-icon' }, b.querySelector('svg').cloneNode(true));
+  const name = el('strong', { text: b.textContent.trim() });
+  const about = el('span', { class: 'hint', text: b.dataset.about });
+  if (b.dataset.setup === 'models') {
+    return el('div', { class: 'settings-tile settings-tile-two' }, icon, name, about,
+      el('div', { class: 'tile-acts' }, tileButton('See installed', TILE_LIST, () => openThisPc()), tileButton('Add new', TILE_PLUS, () => app.openModels())));
+  }
+  return el('button', { class: 'settings-tile', type: 'button', onclick: () => b.click() }, icon, name, about);
+}));
 // Hiring, letting go, pairing a PC or sharing this one changes the lists: redraw when those windows close.
 for (const id of ['#team', '#jobs']) $(id)?.addEventListener('close', () => {
   refresh();
@@ -324,7 +343,7 @@ function drawHomeAsk() {
   // Nobody hired yet: the staff icons (one per chat role), each opening a window to hire one.
   const hire = $('#home-hire');
   hire.hidden = !!staff.length;
-  if (!staff.length) hire.replaceChildren(...(team.data?.roles ?? []).map(r => el('button', { class: 'staff-chip', type: 'button', title: `Hire a ${r.name.toLowerCase()}: pick their PC and software`, onclick: () => quickHire(r.id) },
+  if (!staff.length) hire.replaceChildren(...(team.data?.roles ?? []).map(r => el('button', { class: 'staff-chip', type: 'button', title: `Hire ${/^[aeiou]/i.test(r.name) ? 'an' : 'a'} ${r.name.toLowerCase()}: pick their PC and software`, onclick: () => quickHire(r.id) },
     el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, roleIcon(r.id)), el('span', { text: r.name }))));
   if (staff.length) {
     pick.replaceChildren(el('option', { value: '', text: 'Default - strongest available PC', title: 'The strongest worker that is free when it starts' }),
@@ -359,26 +378,28 @@ $('#home-ask').addEventListener('submit', async e => {
     return;
   }
   if ($('#home-staff').hidden) {
-    sayHere(say, 'Set up staff first: press Setup staff, hire at least one person, then press Lets go! again.');
+    sayHere(say, 'Hire staff first: press Hire staff under the prompt (or one of the role buttons), hire at least one person, then press Lets go! again.');
     return;
   }
   const go = $('#home-go');
   go.disabled = true;
   try {
-    // Lets go!: the project, then the prompt sent to one hire in a chat in it, as a normal message (no plan).
-    const r = await api('/api/projects/create', { name: $('#home-name').value, about, prompt, pm: homeAsk.pm, go: true });
+    // Lets go!: the project, then the queue plans and splits it as a project started anywhere else (a picture alone
+    // is one picture step, drawn by the artist) and runs its steps.
+    const r = await api('/api/projects/create', { name: $('#home-name').value, about, prompt, pm: homeAsk.pm, go: true, plan: true });
     say.hidden = true;
-    // A TOMLIN still running older code (started before an update) makes the project but no chat.
-    if (!r.chat) {
-      sayHere(say, 'The project was made (it is in Recent projects), but TOMLIN is still running an older version that does not start a chat for it. Close TOMLIN and open it again, then press Lets go! again.');
+    // A TOMLIN still running older code (started before an update) makes the project but does not plan it.
+    if (!r.plan) {
+      sayHere(say, 'The project was made (it is in Recent projects), but TOMLIN is still running an older version that does not plan it. Close TOMLIN and open it again, then press Lets go! again.');
       return;
     }
-    await app.openChat(r.chat);
-    if (app.chatId !== r.chat) {
-      sayHere(say, `The project was made, but its chat with ${r.hire} did not open. Open it from the Chats list, then copy the prompt below into it.`);
+    try {
+      await app.addToQueue([{ kind: 'project', project: r.id }]);
+    } catch (err) {
+      sayHere(say, `The project was made (it is in Recent projects), but it was not added to the queue: ${err.message} Open it and press Make the plan.`);
       return;
     }
-    app.sendNow(prompt || about);
+    sayHere(say, r.picture ? `${r.name} is in the queue: the artist draws it as one picture.` : `${r.name} is in the queue: it is planned into steps first, then each step goes to its hire.`);
     for (const id of ['#home-name', '#home-about', '#home-goal']) $(id).value = '';
     drawHomeAsk();
   } catch (err) {

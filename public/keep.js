@@ -133,53 +133,68 @@ function keepName(file) {
   return `${at.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })} (${m[7]})`;
 }
 
-/** The "Your data and updates" part of the Settings page. */
+/** A backup's file name as a table's two cells: when ("Nov 12, 2026, 6:51 PM") and how it was made ("before 2.0.88"). */
+function backupWhen(file) {
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2}) (.*)\.zip$/.exec(file);
+  if (!m) return [file.replace(/\.zip$/, ''), ''];
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return [at.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }), m[7]];
+}
+
+/**
+ * Your data, on Data and lock: the data folder (its size and Open the folder), then Backups: how many and the newest on
+ * its row with Back up now, the list folded under it as a table, each with Put back. Update this install is on Manage
+ * updates (it was here too).
+ */
 app.keepBox = () => {
-  const note = el('p', { class: 'hint', role: 'status', text: 'Reading…' });
-  const box = el('div', { class: 'notify-box' }, el('h3', { text: 'Your data and updates' }), note);
+  const note = app.setSaid();
   const ask = el('div', { hidden: true });
+  const folder = app.setRow({ icon: 'data', name: 'Data folder', about: 'Reading…', side: app.setButton('Open the folder', () => api('/api/keep', { do: 'open' }).catch(err => (note.textContent = err.message))) });
+  const backNow = app.setButton('Back up now', async () => {
+    note.textContent = 'Backing up…';
+    try {
+      const r = await api('/api/keep', { do: 'backup' });
+      draw(r);
+      note.textContent = r.said;
+    } catch (err) {
+      note.textContent = err.message;
+    }
+  }, { main: true });
+  const table = el('tbody');
+  // With no backups yet the table is not shown: its headings alone read as a broken list.
+  const listed = el('table', { class: 'set-table', hidden: true }, el('thead', {}, el('tr', {}, el('th', { text: 'When' }), el('th', { text: 'Made' }), el('th', { text: 'Size' }), el('th', {}))), table);
+  const backups = app.setRow({ icon: 'backup', name: 'Backups', about: 'Reading…', side: backNow, inside: [
+    listed,
+    el('div', { class: 'set-line set-foot' },
+      el('p', { class: 'set-note', text: 'Keeps the newest 5, then daily, weekly and quarterly. Models are not included.' }),
+      // A4: a new PC links to the PC that kept the backups, then asks for them there by backup name and PIN.
+      app.setButton('Get my backups from a linked PC', () => {
+        document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();
+        app.openNet?.();
+      }, { title: 'On a new PC: link it to the PC that kept your backups first (Network), then use Get my backups under its name' })),
+    ask,
+  ] });
   const draw = k => {
-    const list = k.backups.length
-      ? el('ul', { class: 'keep-backups' }, ...k.backups.map(x => el('li', {},
-        el('span', { text: `${keepName(x.name)} · ${keepMb(x.bytes)} `, title: x.name }),
-        el('button', { class: 'link', type: 'button', text: 'Put back', onclick: async () => {
+    folder.about.textContent = `${k.home} · ${keepMb(k.dataBytes)}`;
+    backups.about.textContent = k.backups.length ? `${k.backups.length} kept · newest ${backupWhen(k.backups[0].name)[0]}` : 'None yet: one is made by itself before a new version first uses your data';
+    listed.hidden = !k.backups.length;
+    table.replaceChildren(...k.backups.map(x => {
+      const [when, how] = backupWhen(x.name);
+      return el('tr', {}, el('td', { text: when, title: x.name }), el('td', { class: 'set-dim', text: how }), el('td', { class: 'set-dim', text: keepMb(x.bytes) }),
+        el('td', { class: 'set-end' }, app.setButton('Put back', async () => {
+          backups.open = true;
           if (!(await askHere(ask, `Put back the backup from ${keepName(x.name)}? Your data as it is now is backed up first, then TOMLIN starts again.`, 'Put it back', 'Not now', false))) return;
           try {
             afterPlanned(await api('/api/keep', { do: 'restore', name: x.name }), 'Putting a backup back', k.startedAt);
           } catch (err) {
             note.textContent = err.message;
           }
-        } }))))
-      : el('p', { class: 'hint', text: 'No backups yet. One is made by itself before a new version first uses your data.' });
-    box.replaceChildren(
-      el('h3', { text: 'Your data and updates' }),
-      el('p', { class: 'hint', text: `Kept in ${k.home} (${keepMb(k.dataBytes)} of chats, pictures and settings, plus your downloaded models). An update keeps all of it: the new version finds this folder, backs your data up first and downloads nothing again. To update, use Update this install (Settings, Manage updates): Check git or Check zip.` }),
-      el('div', { class: 'team-actions' },
-        el('button', { class: 'btn quiet', type: 'button', text: 'Update this install', onclick: () => app.openUpdateInstall?.() }),
-        el('button', { class: 'btn quiet', type: 'button', text: 'Open the folder', onclick: () => api('/api/keep', { do: 'open' }).catch(err => (note.textContent = err.message)) }),
-        el('button', { class: 'btn quiet', type: 'button', text: 'Back up now', onclick: async () => {
-          note.textContent = 'Backing up…';
-          try {
-            const r = await api('/api/keep', { do: 'backup' });
-            draw(r);
-            note.textContent = r.said;
-          } catch (err) {
-            note.textContent = err.message;
-          }
-        } })),
-      el('p', { class: 'hint', text: 'Backups (the newest 5, then one a day for a week, one a week for a month and one every 3 months for a year; models are not in them). To keep one on a linked PC too: Network, Models on my other PCs.' }),
-      // A4: a new PC links to the PC that kept the backups, then asks for them there by backup name and PIN.
-      el('div', { class: 'team-actions' }, el('button', { class: 'btn quiet', type: 'button', text: 'Get my backups from a linked PC', title: 'On a new PC: link it to the PC that kept your backups first (Network), then use Get my backups under its name', onclick: () => {
-        document.querySelector('dialog.mute-dlg[open], #settings[open]')?.close();
-        app.openNet?.();
-      } })),
-      list,
-      ask,
-      note);
+        })));
+    }));
     note.textContent = '';
   };
   api('/api/keep').then(draw, err => (note.textContent = err.message));
-  return box;
+  return app.setPart('Your data', app.setCard(folder, backups), note);
 };
 
 keepStart();

@@ -459,6 +459,7 @@
     if (m === 'off') chatQueue.length = 0;
     for (const v of views) v.told = v.thoughtsTold = '';
     syncChatPick();
+    syncShopOptions?.();
     wake();
   };
   const chatMode = () => world.chatMode ?? (world.chatMode = app.chatMode());
@@ -491,6 +492,37 @@
     if (chatMode() === 'off') return null;
     return el('label', { class: 'office-chit', title: 'The banter and chit-chat in Thoughts. Untick to keep only what they are doing (Chat in Watch also has Off)' },
       el('input', { type: 'checkbox', checked: chatMode() === 'all', onchange: e => app.setChatMode(e.target.checked ? 'all' : 'work') }), ' Show general chit-chat');
+  }
+  // ---- The speaker button: mutes or unmutes this page's sounds and Windows pop-ups (Settings > Notifications, set together).
+  // Beside Show general chit-chat under Thoughts, and in Look after the team: every one on the page repaints together. ----
+  function speakerIcon(on) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const s = document.createElementNS(ns, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: 18, height: 18, 'aria-hidden': 'true', focusable: 'false', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) s.setAttribute(k, v);
+    const mk = (tag, attrs) => { const n = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+    s.append(mk('path', { d: 'M4 9h4l5-4v14l-5-4H4z', fill: 'currentColor' }));
+    if (on) { s.append(mk('path', { d: 'M16 9a4 4 0 0 1 0 6' }), mk('path', { d: 'M18.5 6.5a8 8 0 0 1 0 11' })); } else s.append(mk('path', { d: 'M16 9l5 6M21 9l-5 6' }));
+    return s;
+  }
+  const soundOn = () => homeUi.data?.notify?.settings?.sound !== false || homeUi.data?.notify?.settings?.windows !== false;
+  function paintSound(b) {
+    const on = soundOn();
+    b.setAttribute('aria-pressed', String(!on));
+    b.title = on ? 'Chat notifications are on (sound and Windows pop-ups): press to mute' : 'Chat notifications are muted: press to turn them on';
+    b.setAttribute('aria-label', on ? 'Mute chat notifications' : 'Unmute chat notifications');
+    b.replaceChildren(speakerIcon(on));
+  }
+  function soundButton() {
+    const b = el('button', { class: 'btn quiet office-sound', type: 'button' });
+    b.addEventListener('click', async () => {
+      try {
+        const r = await api('/api/notify', { sound: !soundOn(), windows: !soundOn() });
+        if (homeUi.data?.notify) homeUi.data.notify.settings = r;
+      } catch { /* the icon stays as it was */ }
+      for (const x of document.querySelectorAll('.office-sound')) paintSound(x);
+    });
+    paintSound(b);
+    return b;
   }
   /**
    * Something a hire said or thought, queued for the chat. kind 'work': a line about their work (kept in Work only);
@@ -1997,7 +2029,7 @@
   function tell(v) {
     if (v.kind === 'full' && v.thoughtsTold !== thoughtsKey()) {
       v.thoughtsTold = thoughtsKey();
-      fullThoughts.replaceChildren(...thoughtsParts(THOUGHTS_FULL, true), chitTick() ?? '');
+      fullThoughts.replaceChildren(...thoughtsParts(THOUGHTS_FULL, true));
       // The newest message is at the bottom: kept in view.
       fullThoughts.scrollTop = fullThoughts.scrollHeight;
     }
@@ -2015,7 +2047,7 @@
     }
     const hint = el('span', { class: 'hint', text: world.staff.length ? 'Click on a staff to see what they are up to.' : 'Nobody hired yet.' });
     if (v.kind !== 'tile' || !world.staff.length) return v.strip.replaceChildren(hint);
-    v.strip.replaceChildren(el('div', { class: 'office-thoughts' }, ...thoughtsParts(THOUGHTS_TILE), el('div', { class: 'office-thoughts-foot' }, chitTick() ?? '', hint)));
+    v.strip.replaceChildren(el('div', { class: 'office-thoughts' }, ...thoughtsParts(THOUGHTS_TILE), el('div', { class: 'office-thoughts-foot' }, chitTick() ?? '', hint, soundButton())));
   }
 
   // ---- Pointer: press a person to pick them, a desk to open its PC window; drag a person onto another desk ----
@@ -2179,9 +2211,13 @@
   // The menu beside the office: each thing to buy as a picture card with its price.
   // On a phone it sits under the office (the window scrolls to it). It can be folded away.
   const shopTiles = el('div', { class: 'office-shop-groups' });
+  // Look after the team: Show general chit-chat on the left, the speaker button (soundButton above) on the right.
+  const shopOptions = el('div', { class: 'office-shop-options' });
+  const syncShopOptions = () => shopOptions.replaceChildren(chitTick() ?? el('span'), soundButton());
+  syncShopOptions();
   const shopPanel = el('details', { class: 'office-shop-panel' },
     el('summary', {}, el('h3', { id: 'office-shop-title', text: 'Look after the team' }), el('span', { class: 'hint', text: 'Gain tokens from work done' })),
-    shopTiles, fullSaid);
+    shopOptions, shopTiles, fullSaid);
   shopPanel.open = true;
   /** Each item's button (short) and what it does (the title); `done`: said once it is bought. */
   const SHOP_WORDS = {

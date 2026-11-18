@@ -60,9 +60,16 @@ export interface ChatStyle {
  * - 'never': the rest, and Qwen 3's "Instruct-2507" builds, answer straight away.
  */
 export type Thinks = 'switch' | 'always' | 'never';
+/** GLM 4.5 to 4.9 and GLM 5 and later, from the file name ("GLM-4.7-Flash-UD-Q4_K_XL.gguf"). GLM-4 and 4.1 do not think. */
+const isGlmHybrid = (model: string): boolean => /(?<![a-z0-9])glm[-_ ]?(?:4[.-][5-9](?![a-z0-9])|[5-9](?:\.\d|[-_. ]))/i.test(model);
 export function thinksOf(model: string): Thinks {
+  // GLM 4.5 and later (4.7-Flash included) are hybrid: they think first by default and take enable_thinking to stop.
+  // Filed as "never" they got no room for the working, and once it was cut at its limit nothing asked for the answer.
+  if (isGlmHybrid(model)) return 'switch';
   if (/qwen3/i.test(model)) return /instruct-2507/i.test(model) ? 'never' : /thinking/i.test(model) ? 'always' : 'switch';
-  if (/deepseek-r1|\bqwq\b|magistral|thinking|reasoning|[-_.]r1[-_.]/i.test(model)) return 'always';
+  // gpt-oss reasons before every answer and has no off switch (only reasoning_effort): filed with the always-thinkers,
+  // so it is given the working's room whatever was chosen.
+  if (/deepseek-r1|\bqwq\b|magistral|thinking|reasoning|gpt-oss|[-_.]r1[-_.]/i.test(model)) return 'always';
   return 'never';
 }
 
@@ -73,6 +80,7 @@ export function thinksOf(model: string): Thinks {
 export function chatStyle(model: string, think = false): ChatStyle {
   if (/qwen3/i.test(model) && think && thinksOf(model) === 'switch') return { sampling: { temperature: 0.6, top_p: 0.95, top_k: 20, presence_penalty: 1.5, chat_template_kwargs: { enable_thinking: true } }, systemInFirstMessage: false };
   if (/qwen3/i.test(model)) return { sampling: { temperature: 0.7, top_p: 0.8, presence_penalty: 1.5, chat_template_kwargs: { enable_thinking: false } }, systemInFirstMessage: false };
+  if (isGlmHybrid(model)) return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5, chat_template_kwargs: { enable_thinking: think } }, systemInFirstMessage: false };
   if (/gemma/i.test(model)) return { sampling: { temperature: 0.8, top_p: 0.95, presence_penalty: 0.5 }, systemInFirstMessage: true };
   if (/mistral|ministral|nemo/i.test(model)) return { sampling: { temperature: 0.7, top_p: 0.95, presence_penalty: 0.5, stop: ['[INST]', '</s>'] }, systemInFirstMessage: false };
   return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5 }, systemInFirstMessage: false };
@@ -127,13 +135,45 @@ export const THOUGHT_KEPT = 40_000;
  * The extra a Think answer may run to, in word-pieces, on top of the answer's own allowance: the working comes first
  * and counts against the same limit, so without it a small allowance ends before the answer starts.
  */
-export const THINK_ROOM = 4096;
+export const THINK_ROOM = 6144;
 
 /**
  * The working may run to about this many characters (a word-piece is 3 to 4 of them): past it, it is stopped and the
  * answer asked for with the working so far, so the allowance is never spent on working alone.
  */
 export const THINK_CHARS = THINK_ROOM * 3;
+
+/**
+ * The sizes of working room a message can be given, smallest first: the first is the default. When the working fills its
+ * room, the page offers the next ones up (a drop-down), and asks again with the one picked.
+ */
+export const THINK_SIZES = [THINK_ROOM, 12288, 24576, 49152] as const;
+
+/** `n` as one of THINK_SIZES (anything else, or nothing, is the default room). */
+export const thinkRoomOf = (n: unknown): number => THINK_SIZES.find(s => s === n) ?? THINK_ROOM;
+
+/**
+ * The working's room once the context is counted: `asked` (one of THINK_SIZES) cut to what the context leaves after the
+ * prompt (`usedChars`, about 3 characters a word-piece) and the answer's own allowance, and never under 512. `free` is that
+ * leftover itself: the bigger sizes on the card must fit in it, or the context fills before the answer starts.
+ */
+export function thinkRoomFit(asked: number, ctx: number, usedChars: number, answerTokens: number): { room: number; free: number } {
+  const free = Math.max(0, ctx - Math.ceil(usedChars / 3) - answerTokens);
+  return { room: Math.min(asked, Math.max(512, free)), free };
+}
+
+/** A size in words for a button: 6144 is "6k". */
+export const thinkSizeWords = (room: number): string => `${Math.round(room / 1024)}k`;
+
+/**
+ * How the answer is asked for once the working was stopped (the `final` ask). A model that reasons before every answer
+ * (gpt-oss) cannot be told to stop; it is told to reason as little as it takes (reasoning_effort low), or it worked a
+ * second time with no one watching, up to the whole room again, and the answer asked for never came.
+ */
+export function finalStyle(model: string, style: ChatStyle): ChatStyle {
+  if (!/gpt-oss/i.test(model)) return style;
+  return { ...style, sampling: { ...style.sampling, chat_template_kwargs: { ...(style.sampling.chat_template_kwargs as object | undefined), reasoning_effort: 'low' } } };
+}
 
 /**
  * Working that goes round in circles: a paragraph or sentence again (repeatCut), or the same line of 40 characters or
@@ -204,24 +244,56 @@ export function paced(send: (text: string) => void, now: () => number = Date.now
   };
 }
 
+/** The character ranges of the fenced code blocks (an unclosed one runs to the end of the text). */
+function codeRanges(text: string): [number, number][] {
+  const out: [number, number][] = [];
+  let open = -1;
+  for (const m of text.matchAll(/^[ \t]*```.*$/gm)) {
+    if (open < 0) open = m.index;
+    else {
+      out.push([open, m.index + m[0].length]);
+      open = -1;
+    }
+  }
+  if (open >= 0) out.push([open, text.length]);
+  return out;
+}
+
 /**
  * A small model can fall into a loop, writing the same paragraph again and again until its allowance runs out.
  * Returns the answer cut before the repeat once a finished paragraph comes round a second time, or a sentence a third
- * time; null while it is not repeating.
+ * time; null while it is not repeating. Prose only: code repeats itself by nature (ctx.fillRect, pipes.forEach ... were
+ * "sentences" that came a third time, and a game's page was cut mid-file as a loop, 17 Nov 2026), so a fenced block is
+ * checked on its own by repeatedCode: the same eight lines three times.
  */
 export function repeatCut(text: string): string | null {
+  const run = sameRunCut(text);
+  if (run !== null) return run;
   const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+  const code = codeRanges(text);
+  const inCode = (i: number) => code.some(([x, y]) => i >= x && i < y);
+  let at = 0;
   const paras = text.split(/\n\s*\n/);
   const seen = new Set<string>();
+  const starts: number[] = [];
+  for (const p of paras) {
+    const i = text.indexOf(p, at);
+    starts.push(i);
+    at = i + p.length;
+  }
   for (let i = 0; i < paras.length - 1; i++) {
     const p = norm(paras[i]);
-    if (p.length < 30) continue;
+    if (p.length < 30 || inCode(starts[i]) || p.includes('```')) continue;
     if (seen.has(p)) return paras.slice(0, i).join('\n\n').trimEnd();
     seen.add(p);
   }
   const counts = new Map<string, number>();
   const secondAt = new Map<string, number>();
-  for (const m of text.matchAll(/[^.!?\n]+[.!?]/g)) {
+  // Each run of words is taken whole and kept only when a full stop, ! or ? ends it. The pattern with the stop required
+  // tried again from every letter of a long run with none (a list, a run of x's): 40,000 such characters took 4 s a look,
+  // and the whole app stood still while an answer like that streamed.
+  for (const m of text.matchAll(/[^.!?\n]+[.!?]?/g)) {
+    if (!/[.!?]$/.test(m[0]) || inCode(m.index)) continue;
     const s = norm(m[0]);
     if (s.length < 25) continue;
     const n = (counts.get(s) ?? 0) + 1;
@@ -229,6 +301,53 @@ export function repeatCut(text: string): string | null {
     if (n === 2) secondAt.set(s, m.index);
     // A third time shows the loop; the answer is kept up to where the second began.
     if (n === 3) return text.slice(0, secondAt.get(s)).trimEnd();
+  }
+  return repeatedCode(text, code);
+}
+
+/** The same eight lines (160 characters or more) a third time inside a code block: cut where the second began. */
+function repeatedCode(text: string, code: [number, number][]): string | null {
+  const WINDOW = 8;
+  for (const [x, y] of code) {
+    const lines: { s: string; at: number }[] = [];
+    let at = x;
+    for (const line of text.slice(x, y).split('\n')) {
+      lines.push({ s: line.trim(), at });
+      at += line.length + 1;
+    }
+    const seen = new Map<string, { n: number; second: number }>();
+    for (let i = 0; i + WINDOW <= lines.length; i++) {
+      const w = lines.slice(i, i + WINDOW).map(l => l.s).join('\n');
+      if (w.length < 160) continue;
+      const e = seen.get(w) ?? { n: 0, second: 0 };
+      e.n++;
+      if (e.n === 2) e.second = lines[i].at;
+      seen.set(w, e);
+      if (e.n === 3) return text.slice(0, e.second).trimEnd();
+    }
+  }
+  return null;
+}
+
+/** How long the end of an answer must be one short piece over and over (see sameRunCut). */
+export const SAME_RUN = 1200;
+
+/**
+ * The end of the answer is one piece of 1 to 16 characters written again and again for SAME_RUN characters or more
+ * ("xxxx…" with no sentence, paragraph or line to repeat, so the checks above never see it; a 2B model wrote 52,000
+ * x's). Cut where that run began, keeping its first 80 characters so the reader sees what happened. Only the end is
+ * looked at: a run still growing is the loop, and the look costs the same however long the answer is.
+ */
+function sameRunCut(text: string): string | null {
+  const n = text.length;
+  if (n < SAME_RUN + 16) return null;
+  for (let unit = 1; unit <= 16; unit++) {
+    let i = n - SAME_RUN;
+    while (i < n && text[i] === text[i - unit]) i++;
+    if (i < n) continue;
+    let start = n - SAME_RUN;
+    while (start - unit > 0 && text[start - 1] === text[start - 1 + unit]) start--;
+    return text.slice(0, start + 80).trimEnd();
   }
   return null;
 }
@@ -267,7 +386,16 @@ export interface Streamed {
    * asked not to think; a model that always thinks ends with no answer.
    */
   thoughtStopped?: ThoughtStop;
+  /** Seconds from the ask to the first word-piece (reading the prompt, loading, thinking); 0 when none came. */
+  firstWord?: number;
+  /** The longest quiet between two word-pieces, in seconds (0 when under one). */
+  longestGap?: number;
+  /** Set when the model went quiet for this many seconds part-way and the answer was ended there (it is offered Continue). */
+  stalled?: number;
 }
+
+/** An answer that has begun and then gets no word-piece for this long is ended and offered Continue: a hung runner, not a slow one. */
+export const STALL_MS = 10 * 60_000;
 
 export type ThoughtStop = 'loop' | 'long' | 'hurry';
 
@@ -278,6 +406,8 @@ export type ThoughtStop = 'loop' | 'long' | 'hurry';
 export interface AskOpts {
   plain?: boolean;
   think?: boolean;
+  /** The working's room in word-pieces, one of THINK_SIZES (the default when not given). */
+  thinkRoom?: number;
   onThought?: (thought: string, seconds: number) => void;
   hurry?: AbortSignal;
   /** Asked again after its working was stopped: not asked a third time. */
@@ -292,6 +422,8 @@ export interface AskOpts {
   web?: { seed: string[]; perCall: number; total: number };
   /** Inside a round of tool calls: the calls and what they gave so far, sent after the turns (set by streamChat). */
   toolTurns?: Record<string, unknown>[];
+  /** Quiet allowed between two word-pieces once the answer has begun, in ms (STALL_MS when not given; for tests). */
+  stallMs?: number;
   /** Which round of tool calls this is, 0 the first (set by streamChat). */
   round?: number;
 }
@@ -308,6 +440,8 @@ export interface ToolBox {
   onCall?: (name: string, args: string) => void;
   /** Whether a call by this name may run beside the others in its round (unset: one after another). */
   parallel?: (name: string) => boolean;
+  /** A long answer's tool turns made smaller before the next ask (src/researchtools.ts foldToolTurns). Unset: sent whole. */
+  fold?: (turns: Record<string, unknown>[]) => Record<string, unknown>[];
   rounds: number;
 }
 
@@ -361,6 +495,15 @@ export function contextFull(said: string): ContextFull | null {
 export const CONTINUE_ASK = 'Your last answer was cut off by its length limit. Carry on from exactly where it stopped: do not repeat anything, do not greet or explain, start with the next character (inside a code block, carry on the code).';
 
 /**
+ * Continue on a model of a linked PC: the turns end with the person's ask to carry on, never with the cut answer. A linked
+ * PC takes only a conversation that ends with the person's message (src/brains.ts cleanTurns), so a Continue sent as it is
+ * was refused ("the conversation sent was not in the expected form", Z820 on 2.0.95, 17 Nov 2026). Other turns pass as they are.
+ */
+export function withContinueAsk<T extends { role: string; content: string }>(turns: T[]): T[] {
+  return turns.at(-1)?.role === 'assistant' ? [...turns, { role: 'user', content: CONTINUE_ASK } as T] : turns;
+}
+
+/**
  * Asks llama.cpp's server at `base` and calls `onText` with the whole visible answer so far after each piece. Stops
  * when `signal` aborts (the caller aborts for the person's Stop button, a loop, or the limits). `plain`: a Default
  * hire, asked with plainStyle. A model's working before its answer (llama.cpp sends it apart, as reasoning_content, or
@@ -395,8 +538,12 @@ export async function runnerFetch(url: string, init: RequestInit = {}): Promise<
   return fetch(url, patient ? ({ ...init, dispatcher: patient } as RequestInit) : init);
 }
 
+/** Told of every answer that came back whole, with the runner's address and its writing speed (the run history). */
+export const answered: { on: ((base: string, perSecond: number | null) => void) | null } = { on: null };
+
 export async function streamChat(base: string, model: string, turns: ChatTurn[], onText: (text: string) => void, signal: AbortSignal, maxTokens = MAX_ANSWER, opts: AskOpts = {}): Promise<Streamed> {
-  const style = opts.plain ? plainStyle(model, opts.think) : chatStyle(model, opts.think);
+  const chosen = opts.plain ? plainStyle(model, opts.think) : chatStyle(model, opts.think);
+  const style = opts.final ? finalStyle(model, chosen) : chosen;
   // Its own stop as well as the caller's: working that goes round in circles is stopped here (below).
   const ac = new AbortController();
   const stop = () => ac.abort();
@@ -427,7 +574,9 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     }
     let raw = '';
     let reasoning = '';
-    const t0 = Date.now();
+    // Timed by a clock that only goes forward, not the PC's clock: one put right part way never looks like a stall.
+    const clock = () => performance.now();
+    const t0 = clock();
     let thoughtEnd = 0;
     const thoughtSoFar = () => [reasoning.trim(), thinkingText(raw)].filter(Boolean).join('\n\n');
     // A small model can think in a loop ("Wait, looking at the first turn..." again and again) until the whole allowance
@@ -445,7 +594,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     const watch = (thought: string) => {
       if (thoughtEnd || thought.length - checkedAt < 200) return;
       checkedAt = thought.length;
-      if (thought.length > THINK_CHARS) halt('long');
+      if (thought.length > (opts.thinkRoom ?? THINK_ROOM) * 3) halt('long');
       else if (thinkingLoops(thought)) halt('loop');
     };
     let tokens = 0;
@@ -459,6 +608,17 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     let pieces = 0;
     let firstAt = 0;
     let lastAt = 0;
+    let longestGap = 0;
+    // A model that has begun writing and then goes quiet for STALL_MS is ended, not waited on for ever.
+    let stalled = 0;
+    const stallMs = opts.stallMs ?? STALL_MS;
+    const watchdog = setInterval(() => {
+      if (lastAt && !stalled && clock() - lastAt >= stallMs) {
+        stalled = Math.max(1, Math.round((clock() - lastAt) / 1000));
+        ac.abort();
+      }
+    }, Math.max(20, Math.min(5000, Math.floor(stallMs / 4))));
+    watchdog.unref();
     // Tool calls, as they stream in: each by its index, its name once, its arguments in pieces.
     const calls: { id: string; name: string; args: string }[] = [];
     let buffer = '';
@@ -497,13 +657,15 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
           }
           if (thinking || msg.choices?.[0]?.delta?.content || msg.choices?.[0]?.delta?.tool_calls?.length) {
             pieces++;
-            lastAt = Date.now();
+            const now = clock();
+            if (lastAt) longestGap = Math.max(longestGap, now - lastAt);
+            lastAt = now;
             firstAt ||= lastAt;
           }
           if (thinking) {
             reasoning += thinking;
             const so = thoughtSoFar();
-            opts.onThought?.(so, Math.round((Date.now() - t0) / 1000));
+            opts.onThought?.(so, Math.round((clock() - t0) / 1000));
             watch(so);
           }
           const piece = msg.choices?.[0]?.delta?.content;
@@ -513,10 +675,10 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
             // Still inside <think> tags: the working grows, nothing of the answer yet.
             if (!shown && /<think>/.test(raw)) {
               const so = thoughtSoFar();
-              opts.onThought?.(so, Math.round((Date.now() - t0) / 1000));
+              opts.onThought?.(so, Math.round((clock() - t0) / 1000));
               watch(so);
             }
-            if (shown && !thoughtEnd) thoughtEnd = Date.now();
+            if (shown && !thoughtEnd) thoughtEnd = clock();
             onText(shown);
           }
           if (msg.choices?.[0]?.finish_reason === 'length') cut = true;
@@ -532,8 +694,11 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
         }
       }
     } catch (error) {
-      if (!stopped || signal.aborted) throw error;
+      if (!(stopped || stalled) || signal.aborted) throw error;
+    } finally {
+      clearInterval(watchdog);
     }
+    if (stalled) cut = true;
     if (!perSecond) {
       const fallback = streamedSpeed(pieces, firstAt, lastAt);
       if (fallback) ({ perSecond, tokens } = fallback);
@@ -544,7 +709,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     if (used) readings.used?.(model, used);
     const all = thoughtSoFar();
     const thought = all.length > THOUGHT_KEPT ? `…${all.slice(-THOUGHT_KEPT)}` : all;
-    const thoughtSeconds = all ? Math.round(((thoughtEnd || Date.now()) - t0) / 1000) : 0;
+    const thoughtSeconds = all ? Math.round(((thoughtEnd || clock()) - t0) / 1000) : 0;
     // The working was stopped: the answer is asked for once more, without thinking (a model that always thinks thinks
     // anyway, so it is asked only when he pressed Answer now), with the working so far, which is kept with the answer.
     // (Set inside the stream's callbacks, which the type checker does not follow.)
@@ -575,16 +740,18 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       // A side-by-side call that fails while another is awaited is caught when its turn comes (not left unhandled).
       for (const p of side) p?.catch(() => undefined);
       for (const [i, c] of asked.entries()) said.push({ role: 'tool', tool_call_id: ids[i], content: await (side[i] ?? one(c)) });
-      const next = await streamChat(base, model, turns, onText, signal, maxTokens, { ...opts, toolTurns: [...(opts.toolTurns ?? []), ...said], round: round + 1 });
+      const next = await streamChat(base, model, turns, onText, signal, maxTokens, { ...opts, toolTurns: tools.fold ? tools.fold([...(opts.toolTurns ?? []), ...said]) : [...(opts.toolTurns ?? []), ...said], round: round + 1 });
       return { ...next, thought: [thought, next.thought].filter(Boolean).join('\n\n'), thoughtSeconds: thoughtSeconds + next.thoughtSeconds };
     }
     if (why && !signal.aborted && !opts.final && (thinksOf(model) === 'switch' || why === 'hurry')) {
       // What the tools gave goes with it (Answer now in a later round must not lose the pages read), calls off.
       const web = opts.tools && opts.toolTurns?.length ? { tools: opts.tools, toolTurns: opts.toolTurns, round: opts.tools.rounds } : {};
-      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - THINK_ROOM), { plain: opts.plain, final: true, ...web });
+      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - (opts.thinkRoom ?? THINK_ROOM)), { plain: opts.plain, final: true, ...web });
       return { ...again, thought, thoughtSeconds, thoughtStopped: why };
     }
-    return { text: why ? '' : visibleText(raw), tokens, perSecond, read, readTokens, cut: cut && !why, thought, thoughtSeconds, ...(why ? { thoughtStopped: why } : {}) };
+    // An answer that came back whole: the run history counts it for the runner at `base` (src/server/faults.ts).
+    if (!signal.aborted) answered.on?.(base, perSecond ?? null);
+    return { text: why ? '' : visibleText(raw), tokens, perSecond, read, readTokens, cut: cut && !why, thought, thoughtSeconds, ...(why ? { thoughtStopped: why } : {}), ...(firstAt ? { firstWord: Math.round((firstAt - t0) / 1000) } : {}), ...(longestGap >= 1000 ? { longestGap: Math.round(longestGap / 1000) } : {}), ...(stalled ? { stalled } : {}) };
   } finally {
     signal.removeEventListener('abort', stop);
     if (hurry) opts.hurry?.removeEventListener('abort', hurry);

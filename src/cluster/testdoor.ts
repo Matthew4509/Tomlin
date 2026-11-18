@@ -1,0 +1,226 @@
+// The cluster test door, this PC's side as a node: a linked PC opens a stream here to TIME the network and this PC's
+// RPC server, so the expert-parallel engine can be measured with nobody at this PC (docs/PLAN-2026-11-14-CLUSTER-PARALLEL-ENGINE.md).
+// It opens like Max mode's door (src/jobrun/maxnode.ts): an HTTP Upgrade on the worker port (so no new firewall rule
+// is needed), a sealed request from a linked PC, the same lending rules (the cluster tick on, nobody using this PC, no
+// Max mode loan running). Then the stream is either an echo (the network probe) or a short-lived RPC server of this
+// PC's own runner, sealed like Max mode or, when the linked PC asks, UNENCRYPTED: the bytes after the opening are not
+// sealed, so anyone on the home network who can reach the wire could read or change them. That is the choice a user
+// may make on a private wired network; the opening itself is always sealed and checked.
+// A test stream lasts at most TEST_MAX_MINUTES and ends at once when someone starts using this PC, the cluster tick is
+// taken off or sharing is turned off. Why it ended is kept here for a while, and the linked PC asks for it after the
+// close (a sealed "why" request on the same door, with the stream's nonce): the stream itself carries llama.cpp's bytes
+// and must not be touched, and an older TOMLIN there never asks. Tested in test/clustertest.test.ts.
+import type { IncomingMessage } from 'node:http';
+import type { Socket } from 'node:net';
+import { Duplex } from 'node:stream';
+import * as share from '../share.ts';
+import * as link from '../link.ts';
+import * as guestpass from '../guestpass.ts';
+import * as carry from '../carry.ts';
+import * as maxlend from '../maxlend.ts';
+import { newNonce, sealedPipe, streamKeys } from '../linkstream.ts';
+
+export const CLUSTER_TEST_DOOR = '/worker/cluster-test';
+export const CLUSTER_TEST_UPGRADE = 'tomlin-cluster-test';
+/** How long a test stream may last unless the linked PC asks for less, and the most it may ask for. */
+export const TEST_MINUTES = 15;
+export const TEST_MAX_MINUTES = 30;
+/** How often a running test stream checks that it may go on (someone at the PC, the tick, sharing). */
+export const TEST_CHECK_MS = 2_000;
+
+/** What the linked PC asks for, as checked here. */
+export interface TestAsk {
+  target: 'echo' | 'rpc';
+  /** The bytes after the opening are not sealed. */
+  plain: boolean;
+  /** The llama.cpp build its runner talks to ("b11284"); '' for the first this PC has. */
+  build: string;
+  /** Lend the card and the RAM and cores together (as Max mode "all"). */
+  all: boolean;
+  minutes: number;
+  nonce: Buffer;
+}
+
+/** How long a stream's end reason is kept for the linked PC to ask, and the most kept at once. */
+export const WHY_KEEP_MS = 10 * 60_000;
+const WHY_MAX = 200;
+const ends = new Map<string, { reason: string; at: number }>();
+const endKey = (hash: string, nonce: Buffer | string) => `${hash}|${typeof nonce === 'string' ? nonce : nonce.toString('base64url')}`;
+
+/** Keeps why a stream ended, for the linked PC that opened it (by its link and the stream's own nonce). */
+export function keepEnd(hash: string, nonce: Buffer, reason: string, now = Date.now()): void {
+  for (const [k, v] of ends) if (now - v.at > WHY_KEEP_MS || ends.size >= WHY_MAX) ends.delete(k);
+  ends.set(endKey(hash, nonce), { reason, at: now });
+}
+
+/** Why a stream ended ('' when it has not ended, or that was too long ago). */
+export function endReason(hash: string, nonce: string, now = Date.now()): string {
+  const e = ends.get(endKey(hash, nonce));
+  return e && now - e.at <= WHY_KEEP_MS ? e.reason : '';
+}
+
+/** The ask from a sealed request's body, or why it is not one. */
+export function readAsk(body: Record<string, unknown>): TestAsk | string {
+  const nonce = Buffer.from(String(body.nonce ?? ''), 'base64url');
+  if (nonce.length !== 16) return 'a cluster test request was not in the expected form';
+  const target = body.target === 'rpc' ? 'rpc' : body.target === undefined || body.target === 'echo' ? 'echo' : null;
+  if (!target) return `there is no cluster test "${String(body.target)}" here`;
+  const build = typeof body.build === 'string' && /^b\d{3,6}$/.test(body.build) ? body.build : '';
+  const asked = Number(body.minutes);
+  const minutes = Number.isFinite(asked) && asked > 0 ? Math.min(TEST_MAX_MINUTES, Math.max(1, Math.round(asked))) : TEST_MINUTES;
+  return { target, plain: body.plain === true, build, all: body.all === true, minutes, nonce };
+}
+
+/** Whether an Upgrade is for this door (the worker's upgrade handler sends the rest to Max mode). */
+export const isClusterTest = (req: IncomingMessage) => new URL(req.url ?? '/', 'http://worker').pathname === CLUSTER_TEST_DOOR;
+
+/** What the door needs from the app, so tests can stand in for it (src/cluster/testdoornode.ts gives the real ones). */
+export interface DoorDeps {
+  state: () => share.ShareState;
+  taken: link.Seen;
+  /** Whether someone is at this PC (a first reading may take a few seconds). */
+  presence: () => Promise<maxlend.Presence | null>;
+  /** The newest reading, for the checks while a stream runs (null: not read). */
+  presenceNow: () => maxlend.Presence | null;
+  /** Max mode lending now: to whom (null: nobody). */
+  lending: () => string | null;
+  program: (build: string) => maxlend.RpcProgram | null;
+  builds: () => string[];
+  /** Starts an RPC server for one test stream (127.0.0.1 only) and says how to stop it. */
+  startRpc: (p: maxlend.RpcProgram) => Promise<{ port: number; stop: () => void }>;
+  say: (line: string) => void;
+}
+
+/** An in-memory echo: what is written comes back (the probe's far end). */
+export function echoStream(): Duplex {
+  return new Duplex({
+    read() {},
+    write(chunk: Buffer, _enc, cb) {
+      this.push(chunk);
+      cb();
+    },
+    final(cb) {
+      this.push(null);
+      cb();
+    },
+  });
+}
+
+function refuse(socket: Duplex, status: number, error: string): void {
+  const body = JSON.stringify({ error });
+  socket.end(`HTTP/1.1 ${status} Refused\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+}
+
+/** Why a running test stream must end now ('' while it may go on). */
+export function testEnds(st: share.ShareState, p: maxlend.Presence | null): string {
+  if (!st.on) return 'sharing was turned off here';
+  if (!carry.cleanAllow(st.allow).lend) return 'the cluster tick was taken off here';
+  if (st.away) return 'someone here pressed "I need to use the pc"';
+  if (p && maxlend.ownerBack(p)) return 'someone started using this PC';
+  return '';
+}
+
+export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deps: DoorDeps): Promise<void> {
+  let from = req.socket.remoteAddress ?? '';
+  const no = (status: number, error: string) => {
+    deps.say(`Did not open a cluster test (${from}): ${error}`);
+    refuse(socket, status, error);
+  };
+  try {
+    if (!share.isPrivateAddress(from)) return no(403, 'This worker only answers PCs on its own home network.');
+    if (req.headers.origin) return no(403, 'Web pages cannot use this worker.');
+    if (!isClusterTest(req) || String(req.headers.upgrade).toLowerCase() !== CLUSTER_TEST_UPGRADE) return no(404, 'There is no such door here.');
+    const st = deps.state();
+    const hash = /^Link ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
+    const who = share.pairedByHash(st, hash);
+    if (!who) return no(401, 'that PC no longer knows this one (it was removed there, or set up again)');
+    from = `"${who.name}", ${from}`;
+    const keys = link.keysOf(who.key);
+    if (!keys) return no(401, 'this link was made before links were encrypted. Link this PC again from the main PC.');
+    const opened = link.openRequest(keys, { box: String(req.headers['x-link'] ?? '') }, CLUSTER_TEST_DOOR, deps.taken);
+    if ('error' in opened) return no(400, opened.error);
+    // A guest (src/guestpass.ts) never joins a cluster: the same check as every other door.
+    const guestNo = guestpass.doorRefusal(st, who, CLUSTER_TEST_DOOR);
+    if (guestNo) return no(guestNo.status, guestNo.error);
+    // The linked PC asks why a stream ended: a status read, so the lending rules do not apply.
+    if (opened.body.target === 'why') {
+      const reason = endReason(hash, String(opened.body.stream ?? ''));
+      const body = JSON.stringify({ box: link.sealAnswer(keys, opened.id, 0, { reason }) });
+      socket.end(`HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+      return;
+    }
+    const ask = readAsk(opened.body);
+    if (typeof ask === 'string') return no(400, ask);
+    const p = await deps.presence();
+    const why = maxlend.lendWhy({ pc: st.name, on: st.on, allow: carry.cleanAllow(st.allow), away: !!st.away, presence: p, idleMinutes: maxlend.cleanLendIdle(st.lendIdle), lease: null, by: who });
+    if (why) return no(409, why);
+    const busy = deps.lending();
+    if (busy) return no(409, `"${st.name}" is lending to "${busy}" now (Max mode); a test waits until that ends.`);
+
+    let inner: Duplex;
+    let stopRpc: () => void = () => undefined;
+    if (ask.target === 'rpc') {
+      const program = deps.program(ask.build);
+      if (!program) return no(409, `"${st.name}" does not have the ${ask.build ? `llama.cpp ${ask.build}` : 'llama.cpp'} runner unpacked (it has ${deps.builds().join(' or ') || 'none'}).`);
+      let started: { port: number; stop: () => void };
+      try {
+        started = await deps.startRpc({ ...program, all: ask.all });
+      } catch (e) {
+        return no(409, `"${st.name}" could not start its RPC server: ${(e as Error).message}.`);
+      }
+      const rpc = await maxlend.reachRpc(started.port, () => socket.destroyed);
+      if (!rpc || socket.destroyed) {
+        rpc?.destroy();
+        started.stop();
+        return no(503, `"${st.name}" started its RPC server, but it did not answer.`);
+      }
+      inner = rpc;
+      stopRpc = started.stop;
+    } else inner = echoStream();
+
+    const nodeNonce = newNonce();
+    const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url'), plain: ask.plain, target: ask.target, minutes: ask.minutes });
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: ${CLUSTER_TEST_UPGRADE}\r\nconnection: Upgrade\r\nx-link: ${answer}\r\n\r\n`);
+    deps.say(`Cluster test for "${who.name}": ${ask.target === 'rpc' ? `this PC's RPC server (${ask.all ? 'card, RAM and cores' : 'card'})` : 'an echo'}, ${ask.plain ? 'NOT encrypted' : 'sealed'}, ${ask.minutes} minutes at most.`);
+
+    let ended = '';
+    // Which end closed first, for an end with no other reason (a sealed pipe ending destroys both at once after).
+    let first = '';
+    const closedBy = () => first || 'closed';
+    const end = (reason: string) => {
+      if (ended) return;
+      ended = reason || closedBy();
+      keepEnd(hash, ask.nonce, ended);
+      clearTimeout(limit);
+      clearInterval(check);
+      socket.destroy();
+      inner.destroy();
+      stopRpc();
+      deps.say(`Cluster test for "${who.name}" ended: ${ended}.`);
+    };
+    const limit = setTimeout(() => end(`its ${ask.minutes} minutes were up`), ask.minutes * 60_000);
+    const check = setInterval(() => {
+      const stop = testEnds(deps.state(), deps.presenceNow());
+      if (stop) end(stop);
+    }, TEST_CHECK_MS);
+    const byAsker = 'the asking PC closed the stream (or the network between the PCs dropped)';
+    const byInner = ask.target === 'rpc' ? "this PC's RPC server closed the connection (it stopped, or llama.cpp there ended the session)" : 'the echo here ended';
+    for (const [s, by] of [[socket, byAsker], [inner, byInner]] as const) {
+      for (const ev of ['end', 'close', 'error']) s.on(ev, () => {
+        first ||= by;
+        if (ask.plain) end('');
+      });
+    }
+    if (ask.plain) {
+      (socket as Socket).setNoDelay?.(true);
+      (inner as Socket).setNoDelay?.(true);
+      if (head.length) inner.write(head);
+      socket.pipe(inner);
+      inner.pipe(socket);
+    } else {
+      void sealedPipe(inner, socket, streamKeys(keys, ask.nonce, nodeNonce, 'node'), 'node', { head }).then(why => end(why));
+    }
+  } catch (e) {
+    no(500, `The cluster test failed here: ${(e as Error).message}`);
+  }
+}

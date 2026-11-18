@@ -10,6 +10,9 @@ import { startFact } from './runnerpush.ts';
 import type { Device } from './runtimes.ts';
 import * as leftovers from './leftovers.ts';
 import { dllLine, dllNotFound } from './vcrt.ts';
+import { watchRunner } from './runnerexit.ts';
+import { timeUpLine } from './loadlimit.ts';
+import type { LoadTrack, LoadView } from './loadeta.ts';
 
 export type PaneState = 'disconnected' | 'loading' | 'connected' | 'unloading' | 'failed';
 export type Asked = 'auto' | 'gpu' | 'cpu';
@@ -44,6 +47,10 @@ export interface WorkerView {
   /** What the runner is doing while it loads, from its own output ("reading the model file"). */
   stage: string | null;
   lastUnload: UnloadReport | null;
+  /** The runner build it was started with (runtimes.json id, such as llama-cuda), for the fault record and the run history. */
+  pin?: string | null;
+  /** While a chat model loads: the loading screen's figures (src/loadeta.ts), filled in by the status. */
+  load?: LoadView | null;
 }
 
 export interface LaunchSpec {
@@ -55,8 +62,12 @@ export interface LaunchSpec {
   device: Device;
   /** Which build of that device's runner it is ('cuda13' for the CUDA 13.4 one), for what a start says it ran on. */
   runner?: string;
+  /** The runner build (runtimes.json id): kept in the view (WorkerView.pin). */
+  id?: string;
   /** Most seconds to wait; a big model read from a hard disk can take minutes. */
   timeoutSeconds: number;
+  /** More environment for the runner (expert parallel's LLAMA_EXPERT_SPLIT); unset: none. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -131,8 +142,12 @@ export class Worker {
   private ends = 0;
   private log: string[] = [];
   private errors: string[] = [];
+  /** The last start ran out of its time (src/loadlimit.ts). */
+  timedOut = false;
   /** This start's lines about the devices it found and used (runnerpush.startFact), from the first on. */
   facts: string[] = [];
+  /** The load being followed (src/loadeta.ts): it reads the runner's progress dots as they come. */
+  track: LoadTrack | null = null;
   /** Lines from the runner, for listeners (image progress reads them). */
   onLine: ((line: string) => void) | null = null;
   onExit: (() => void) | null = null;
@@ -174,8 +189,11 @@ export class Worker {
     this.log = [];
     this.errors = [];
     this.facts = [];
-    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: runnerEnv(spec.device) });
+    this.timedOut = false;
+    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: spec.env ? { ...(runnerEnv(spec.device) ?? process.env), ...spec.env } : runnerEnv(spec.device) });
     const started = Date.now();
+    // Ended without Disconnect (or a load that ran out of time): its exit and last error lines go in the log.
+    const exitLog = watchRunner(child, spec.exe, () => this.child !== child, { feed: true });
     const start = this.pane === 'chat' ? { device: spec.device, ...(spec.runner ? { runner: spec.runner } : {}), seconds: null as number | null, lines: [] as string[] } : null;
     if (start) lastStart = start;
     leftovers.started(child.pid, spec.exe);
@@ -183,7 +201,7 @@ export class Worker {
     this.port = port;
     const base = `http://127.0.0.1:${port}`;
     remember(base, key);
-    this.view = { ...this.view, device: spec.device, pid: child.pid ?? null, stage: 'Starting the runner' };
+    this.view = { ...this.view, device: spec.device, pid: child.pid ?? null, stage: 'Starting the runner', pin: spec.id ?? null };
     const keep = (lines: string[]) => {
       this.log = [...this.log, ...lines].slice(-60);
       this.errors = [...this.errors, ...lines.filter(l => /\b(error|failed|out of memory)\b|^\S+\s+E\s|FilterExpression|unknown (test|filter)/i.test(l))].slice(-8);
@@ -204,8 +222,16 @@ export class Worker {
       const split = lineSplitter();
       // Decoded as a stream: a character of two or more bytes (a model path in another language) cut by a chunk stays whole.
       stream?.setEncoding('utf8');
-      stream?.on('data', (b: string) => keep(split(b)));
-      stream?.on('end', () => keep(split.rest()));
+      const errors = stream === child.stderr;
+      const take = (lines: string[]) => {
+        if (errors) for (const l of lines) exitLog.line(l);
+        keep(lines);
+      };
+      stream?.on('data', (b: string) => {
+        this.track?.text(b);
+        take(split(b));
+      });
+      stream?.on('end', () => take(split.rest()));
     }
     let exited = false;
     child.on('exit', code => {
@@ -239,6 +265,10 @@ export class Worker {
       }
       await sleep(400);
     }
+    // Out of time: said in the runner's tail (whyItFailed reads it) and not started again (pane.ts reads timedOut).
+    this.timedOut = true;
+    this.errors = [...this.errors, timeUpLine(spec.timeoutSeconds)].slice(-8);
+    this.log = [...this.log, timeUpLine(spec.timeoutSeconds)].slice(-60);
     await this.end();
     return 'failed';
   }

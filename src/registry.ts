@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fetchChecked, hfUrl } from './download.ts';
+import { SPARE } from './modelhome.ts';
 
 export interface RegistryFile {
   role: 'model' | 'diffusion' | 'llm' | 'vae' | 'taesd' | 'lora' | 'onnx' | 'upscaler';
@@ -64,7 +65,12 @@ function sizeOf(path: string): number {
 
 export class Registry {
   readonly models: RegistryModel[];
-  readonly dir: string;
+  /** Where model files go; changed when another folder is chosen (Where models are kept). */
+  dir: string;
+  /** Added to "not enough free disk space" when another drive has room for `need` bytes (src/modelhome.ts); '' when none. */
+  elsewhere: (need: number) => Promise<string> = async () => '';
+  /** Why nothing can be downloaded now (the chosen models folder's drive is not there), or ''. */
+  noHome: () => string = () => '';
   private downloads = new Map<string, { state: DownloadState; ac: AbortController }>();
   /** models/ folders of other copies of TOMLIN beside this one: a whole file there is used where it is. */
   copies: () => string[] = () => [];
@@ -146,10 +152,14 @@ export class Registry {
     if (!model) throw new Error(`There is no model ${id}.`);
     const running = this.downloads.get(id);
     if (running && !running.state.done && !running.state.error) return running.state;
+    const gone = this.noHome();
+    if (gone) throw new Error(gone);
     const need = this.missing(model);
     const fs = await statfs(this.dir).catch(() => null);
     const free = fs ? fs.bavail * fs.bsize : Infinity;
-    if (need + 0.5 * GB > free) throw new Error(`Not enough free disk space: ${model.name} needs ${(need / GB).toFixed(1)} GB more, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.`);
+    // `room`: the page offers Free up space with these numbers.
+    // SPARE (2 GB) is left free on the drive after it, as every other writer keeps.
+    if (need + SPARE > free) throw Object.assign(new Error(`Not enough free disk space: ${model.name} needs ${(need / GB).toFixed(1)} GB more, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.${await this.elsewhere(need).catch(() => '')}`), { room: { name: model.name, bytes: need, free } });
     const state: DownloadState = { id, got: 0, bytes: this.bytes(model), checking: false, error: null, done: false };
     const ac = new AbortController();
     this.downloads.set(id, { state, ac });

@@ -463,11 +463,14 @@
   // The person (gender, skin, hair, top, facial hair) comes from the same draws whatever the role; the role's things
   // (headphones, a beret, glasses) come after, from `extra`, so a hire whose role changes is drawn as the same person
   // (3 Nov: a coder's headphones took a draw before the skin, and Rosa was drawn as someone else).
-  function random(role = '', rnd = Math.random, extra = rnd) {
+  // `gender`: the one the hire's name calls for (public/hire.js genderOf); the draw for it is still taken, so the rest of
+  // the look comes from the same draws as without it.
+  function random(role = '', rnd = Math.random, extra = rnd, gender = null) {
     if (!options) return null;
     const any = kind => options[kind][Math.floor(rnd() * options[kind].length)].id;
     const from = list => list[Math.floor(rnd() * list.length)];
-    const gender = any('gender');
+    const drawn = any('gender');
+    gender = gender && options.gender.some(g => g.id === gender) ? gender : drawn;
     const hair = gender === 'woman' ? from(['long', 'bob', 'ponytail', 'bun', 'curly', 'afro', 'short', 'side-part'])
       : gender === 'man' ? from(['short', 'buzz', 'side-part', 'curly', 'afro', 'bald', 'short', 'long'])
         : any('hair');

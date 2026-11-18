@@ -27,9 +27,9 @@ const put = (root: string, rel: string, text: string) => {
 
 /** A small copy of the app: what a release holds, plus what it never ships. */
 function aCopy(parent: string, version: string, extra: Record<string, string> = {}) {
-  const root = join(parent, `shelby-${version}`);
+  const root = join(parent, `tomlin-${version}`);
   const files: Record<string, string> = {
-    'package.json': JSON.stringify({ name: 'shelby', version }),
+    'package.json': JSON.stringify({ name: 'tomlin', version }),
     'Start TOMLIN.cmd': '@echo off\r\n',
     'src/server.ts': `// server ${version}\n`,
     'src/carry.ts': '// the same in both\n',
@@ -167,7 +167,7 @@ test('an update: only the changed files cross, the new copy is whole beside the 
   assert.ok(existsSync(join(dir, 'models', 'chat')));
   // The old copy is as it was, for going back; the incoming folder is gone.
   assert.equal(readFileSync(join(node.root, 'src', 'server.ts'), 'utf8'), '// server 2.0.32\n');
-  assert.deepEqual(readdirSync(node.parent).sort(), ['shelby-2.0.32', 'tomlin-2.0.33']);
+  assert.deepEqual(readdirSync(node.parent).sort(), ['tomlin-2.0.32', 'tomlin-2.0.33']);
 });
 
 test('an update is refused without the tick, when not newer, or when the node cannot start it by itself', async () => {
@@ -198,6 +198,42 @@ test('a node that asks its PIN takes no update without it or with a wrong one, a
   assert.equal(node.done.length, 1);
 });
 
+test('a host PIN reaches the PIN check with the link it came from, in place of the PC\'s own (src/hostpin.ts)', async () => {
+  const seen: unknown[] = [];
+  const handle = update.updateSide({
+    root: aCopy(tmp(), '2.0.32'), version: '2.0.32', allowed: () => true, pcName: () => 'Worker PC', restarts: true, busy: () => null, freeBytes: async () => Infinity, done: async () => undefined,
+    pinCheck: async (v, who, host) => {
+      seen.push({ v, who, host });
+      return host?.link === 'link-a' && host.pin === '246810' ? { ok: true as const } : { status: 403, error: 'holds no host PIN from this PC' };
+    },
+  });
+  assert.equal((await handle('/worker/update-pin', { hostPin: '246810' }, { key: 'b1b2', name: 'Laptop', link: 'link-a' })).status, 200);
+  const other = await handle('/worker/update-pin', { hostPin: '246810' }, { key: 'c1c2', name: 'Other host', link: 'link-b' });
+  assert.equal(other.status, 403);
+  assert.equal(other.json.needPin, true);
+  assert.match(String(other.json.error), /^"Worker PC" holds no host PIN from this PC\.$/);
+  assert.deepEqual(seen[0], { v: undefined, who: 'b1b2', host: { pin: '246810', link: 'link-a' } });
+  // No host PIN sent: the PC's own is checked as before.
+  await handle('/worker/update-pin', { appPin: '4711' }, { key: 'b1b2', name: 'Laptop', link: 'link-a' });
+  assert.deepEqual(seen[2], { v: '4711', who: 'b1b2', host: undefined });
+  // An update pulled at the PC itself never asks one; a pushed one carries the host PIN in its offer.
+  const asked: Record<string, unknown>[] = [];
+  const wire: Wire = { ask: async (_p, b) => (asked.push(b), Promise.reject(new Error('stop here'))), getPiece: async () => Buffer.alloc(0), putPiece: async () => ({}) };
+  const host = hostCopy();
+  await assert.rejects(update.pushUpdate(wire, { version: '2.0.33', root: host, files: await update.appFiles(host), hostPin: '246810', progress: () => undefined, signal: new AbortController().signal }), /stop here/);
+  assert.equal(asked[0].hostPin, '246810');
+  assert.equal('appPin' in asked[0], false);
+});
+
+test('the quick PIN check is not answered while updates from other PCs are not allowed: it cannot serve to try PINs', async () => {
+  let asked = 0;
+  const shut = update.updateSide({ root: hostCopy(), version: '2.0.32', allowed: () => false, pcName: () => 'Worker PC', restarts: true, busy: () => null, freeBytes: async () => Infinity, done: async () => undefined, pinCheck: async () => { asked++; return { ok: true as const }; } });
+  const a = await shut('/worker/update-pin', { appPin: '4711' }, { key: 'b1b2b3b4', name: 'Laptop' });
+  assert.equal(a.status, 403);
+  assert.match(String(a.json.error), /does not let other PCs update TOMLIN/);
+  assert.equal(asked, 0, 'the PIN was never looked at');
+});
+
 test('a busy node is asked again until it is free; nothing restarts while it works for someone', async () => {
   let busyFor = 2;
   const node = aNode({ busy: () => (busyFor-- > 0 ? 'answering for a linked PC' : null) });
@@ -223,7 +259,7 @@ test('Stop clears what came in: the node keeps its old version and no new folder
   const w = node.wire();
   const stopping: Wire = { ...w, putPiece: async (p, b, piece) => { const r = await w.putPiece(p, b, piece); ac.abort(); return r; } };
   await assert.rejects(update.pushUpdate(stopping, { version: '2.0.33', root: host, files: await update.appFiles(host), progress: () => undefined, signal: ac.signal }), /Stopped/);
-  assert.deepEqual(readdirSync(node.parent), ['shelby-2.0.32']);
+  assert.deepEqual(readdirSync(node.parent), ['tomlin-2.0.32']);
   assert.equal(node.done.length, 0);
 });
 
@@ -274,35 +310,6 @@ test('files that say another version than the one sent are refused, with the way
   assert.deepEqual(node.done, []);
 });
 
-test('a copy carries Start TOMLIN.cmd and no longer the Start Shelby.cmd forwarder (every PC runs 2.0.45 or newer)', () => {
-  assert.ok(update.PARTS.includes('Start TOMLIN.cmd') && !update.PARTS.includes('Start Shelby.cmd'));
-  assert.equal(existsSync(new URL('../Start Shelby.cmd', import.meta.url)), false);
-});
-
-test('a PC from before the TOMLIN name gets the launcher under the name it takes; its folder finds it either way', () => {
-  const f = (path: string, sha = 'a'.repeat(64)) => ({ path, bytes: 10, sha });
-  const files = [f('package.json'), f('src/server.ts'), f('Start TOMLIN.cmd', 'b'.repeat(64)), f('Start Shelby.cmd', 'c'.repeat(64)), f('Install TOMLIN.cmd')];
-  // The list a 2.0.44 node (before the TOMLIN name) takes: no "Start TOMLIN.cmd" or "Install TOMLIN.cmd" in it.
-  const before = ['src', 'public', 'tools', 'test', 'registry', 'runtime/node', 'runtime/llama-cpu', 'runtime/sd-cpu', 'runtime/llama-vulkan', 'runtime/sd-vulkan', 'node_modules', 'package.json', 'package-lock.json', 'runtimes.json', 'README.md', 'LICENSE', 'THIRD-PARTY.md', 'Start Shelby.cmd', 'Install Smart Manager.cmd', 'models/helpers/u2netp.onnx'];
-  const older = update.forOlderNode(files);
-  assert.ok(older.every(x => before.some(p => x.path === p || x.path.startsWith(`${p}/`))), JSON.stringify(older.map(x => x.path)));
-  const launcher = older.find(x => x.path === 'Start Shelby.cmd');
-  assert.deepEqual([launcher?.sha, launcher?.from], ['b'.repeat(64), 'Start TOMLIN.cmd'], 'the whole launcher, read from Start TOMLIN.cmd');
-  assert.equal(older.filter(x => x.path === 'Start Shelby.cmd').length, 1);
-  assert.ok(update.refusedNewNames(new Error('a file in the update was not named as an app file (Start TOMLIN.cmd), so the update was refused.')));
-  assert.ok(!update.refusedNewNames(new Error('a file in the update was not named as an app file (src/x.ts), so the update was refused.')));
-  // Start with Windows and the desktop shortcut use the launcher the folder has.
-  const dir = mkdtempSync(join(tmpdir(), 'sm-launcher-'));
-  try {
-    writeFileSync(join(dir, 'Start Shelby.cmd'), '@echo off');
-    assert.equal(update.launcherIn(dir), join(dir, 'Start Shelby.cmd'));
-    writeFileSync(join(dir, 'Start TOMLIN.cmd'), '@echo off');
-    assert.equal(update.launcherIn(dir), join(dir, 'Start TOMLIN.cmd'));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 // ---- The build id: what code a copy is, so one version number holding two apps shows as "different files" ----
 
 test('a build id is a short hash of the files that run: any order, tests, packages, runners and launchers left out', () => {
@@ -313,7 +320,7 @@ test('a build id is a short hash of the files that run: any order, tests, packag
   assert.equal(update.shortBuild(id), id.slice(0, 7));
   assert.equal(update.buildIdOf([...code].reverse()), id, 'the order of the list does not count');
   // What changes nothing that runs, or is pinned elsewhere, or is named differently on an older PC, does not count.
-  const extra = [f('node_modules/sharp/index.js'), f('runtime/node/node.exe'), f('runtime/llama-cpu/llama-server.exe'), f('test/update.test.ts'), f('README.md'), f('LICENSE'), f('THIRD-PARTY.md'), f('Start TOMLIN.cmd'), f('Start Shelby.cmd'), f('Install TOMLIN.cmd'), f('models/helpers/u2netp.onnx'), f('src/partner.ts')];
+  const extra = [f('node_modules/sharp/index.js'), f('runtime/node/node.exe'), f('runtime/llama-cpu/llama-server.exe'), f('test/update.test.ts'), f('README.md'), f('LICENSE'), f('THIRD-PARTY.md'), f('Start TOMLIN.cmd'), f('Install TOMLIN.cmd'), f('models/helpers/u2netp.onnx'), f('src/partner.ts')];
   assert.equal(update.buildIdOf([...code, ...extra]), id);
   // One changed file of the code is another build.
   assert.notEqual(update.buildIdOf(code.map(x => (x.path === 'src/server.ts' ? { ...x, sha: 'd'.repeat(64) } : x))), id);
@@ -376,8 +383,9 @@ test('a node takes the same version with different files, refuses the same files
   const node = aNode({ build: () => own });
   own = await update.buildId(node.root);
   assert.notEqual(own, update.buildIdOf(files));
-  assert.equal(await go(node), 'tomlin-2.0.32');
-  const dir = join(node.parent, 'tomlin-2.0.32');
+  // The same version beside the copy that runs: the new folder gets a number.
+  assert.equal(await go(node), 'tomlin-2.0.32 (2)');
+  const dir = join(node.parent, 'tomlin-2.0.32 (2)');
   assert.deepEqual(node.done, [{ dir, version: '2.0.32', by: 'Laptop' }]);
   // The new copy is the build that was sent: it says so once it starts there.
   assert.equal(await update.buildId(dir), update.buildIdOf(files));
@@ -413,19 +421,18 @@ test('half-come updates are not kept for ever: old ones go at start, another ver
     if (age) utimesSync(join(parent, name), age, age);
   };
   plant('.tomlin-2.0.30-incoming', old);
-  plant('.shelby-2.0.29-incoming', old);
-  plant('.tomlin-2.0.31-incoming');
+    plant('.tomlin-2.0.31-incoming');
   plant('tomlin-2.0.28', old);
   writeFileSync(join(parent, '.tomlin-notes-incoming'), 'not a folder of ours');
   utimesSync(join(parent, '.tomlin-notes-incoming'), old, old);
   const handle = update.updateSide({ root, version: '2.0.32', allowed: () => true, pcName: () => 'Worker PC', restarts: true, busy: () => null, freeBytes: async () => Infinity, done: async () => undefined });
-  assert.deepEqual((await handle.swept).sort(), ['.shelby-2.0.29-incoming', '.tomlin-2.0.30-incoming']);
+  assert.deepEqual((await handle.swept).sort(), ['.tomlin-2.0.30-incoming']);
   const left = () => readdirSync(parent).sort();
-  assert.deepEqual(left(), ['.tomlin-2.0.31-incoming', '.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'a recent one stays, to be carried on');
+  assert.deepEqual(left(), ['.tomlin-2.0.31-incoming', '.tomlin-notes-incoming', 'tomlin-2.0.28', 'tomlin-2.0.32'], 'a recent one stays, to be carried on');
   const files = await update.appFiles(aCopy(tmp(), '2.0.33'));
   const r = await handle('/worker/update-offer', { version: '2.0.33', files }, { key: 'b1b2b3b4', name: 'Laptop' });
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.deepEqual(left(), ['.tomlin-notes-incoming', 'shelby-2.0.32', 'tomlin-2.0.28'], 'another version coming in clears the 2.0.31 one');
+  assert.deepEqual(left(), ['.tomlin-notes-incoming', 'tomlin-2.0.28', 'tomlin-2.0.32'], 'another version coming in clears the 2.0.31 one');
 });
 
 // A TOMLIN zip uploaded under This PC: models and updates (src/server/selfupdate.ts): only a whole, newer TOMLIN is taken.
@@ -437,25 +444,22 @@ test('zipWhy takes a whole newer TOMLIN, or the same version with other files, a
   assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.50' }, [], b1, '2.0.50', b1), /already runs TOMLIN 2\.0\.50 with the same files/);
   assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.50' }, [], '', '2.0.50', b1), /nothing to update/);
   assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.47' }, [], b2, '2.0.50', b1), /older than the 2\.0\.50/);
-  assert.match(update.zipWhy({ name: 'shelby', version: '2.0.51' }, [], b2, '2.0.50', b1), /not a TOMLIN release/);
+  assert.match(update.zipWhy({ name: 'other-app', version: '2.0.51' }, [], b2, '2.0.50', b1), /not a TOMLIN release/);
   assert.match(update.zipWhy({ name: 'tomlin', version: 'x' }, [], b2, '2.0.50', b1), /not a TOMLIN release/);
   assert.match(update.zipWhy({ name: 'tomlin', version: '2.0.51' }, ['src/server.ts'], b2, '2.0.50', b1), /src\/server\.ts is missing/);
 });
 
-test('an older PC that refuses a file it does not know gets the same copy without it: the welcome page, then the old launcher name', () => {
+test('an older PC that refuses a file it does not know gets the same copy without it: the welcome page', () => {
   const f = (path: string) => ({ path, bytes: 1, sha: 'a'.repeat(64) });
   const files = [f('src/server.ts'), f('Start TOMLIN.cmd'), f('Install TOMLIN.cmd'), f('Welcome to TOMLIN.html')];
   const refused = (name: string) => new Error(`"Old node": a file in the update was not named as an app file (${name}), so the update was refused.`);
-  // A TOMLIN-named PC before 2.0.50: only the welcome page goes.
-  const one = update.retryFor(files, files, refused('Welcome to TOMLIN.html'))!;
+  // A PC before 2.0.50: only the welcome page goes.
+  const one = update.retryFor(files, refused('Welcome to TOMLIN.html'))!;
   assert.deepEqual(one.map(x => x.path), ['src/server.ts', 'Start TOMLIN.cmd', 'Install TOMLIN.cmd']);
-  // A PC from before the TOMLIN name then refuses the launcher: the old name, and still no welcome page.
-  const two = update.retryFor(files, one, refused('Start TOMLIN.cmd'))!;
-  assert.deepEqual(two.map(x => x.path), ['src/server.ts', 'Start Shelby.cmd']);
-  // Refused again for the same names, or for anything else: no more tries.
-  assert.equal(update.retryFor(files, two, refused('Start TOMLIN.cmd')), null);
-  assert.equal(update.retryFor(files, one, refused('Welcome to TOMLIN.html')), null);
-  assert.equal(update.retryFor(files, files, new Error('no room on that PC')), null);
+  // Refused again for the same name, for a launcher name, or for anything else: no more tries.
+  assert.equal(update.retryFor(one, refused('Welcome to TOMLIN.html')), null);
+  assert.equal(update.retryFor(one, refused('Start TOMLIN.cmd')), null);
+  assert.equal(update.retryFor(files, new Error('no room on that PC')), null);
   // The welcome page is not part of the build id, so leaving it out does not make the PC look different afterwards.
   assert.ok(update.NEWER_FILES.every(p => !update.BUILD_PARTS.some(b => p === b || p.startsWith(`${b}/`))));
 });
@@ -515,7 +519,7 @@ test('a PC gives only its own app files, read-only and behind its own tick; noth
   assert.equal(piece.piece.toString(), '// server 2.0.33\n');
   assert.equal(((await get({ path: 'node_modules/sharp/index.js', from: 4000 })) as { piece: Buffer }).piece.length, 1000);
   // Only a file of the list it gave: no data, no private files, no way out of the folder, no other folder.
-  for (const path of ['data/settings.json', 'src/partner.ts', '../shelby-2.0.32/src/server.ts', 'src/../data/settings.json', 'src/nothere.ts', 'C:/Windows/win.ini', 'SRC/SERVER.TS', 7]) {
+  for (const path of ['data/settings.json', 'src/partner.ts', '../tomlin-2.0.32/src/server.ts', 'src/../data/settings.json', 'src/nothere.ts', 'C:/Windows/win.ini', 'SRC/SERVER.TS', 7]) {
     const a = await get({ path });
     assert.ok(!('piece' in a) && a.status === 404, `${String(path)}: ${a.status}`);
   }
@@ -554,7 +558,7 @@ test('a pull: only the changed files come, the new copy is whole beside the old 
   assert.equal(readFileSync(join(dir, 'src', 'server.ts'), 'utf8'), '// server 2.0.33\n');
   for (const never of ['src/partner.ts', 'data/settings.json', 'src/old-only.ts']) assert.equal(existsSync(join(dir, ...never.split('/'))), false, never);
   assert.equal(readFileSync(join(node.root, 'src', 'server.ts'), 'utf8'), '// server 2.0.32\n', 'the old copy stays for going back');
-  assert.deepEqual(readdirSync(node.parent).sort(), ['shelby-2.0.32', 'tomlin-2.0.33']);
+  assert.deepEqual(readdirSync(node.parent).sort(), ['tomlin-2.0.32', 'tomlin-2.0.33']);
   // Over the link the same PC still takes no push without its tick.
   const newer = aCopy(tmp(), '2.0.34');
   await assert.rejects(update.pushUpdate(node.wire(), { version: '2.0.34', root: newer, files: await update.appFiles(newer), pin: '4711', progress: () => undefined, signal: new AbortController().signal }), /Allow host to update TOMLIN/);
@@ -588,7 +592,7 @@ test('Stop on a pull leaves this PC as it was; a pull and a push never come in a
   const g = await aGiver();
   const ac = new AbortController();
   await assert.rejects(update.pullUpdate(g.wire({ onPiece: () => ac.abort() }), pullInto(node), { progress: () => undefined, signal: ac.signal }), /Stopped/);
-  assert.deepEqual(readdirSync(node.parent), ['shelby-2.0.32']);
+  assert.deepEqual(readdirSync(node.parent), ['tomlin-2.0.32']);
   assert.equal(node.done.length, 0);
   // A push coming in from a linked PC: a pull waits for it (and the other way round).
   const files = await update.appFiles(g.root);

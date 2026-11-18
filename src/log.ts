@@ -2,7 +2,7 @@
 // last 7 days kept. It holds what went wrong and where (a request, a model that would not load, a chat or job step that
 // stopped), never a chat's words, a prompt or a file's text, so it can be sent to someone who helps. Everything written
 // to console.error and console.warn lands here too. Help has "Open the log". Tested in test/log.test.ts.
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const KEEP_DAYS = 7;
@@ -40,10 +40,72 @@ export const MAX_TAIL = 1000;
  */
 export function lastLines(n = 300, now = new Date()): { day: string; lines: string[] } {
   const want = Math.max(1, Math.min(MAX_TAIL, Math.floor(n) || 300));
-  const file = logFile(now);
-  if (!file) return { day: day(now), lines: [] };
+  return { day: day(now), lines: tailOf(day(now), want) };
+}
+
+/** The days a linked PC may ask for: today and the KEEP_DAYS - 1 before it (local dates), newest first. */
+export const keptDays = (now = new Date()): string[] => Array.from({ length: KEEP_DAYS }, (_, i) => day(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)));
+
+/**
+ * A day as asked for ("2026-11-17"): only a real date within the days kept, never anything else (it names a file, so a
+ * path or a pattern is refused). Undefined or '' means today. Null: refused.
+ */
+export function cleanLogDay(v: unknown, now = new Date()): string | null {
+  if (v === undefined || v === null || v === '') return day(now);
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  return keptDays(now).includes(v) ? v : null;
+}
+
+/** A word to look for in a day's lines: plain text, up to 100 characters, no line breaks. '' means every line. */
+export const cleanLogFind = (v: unknown): string => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 100) : '');
+
+/**
+ * What a linked PC asked of this PC's log (src/jobrun/node.ts /worker/log): the last `lines` lines of `day` (today when
+ * not given), only those holding `find` (any case) when it is given, and the days that have a file. A whole day is read
+ * only for a search (20 MB at most); otherwise only its end.
+ */
+export function askLog(ask: { lines?: unknown; day?: unknown; find?: unknown }, now = new Date()): { day: string; lines: string[]; days: string[]; find: string } | { error: string } {
+  const want = Math.max(1, Math.min(MAX_TAIL, Math.floor(Number(ask.lines)) || 300));
+  const asked = cleanLogDay(ask.day, now);
+  if (!asked) return { error: `that day is not kept here: ask for one of the last ${KEEP_DAYS} days, written as 2026-11-17.` };
+  const find = cleanLogFind(ask.find);
+  const days = dir ? keptDays(now).filter(x => existsSync(join(dir!, `${x}.log`))) : [];
+  if (!find) return { day: asked, lines: tailOf(asked, want), days, find };
+  const lower = find.toLowerCase();
+  let lines: string[] = [];
   try {
-    const fd = openSync(file, 'r');
+    if (dir) lines = readFileSync(join(dir, `${asked}.log`), 'utf8').split('\n').filter(l => l && l.toLowerCase().includes(lower));
+  } catch {
+    // No file that day: no lines.
+  }
+  return { day: asked, lines: lines.slice(-want), days, find };
+}
+
+const isDay = (x: unknown): x is string => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x);
+
+/**
+ * A linked PC's answer to askLog, read on the PC that asked (src/jobrun/links.ts nodeLog): its lines kept as text and
+ * trimmed. A TOMLIN from before days and search has no `days` in its answer and sends today's lines whatever was asked:
+ * `todayOnly` says so, and the search is then done here on what came. A refusal keeps its own words.
+ */
+export function logAnswer(status: number, got: unknown, ask: { day?: string; find?: string } = {}): { state: 'on'; day: string; lines: string[]; days: string[]; todayOnly?: true } | { state: 'off'; error?: string } {
+  const x = got && typeof got === 'object' ? (got as { day?: unknown; lines?: unknown; days?: unknown; error?: unknown }) : null;
+  // A day it does not keep, or a door it refuses this link: its own words.
+  if ((status < 200 || status > 299) && typeof x?.error === 'string') return { state: 'off', error: x.error.slice(0, 300) };
+  if (status < 200 || status > 299 || !x || !Array.isArray(x.lines)) return { state: 'off' };
+  let lines = x.lines.filter((l): l is string => typeof l === 'string').slice(-MAX_TAIL).map(l => l.slice(0, 4000));
+  const older = !Array.isArray(x.days);
+  const find = cleanLogFind(ask.find).toLowerCase();
+  if (older && find) lines = lines.filter(l => l.toLowerCase().includes(find));
+  const days = older ? [] : (x.days as unknown[]).filter(isDay).slice(0, 14);
+  return { state: 'on', day: isDay(x.day) ? x.day : '', lines, days, ...(older && (ask.day || find) ? { todayOnly: true as const } : {}) };
+}
+
+/** The last `want` lines of one day's file: only its end is read. */
+function tailOf(name: string, want: number): string[] {
+  if (!dir) return [];
+  try {
+    const fd = openSync(join(dir, `${name}.log`), 'r');
     try {
       const size = fstatSync(fd).size;
       const bytes = Math.min(size, want * (MAX_LINE + 40));
@@ -52,12 +114,12 @@ export function lastLines(n = 300, now = new Date()): { day: string; lines: stri
       const lines = buf.toString('utf8').split('\n').filter(Boolean);
       // A read that starts mid-file starts mid-line: that part line is left out.
       if (bytes < size) lines.shift();
-      return { day: day(now), lines: lines.slice(-want) };
+      return lines.slice(-want);
     } finally {
       closeSync(fd);
     }
   } catch {
-    return { day: day(now), lines: [] };
+    return [];
   }
 }
 

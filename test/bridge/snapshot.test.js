@@ -20,12 +20,27 @@ async function stillThere(port) {
   try { await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(800) }); return true; } catch {}
   return (await platform.portOwners([Number(port)])).length > 0;
 }
-// A stopped Edge ends in Windows' own time, up to 30 s on a busy PC (measured): it must go, however long the wait.
+// A stopped Edge ends in Windows' own time, up to 30 s on a busy PC (measured), and over a minute with every core busy
+// (18 Nov 2026: its port closed at once, its process and Windows' entry for the port stayed): it must go, however long
+// the wait, so it is given 3 minutes. One that was never stopped is still there after them.
+const END_MS = 180000;
 async function goneSoon(port) {
-  for (const end = Date.now() + 40000; Date.now() < end; await new Promise(r => setTimeout(r, 300))) if (!(await stillThere(port))) return true;
+  for (const end = Date.now() + END_MS; Date.now() < end; await new Promise(r => setTimeout(r, 300))) if (!(await stillThere(port))) return true;
   return false;
 }
 const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split(/\r?\n/)[0].trim(); } catch { return null; } };
+// A stopped Edge can hold the profile's lock for a while after its port has closed (Windows ends its last processes in
+// its own time, longer on a busy PC). Waits until the lock can be removed: then no browser holds the profile.
+async function profileFreeSoon(profile) {
+  const lock = path.join(profile, 'lockfile');
+  for (const end = Date.now() + END_MS; Date.now() < end; await new Promise(r => setTimeout(r, 300))) {
+    try { fs.rmSync(lock, { force: true }); return true; } catch {}
+  }
+  return false;
+}
+// The longest a test here lets the Bridge try to stop a browser. The Bridge itself gives up after 20 s so Quit is never
+// held long; on a busy PC the lookup of who holds a port (PowerShell) alone can take most of that.
+const STOP_MS = 90000;
 
 (async () => {
   const edge = platform.findBrowser();
@@ -66,6 +81,7 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
         const port = portIn(profile);
         assert(port, 'Edge wrote no DevTools port');
         assert(await goneSoon(port), 'a browser still holds port ' + port);
+        assert(await profileFreeSoon(profile), 'a browser still holds the profile');
       });
     }
     await check('a browser left over from an earlier run is stopped before the next picture', async () => {
@@ -82,7 +98,7 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
       // It does not answer in time (a PC under load): every ask on its port fails.
       const realFetch = globalThis.fetch;
       globalThis.fetch = (u, ...rest) => (String(u).includes(':' + busy + '/') ? Promise.reject(new Error('timed out')) : realFetch(u, ...rest));
-      try { await stopBrowser(busy); } finally { globalThis.fetch = realFetch; }
+      try { await stopBrowser(busy, { ms: STOP_MS }); } finally { globalThis.fetch = realFetch; }
       assert(await goneSoon(busy), 'the browser on port ' + busy + ' is still running');
     });
     await check('a lookup of who holds the port that comes back empty once (a PC under load) does not leave the busy Edge running', async () => {
@@ -96,7 +112,7 @@ const portIn = profile => { try { return fs.readFileSync(path.join(profile, 'Dev
       delete require.cache[file];
       const realFetch = globalThis.fetch;
       globalThis.fetch = (u, ...rest) => (String(u).includes(':' + busy + '/') ? Promise.reject(new Error('timed out')) : realFetch(u, ...rest));
-      try { await require(file).stopBrowser(busy); } finally { globalThis.fetch = realFetch; platform.portOwners = realOwners; delete require.cache[file]; }
+      try { await require(file).stopBrowser(busy, { ms: STOP_MS }); } finally { globalThis.fetch = realFetch; platform.portOwners = realOwners; delete require.cache[file]; }
       assert(await goneSoon(busy), 'the browser on port ' + busy + ' is still running');
     });
   } finally {

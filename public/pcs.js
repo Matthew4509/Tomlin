@@ -8,6 +8,21 @@
   const dlg = $('#pc-dlg');
   const body = $('#pc-body');
   let showing = 'here';
+  /** Settings > This PC: the box the models list is drawn into there (the same list as in this PC's window), and its confirm box. */
+  let page = null;
+  let pageAsk = null;
+  const askBox = () => (!dlg.open && pageAsk ? pageAsk : $('#pc-ask'));
+  // The Updates page's section is lent to this window (Manage PC and updates): given back when the window closes.
+  dlg.addEventListener('close', () => {
+    app.updateInstallBack?.();
+    // A question left open (Move, Delete) is called off with the window: it must not be waiting when the window opens again.
+    const ask = $('#pc-ask');
+    if (ask && !ask.hidden && ask.cancelAsk) {
+      const cancel = ask.cancelAsk;
+      ask.cancelAsk = null;
+      cancel();
+    }
+  });
   /** The models list as you left it on this PC: the words searched, the kind shown, the order and the page. */
   const list = { q: '', cat: 'all', sort: 'name', page: 0 };
   /** What a model's row last said (a speed test that failed, a Delete refused), kept across the redraws. */
@@ -46,16 +61,35 @@
     if (text) p.scrollIntoView({ block: 'nearest' });
   }
 
-  async function load(id) {
+  /** Each load's turn: an answer for a PC no longer shown (another opened, or this one opened again) is not drawn. */
+  let turn = 0;
+  /** `fresh`: the window was just opened. A linked PC's is drawn at once from what it said last, then from its answer now. */
+  async function load(id, fresh = false) {
     if (id !== showing) Object.assign(list, { q: '', cat: 'all', sort: 'name', page: 0 });
     showing = id;
+    const onPage = !dlg.open && page;
+    const mine = ++turn;
+    const quick = fresh && id !== 'here' && !onPage;
+    let drawn = false;
     try {
-      draw(await api(`/api/pc?id=${encodeURIComponent(id)}`));
+      // A PC that is off took over 10 s to say so, with the window stuck on "Reading…": now what it said last shows at once.
+      if (quick) {
+        const was = await api(`/api/pc?id=${encodeURIComponent(id)}&quick=1`);
+        if (mine !== turn) return;
+        draw(was);
+        drawn = true;
+      }
+      const v = await api(`/api/pc?id=${encodeURIComponent(id)}`);
+      if (mine !== turn) return;
+      draw(v);
     } catch (e) {
-      body.replaceChildren(el('p', { class: 'fault', text: e.message }));
+      if (mine !== turn) return;
+      // Drawn already from what it said last: that stays, and the line under it says why it was not read again.
+      if (drawn) return say(e.message, true);
+      (onPage ? page : body).replaceChildren(el('p', { class: 'fault', text: e.message }));
       return;
     }
-    if (id !== 'here') return;
+    if (id !== 'here' || onPage) return;
     installBox.replaceChildren(el('h3', { text: 'Install' }), el('p', { class: 'hint', text: 'Checking the install…' }));
     try {
       install = await api('/api/install');
@@ -67,6 +101,7 @@
 
   // ---- This PC's install (My PC only): Repair install, Shortcut to desktop, Start on start up (src/server/install.ts) ----
   let install = null;
+  let thisPc = null; // this PC's window data (version, build, tokens), for the Updates and Install tiles
   const installBox = el('div', { class: 'pc-install' });
 
   /** "Start when this PC starts", as the tick in Network saves it (a node asks for the app lock PIN). */
@@ -88,18 +123,20 @@
     const s = install;
     if (!s?.windows) return installBox.replaceChildren();
     const parts = [el('h3', { text: 'Install' })];
-    parts.push(el('p', {
-      text: !s.installed ? `Not installed: TOMLIN runs from ${s.here}.`
-        : s.outside ? `This TOMLIN runs from a folder (${s.here}), not from the install in ${s.root}${s.current ? `, which has ${s.current.version}` : ''}. Updates from linked PCs reach the copy that runs, so the install stays behind.`
-        : `Installed in ${s.root}.`,
-    }));
+    const dateOf = iso => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+    if (!s.installed || s.outside) {
+      parts.push(el('p', {
+        text: !s.installed ? `Not installed: TOMLIN runs from ${s.here}.`
+          : `This TOMLIN runs from a folder (${s.here}), not from the install in ${s.root}${s.current ? `, which has ${s.current.version}` : ''}. Updates from linked PCs reach the copy that runs, so the install stays behind.`,
+      }));
+    }
     if (result) {
       if (result.done.length) parts.push(el('p', { text: 'Repaired:' }), el('ul', { class: 'pc-repair' }, ...result.done.map(t => el('li', { text: t }))));
       if (result.failed.length) parts.push(el('p', { class: 'fault-line', text: 'Not repaired:' }), el('ul', { class: 'pc-repair' }, ...result.failed.map(t => el('li', { text: t }))));
       if (!result.done.length && !result.failed.length) parts.push(el('p', { text: 'Nothing needed repairing.' }));
     } else if (s.steps.length) parts.push(el('p', { text: 'Repair install would:' }), el('ul', { class: 'pc-repair' }, ...s.steps.map(t => el('li', { text: t }))));
-    else if (s.installed && !s.left.length) parts.push(el('p', { class: 'hint', text: 'Nothing to repair.' }));
     for (const l of (result ?? s).left) parts.push(el('p', { class: 'hint', text: l }));
+    const nothingToRepair = !result && s.installed && !s.steps.length && !s.left.length;
 
     const busy = (btn, text) => {
       btn.disabled = true;
@@ -118,7 +155,8 @@
         drawInstall();
       }
     });
-    const desk = el('button', { class: 'btn', type: 'button', text: 'Shortcut to desktop' });
+    const deskThere = !!s.desktop?.there;
+    const desk = el('button', { class: 'btn', type: 'button', text: 'Install desktop shortcut', disabled: deskThere });
     desk.addEventListener('click', async () => {
       busy(desk, 'Making it…');
       try {
@@ -143,8 +181,18 @@
       }
       drawInstall(result);
     });
-    parts.push(el('div', { class: 'team-actions' }, repair, desk, start));
-    parts.push(el('p', { class: 'hint', text: `${s.desktop?.there ? 'A TOMLIN shortcut is on the desktop.' : 'No TOMLIN shortcut on the desktop.'} ${s.autostart ? 'TOMLIN starts when this PC starts.' : 'TOMLIN does not start when this PC starts.'}` }));
+    // Each button with its state beside it: "✓ Already installed" instead of a sentence about what is not done.
+    const done = (on, text) => (on ? el('span', { class: 'pc-done', text: `✓ ${text}` }) : null);
+    parts.push(
+      el('div', { class: 'pc-install-row' }, repair, nothingToRepair ? el('span', { class: 'hint', text: 'Nothing to repair' }) : null),
+      el('div', { class: 'pc-install-row' }, desk, done(deskThere, 'Already installed')),
+      el('div', { class: 'pc-install-row' }, start, done(s.autostart, 'Already on')),
+      // The one place for what linked PCs may do here (cluster use too), on Network: opened from here as well.
+      el('div', { class: 'pc-install-row' }, el('button', { class: 'btn', type: 'button', text: 'Sharing and cluster permissions', onclick: () => { dlg.close(); app.openSharePermissions?.(); } }), el('span', { class: 'hint', text: 'What linked PCs may do on this PC' })));
+    // Under the buttons: where, when, and the work it has done.
+    const out = thisPc?.meter?.total?.out;
+    const facts = [['Install location', s.installed ? s.root : s.here], ['Installed', dateOf(s.installedOn)], ['Tokens generated', out != null ? tokens(out) : '']].filter(f => f[1]);
+    parts.push(el('dl', { class: 'pc-install-facts' }, ...facts.flatMap(([k, x]) => [el('dt', { text: k }), el('dd', { text: x })])));
     if (s.canSwitch) {
       const go = el('button', { class: 'btn', type: 'button', text: 'Start the installed one now' });
       go.addEventListener('click', async () => {
@@ -159,7 +207,15 @@
       });
       parts.push(el('div', { class: 'team-actions' }, go), el('p', { class: 'hint', text: 'This TOMLIN (started from a folder) closes, and the installed one takes over: from then on, updates from linked PCs reach the install.' }));
     }
-    installBox.replaceChildren(...parts);
+    // The left half: updates (the button, then the version and when it was last updated); the right half: the install.
+    // Updates are done right here: the Updates page's own section (Check for updates, Update via zip, Update now) sits in this tile.
+    const updHost = el('div', { class: 'pc-update-host' });
+    const upFacts = [['Version', thisPc ? `TOMLIN ${thisPc.version}${thisPc.build ? `, build ${thisPc.build}` : ''}` : s.version], ['Last updated', dateOf(s.updatedOn)]].filter(f => f[1]);
+    const updates = el('div', { class: 'pc-tile' }, el('h3', { text: 'Updates' }),
+      updHost,
+      el('dl', { class: 'pc-install-facts' }, ...upFacts.flatMap(([k, x]) => [el('dt', { text: k }), el('dd', { text: x })])));
+    installBox.replaceChildren(el('div', { class: 'pc-tiles' }, updates, el('div', { class: 'pc-tile' }, ...parts)));
+    app.updateInstallInto?.(updHost);
   }
 
   /** One table row: the project, its tokens and working time, then power and each API, the least of them marked. */
@@ -242,16 +298,20 @@
   /** One model's row: its name, the memory it needs and its file, its state, and (this PC) Test speed, Hide and Delete. */
   function modelRow(v, x) {
     const state = x.busy ? (x.kind === 'image' ? 'Drawing now' : 'Answering now') : x.loaded ? (v.here ? 'In use' : 'Loaded there') : x.ollama ? 'Kept by Ollama' : x.hidden ? 'Hidden' : '';
-    const facts = [x.kind === 'image' ? 'Pictures' : 'Chat', x.speed?.expect ? app.speedWords(x.speed.expect) : '', x.need ? `needs about ${GBs(x.need)}` : ''].filter(Boolean).join(' · ');
+    const facts = [x.kind === 'image' ? 'Pictures' : 'Chat', !v.here && x.speed?.expect ? app.speedTk(x.speed.expect) : '', x.need ? `needs about ${GBs(x.need)}` : ''].filter(Boolean).join(' · ');
     const said = rowSay[x.id];
     // On show: Test speed. Behind the "…": everything done less often.
     const acts = [];
     const more = [];
     if (v.here) {
-      if (x.kind === 'chat') acts.push(app.speedLink(`model:${x.id}`, msg => { rowSay[x.id] = msg; drawList(v); }, ok => {
-        if (ok) delete rowSay[x.id];
-        load(showing);
-      }));
+      // The speed tile: the button on top (Re-test once it has been tested), a line, then the speed in green.
+      if (x.kind === 'chat') {
+        const test = app.speedLink(`model:${x.id}`, msg => { rowSay[x.id] = msg; drawList(v); }, ok => {
+          if (ok) delete rowSay[x.id];
+          load(showing);
+        }, x.speed?.test ? 'Re-test speed' : 'Test speed');
+        acts.push(el('span', { class: 'pc-speed' }, test, x.speed?.expect > 0 ? el('span', { class: 'pc-speed-fig', text: app.speedTk(x.speed.expect) }) : null));
+      }
       const hide = el('button', { class: 'link', type: 'button', text: x.hidden ? 'Unhide' : 'Hide', title: x.hidden ? 'Show it again where a model is picked' : 'Keep it (and its speed tests) but leave it out where a model is picked' });
       hide.addEventListener('click', async () => {
         hide.disabled = true;
@@ -264,14 +324,28 @@
         await modelsChanged();
       });
       // Kept pressable whatever its state: pressed, it says why it cannot go now (loaded, hidden, kept by Ollama).
-      const del = el('button', { class: 'icon-btn pc-bin', type: 'button', title: `Delete ${x.name} from this PC`, 'aria-label': `Delete ${x.name} from this PC` }, svgIcon(BIN, 18));
+      const del = el('button', { class: 'icon-btn pc-bin', type: 'button', title: `Delete ${x.name} from this PC`, 'aria-label': `Delete ${x.name} from this PC` }, svgIcon(BIN, 18), el('span', { text: 'Delete' }));
+      // A Move in progress: the row says so, then what became of it (the model list is read again when it ends).
+      const moving = r => {
+        if (r.said) rowSay[x.id] = r.said;
+        else {
+          rowSay[x.id] = r.copy ? `Copying ${x.name} to "${r.to}". It stays on this PC; the progress is under Network, Models on my other PCs.`
+            : `Moving ${x.name} to "${r.to}". It stays on this PC until the copy there is checked; the progress is under Network, Models on my other PCs.`;
+          app.followMove(r.transfer, async t => {
+            rowSay[x.id] = t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : r.copy ? 'Not copied' : 'Not moved'}: ${t.said}`;
+            await modelsChanged();
+          });
+        }
+        drawList(v);
+      };
       del.addEventListener('click', async () => {
         if (x.hidden) {
           rowSay[x.id] = `${x.name} is hidden, which keeps it from Delete. Unhide it first, then Delete.`;
           return drawList(v);
         }
-        const users = x.usedBy?.length ? ` ${x.usedBy.join(', ')} ${x.usedBy.length > 1 ? 'work' : 'works'} on it and would need another model.` : '';
-        if (!(await askHere($('#pc-ask'), `Delete ${x.name} from this PC? It frees ${GBs(x.bytes)} and cannot be undone.${users}`, `Delete ${x.name}`, 'Keep it'))) return;
+        const pick = await app.deleteAsk(askBox(), x, { pc: 'here', text: `Delete ${x.name} from this PC? It frees ${GBs(x.bytes)} and cannot be undone.`, yes: `Delete ${x.name}` });
+        if (pick === null) return;
+        if (pick !== 'delete') return moving(pick);
         try {
           await api('/api/models/delete', { id: x.id, kind: x.kind });
           delete rowSay[x.id];
@@ -280,18 +354,92 @@
         }
         await modelsChanged();
       });
-      more.push(hide, del);
+      // Move: copied to a linked PC, checked byte for byte there, and only then removed from this PC (src/jobrun/copies.ts moveTo).
+      const move = el('button', { class: 'link', type: 'button', text: 'Move to another PC', title: `Copy ${x.name} to a linked PC, check the copy, then remove it from this PC` });
+      move.addEventListener('click', async () => {
+        const r = await app.moveAsk(askBox(), x);
+        if (r) moving(r);
+      });
+      // Move on its own line; Hide at the left and Delete at the right of the next one.
+      more.push(...(x.ollama ? [] : [move]), el('span', { class: 'pc-more-row' }, hide, del));
+    } else {
+      // A linked PC's model: deleted over the link, so a PC nobody sits at can be kept tidy. That PC's own tick ("Accept
+      // models from linked PCs") decides, and it refuses a hidden or loaded model, saying why in its own words.
+      const del = el('button', { class: 'icon-btn pc-bin', type: 'button', title: `Delete ${x.name} from "${v.name}"`, 'aria-label': `Delete ${x.name} from ${v.name}` }, svgIcon(BIN, 18), el('span', { text: 'Delete' }));
+      del.addEventListener('click', async () => {
+        if ((await app.deleteAsk(askBox(), x, { pc: v.id, text: `Delete ${x.name} from "${v.name}"? It frees ${GBs(x.bytes)} there and cannot be undone: it would have to be sent again.`, yes: `Delete ${x.name}` })) !== 'delete') return;
+        // That PC asks its own app lock PIN, as for an update: asked here, and again after a wrong one.
+        let nodePin;
+        for (;;) {
+          try {
+            const r = await api('/api/network/model-remove', nodePin === undefined ? { pc: v.id, id: x.id, kind: x.kind } : { pc: v.id, id: x.id, kind: x.kind, nodePin });
+            rowSay[x.id] = r.said || 'Deleted.';
+            break;
+          } catch (e) {
+            if (e.data?.needNodePin && typeof askAppPin === 'function') {
+              nodePin = await askAppPin(nodePin === undefined ? '' : e.message, v.name, { button: 'Delete', about: `Deleting a model on another PC needs the PIN (or password) that opens TOMLIN on "${v.name}", typed here for this delete. It is checked there and not kept here.` });
+              if (nodePin !== null) continue;
+            }
+            rowSay[x.id] = e.message;
+            break;
+          }
+        }
+        await modelsChanged();
+      });
+      more.push(del);
     }
     // Find the fastest setup: a chat model here, or one a linked PC lends (that PC runs the test on itself).
     if (x.kind === 'chat' && !x.ollama) more.unshift(app.finderButton(v.here ? x.id : `remote:${v.id}:${x.id}`, { name: x.name, pcName: v.name, link: true }));
     return el('li', { class: `pc-model${x.hidden ? ' hidden-model' : ''}` },
       el('span', { class: 'pc-model-text' },
-        el('strong', { text: x.name }),
+        el('strong', {}, x.name, v.here && x.disk?.hdd ? el('span', { class: 'pc-hdd', title: `On ${x.disk.drive}, a hard disk: it loads slower than from an SSD`, text: 'HDD' }) : null),
         el('span', { class: 'hint', text: facts || 'Size not known' })),
       state ? el('span', { class: `pc-model-state${x.loaded || x.busy ? ' on' : ''}`, text: state }) : null,
       acts.length || more.length ? el('span', { class: 'pc-model-acts' }, ...acts,
-        more.length ? el('details', { class: 'pc-model-more' }, el('summary', { 'aria-label': `More for ${x.name}`, title: 'Find the fastest setup, Hide, Delete', text: '…' }), el('span', { class: 'pc-model-more-list' }, ...more)) : null) : null,
+        more.length ? el('details', { class: 'pc-model-more' }, el('summary', { 'aria-label': `More for ${x.name}`, title: 'Find the fastest setup, Hide, Move, Delete', text: '…' }), el('span', { class: 'pc-model-more-list' }, ...more)) : null) : null,
+      x.staffNote ? el('p', { class: 'hint pc-model-staff', text: x.staffNote }) : null,
+      // One row for a model found twice (src/server/thispc.ts copiesWords); a split model with a part missing says so.
+      x.copiesNote ? el('p', { class: 'hint pc-model-staff', text: x.copiesNote }) : null,
+      x.incomplete ? el('p', { class: 'hint fault-line pc-model-staff', text: x.incomplete }) : null,
+      diskLine(v, x),
       said ? el('p', { class: 'hint fault-line pc-model-said', role: 'status', text: said }) : null);
+  }
+
+  /**
+   * A model on a hard disk (Windows says so; nothing when it does not): the "HDD" mark, the line, and Move to SSD when an
+   * SSD of this PC has room and the model is TOMLIN's own. With the load time when it is known. Nothing blocks a load.
+   */
+  function diskLine(v, x) {
+    const d = v.here ? x.disk : null;
+    if (!d || (!d.hdd && !d.loadSeconds)) return null;
+    const time = d.loadSeconds ? `Loads in about ${span(d.loadSeconds)}${d.hdd ? ` from ${d.drive}` : ''}.` : '';
+    const words = [d.hdd ? 'Move to SSD for better performance.' : '', time].filter(Boolean).join(' ');
+    let go = null;
+    if (d.hdd && d.ssd && d.canMove) {
+      go = el('button', { class: 'link', type: 'button', text: `Move to SSD (${d.ssd.drive})` });
+      go.addEventListener('click', async () => {
+        const yes = await askPick(askBox(), `Move ${x.name} (${GBs(x.bytes)}) from ${d.drive} (a hard disk) to ${d.ssd.drive} (an SSD)? It is copied there, checked, and only then removed from ${d.drive}.${d.ssd.newHome ? ` Models are then kept in ${d.ssd.drive}\\TOMLIN models: new downloads go there too, and the models left on ${d.drive} are still used where they are.` : ''}`, [{ label: `Move to ${d.ssd.drive}`, value: 'go', danger: false }], 'Keep it here');
+        if (yes !== 'go') return;
+        go.disabled = true;
+        try {
+          const r = await api('/api/models/to-ssd', { id: x.id });
+          rowSay[x.id] = r.said;
+          drawList(v);
+          // Followed until it ends (the same move as Where models are kept: /api/models/where says how it went).
+          const tick = async () => {
+            const w = await api('/api/models/where').catch(() => null);
+            if (w?.move?.state === 'moving') return void setTimeout(tick, 2000);
+            rowSay[x.id] = w?.move?.said || 'The move ended: Models shows where it is now.';
+            await modelsChanged();
+          };
+          setTimeout(tick, 2000);
+        } catch (e) {
+          rowSay[x.id] = e.message;
+          drawList(v);
+        }
+      });
+    }
+    return el('p', { class: `hint pc-model-staff${d.hdd ? ' pc-slow-disk' : ''}` }, words, go ? ' ' : null, go);
   }
 
   const listBox = el('div', { class: 'pc-models-list' });
@@ -317,6 +465,19 @@
     listBox.replaceChildren(
       rows.length ? el('ul', { class: 'pc-models' }, ...rows.map(x => modelRow(v, x))) : el('p', { class: 'hint', text: none }),
       el('div', { class: 'pc-list-foot' }, shown.length > PAGE ? el('span', { class: 'hint', text: `Showing ${from + 1} to ${from + rows.length} of ${shown.length}` }) : null, pager));
+  }
+
+  /**
+   * "Free space: C: 162 GB · D: 1611 GB", above Free up space: each drive of that PC with the room it has now. A PC that
+   * does not list its drives (an older TOMLIN) gives the one drive it keeps its data on; none known gives nothing.
+   */
+  function freeSpaceLine(v) {
+    const drives = v.drives?.length ? v.drives : [];
+    const one = v.disk ?? v.diskThere;
+    const words = drives.length
+      ? drives.map(d => `${d.drive}${d.label ? ` ${d.label}` : ''} ${GBs(d.free)}`).join(' · ')
+      : one ? `${GBs(one.free)} on the drive it keeps its data on` : '';
+    return words ? el('span', { class: 'hint pc-free-space', title: 'Free space on each drive of this PC, as it said just now', text: `Free space: ${words}` }) : null;
   }
 
   function modelsPart(v) {
@@ -346,10 +507,12 @@
     // Search, filters and sort are for a long list: with a few models they are clutter. A hidden model still needs its filter.
     const many = v.models.length > 6;
     const add = v.here ? el('button', { class: 'btn', type: 'button', text: 'Get a model', onclick: () => { dlg.close(); app.openModels?.(); } }) : null;
+    // Free up space: the models used least, to tick and remove (src/cleanup.ts). A linked PC's are only listed here: they go on that PC.
+    const free = el('button', { class: 'btn', type: 'button', text: 'Free up space', title: v.here ? 'Lists the models used least, to remove the ones you do not need' : `Lists the models used least on ${v.name}`, onclick: () => app.openCleanup?.({ pc: v.id, onChanged: modelsChanged }) });
     return el('section', { class: 'pc-part pc-card-part' },
-      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Memory needed is an estimate (a chat model with an 8K context).', text: `Models (${shown})` }), many ? search : null, add),
+      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Memory needed is an estimate (a chat model with an 8K context).', text: `Models (${shown})` }), many ? search : null, el('div', { class: 'pc-free' }, freeSpaceLine(v), free), add),
       many ? el('div', { class: 'pc-tools' }, shelf, el('label', { class: 'pc-sort' }, 'Sort ', sort)) : cats.includes('hidden') ? el('div', { class: 'pc-tools' }, shelf) : null,
-      v.here ? null : el('p', { class: 'hint', text: 'Hide and Delete are on that PC itself.' }),
+      v.here ? null : el('p', { class: 'hint', text: 'Hide is on that PC itself. Delete works here when its owner ticks Accept models from linked PCs.' }),
       listBox);
   }
 
@@ -400,10 +563,15 @@
     return pic;
   }
 
+  /** Its name in the title: this PC's, or a linked PC's as the left panel names it (with the words telling twins apart). */
+  const pcTitle = v => (v.here ? v.name : app.pcLabel?.(v.id) ?? v.name);
+
   /** What it is, in one line: processor, memory, graphics card. */
   const specLine = v => {
     const m = v.memory;
-    const card = m?.gpu && !m.gpu.shared && m.gpu.total ? `${(m.gpu.name ?? 'graphics card').replace(/^(NVIDIA|AMD)\s+/i, '')} with ${GBs(m.gpu.total)}` : m?.ram?.total ? 'no graphics card' : '';
+    // The card TOMLIN uses there (the strongest: src/hardware.ts strongestFirst); "and N more" when it has others.
+    const more = Math.max(0, (m?.cards?.list?.length ?? 0) - 1);
+    const card = m?.gpu && !m.gpu.shared && m.gpu.total ? `${(m.gpu.name ?? 'graphics card').replace(/^(NVIDIA|AMD)\s+(?!card\b)/i, '')} with ${GBs(m.gpu.total)}${more ? ` and ${more} more card${more === 1 ? '' : 's'}` : ''}` : m?.ram?.total ? 'no graphics card' : '';
     const cpu = v.cpu?.name?.replace(/\(R\)|\(TM\)|\bCPU\b|@.*$/g, '').replace(/^Intel\s+Core\s+/i, '').replace(/\s+/g, ' ').trim();
     return [cpu, m?.ram?.total ? `${GBs(m.ram.total)} of RAM` : '', card].filter(Boolean).join(', ');
   };
@@ -417,20 +585,85 @@
     const rows = [];
     if (v.cpu) rows.push(['Processor', `${v.cpu.name} (${v.cpu.cores} cores, ${v.cpu.threads} threads)`]);
     rows.push(['RAM', m?.ram?.total ? GBs(m.ram.total) : 'Not known yet']);
-    rows.push(['Graphics memory', m?.gpu && !m.gpu.shared && m.gpu.total ? `${GBs(m.gpu.total)}${m.gpu.name ? ` (${m.gpu.name})` : ''}` : m?.ram?.total ? 'None of its own' : 'Not known yet']);
+    rows.push(['Graphics memory', m?.gpu && !m.gpu.shared && m.gpu.total ? `${GBs(m.gpu.total)}${m.gpu.name ? ` (${m.gpu.name})` : ''}${m.gpu.guessed ? ', worked out from its cards together: it runs an older TOMLIN' : ''}` : m?.ram?.total ? 'None of its own' : 'Not known yet']);
+    // Two or more cards: each one, the one TOMLIN uses first at the top (src/pccards.ts).
+    const cards = m?.cards?.list ?? [];
+    if (cards.length > 1) rows.push(['Graphics cards', cards.map((c, i) => `${c.name}, ${GBs(c.total)}${i ? '' : ' (used first)'}`).join('; ')]);
     if (v.disk) rows.push(['Disk free', `${GBs(v.disk.free)} of ${GBs(v.disk.total)} (the drive TOMLIN keeps its data on)`]);
     return el('section', { class: 'pc-specs' }, el('h3', { text: 'Specifications' }),
       el('dl', {}, ...rows.flatMap(([k, x]) => [el('dt', { text: k }), el('dd', { text: x })])));
   }
 
+  // ---- A linked PC's log (folded): a day of the 7 it keeps, newest line last, with a word to look for ----
+  /** The Log part as you left it: the day ('' for today), the word, and the last answer (a redraw shows it again). */
+  const logAsk = { pc: '', day: '', find: '', shown: null };
+  const dayName = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  function logPart(v) {
+    if (logAsk.pc !== v.id) Object.assign(logAsk, { pc: v.id, day: '', find: '', shown: null });
+    const days = Array.from({ length: 7 }, (_, i) => new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - i));
+    const pick = el('select', { 'data-key': 'pc-log-day', 'aria-label': 'Which day' }, ...days.map((d, i) => el('option', { value: i ? dayName(d) : '', text: i === 0 ? 'Today' : i === 1 ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) })));
+    pick.value = logAsk.day;
+    const find = el('input', { type: 'search', 'data-key': 'pc-log-find', maxlength: '100', placeholder: 'A word to look for', 'aria-label': 'Only lines with this word', value: logAsk.find });
+    const show = el('button', { class: 'btn', type: 'button', text: 'Show' });
+    const said = el('p', { class: 'hint', role: 'status' });
+    // Text only: the lines are that PC's own words, never read as page code.
+    const out = el('pre', { class: 'pc-log-lines', tabindex: '0', 'aria-label': `The log of ${v.name}` });
+    const put = s => {
+      said.textContent = s.said;
+      out.textContent = s.text;
+      out.hidden = !s.text;
+      // Newest last: the end is what is shown first.
+      out.scrollTop = out.scrollHeight;
+    };
+    let mine = 0;
+    const read = async () => {
+      Object.assign(logAsk, { day: pick.value, find: find.value.trim() });
+      const n = ++mine;
+      put({ said: 'Reading…', text: '' });
+      let s;
+      try {
+        const q = new URLSearchParams({ pc: v.id, lines: '500', ...(logAsk.day ? { day: logAsk.day } : {}), ...(logAsk.find ? { find: logAsk.find } : {}) });
+        const got = await api(`/api/node/log?${q}`);
+        const when = pick.selectedOptions[0]?.textContent ?? 'Today';
+        const lines = got.lines ?? [];
+        const which = logAsk.find ? ` with "${logAsk.find}"` : '';
+        s = got.state === 'old' ? { said: 'That PC runs an older TOMLIN that cannot send its log. Update it to read its log here.', text: '' }
+          : got.state !== 'on' ? { said: got.error ? `It did not send its log: ${got.error}` : 'It did not answer.', text: '' }
+          : { said: `${got.todayOnly ? 'That PC runs an older TOMLIN that sends only today\'s log, every line: update it for other days and the search. ' : ''}${lines.length ? `${got.todayOnly ? 'Today' : when}: ${lines.length === 500 ? 'the last 500 lines' : `${lines.length} line${lines.length === 1 ? '' : 's'}`}${which}, newest last.` : `${when}: no lines${which}.`}`, text: lines.join('\n') };
+      } catch (e) {
+        s = { said: e.message, text: '' };
+      }
+      if (n !== mine) return;
+      logAsk.shown = s;
+      put(s);
+    };
+    pick.addEventListener('change', read);
+    show.addEventListener('click', read);
+    find.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      read();
+    });
+    const part = el('div', { class: 'pc-log' }, el('div', { class: 'pc-log-ask' }, pick, find, show), said, out);
+    if (logAsk.shown) put(logAsk.shown);
+    else out.hidden = true;
+    return { part, read };
+  }
+
   function draw(v) {
-    $('#pc-title').textContent = v.name;
+    // Settings > This PC: only the models list, the same one as in this PC's window (drawn into the page, not the window).
+    if (!dlg.open && page) return page.replaceChildren(modelsPart(v));
+    // Two linked PCs with one name are told apart here as in the left panel (app.pcLabel, public/home.js).
+    const title = pcTitle(v);
+    $('#pc-title').textContent = title;
     // ---- Behind this PC: Update it sends this PC's TOMLIN there (it starts the new version by itself), or why not ----
     // Behind: a lower version, or the same version with different files (its build id differs from this PC's).
     const older = !v.here && v.update;
     const built = b => (b ? `, build ${b}` : '');
     const version = v.here ? `TOMLIN ${v.version}${built(v.build)}`
-      : v.fault ? `Did not answer just now: ${v.fault.replace(/\.$/, '')}. Its version is not known until it answers.`
+      // Why it did not answer is the line under the head: here only what that means for its version.
+      : v.fault ? 'Its version is not known until it answers.'
+      : v.checking && !v.version ? `Asking ${title} now…`
       : older ? `${pcVersionWords(v, true).line}${v.update.why ? `. ${v.update.why.charAt(0).toUpperCase()}${v.update.why.slice(1)}` : ''}`
       : v.pull ? `${pcVersionWords(v, false).line}${v.pull.why ? `. ${v.pull.why.charAt(0).toUpperCase()}${v.pull.why.slice(1)}` : ''}`
       : v.version === v.ours ? `TOMLIN ${v.version}${built(v.build)}: Up to date${v.installed ? `: Last updated ${new Date(v.installed).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}`
@@ -477,16 +710,14 @@
       });
     }
     const on = v.here || (v.online && !v.fault);
+    // Its state in one word, the same as the left panel says (src/home.ts pcLook); as it said last until it answers.
+    const look = v.look ?? { activity: on ? 'available' : 'offline', word: on ? 'On' : 'Off or not answering' };
     // This PC only: Repair install, Shortcut to desktop, Start on start up, under Manage PC.
     let manage = null;
     if (v.here) {
-      // Update TOMLIN beside this PC's version: Update this install (Manage updates), 2.0.63.
-      go = el('button', { class: 'btn primary', type: 'button', text: 'Update TOMLIN' });
-      go.addEventListener('click', () => {
-        dlg.close();
-        app.openUpdateInstall?.();
-      });
-      manage = el('button', { class: 'btn quiet', type: 'button', text: 'Manage PC', 'aria-expanded': String(!installBox.hidden), 'aria-controls': 'pc-manage' });
+      // Update TOMLIN now sits inside Manage PC and updates (the Updates tile), not beside the version.
+      thisPc = v;
+      manage = el('button', { class: 'btn quiet', type: 'button', text: 'Manage PC and updates','aria-expanded': String(!installBox.hidden), 'aria-controls': 'pc-manage' });
       manage.addEventListener('click', () => {
         installBox.hidden = !installBox.hidden;
         manage.setAttribute('aria-expanded', String(!installBox.hidden));
@@ -498,12 +729,37 @@
     const head = el('div', { class: 'pc-head' },
       pcPicture(v),
       el('span', { class: 'pc-head-name' },
-        el('span', { class: 'pc-head-title' }, el('strong', { text: v.name }), el('span', { class: `pc-head-chip${on ? '' : ' off'}`, text: on ? 'On' : 'Off or not answering' }), el('span', { class: 'sr-only', text: on ? ' (connected)' : ' (not connected)' })),
+        el('span', { class: 'pc-head-title' }, el('strong', { text: title }), el('span', { class: `pc-head-chip${look.activity === 'offline' ? ' off' : look.activity === 'available' && look.word === 'Asleep' ? ' asleep' : ''}`, title: look.text ?? '', text: look.word }), el('span', { class: 'sr-only', text: on ? ' (connected)' : ' (not connected)' })),
         el('span', { class: 'hint', text: [v.profile.model, specLine(v)].filter(Boolean).join(' · ') })),
-      el('span', { class: `pc-head-ver${v.fault ? ' fault-line' : ''}` },
+      el('span', { class: `pc-head-ver${v.fault ? ' fault-line' : ''}${!fine && !v.fault ? ' long-line' : ''}` },
         fine ? el('strong', { text: `TOMLIN ${v.version ?? ''}` }) : version,
         fine && !v.here ? el('span', { class: 'pc-head-ok', text: '✓ Up to date' }) : null),
-      go, manage);
+      manage);
+
+    // ---- The actions of a linked PC, under its head: Update (a tick when up to date) and Shut down ----
+    const mark = d => (typeof clusterIcon === 'function' ? clusterIcon(d) : null);
+    let actions = null;
+    if (!v.here) {
+      const upBtn = go ?? el('button', { class: 'btn', type: 'button', disabled: true, title: v.fault ? 'It is not answering, so it cannot be updated now.' : older ? (v.update.why ? `${v.update.why.charAt(0).toUpperCase()}${v.update.why.slice(1)}.` : '') : 'It runs the same TOMLIN as this PC: nothing to update.', text: older ? 'Update' : 'Up to date' });
+      upBtn.prepend(mark('M12 19V5M6.5 10.5 12 5l5.5 5.5') ?? '');
+      let offBtn = null;
+      if (v.off?.can) {
+        const why = !v.off.allowed ? 'Its owner has not switched on "Allow host to turn this PC off" (Network, sharing permissions).' : v.off.away ? 'Someone is using it now.' : 'Shuts that PC down. It asks for its PIN (its own, or the host PIN), and stays off until someone switches it on again.';
+        offBtn = el('button', { class: 'btn', type: 'button', title: why, disabled: !v.off.allowed || !!v.off.away }, mark('M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0') ?? '', 'Shut down');
+        offBtn.addEventListener('click', async () => {
+          if (!confirm(`Turn off "${title}"?\n\nIt shuts down about 15 seconds after it answers, and stays off until someone switches it on again. Anything it is doing for you stops.`)) return;
+          offBtn.disabled = true;
+          try {
+            const r = typeof powerOffWithPin === 'function' ? await powerOffWithPin({ id: v.id, name: v.name }) : null;
+            say(r ? r.said : 'Not turned off (no PIN given).', !r);
+          } catch (e) {
+            say(e.message, true);
+          }
+          offBtn.disabled = false;
+        });
+      }
+      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, upBtn, offBtn ?? '');
+    }
 
     // ---- The strip: TOMLIN, tokens, time worked, power cost ----
     const updateWords = older && !v.update.why ? 'Update it with the button above' : older ? 'Update it there (see above)' : 'Update it there';
@@ -610,8 +866,18 @@
     };
     const detailsFold = opened('details', el('details', { class: 'pc-fold' }, el('summary', {}, el('span', { text: 'Details' }), el('span', { class: 'hint', text: 'processor, disk, tokens, power cost' })), specsPart(v), strip, tokenLine, ...up, topPart(v)));
     const nameFold = opened('name', el('details', { class: 'pc-fold' }, el('summary', {}, el('span', { text: 'Name and photo' }), el('span', { class: 'hint', text: 'what this PC is called in the left panel' })), profileBlock(v)));
+    // A linked PC's log, read from here when the fold is opened (this PC's own is under Help, Open the log).
+    let logFold = null;
+    if (!v.here) {
+      const lp = logPart(v);
+      logFold = opened('log', el('details', { class: 'pc-fold' }, el('summary', {}, el('span', { text: 'Log' }), el('span', { class: 'hint', text: 'what happened on that PC, the last 7 days' })), lp.part));
+      logFold.addEventListener('toggle', () => { if (logFold.open && !logAsk.shown) lp.read(); });
+      if (logFold.open && !logAsk.shown) lp.read();
+    }
     const lowDisk = v.disk && v.disk.free < LOW_DISK ? el('p', { class: 'fault-line pc-warn', role: 'alert', text: `The disk is nearly full: ${GBs(v.disk.free)} free. A model or a backup may not fit.` }) : null;
-    body.replaceChildren(head, lowDisk ?? '', v.here ? installBox : '', modelsPart(v), peoplePart(v), detailsFold, nameFold, fold
+    const away = !v.here && v.fault ? el('p', { class: 'fault-line pc-warn', role: 'status', text: v.fault })
+      : v.checking ? el('p', { class: 'hint pc-warn', role: 'status', text: `Shown as ${title} said last. Asking it now…` }) : null;
+    body.replaceChildren(head, actions ?? '', away ?? '', lowDisk ?? '', v.here ? installBox : '', modelsPart(v), peoplePart(v), detailsFold, nameFold, fold, logFold ?? ''
     );
   }
   const foldsOpen = {};
@@ -621,11 +887,44 @@
   /** Opens a PC's window: 'here' for this PC, else a linked PC's id. */
   app.openPc = id => {
     say('');
+    // The log is read again each time the window opens (an open Log fold reads it at once).
+    logAsk.shown = null;
+    // Its name at once (a linked PC's window said "My PC" until it answered).
+    $('#pc-title').textContent = app.pcLabel?.(id || 'here') ?? (id && id !== 'here' ? 'A linked PC' : 'My PC');
     body.replaceChildren(el('p', { class: 'hint', text: 'Reading…' }));
     if (!dlg.open) dlg.showModal();
     // "Its settings" only in this PC's own window for now (dropped from a linked PC's).
     $('#pc-more').hidden = !!id && id !== 'here';
-    load(id || 'here');
+    load(id || 'here', true);
+  };
+  /**
+   * Escape with a model's "…" menu open closes the menu only (focus back on its button); the next Escape closes the
+   * window. The keydown is stopped before the dialog takes it as its own close request.
+   */
+  const openMenu = () => dlg.querySelector('details.pc-model-more[open]');
+  const closeMenu = menu => {
+    menu.open = false;
+    menu.querySelector('summary')?.focus();
+  };
+  dlg.addEventListener('keydown', e => {
+    const menu = e.key === 'Escape' ? openMenu() : null;
+    if (!menu) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu(menu);
+  });
+  dlg.addEventListener('cancel', e => {
+    const menu = openMenu();
+    if (!menu) return;
+    e.preventDefault();
+    closeMenu(menu);
+  });
+  /** Settings > This PC: draws this PC's models list (search, All | Chat | Pictures, sort, Test speed, Hide, Delete) into `host`. */
+  app.pcModelsInto = (host, ask) => {
+    page = host;
+    pageAsk = ask;
+    host.replaceChildren(el('p', { class: 'hint', text: 'Reading…' }));
+    return load('here');
   };
   $('#pc-more').addEventListener('click', () => {
     dlg.close();

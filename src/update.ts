@@ -12,10 +12,10 @@
 // "Let linked PCs pull TOMLIN updates from here" (giveSide: its own app files only, read-only). The pulling PC runs the
 // same checks as for a push (updateSide's `here`, reached only from itself), without the tick or the PIN a push needs.
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { addPiece, freeBytes, partOf, readPiece, roomWhy, sizeOf, type Progress, type Wire } from './carry.ts';
+import { addPiece, afterStop, freeBytes, partOf, readPiece, roomWhy, sizeOf, type Progress, type Wire } from './carry.ts';
 
 /** Exit code Start TOMLIN.cmd reads as "start the copy named in next-copy.txt (in this folder) instead". */
 export const RESTART_INTO = 76;
@@ -42,21 +42,8 @@ export interface AppFile {
   bytes: number;
   /** SHA-256, hex. */
   sha: string;
-  /** Read from this path here when it is sent under another name (forOlderNode); never sent itself. */
-  from?: string;
 }
 
-/**
- * A copy for a PC from before the TOMLIN name (its list of app files has no "Start TOMLIN.cmd", so it refuses a copy
- * that names it): the launcher goes by the name that PC takes, "Start Shelby.cmd", holding the whole launcher (not the
- * forwarder), and "Install TOMLIN.cmd" stays out. That PC's own Start Shelby.cmd starts the new copy (exit 76); from
- * then on it takes the new names.
- */
-export function forOlderNode(files: AppFile[]): AppFile[] {
-  const launcher = files.find(f => f.path === 'Start TOMLIN.cmd');
-  if (!launcher) return withoutNewer(files);
-  return [...withoutNewer(files).filter(f => !['Start TOMLIN.cmd', 'Start Shelby.cmd', 'Install TOMLIN.cmd'].includes(f.path)), { ...launcher, path: 'Start Shelby.cmd', from: launcher.path }];
-}
 /**
  * Files at the top of the folder that newer copies list in PARTS and older ones do not (each older copy refuses a copy
  * that names one, before anything is kept): left out for such a PC. Its next update from a newer copy brings them.
@@ -66,25 +53,20 @@ export const NEWER_FILES = ['Welcome to TOMLIN.html'];
 export const withoutNewer = (files: AppFile[]) => files.filter(f => !NEWER_FILES.includes(f.path));
 /** The file name an older PC refused the copy for ("…not named as an app file (<name>)…"), or null. */
 const refusedName = (e: unknown) => /not named as an app file \(([^)]+)\)/.exec(String((e as Error)?.message ?? e))?.[1] ?? null;
-/** That PC refused the copy for a name it does not know from the TOMLIN name: sent again with forOlderNode. */
-export const refusedNewNames = (e: unknown) => /^(Start|Install) TOMLIN\.cmd$/.test(refusedName(e) ?? '');
 /** That PC refused the copy for a file newer than it (NEWER_FILES): sent again without them. */
 export const refusedNewerFile = (e: unknown) => NEWER_FILES.includes(refusedName(e) ?? '');
 /**
- * The same copy again for a PC that refused this one for a name it does not know, or null when the refusal was for
- * something else. Tried in turn: without the newer files (a TOMLIN-named PC before 2.0.50), then with the launcher
- * under its old name as well (a PC from before the TOMLIN name).
+ * The same copy again for a PC that refused this one for a file newer than it (a PC before 2.0.50), or null when the
+ * refusal was for something else or the newer files were already left out.
  */
-export function retryFor(files: AppFile[], sent: AppFile[], e: unknown): AppFile[] | null {
-  if (refusedNewNames(e)) return sent.some(f => f.from) ? null : forOlderNode(files);
+export function retryFor(sent: AppFile[], e: unknown): AppFile[] | null {
   if (refusedNewerFile(e)) return sent.some(f => NEWER_FILES.includes(f.path)) ? withoutNewer(sent) : null;
   return null;
 }
 
-/** The launcher in a copy's folder: Start TOMLIN.cmd, or Start Shelby.cmd in a copy an older PC took under that name. */
+/** The launcher in a copy's folder. */
 export function launcherIn(root: string): string {
-  const now = join(root, 'Start TOMLIN.cmd');
-  return !existsSync(now) && existsSync(join(root, 'Start Shelby.cmd')) ? join(root, 'Start Shelby.cmd') : now;
+  return join(root, 'Start TOMLIN.cmd');
 }
 
 /** Nothing larger is taken as an update (the app is about 300 MB unpacked). */
@@ -296,9 +278,10 @@ export interface UpdateNodeDeps {
   done: (dir: string, version: string, by: string, pulled?: boolean) => Promise<void>;
   /**
    * This PC's app lock PIN, typed on the PC sending an update (audit X2): checked, with wrong tries counted per link
-   * (`who`) apart from the lock screen's. Unset (tests of the copy itself): no PIN is asked.
+   * (`who`) apart from the lock screen's. Unset (tests of the copy itself): no PIN is asked. `host`: the host PIN that
+   * link gave this PC (src/hostpin.ts), sent in place of the PC's own.
    */
-  pinCheck?: (pin: unknown, who: string) => Promise<{ ok: true } | { status: number; error: string }>;
+  pinCheck?: (pin: unknown, who: string, host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>;
 }
 
 const no = (status: number, error: string) => ({ status, json: { error } as Record<string, unknown> });
@@ -306,8 +289,8 @@ const no = (status: number, error: string) => ({ status, json: { error } as Reco
 /** Who an update pulled by this PC itself comes from, as `updateSide` keeps it: never a link's key (those are hex). */
 const HERE = 'this PC';
 
-/** An update's files while they come in, beside the app's copies (.shelby- before the TOMLIN name). */
-const INCOMING = /^\.(tomlin|shelby)-\d+\.\d+\.\d+-incoming$/;
+/** An update's files while they come in, beside the app's copies. */
+const INCOMING = /^\.tomlin-\d+\.\d+\.\d+-incoming$/;
 /** An update left half way stays to be carried on, but not for ever: at start, one untouched this long is removed. */
 export const INCOMING_DAYS = 3;
 
@@ -361,18 +344,22 @@ export function updateSide(d: UpdateNodeDeps) {
     return current;
   };
 
-  const door = async (p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece: Buffer | undefined, here: boolean): Promise<{ status: number; json: Record<string, unknown> }> => {
+  const door = async (p: string, b: Record<string, unknown>, who: { key: string; name: string; link?: string }, piece: Buffer | undefined, here: boolean): Promise<{ status: number; json: Record<string, unknown> }> => {
+    // A host PIN sent in place of this PC's own is checked against the one that link gave (never another link's).
+    const host = b.hostPin !== undefined ? { pin: b.hostPin, link: who.link } : undefined;
     switch (p) {
       case '/worker/update-pin': {
-        // The sending page's quick check, so a wrong PIN is said at once (the offer checks it again).
-        const ok = d.pinCheck ? await d.pinCheck(b.appPin, who.key) : { ok: true as const };
+        // The sending page's quick check, so a wrong PIN is said at once (the offer checks it again). Not answered
+        // while updates from other PCs are not allowed here: the door would only serve to try PINs.
+        if (!here && !d.allowed()) return no(403, `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`);
+        const ok = d.pinCheck ? await d.pinCheck(b.appPin, who.key, host) : { ok: true as const };
         return 'error' in ok ? { status: ok.status, json: { error: `"${d.pcName()}" ${ok.error}.`, needPin: true } } : { status: 200, json: { ok: true } };
       }
       case '/worker/update-offer': {
         const refused = why(b.version, b.build, here);
         if (refused) return no(403, refused);
         if (d.pinCheck && !here) {
-          const ok = await d.pinCheck(b.appPin, who.key);
+          const ok = await d.pinCheck(b.appPin, who.key, host);
           if ('error' in ok) return { status: ok.status, json: { error: `"${d.pcName()}" ${ok.error}.`, needPin: true } };
         }
         if (current && current.from !== who.key && Date.now() - current.at < 10 * 60_000) return no(409, current.from === HERE ? `"${d.pcName()}" is taking an update from "${current.fromName}" now.` : `another PC is updating "${d.pcName()}" now.`);
@@ -514,7 +501,7 @@ export function updateSide(d: UpdateNodeDeps) {
   const incoming = (now = Date.now()): { version: string; from: string; starting: boolean } | null =>
     starting ? { version: starting.version, from: starting.fromName, starting: true }
       : current && now - current.at < 2 * 60_000 ? { version: current.version, from: current.fromName, starting: false } : null;
-  const handle = (p: string, b: Record<string, unknown>, who: { key: string; name: string }, piece?: Buffer) => door(p, b, who, piece, false);
+  const handle = (p: string, b: Record<string, unknown>, who: { key: string; name: string; link?: string }, piece?: Buffer) => door(p, b, who, piece, false);
   /** An update this PC pulls from the linked PC named `from` (pullUpdate), never asked for over the link. */
   const here = (p: string, b: Record<string, unknown>, from: string, piece?: Buffer) => door(p, b, { key: HERE, name: from }, piece, true);
   return Object.assign(handle, { incoming, swept, here });
@@ -594,20 +581,20 @@ export function updateWhy(pc: { name: string; ok: boolean; version: string; buil
  * Sends this copy to a linked PC: the list, then only the files it does not have, then "finish". While that PC works
  * for someone it is asked again every 10 seconds (up to 15 minutes). Gives the new folder's name there.
  */
-export async function pushUpdate(w: Wire, o: { version: string; root: string; files: AppFile[]; /** That PC's app lock PIN (one that asks it: audit X2). */ pin?: string; progress: (p: Partial<Progress> & { stage?: 'compare' | 'send' | 'start' }) => void; signal: AbortSignal; waiting?: (busy: string) => void; wait?: (ms: number) => Promise<void>; /** Where a piece comes from (a pull: the PC it is pulled from); else read from `root`. */ read?: (f: AppFile, at: number) => Promise<Buffer> }): Promise<string> {
+export async function pushUpdate(w: Wire, o: { version: string; root: string; files: AppFile[]; /** That PC's app lock PIN (one that asks it: audit X2). */ pin?: string; /** Or the host PIN it holds from this PC (src/hostpin.ts). */ hostPin?: string; progress: (p: Partial<Progress> & { stage?: 'compare' | 'send' | 'start' }) => void; signal: AbortSignal; waiting?: (busy: string) => void; wait?: (ms: number) => Promise<void>; /** Where a piece comes from (a pull: the PC it is pulled from); else read from `root`. */ read?: (f: AppFile, at: number) => Promise<Buffer> }): Promise<string> {
   const wait = o.wait ?? (ms => new Promise(r => setTimeout(r, ms)));
   o.progress({ stage: 'compare' });
   // The build id of exactly these files: a node at the same version takes them when its own build differs (an older
   // node ignores it and goes by the version, as before).
   const build = buildIdOf(o.files);
-  const offer = await w.ask('/worker/update-offer', { version: o.version, build, files: o.files.map(({ path, bytes, sha }) => ({ path, bytes, sha })), ...(o.pin !== undefined ? { appPin: o.pin } : {}) });
+  const offer = await w.ask('/worker/update-offer', { version: o.version, build, files: o.files.map(({ path, bytes, sha }) => ({ path, bytes, sha })), ...(o.pin !== undefined ? { appPin: o.pin } : {}), ...(o.hostPin !== undefined ? { hostPin: o.hostPin } : {}) });
   const need = (Array.isArray(offer.need) ? offer.need : []).map(Number);
   const at0 = (Array.isArray(offer.at) ? offer.at : []).map(Number);
   const bytes = need.reduce((n, k) => n + (o.files[k]?.bytes ?? 0), 0);
   let before = 0;
   o.progress({ stage: 'send', done: 0, bytes });
   const stop = async () => {
-    await w.ask('/worker/update-drop', { version: o.version }).catch(() => undefined);
+    await afterStop(() => w.ask('/worker/update-drop', { version: o.version })).catch(() => undefined);
     throw new Error('Stopped.');
   };
   for (const [j, k] of need.entries()) {
@@ -616,7 +603,11 @@ export async function pushUpdate(w: Wire, o: { version: string; root: string; fi
     for (let at = Math.max(0, Math.min(at0[j] || 0, f.bytes)); at < f.bytes;) {
       if (o.signal.aborted) await stop();
       o.progress({ done: before + at, bytes });
-      const r = await w.putPiece('/worker/update-put', { version: o.version, file: k, from: at }, await (o.read ? o.read(f, at) : readPiece(join(o.root, ...(f.from ?? f.path).split('/')), at)));
+      const r = await w.putPiece('/worker/update-put', { version: o.version, file: k, from: at }, await (o.read ? o.read(f, at) : readPiece(join(o.root, ...f.path.split('/')), at))).catch(async e => {
+        // Stop pressed while the piece was on its way ends it at once: the tidy-up still goes.
+        if (o.signal.aborted) await stop();
+        throw e;
+      });
       at = Number(r.at);
       if (!Number.isSafeInteger(at) || at < 0) throw new Error('that PC did not say how much it has.');
     }

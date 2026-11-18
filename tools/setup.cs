@@ -2,7 +2,10 @@
 // the C# compiler that comes with Windows (.NET Framework 4), so nothing is downloaded, then runs it. It decides nothing
 // itself: it asks "node tools/install.ts status" what is installed, checks a typed folder with "check", and runs
 // "install --yes ..." with the answers, showing its lines. A copy of the same rules, so the console setup
-// ("Install TOMLIN.cmd --console") and this window cannot drift apart.
+// ("Install TOMLIN.cmd --console") and this window cannot drift apart. When a copy is already installed, the first page
+// says which (folder and version) and which version this setup holds, and offers Repair | Update | Uninstall to click
+// (the words come from status, src/installer.ts windowMenu); the choice is passed by name (install --action update,
+// repair --yes, uninstall --yes after its own confirm page), so no yes/no default decides it. Cancel changes nothing.
 //   TOMLIN Setup.exe --node <node.exe> --src <the unzipped folder> [--shots <folder>]
 //   TOMLIN-Setup-<version>.exe   (no arguments: the release zip is carried after the exe's own bytes, tools/setupexe.ts;
 //                                 it is checked against its SHA-256, unpacked to a temp folder, and removed again at the end)
@@ -27,6 +30,10 @@ using System.Windows.Forms;
 class Info
 {
     public string Version = "", Installed = "", Root = "", Exe = "", Home = "", Vcrt = "ok", Rule = "no", Autostart = "no", User = "";
+    // When a copy is installed: where it was found, the words of the first page, the choices (key, label), the one
+    // ticked at the start ("" = none) and what Uninstall removes and keeps. All from src/installer.ts windowMenu.
+    public string Found = "", Intro = "", Pick = "", Removes = "";
+    public List<string[]> Choices = new List<string[]>();
 }
 
 /** A read-only window of a file: the zip carried after the exe's own bytes (seekable, as ZipArchive needs). */
@@ -84,18 +91,21 @@ class Wizard : Form
 {
     static string node, src;
     Info info = new Info();
-    string mode = "install"; // install, update or repair
+    // install (nothing installed), or what was picked for an installed copy: update, repair, uninstall, "" (not yet).
+    string mode = "install";
+    bool installedNow;
     string chosenRoot = "";
 
     Panel header, footer;
     Label title, subtitle;
     Button back, next, cancel;
-    List<Panel> pages = new List<Panel>();
-    List<string> names = new List<string>();
+    Dictionary<string, Panel> pageOf = new Dictionary<string, Panel>();
+    List<string> names = new List<string>(); // the pages this mode goes through, in order (Flow)
+    List<RadioButton> radios = new List<RadioButton>();
     int at;
-    Panel pWelcome, pFolder, pOptions, pProgress, pFinish;
+    Panel pWelcome, pFolder, pOptions, pConfirm, pProgress, pFinish;
     TextBox folderBox, log;
-    CheckBox cDesktop, cAutostart, cFirewall, cVcrt, cLaunch;
+    CheckBox cDesktop, cAutostart, cFirewall, cVcrt, cLaunch, cRemoveRule;
     ProgressBar bar;
     Label finishText, welcomeText, optionsNote;
     bool running, failed;
@@ -232,8 +242,22 @@ class Wizard : Form
     /** Runs node tools/install.ts with the arguments; each output line goes to onLine; returns the exit code. */
     static int Node(string args, Action<string> onLine)
     {
-        ProcessStartInfo psi = new ProcessStartInfo(node, "\"" + Path.Combine(src, "tools\\install.ts") + "\" " + args);
-        psi.WorkingDirectory = src;
+        string exe = node, dir = src;
+        // Uninstall removes the install folder: it runs from a copy of Node.js outside it, with its working folder outside
+        // it too, as the tray's own Uninstall does (a program or working folder inside it kept it from being removed).
+        if (args.StartsWith("uninstall"))
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "tomlin-uninstall");
+            try
+            {
+                Directory.CreateDirectory(temp);
+                dir = temp;
+                if (File.Exists(node)) { File.Copy(node, Path.Combine(temp, "node.exe"), true); exe = Path.Combine(temp, "node.exe"); }
+            }
+            catch (Exception) { }
+        }
+        ProcessStartInfo psi = new ProcessStartInfo(exe, "\"" + Path.Combine(src, "tools\\install.ts") + "\" " + args);
+        psi.WorkingDirectory = dir;
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
         psi.RedirectStandardOutput = true;
@@ -264,28 +288,20 @@ class Wizard : Form
             if (k == "version") r.Version = v; else if (k == "installed") r.Installed = v; else if (k == "root") r.Root = v;
             else if (k == "exe") r.Exe = v; else if (k == "home") r.Home = v; else if (k == "vcrt") r.Vcrt = v;
             else if (k == "rule") r.Rule = v; else if (k == "autostart") r.Autostart = v; else if (k == "user") r.User = v;
+            else if (k == "found") r.Found = v; else if (k == "intro") r.Intro = v; else if (k == "pick") r.Pick = v; else if (k == "removes") r.Removes = v;
+            else if (k == "choice") { int bar = v.IndexOf('|'); if (bar > 0) r.Choices.Add(new string[] { v.Substring(0, bar), v.Substring(bar + 1) }); }
         });
         if (r.Version.Length == 0) throw new Exception("no status");
         return r;
     }
 
-    static bool Newer(string a, string b)
-    {
-        string[] x = a.Split('.'), y = b.Split('.');
-        for (int i = 0; i < Math.Max(x.Length, y.Length); i++)
-        {
-            int p = 0, q = 0;
-            if (i < x.Length) int.TryParse(x[i], out p);
-            if (i < y.Length) int.TryParse(y[i], out q);
-            if (p != q) return p > q;
-        }
-        return false;
-    }
-
     Wizard()
     {
         info = ReadStatus();
-        if (info.Installed.Length > 0) mode = Newer(info.Installed, info.Version) ? "repair" : "update";
+        installedNow = info.Installed.Length > 0;
+        // A copy is there: nothing is chosen for the person; the first page offers Repair | Update | Uninstall, with the
+        // same one ticked as the terminal's Enter (none for the same version: Next waits for a click).
+        if (installedNow) mode = info.Pick;
         chosenRoot = info.Root;
 
         Text = "TOMLIN setup";
@@ -313,18 +329,50 @@ class Wizard : Form
         cancel = new Button(); cancel.Text = "Cancel"; cancel.SetBounds(510, 14, 80, 28);
         back.Click += delegate { Go(at - 1); };
         next.Click += delegate { OnNext(); };
+        // Cancel closes setup; before the run starts nothing has been changed.
         cancel.Click += delegate { Close(); };
         AcceptButton = next;
         footer.Controls.AddRange(new Control[] { line2, back, next, cancel });
 
         BuildPages();
+        names = Flow();
         // Docking order: the page area fills what is left.
         Panel area = new Panel(); area.Dock = DockStyle.Fill;
-        foreach (Panel p in pages) { p.Dock = DockStyle.Fill; p.Visible = false; area.Controls.Add(p); }
+        foreach (Panel p in pageOf.Values) { p.Dock = DockStyle.Fill; p.Visible = false; area.Controls.Add(p); }
         Controls.Add(area);
         Controls.Add(footer);
         Controls.Add(line1);
         Controls.Add(header);
+        Go(0);
+    }
+
+    /** The pages for the mode, in order. */
+    List<string> Flow()
+    {
+        List<string> f = new List<string>();
+        f.Add("welcome");
+        if (mode == "install") { f.Add("folder"); f.Add("options"); }
+        else if (mode == "update") f.Add("options");
+        else if (mode == "uninstall") f.Add("confirm");
+        f.Add("progress");
+        f.Add("finish");
+        return f;
+    }
+
+    string Verb()
+    {
+        if (mode == "install") return "Install";
+        if (mode == "update") return info.Installed == info.Version ? "Reinstall" : "Update";
+        if (mode == "repair") return "Repair";
+        if (mode == "uninstall") return "Uninstall";
+        return "Next >";
+    }
+
+    /** A choice on the first page was clicked: the pages after it follow that choice. */
+    void Choose(string key)
+    {
+        mode = key;
+        names = Flow();
         Go(0);
     }
 
@@ -340,13 +388,27 @@ class Wizard : Form
 
     void BuildPages()
     {
-        string verb = mode == "install" ? "Install" : mode == "update" ? "Update" : "Repair";
-
         pWelcome = new Panel();
-        welcomeText = Text2(pWelcome, "", 26, 22, 548, 250);
-        pages.Add(pWelcome); names.Add("welcome");
+        if (!installedNow) welcomeText = Text2(pWelcome, "", 26, 22, 548, 250);
+        else
+        {
+            // Which copy was found (folder and version), which version this setup holds, then the choices to click.
+            welcomeText = Text2(pWelcome, "", 26, 16, 548, 64);
+            int y = 84;
+            foreach (string[] c in info.Choices)
+            {
+                RadioButton r = new RadioButton();
+                r.Text = c[1]; r.Tag = c[0]; r.AutoSize = false; r.SetBounds(26, y, 548, 30);
+                r.Checked = c[0] == info.Pick;
+                r.CheckedChanged += delegate(object s, EventArgs e) { RadioButton me = (RadioButton)s; if (me.Checked) Choose((string)me.Tag); };
+                pWelcome.Controls.Add(r); radios.Add(r);
+                y += 34;
+            }
+            Text2(pWelcome, "Whichever you pick, your chats, staff, pictures and models in " + info.Home + " are kept. Cancel closes setup and changes nothing.", 26, y + 10, 548, 64);
+        }
+        pageOf["welcome"] = pWelcome;
 
-        if (mode == "install")
+        if (!installedNow)
         {
             pFolder = new Panel();
             Text2(pFolder, "TOMLIN will be installed in this folder. To use another, type its path or press Browse.", 26, 22, 548, 40);
@@ -362,73 +424,91 @@ class Wizard : Form
             Text2(pFolder, "The folder must be new or empty. It is made for you if it does not exist. Your chats, staff, pictures and models are not kept here; they stay in " + info.Home + ".", 26, 112, 548, 60);
             Button reset = new Button(); reset.Text = "Use the standard folder"; reset.SetBounds(26, 182, 170, 28); pFolder.Controls.Add(reset);
             reset.Click += delegate { folderBox.Text = info.Root; };
-            pages.Add(pFolder); names.Add("folder");
+            pageOf["folder"] = pFolder;
         }
 
-        if (mode != "repair")
+        pOptions = new Panel();
+        Text2(pOptions, "Choose what setup adds. You can change all of these later in TOMLIN.", 26, 18, 548, 24);
+        cDesktop = Check(pOptions, "Put a TOMLIN shortcut on the desktop", 52, true, 24);
+        cAutostart = Check(pOptions, "Start TOMLIN when I sign in to Windows (for a PC that lends its models to others)", 82, info.Autostart == "yes", 24);
+        int oy = 112;
+        if (info.Rule == "no")
         {
-            pOptions = new Panel();
-            Text2(pOptions, "Choose what setup adds. You can change all of these later in TOMLIN.", 26, 18, 548, 24);
-            cDesktop = Check(pOptions, "Put a TOMLIN shortcut on the desktop", 52, true, 24);
-            cAutostart = Check(pOptions, "Start TOMLIN when I sign in to Windows (for a PC that lends its models to others)", 82, info.Autostart == "yes", 24);
-            int y = 112;
-            if (info.Rule == "no")
-            {
-                cFirewall = Check(pOptions, "This is a worker PC my other PCs will use: add the firewall rule (Windows asks you to allow it; only PCs on your home network get in)", y, true, 44);
-                y += 54;
-            }
-            if (info.Vcrt != "ok")
-            {
-                cVcrt = Check(pOptions, info.Vcrt == "missing"
-                    ? "Download the Microsoft Visual C++ Runtime (about 19 MB, from Microsoft). Without it TOMLIN opens but no model loads."
-                    : "Update the Microsoft Visual C++ Runtime (about 19 MB, from Microsoft). The one on this PC is older than the model runners need.", y, true, 44);
-                y += 54;
-            }
-            optionsNote = Text2(pOptions, "Nothing here needs an administrator account.", 26, y + 6, 548, 24);
-            pages.Add(pOptions); names.Add("options");
+            cFirewall = Check(pOptions, "This is a worker PC my other PCs will use: add the firewall rule (Windows asks you to allow it; only PCs on your home network get in)", oy, true, 44);
+            oy += 54;
+        }
+        if (info.Vcrt != "ok")
+        {
+            cVcrt = Check(pOptions, info.Vcrt == "missing"
+                ? "Download the Microsoft Visual C++ Runtime (about 19 MB, from Microsoft). Without it TOMLIN opens but no model loads."
+                : "Update the Microsoft Visual C++ Runtime (about 19 MB, from Microsoft). The one on this PC is older than the model runners need.", oy, true, 44);
+            oy += 54;
+        }
+        optionsNote = Text2(pOptions, "Nothing here needs an administrator account.", 26, oy + 6, 548, 24);
+        pageOf["options"] = pOptions;
+
+        if (installedNow)
+        {
+            // Uninstall asks once more, on its own page: what goes, what is kept. Nothing is removed before the click.
+            pConfirm = new Panel();
+            Text2(pConfirm, info.Removes, 26, 22, 548, 96);
+            if (info.Rule == "yes") cRemoveRule = Check(pConfirm, "Also remove the Windows firewall rule that let your other PCs link to this one (Windows asks you to allow it)", 128, true, 44);
+            pageOf["confirm"] = pConfirm;
         }
 
         pProgress = new Panel();
         bar = new ProgressBar(); bar.Style = ProgressBarStyle.Marquee; bar.MarqueeAnimationSpeed = 30; bar.SetBounds(26, 20, 548, 18); pProgress.Controls.Add(bar);
         log = new TextBox(); log.Multiline = true; log.ReadOnly = true; log.ScrollBars = ScrollBars.Vertical; log.SetBounds(26, 50, 548, 220);
         log.BackColor = Color.White; log.Font = new Font("Consolas", 9f); log.TabStop = false; pProgress.Controls.Add(log);
-        pages.Add(pProgress); names.Add("progress");
+        pageOf["progress"] = pProgress;
 
         pFinish = new Panel();
         finishText = Text2(pFinish, "", 26, 22, 548, 150);
         cLaunch = Check(pFinish, "Start TOMLIN now", 190, true, 24);
-        pages.Add(pFinish); names.Add("finish");
+        pageOf["finish"] = pFinish;
     }
 
     void Go(int i)
     {
-        at = Math.Max(0, Math.Min(pages.Count - 1, i));
-        foreach (Panel p in pages) p.Visible = false;
-        pages[at].Visible = true;
+        at = Math.Max(0, Math.Min(names.Count - 1, i));
+        foreach (Panel p in pageOf.Values) p.Visible = false;
         string n = names[at];
-        string verb = mode == "install" ? "Install" : mode == "update" ? "Update" : "Repair";
+        pageOf[n].Visible = true;
         back.Visible = n != "welcome" && n != "progress" && n != "finish";
         back.Enabled = at > 0;
         next.Enabled = true;
         cancel.Enabled = true;
+        cancel.Visible = true;
         cancel.Text = "Cancel";
         string beforeRun = names[Math.Max(0, names.IndexOf("progress") - 1)];
-        next.Text = n == beforeRun ? verb : n == "finish" ? "Finish" : "Next >";
+        next.Text = n == beforeRun ? Verb() : n == "finish" ? "Finish" : "Next >";
         if (n == "welcome")
         {
-            title.Text = "Welcome to TOMLIN setup";
-            subtitle.Text = mode == "install" ? "Version " + info.Version : mode == "update" ? "Update " + info.Installed + " to " + info.Version : "Repair TOMLIN " + info.Installed;
             string who = info.User.Length > 0 ? "for " + info.User : "for you";
-            if (mode == "install") welcomeText.Text = "This installs TOMLIN " + info.Version + " " + who + " only, with its own copy of Node.js. It needs no administrator account.\r\n\r\nYour chats, staff, pictures and models are kept in " + info.Home + " and are never touched by setup.\r\n\r\nClick Next to carry on.";
-            else if (mode == "update") welcomeText.Text = "TOMLIN " + info.Installed + " is installed in " + info.Root + ". Setup replaces it with " + info.Version + " in the same folder, and keeps the version before it so you can go back.\r\n\r\nYour chats, staff, pictures and models are kept in " + info.Home + " and are never touched by setup.\r\n\r\nClick Next to carry on.";
-            else welcomeText.Text = "TOMLIN " + info.Installed + " is installed in " + info.Root + ", which is newer than the " + info.Version + " in this setup, so it is not replaced.\r\n\r\nSetup can check the installed one and repair what is wrong (shortcuts, the program, a damaged copy). It stays " + info.Installed + ".\r\n\r\nClick Repair to carry on.";
-            if (mode == "repair") next.Text = "Repair";
+            if (!installedNow)
+            {
+                title.Text = "Welcome to TOMLIN setup";
+                subtitle.Text = "Version " + info.Version;
+                welcomeText.Text = "This installs TOMLIN " + info.Version + " " + who + " only, with its own copy of Node.js. It needs no administrator account.\r\n\r\nYour chats, staff, pictures and models are kept in " + info.Home + " and are never touched by setup.\r\n\r\nClick Next to carry on.";
+            }
+            else
+            {
+                title.Text = "TOMLIN is already installed";
+                subtitle.Text = "Pick what setup should do with it.";
+                welcomeText.Text = info.Intro;
+                next.Enabled = mode.Length > 0;
+            }
         }
         else if (n == "folder") { title.Text = "Where to install"; subtitle.Text = "TOMLIN goes in one folder, for you only."; }
-        else if (n == "options") { title.Text = "Options"; subtitle.Text = "Shortcuts and start-up."; }
+        else if (n == "options")
+        {
+            title.Text = "Options";
+            subtitle.Text = mode == "update" ? Verb() + " TOMLIN " + info.Installed + (info.Installed == info.Version ? "" : " to " + info.Version) + " in the same folder" : "Shortcuts and start-up.";
+        }
+        else if (n == "confirm") { title.Text = "Uninstall TOMLIN " + info.Installed + "?"; subtitle.Text = "Your chats, staff, pictures and models are kept."; }
         else if (n == "progress")
         {
-            title.Text = mode == "install" ? "Installing" : mode == "update" ? "Updating" : "Repairing";
+            title.Text = mode == "install" ? "Installing" : mode == "update" ? "Updating" : mode == "repair" ? "Repairing" : "Removing TOMLIN";
             subtitle.Text = "Please wait; this takes a minute or two.";
             back.Visible = false; next.Enabled = false; cancel.Enabled = false;
         }
@@ -440,6 +520,13 @@ class Wizard : Form
                 title.Text = "Setup did not finish";
                 subtitle.Text = "Nothing is lost: your chats and models were not touched.";
                 finishText.Text = "Setup stopped. The last lines it showed:\r\n\r\n" + lastLines + "\r\n\r\nClose this window, fix the cause, then run Install TOMLIN again. Nothing was started.";
+                cLaunch.Visible = false; next.Text = "Close";
+            }
+            else if (mode == "uninstall")
+            {
+                title.Text = "TOMLIN is removed";
+                subtitle.Text = "Your chats, staff, pictures and models are kept.";
+                finishText.Text = "TOMLIN " + info.Installed + " was removed from " + info.Root + ".\r\n\r\nYour chats, staff, pictures and models are kept in " + info.Home + ". To use TOMLIN again, run this setup again.";
                 cLaunch.Visible = false; next.Text = "Close";
             }
             else
@@ -458,10 +545,11 @@ class Wizard : Form
         string n = names[at];
         if (n == "finish")
         {
-            if (!failed && cLaunch.Checked) LaunchApp();
+            if (!failed && mode != "uninstall" && cLaunch.Checked) LaunchApp();
             Close();
             return;
         }
+        if (n == "welcome" && mode.Length == 0) return;
         if (n == "folder")
         {
             string typed = folderBox.Text.Trim();
@@ -476,24 +564,36 @@ class Wizard : Form
             info.Root = chosenRoot;
         }
         string beforeRun = names[Math.Max(0, names.IndexOf("progress") - 1)];
-        if (n == beforeRun) { Go(names.IndexOf("progress")); StartRun(); return; }
+        if (n == beforeRun)
+        {
+            // Nothing can be clicked while it runs (the choices included).
+            foreach (RadioButton r in radios) r.Enabled = false;
+            Go(names.IndexOf("progress"));
+            StartRun();
+            return;
+        }
         Go(at + 1);
+    }
+
+    /** The installer command for the mode and the ticks (each choice by name: no yes/no default decides it). */
+    string RunArgs()
+    {
+        if (mode == "repair") return "repair --yes";
+        if (mode == "uninstall") return "uninstall --yes" + (cRemoveRule != null && cRemoveRule.Checked ? " --firewall" : " --no-firewall");
+        string args = "install --yes --no-start";
+        if (mode == "install") args += " --dir " + Q(chosenRoot);
+        else args += " --action update";
+        args += cDesktop.Checked ? " --desktop" : " --no-desktop";
+        args += cAutostart.Checked ? " --autostart" : " --no-autostart";
+        args += cFirewall != null ? (cFirewall.Checked ? " --firewall" : " --no-firewall") : " --no-firewall";
+        args += cVcrt != null ? (cVcrt.Checked ? " --vcrt" : " --no-vcrt") : " --no-vcrt";
+        return args;
     }
 
     void StartRun()
     {
         running = true;
-        string args;
-        if (mode == "repair") args = "repair --yes";
-        else
-        {
-            args = "install --yes --no-start";
-            if (mode == "install") args += " --dir " + Q(chosenRoot);
-            args += cDesktop.Checked ? " --desktop" : " --no-desktop";
-            args += cAutostart.Checked ? " --autostart" : " --no-autostart";
-            args += cFirewall != null ? (cFirewall.Checked ? " --firewall" : " --no-firewall") : " --no-firewall";
-            args += cVcrt != null ? (cVcrt.Checked ? " --vcrt" : " --no-vcrt") : " --no-vcrt";
-        }
+        string args = RunArgs();
         Thread t = new Thread(delegate()
         {
             int code;
@@ -519,7 +619,7 @@ class Wizard : Form
         running = false;
         failed = code != 0;
         lastLines = last;
-        if (!failed) { try { Info now = ReadStatus(); info.Root = now.Root; info.Exe = now.Exe; } catch (Exception) { } }
+        if (!failed && mode != "uninstall") { try { Info now = ReadStatus(); info.Root = now.Root; info.Exe = now.Exe; } catch (Exception) { } }
         Go(names.IndexOf("finish"));
     }
 
@@ -534,7 +634,18 @@ class Wizard : Form
         base.OnFormClosing(e);
     }
 
-    /** Saves a picture of each page into the folder (a test hook, see the top). */
+    void Snap(string file)
+    {
+        Application.DoEvents();
+        Bitmap bmp = new Bitmap(Width, Height);
+        DrawToBitmap(bmp, new Rectangle(0, 0, Width, Height));
+        bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    /**
+     * Saves a picture of each page into the folder (a test hook, see the top). With a copy installed: the first page
+     * with nothing picked, then each choice's pages, named by the choice.
+     */
     void Shots(string dir)
     {
         Directory.CreateDirectory(dir);
@@ -542,20 +653,24 @@ class Wizard : Form
         log.Text = "Copying TOMLIN 2.0.79 to the install folder ...\r\nbuild TOMLIN.exe\r\nadd TOMLIN to the Start menu";
         log.SelectionStart = log.Text.Length; log.SelectionLength = 0;
         lastLines = "The C# compiler that comes with Windows is not on this PC.";
-        for (int i = 0; i < pages.Count; i++)
+        List<string> modes = new List<string>();
+        if (installedNow) { modes.Add(""); foreach (string[] c in info.Choices) modes.Add(c[0]); }
+        else modes.Add("install");
+        foreach (string m in modes)
         {
-            Go(i);
-            Application.DoEvents();
-            Bitmap bmp = new Bitmap(Width, Height);
-            DrawToBitmap(bmp, new Rectangle(0, 0, Width, Height));
-            bmp.Save(Path.Combine(dir, (i + 1) + "-" + names[i] + ".png"), System.Drawing.Imaging.ImageFormat.Png);
+            foreach (RadioButton r in radios) r.Checked = (string)r.Tag == m;
+            mode = m;
+            names = Flow();
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (m.Length == 0 && i > 0) break;
+                Go(i);
+                Snap(Path.Combine(dir, (m.Length == 0 ? "none" : m) + "-" + (i + 1) + "-" + names[i] + ".png"));
+            }
         }
         failed = true;
         Go(names.IndexOf("finish"));
-        Application.DoEvents();
-        Bitmap bad = new Bitmap(Width, Height);
-        DrawToBitmap(bad, new Rectangle(0, 0, Width, Height));
-        bad.Save(Path.Combine(dir, "failed.png"), System.Drawing.Imaging.ImageFormat.Png);
+        Snap(Path.Combine(dir, "failed.png"));
         failed = false;
     }
 }

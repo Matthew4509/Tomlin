@@ -4,7 +4,6 @@
 // (Vulkan) are included when this PC has them. Every zip is signed with the release key (tools/sign.ts): a missing or
 // different key stops the pack before anything is made, and a private key anywhere in what would ship stops it too.
 //   npm run pack                 (npm run pack -- --new-key: the release key is lost, make a new one)
-import '../src/envnames.ts';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';

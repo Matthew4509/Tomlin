@@ -20,6 +20,8 @@ const mp = {
   terms: new Set(),
   /** Mixture-of-experts ticked: mixtures of experts only (as well as any term). */
   moe: false,
+  /** Capability ticks (images, tools, general): a model that is any one of them shows; none ticked = all. */
+  caps: new Set(),
   /** Fits my card ticked: only chat models with a size that sits wholly on the graphics cards; cards = {n, total} (/api/models). */
   card: false, cards: null,
   /** Fits (the drop-down): '' = all sizes, 'here' = fits this PC, or a linked PC's id = fits that PC (its memory). */
@@ -73,6 +75,32 @@ const TERM_TIP = { abliterated: 'Only models with abliterated in the name: their
  * "8x7B", MoE, Mixtral, gpt-oss, DeepSeek V2 and V3. A model on this PC is also known by its file.
  */
 const MOE = /(?:^|[^a-z0-9])(?:\d+x\d+(?:\.\d+)?b|a\d+(?:\.\d+)?[bm]|[a-z]*moe|mixtral|gpt-oss|deepseek-v[23])(?![a-z])/i;
+/**
+ * What a model can do, as ticks and badges. A badge says what the file or its Hugging Face entry says, not that the model
+ * does it well: a small model can have a place for tools and still not use it (src/capabilities.ts).
+ */
+const CAP_NAME = { images: 'Reads pictures', tools: 'Uses tools', general: 'General chat' };
+const CAP_TIP = {
+  images: 'Only models that can read pictures: a picture-and-text model, or one with a vision file. TOMLIN does not send pictures to a chat model yet',
+  tools: 'Only models whose chat format has a place for tools (web search, reading pages, files). The format allows it; a small model may still not use tools well',
+  general: 'Only plain chat models: no picture reading and no place for tools in the chat format',
+};
+/** The badges for a model's capabilities ({images, tools}); none when they are not known yet or it is a plain chat model. */
+function capBadges(caps) {
+  if (!caps) return [];
+  return [
+    caps.images ? el('span', { class: 'mp-cap', title: CAP_TIP.images, text: 'Pictures' }) : null,
+    caps.tools ? el('span', { class: 'mp-cap', title: CAP_TIP.tools, text: 'Tools' }) : null,
+  ].filter(Boolean);
+}
+/** A model's capabilities: its file's (on this PC), or its Hugging Face entry's once read; null while not known. */
+const capsOfItem = x => (x.repo ? mp.sizes[x.repo]?.caps : x.caps) ?? null;
+/** Whether a model passes the ticked capabilities (any one of them); one not known yet passes none. */
+function capsPass(caps) {
+  if (!mp.caps.size) return true;
+  if (!caps) return false;
+  return [...mp.caps].some(k => (k === 'images' ? caps.images : k === 'tools' ? caps.tools : !caps.images && !caps.tools));
+}
 const MOE_TIP = 'Only mixture-of-experts models (MoE): known by the name (A3B, 8x7B, MoE, Mixtral, gpt-oss…) or, on this PC, by the file. Fast for their size, but they need the memory of the whole model';
 const isMoeItem = x => (x.kind === 'chat' || x.kind === 'popular') && (!!x.moe || MOE.test(`${x.name} ${x.repo ?? ''}`));
 
@@ -89,6 +117,7 @@ function mpNav() {
             mp.cats.clear();
             mp.terms.clear();
             mp.moe = false;
+            mp.caps.clear();
             mp.card = false;
             mp.fitOn = '';
           } else if (e.target.checked) mp.cats.add(id);
@@ -110,6 +139,13 @@ function mpNav() {
           mpDraw();
           mpHfSearch(true);
         }),
+        ...Object.entries(CAP_NAME).map(([id, name]) => tick({ 'data-cap': id }, name, CAP_TIP[id], e => {
+          if (e.target.checked) mp.caps.add(id);
+          else mp.caps.delete(id);
+          mp.importing = false;
+          mpDraw();
+          mpHfSearch(true);
+        })),
         tick({ 'data-card': '' }, 'Fits my card', null, e => {
           mp.card = e.target.checked;
           mp.importing = false;
@@ -126,7 +162,7 @@ function mpNav() {
           } })))),
       el('ul', { class: 'mp-own' }, el('li', {}, el('button', { class: 'mp-cat mp-cat-own', type: 'button', id: 'mp-import', text: 'Import models', onclick: () => { mp.importing = !mp.importing; mpDraw(); } }))));
   }
-  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size && !mp.moe && !mp.card && !mp.fitOn : mp.cats.has(box.dataset.cat);
+  for (const box of nav.querySelectorAll('[data-cat]')) box.checked = box.dataset.cat === 'all' ? !mp.cats.size && !mp.terms.size && !mp.moe && !mp.caps.size && !mp.card && !mp.fitOn : mp.cats.has(box.dataset.cat);
   drawFitOn();
   // Fits my card: only on a PC whose chat can use a graphics card with memory of its own.
   const cardBox = nav.querySelector('[data-card]');
@@ -138,6 +174,7 @@ function mpNav() {
   }
   for (const box of nav.querySelectorAll('[data-term]')) box.checked = mp.terms.has(box.dataset.term);
   for (const box of nav.querySelectorAll('[data-moe]')) box.checked = mp.moe;
+  for (const box of nav.querySelectorAll('[data-cap]')) box.checked = mp.caps.has(box.dataset.cap);
 }
 
 // ---- Sizes: parameters ("9B") and what fits ----
@@ -371,7 +408,7 @@ function runnerPick(r) {
   } else if (chosen) {
     const name = toName(chosen.id);
     btn = el('button', {
-      class: 'btn primary', type: 'button', text: r.zips ? `Send to ${name}` : `Download ${MP_GB(r.bytes)} here, then send to ${name}`,
+      class: 'btn', type: 'button', text: r.zips ? `Send to ${name}` : `Download ${MP_GB(r.bytes)} here, then send to ${name}`,
       title: `${r.zips ? 'Sends' : 'Downloads it to this PC (checked), then sends'} it to ${name} over your home network. ${name} checks every file against the build its own TOMLIN names before it unpacks it. Network shows how far it is, with Stop.`,
       onclick: async e => {
         const b = e.currentTarget;
@@ -422,7 +459,7 @@ function runnerButtons(r) {
   }
   if (!r.installed && !r.why && !(g && !g.done && !g.error)) {
     parts.push(el('button', {
-      class: 'btn primary', type: 'button', text: `Download ${MP_GB(r.bytes)}`,
+      class: 'btn', type: 'button', text: `Download ${MP_GB(r.bytes)}`,
       title: `Downloads it from the ${r.engine === 'sd' ? 'stable-diffusion.cpp' : 'llama.cpp'} release on GitHub, checks each file by SHA-256 and unpacks it for this PC. The next model loaded uses it.`,
       onclick: async e => {
         e.currentTarget.disabled = true;
@@ -436,6 +473,10 @@ function runnerButtons(r) {
         mpLoad();
       },
     }));
+  }
+  // The first-run test (public/runnercheck.js), again whenever wanted: the chat card runners only.
+  if (r.engine === 'llama' && r.installed && app.openRunnerCheck) {
+    parts.push(el('button', { class: 'btn quiet', type: 'button', text: 'Test the runners on this PC', title: 'Loads the smallest chat model that fits the card on each graphics runner here, asks three short questions, and keeps the first that passes (about 2 to 6 minutes).', onclick: () => app.openRunnerCheck() }));
   }
   // Sending between PCs: the chat runner only (a node says how its chat runner is, not its picture one).
   const pick = r.engine === 'llama' && r.device === 'cuda' ? runnerPick(r) : null;
@@ -455,6 +496,7 @@ function runnerMore(r) {
   if (r.engine === 'llama' && r.best) more.push(r.installed ? '★ The one that suits this PC\'s card: Auto starts models on it.' : '★ The one that suits this PC\'s card.');
   else if (r.engine === 'llama' && r.installed && !r.why) more.push('Auto uses the CUDA build that suits the card first; the speed finder tries this one too, and recommends it for a model it runs faster.');
   if (r.why) more.push(r.why);
+  if (r.check) more.push(r.check.state === 'passed' ? `✓ Passed the runner test on this PC (${new Date(r.check.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}).` : `✕ Failed the runner test on this PC: ${r.check.why} Auto does not use it here until a new test passes.`);
   if (r.getting?.error) more.push(`✕ ${r.getting.error}`);
   if (r.zips) more.push(`Its files (${MP_GB(r.bytes)}) are kept here for sending to another PC.`);
   more.push(`Licence: ${r.licence}.`);
@@ -508,8 +550,10 @@ async function mpGet(repo, rev, name, btn) {
   try {
     mpSetJob(await api('/api/chatmodels/get', { repo, rev, name }));
   } catch (e) {
-    if (btn) btn.replaceWith(el('span', { class: 'fault-line', text: e.message }));
-    else $('#mp-job').replaceChildren(el('span', { class: 'fault-line', text: e.message }));
+    // Not enough room: Free up space opens with the numbers (the error carries `room`).
+    const free = e.data?.room ? app.cleanupButton(e.data.room) : null;
+    if (btn) btn.replaceWith(el('span', { class: 'fault-line', text: e.message }), ...(free ? [' ', free] : []));
+    else $('#mp-job').replaceChildren(el('span', { class: 'fault-line', text: e.message }), ...(free ? [' ', free] : []));
   }
 }
 async function mpStop() {
@@ -554,7 +598,7 @@ function mpItems() {
         el('span', { class: 'dl-text', text: `${dl.checking ? 'Checking' : 'Downloading'} ${pc}% of ${MP_GB(dl.bytes)}` }),
         el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: async () => { await api('/api/downloads/stop', { id: x.id }); mpLoad(); } }));
     }
-    return el('button', { class: 'btn primary', type: 'button', text: `Download ${MP_GB(x.bytes)}`, onclick: async e => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Starting…'; try { await api('/api/downloads/start', { id: x.id }); } catch (error) { e.target.replaceWith(el('span', { class: 'fault-line', text: error.message })); return; } mpLoad(); } });
+    return el('button', { class: 'btn', type: 'button', text: `Download ${MP_GB(x.bytes)}`, onclick: async e => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Starting…'; try { await api('/api/downloads/start', { id: x.id }); } catch (error) { e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }), ...(error.data?.room ? [' ', app.cleanupButton(error.data.room)] : [])); return; } mpLoad(); } });
   };
   const regState = x => {
     const dl = x.download;
@@ -569,7 +613,7 @@ function mpItems() {
     items.push({ id: `image:${x.id}`, kind: 'image', modes: x.modes ?? [], name: x.name.replace(/\s*\(.*\)$/, ''), tag: (/\((.*)\)$/.exec(x.name) ?? [])[1] ?? '', about: x.about ?? '', more, warn: x.nonCommercial || x.hardwareFit?.level === 'no', state: regState(x), button: withTo(`img|${x.id}`, downloadBtn(x), { kind: 'image', id: x.id, what: x.name.replace(/\s*\(.*\)$/, '') }, x.bytes, true), bytes: x.bytes });
   }
   for (const x of d.helpers) items.push({ id: `helper:${x.id}`, kind: 'helper', name: x.name, tag: '', about: x.about ?? '', more: [`Licence: ${x.licence}`], state: regState(x), button: downloadBtn(x), bytes: x.bytes });
-  for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`, cardText(c)].filter(Boolean), state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes, card: c.card ?? null, moe: !!c.moe });
+  for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`, cardText(c)].filter(Boolean), state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes, card: c.card ?? null, moe: !!c.moe, caps: c.caps ?? null });
   for (const r of mp.runners ?? d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: r.installed ? 'Installed: it runs the models.' : `Not on this PC (${MP_GB(r.bytes)}).`, more: runnerMore(r), state: r.installed ? '✓ Installed' : 'Not installed', button: runnerButtons(r) });
   for (const p of POPULAR) items.push({ id: `popular:${p.repo}`, kind: 'popular', name: p.name, tag: 'Suggested', about: p.about, more: [`From huggingface.co/${p.repo}.`], repo: p.repo });
   return items;
@@ -607,7 +651,7 @@ function hfRow(x) {
   if (u) side.append(sizeAction(x.repo, s.rev, u, true));
   const row = el('article', { class: `model-row mp-row${u?.fits === 'no' ? ' wont-fit' : ''}` },
     el('div', { class: 'mp-text' },
-      el('div', { class: 'mp-name' }, el('b', { text: x.name }), x.tag ? el('span', { class: 'mp-tag', text: x.tag }) : null),
+      el('div', { class: 'mp-name' }, el('b', { text: x.name }), x.tag ? el('span', { class: 'mp-tag', text: x.tag }) : null, ...capBadges(capsOfItem(x))),
       el('p', { class: 'mp-size', text: hfLine(x) }),
       el('p', { class: `mp-about${open ? ' open' : ''}`, text: x.about }),
       el('div', { class: 'mp-links' },
@@ -645,7 +689,7 @@ function mpRow(x) {
     : null;
   const row = el('article', { class: `model-row mp-row${x.warn ? ' wont-fit' : ''}` },
     el('div', { class: 'mp-text' },
-      el('div', { class: 'mp-name' }, el('b', { text: x.name }), x.tag ? el('span', { class: 'mp-tag', text: x.tag }) : null),
+      el('div', { class: 'mp-name' }, el('b', { text: x.name }), x.tag ? el('span', { class: 'mp-tag', text: x.tag }) : null, ...(x.kind === 'chat' ? capBadges(capsOfItem(x)) : [])),
       el('p', { class: `mp-about${open ? ' open' : ''}`, text: x.about, title: open ? '' : full }),
       open ? el('div', { class: 'mp-more', id: moreId }, ...x.more.map(t => el('p', { class: t.startsWith('▲') || t.startsWith('✕') ? 'warn-line' : 'hint', text: t }))) : null,
       toggle),
@@ -666,11 +710,12 @@ function mpMatches(x, q) {
 function mpTitle(q, filtering) {
   const cats = [...mp.cats].map(c => CAT_NAME[c]).join(' + ');
   return [
-    q ? `Search: "${mp.q.trim()}"` : cats || (filtering ? 'Chat models' : 'All models'),
+    q ? `Search: "${mp.q.trim()}"` : cats || (filtering || mp.caps.size ? 'Chat models' : 'All models'),
     q ? cats : '',
     filtering ? filterText() : '',
     [...mp.terms].map(t => TERM_NAME[t]).join(' or '),
     mp.moe ? "Mixture-of-experts" : '',
+    [...mp.caps].map(c => CAP_NAME[c]).join(' or '),
     { only: 'installed only', hide: 'not installed yet' }[mp.show] ?? '',
   ].filter(Boolean).join(', ');
 }
@@ -712,8 +757,9 @@ function mpDraw() {
   const filtering = !noFilter();
   // A size filter is about chat models: picture models, helpers and runners have no "B".
   const items = mpOrdered(mpItems().filter(x => {
-    if (filtering && x.kind !== 'chat' && x.kind !== 'popular') return false;
+    if ((filtering || mp.caps.size) && x.kind !== 'chat' && x.kind !== 'popular') return false;
     if (mp.moe && !isMoeItem(x)) return false;
+    if (!capsPass(capsOfItem(x))) return false;
     if (q && !every && !mpMatches(x, q)) return false;
     if (!inCats(x)) return false;
     if (mp.terms.size && ![...mp.terms].some(t => mpMatches(x, t))) return false;
@@ -726,7 +772,7 @@ function mpDraw() {
     return passes(x.params, [x]);
   }));
   // Import models: the page is the two tiles (Download, Connect), not a list.
-  const importing = mp.importing && !q && !filtering && !mp.terms.size && !mp.moe;
+  const importing = mp.importing && !q && !filtering && !mp.terms.size && !mp.moe && !mp.caps.size;
   mpOrderButtons(importing);
   $('#mp-import').setAttribute('aria-current', String(importing));
   for (const b of document.querySelectorAll('#mp-show [data-show]')) b.setAttribute('aria-pressed', String(b.dataset.show === mp.show));
@@ -737,9 +783,9 @@ function mpDraw() {
   const list = $('#mp-list');
   list.hidden = importing;
   const parts = [];
-  if (!items.length && !importing) parts.push(el('p', { class: 'hint', text: q || filtering || mp.terms.size || mp.moe || mp.cats.size ? 'Nothing on this PC or in the suggestions matches.' : mp.show === 'only' ? 'None of these is on this PC.' : mp.show === 'hide' ? 'Every one of these is on this PC already.' : 'Nothing here yet.' }));
+  if (!items.length && !importing) parts.push(el('p', { class: 'hint', text: q || filtering || mp.terms.size || mp.moe || mp.caps.size || mp.cats.size ? 'Nothing on this PC or in the suggestions matches.' : mp.show === 'only' ? 'None of these is on this PC.' : mp.show === 'hide' ? 'Every one of these is on this PC already.' : 'Nothing here yet.' }));
   for (const x of items) parts.push(...mpRow(x));
-  if ((q || filtering || mp.terms.size || mp.moe) && hfInCats()) parts.push(...mpHfRows(items));
+  if ((q || filtering || mp.terms.size || mp.moe || mp.caps.size) && hfInCats()) parts.push(...mpHfRows(items));
   list.replaceChildren(...parts);
   for (const f of list.querySelectorAll('.dl-fill[data-w]')) f.style.width = `${f.dataset.w}%`;
   mpPaintJob();
@@ -747,7 +793,7 @@ function mpDraw() {
 
 // ---- Hugging Face: every GGUF chat model matching the words and sizes, a page at a time ----
 
-const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.moe, mp.card, fitAsk(), mp.order, mp.list?.scannedAt ?? null]);
+const hfKey = () => JSON.stringify([mp.q.trim(), mp.f, [...mp.terms].sort(), mp.moe, [...mp.caps].sort(), mp.card, fitAsk(), mp.order, mp.list?.scannedAt ?? null]);
 /** Fits as the search asks it: 'here', or the linked PC's memory (the server judges each size with the same sum). */
 const fitAsk = () => (mp.fitOn === 'here' ? 'here' : (p => (p ? { ram: p.ram, vram: p.vram ?? 0 } : undefined))(fitPc()));
 
@@ -829,7 +875,7 @@ async function mpHfAsk(key, i, paged = false) {
   mpDraw();
   if (paged) $('#mp-hf-head')?.focus();
   try {
-    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], moe: mp.moe, card: mp.card, fitOn: fitAsk(), order: mp.order, cursor: cursors[i] });
+    const r = await api('/api/chatmodels/search', { q: mp.q.trim(), ...mp.f, terms: [...mp.terms], moe: mp.moe, caps: [...mp.caps], card: mp.card, fitOn: fitAsk(), order: mp.order, cursor: cursors[i] });
     for (const f of r.found) mp.sizes[f.repo] = f;
     const before = new Set(seen.slice(0, i).flat());
     // Hugging Face's own search (no list on this PC) comes most downloaded first: Size and A to Z order each page here.
@@ -853,7 +899,7 @@ async function mpHfAsk(key, i, paged = false) {
 function mpHfSearch(now = false) {
   clearTimeout(mp.hfTimer);
   const q = mp.q.trim();
-  if (q.length < 2 && noFilter() && !mp.terms.size && !mp.moe) return;
+  if (q.length < 2 && noFilter() && !mp.terms.size && !mp.moe && !mp.caps.size) return;
   const key = hfKey();
   // Asked again with the same words and sizes (Search pressed after typing): the answer already here or coming stands,
   // unless it was a fault.
@@ -880,7 +926,8 @@ async function mpLoad() {
   if (d && m) mp.data = { image: d.image, helpers: d.helpers, chat: m.chat, runtimes: m.runtimes };
   if (rt) mp.runners = rt.runtimes;
   if (m) mp.cards = m.cards ?? null;
-  if (m) mpFolderLine(m.folder, m.copies ?? [], m.ownFolder);
+  if (m) mpFolderLine(m.folder, m.copies ?? [], m.ownFolder, m.folderMissing);
+  mpWhereLoad();
   if (l) {
     mp.list = l;
     mpListLine();
@@ -902,14 +949,16 @@ async function mpLoad() {
 }
 
 /** Which folders besides this copy's own are used: the chosen one, and older copies of TOMLIN beside this one. */
-function mpFolderLine(folder, copies, own) {
+function mpFolderLine(folder, copies, own, missing) {
   const parts = [];
   if (folder) parts.push(`Using models from ${folder}.`);
+  // The chosen folder is not there now (a USB drive unplugged, or back under another letter): said, not an empty list.
+  if (missing) parts.push(`The models folder ${missing} is not there now, so its models are not listed. Plug its drive in, or choose the folder again.`);
   if (copies.length) parts.push(`Also using models already in ${copies.length === 1 ? 'an older copy' : `${copies.length} older copies`} of TOMLIN beside this one (${copies.join(', ')}), so they are not downloaded again.`);
   $('#mp-folder-line').textContent = parts.join(' ');
   if (own) $('#mp-own-folder').textContent = own;
-  $('#mp-folder-stop').hidden = !folder;
-  if (folder && document.activeElement !== $('#mp-folder')) $('#mp-folder').value = folder;
+  $('#mp-folder-stop').hidden = !folder && !missing;
+  if ((folder || missing) && document.activeElement !== $('#mp-folder')) $('#mp-folder').value = folder || missing;
 }
 $('#mp-folder-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -922,6 +971,71 @@ $('#mp-folder-form').addEventListener('submit', async e => {
     $('#mp-folder-line').textContent = error.message;
   }
 });
+// ---- Where models are kept: the folder downloads go to, the models on this PC by drive, and Move ----
+const mpWhere = { said: '', timer: 0, wasMoving: false };
+async function mpWhereLoad() {
+  const w = await api('/api/models/where').catch(() => null);
+  if (w) mpWhereDraw(w);
+}
+function mpWhereDraw(w) {
+  $('#mp-where-now').textContent = w.missing ? `${w.dir} (not there now)` : `${w.dir}${w.free !== null ? `, ${MP_GB(w.free)} free on ${w.drive}` : ''}`;
+  $('#mp-where-usual').hidden = w.isUsual;
+  // The chosen folder's drive is unplugged: said here, where an empty list would give no reason.
+  $('#mp-where-line').textContent = w.missing ? `The folder your models are kept in, ${w.missing}, is not there now. Plug its drive in, or choose another folder. Nothing can be downloaded until then.` : [mpWhere.said, w.advice].filter(Boolean).join(' ');
+  const moving = w.move.state === 'moving';
+  $('#mp-move-box').hidden = !moving && !w.toMove.files;
+  $('#mp-move-what').textContent = w.toMove.files ? `${w.toMove.files} model file${w.toMove.files === 1 ? ' is' : 's are'} still in ${w.toMove.from.join(' and ')} (${MP_GB(w.toMove.bytes)}). ${w.toMove.files === 1 ? 'It is' : 'They are'} used from there until moved. A model that is loaded is left where it is.` : '';
+  $('#mp-move-go').hidden = moving;
+  $('#mp-move-stop').hidden = !moving;
+  $('#mp-move-line').textContent = moving ? `Moving ${w.move.now || 'the models'}: ${MP_GB(w.move.got)} of ${MP_GB(w.move.bytes)}.` : w.move.said;
+  const rows = w.byDrive.map(d => ({ ...d, models: d.models }));
+  // A drive with no model on it is listed too, so it is plain where there is room.
+  for (const d of w.drives) if (!rows.some(r => r.drive === d.drive)) rows.push({ drive: d.drive, label: d.label, removable: d.removable, free: d.free, bytes: 0, models: [] });
+  rows.sort((a, b) => a.drive.localeCompare(b.drive));
+  $('#mp-drives').replaceChildren(...rows.map(d => el('div', { class: `mp-drive${d.drive === w.drive ? ' mp-drive-now' : ''}` },
+    el('b', { text: `${d.drive}${d.label ? ` (${d.label})` : ''}${d.removable ? ', USB drive' : ''}` }),
+    el('span', { text: ` ${d.models.length ? `${d.models.length} model${d.models.length === 1 ? '' : 's'}, ${MP_GB(d.bytes)}` : 'no models'}${d.free !== null ? `; ${MP_GB(d.free)} free` : ''}${d.drive === w.drive ? '; new downloads go here' : ''}` }),
+    d.models.length ? el('ul', {}, ...d.models.map(m => el('li', { text: `${m.name}, ${MP_GB(m.bytes)}` }))) : null)));
+  clearTimeout(mpWhere.timer);
+  if (moving) mpWhere.timer = setTimeout(mpWhereLoad, 1000);
+  else if (mpWhere.wasMoving) {
+    // The move ended: the lists show each model in its new place.
+    mpLoad();
+    loadModels();
+  }
+  mpWhere.wasMoving = moving;
+}
+async function mpWhereAsk(path, body) {
+  try {
+    const w = await api(path, body);
+    mpWhere.said = w.said ?? '';
+    mpWhereDraw(w);
+    return true;
+  } catch (error) {
+    $('#mp-where-line').textContent = error.message;
+    return false;
+  }
+}
+$('#mp-where-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (await mpWhereAsk('/api/models/where', { dir: $('#mp-where').value })) {
+    $('#mp-where').value = '';
+    await mpLoad();
+    loadModels();
+  }
+});
+$('#mp-where-usual').addEventListener('click', async () => {
+  if (await mpWhereAsk('/api/models/where', { dir: null })) {
+    await mpLoad();
+    loadModels();
+  }
+});
+$('#mp-move-go').addEventListener('click', () => {
+  mpWhere.wasMoving = true;
+  mpWhereAsk('/api/models/move', {});
+});
+$('#mp-move-stop').addEventListener('click', () => mpWhereAsk('/api/models/move/stop', {}));
+
 $('#mp-folder-stop').addEventListener('click', async () => {
   await api('/api/models/folder', { dir: null }).catch(() => undefined);
   $('#mp-folder').value = '';

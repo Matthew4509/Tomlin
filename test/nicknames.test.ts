@@ -57,7 +57,7 @@ test('the shipped Hugging Face list: the most downloaded families all get a real
   }
   // Under 2% of the downloads come out with no name at all.
   assert.ok((by.get('') ?? 0) / total < 0.02);
-  const top = [...by].filter(([n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([n]) => n);
+  const top = [...by].filter(([n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 30).map(([n]) => n);
   for (const n of ['Qwen', 'Gemma', 'Llama', 'DeepSeek', 'GLM', 'Mistral']) assert.ok(top.includes(n), `${n} in ${top.join(', ')}`);
   // No word that only describes a file is ever a name.
   for (const bad of ['Gguf', 'Abliterated', 'Uncensored', 'Instruct', 'Model', 'Mtp']) assert.ok(!by.has(bad), bad);

@@ -99,7 +99,7 @@ button.badge.b-link{border:0;font-family:inherit;cursor:pointer;text-decoration:
 .b-new{background:var(--accent-soft);color:var(--accent)}
 .b-bad{background:var(--bad-soft);color:var(--bad)} .b-ok{background:var(--ok-soft);color:var(--ok)}
 .audit-link{border:0;background:none;padding:0;min-height:24px;cursor:pointer;font-size:12px;text-align:left}
-.a-bad{color:var(--bad)} .a-warn{color:var(--warn)} .a-ok{color:var(--ok)} .a-low{color:var(--muted)}
+.a-bad{color:var(--bad)} .row .desc.git-problem{color:var(--bad)} .a-warn{color:var(--warn)} .a-ok{color:var(--ok)} .a-low{color:var(--muted)}
 /* Hosted live: a light with a shape as well as a colour (● up, ▲ unsure, ✕ down, ○ not checked yet) */
 .live{border:0;background:none;padding:0 2px;min-height:24px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;font-family:inherit}
 .live:hover{text-decoration:underline}

@@ -8,7 +8,7 @@ import { nowModel, paramsB, roleOf, type StaffMember } from '../staff.ts';
 import * as seats from '../seats.ts';
 import { workAs } from '../meter.ts';
 import { type Send, d } from './shared.ts';
-import { backupsOnly, hello, seen, sharedWhy } from './links.ts';
+import { backupsOnly, clusterHeld, hello, seen, sharedWhy } from './links.ts';
 import { brainForRef, candidate, hireBrain } from './who.ts';
 import { addEvent, jobRoot, jobView, packetFront, saveJob } from './jobfiles.ts';
 import { shareView } from './node.ts';
@@ -55,7 +55,7 @@ async function seatOf(ref: string, cached = false): Promise<seats.Seat | null> {
 async function workerPool(cached = false): Promise<seats.Seat[]> {
   const s = await d.store.settings();
   const chatIds = new Set(d.chatList().map(m => m.id));
-  const refs = ['', ...chatHires().flatMap(m => brains.refsOf({ model: nowModel(m) ?? m.model, fallback: m.fallback })), ...s.remotes.filter(r => !r.backupsOnly).map(r => `remote:${r.id}`)];
+  const refs = ['', ...chatHires().flatMap(m => brains.refsOf({ model: nowModel(m) ?? m.model, fallback: m.fallback })), ...s.remotes.filter(r => !r.backupsOnly && !clusterHeld(r.id)).map(r => `remote:${r.id}`)];
   const got = await Promise.all([...new Set(refs.filter(r => r === '' || r.startsWith('remote:') || chatIds.has(r)))].map(r => seatOf(r, cached)));
   const out: seats.Seat[] = [];
   for (const x of got) if (x && !out.some(y => y.ref === x.ref)) out.push(x);
@@ -85,7 +85,7 @@ async function hireSeat(hire: StaffMember, cached = false): Promise<seats.Seat |
  * then most context, then one that answers now, as seats.strongest. A hire on a PC set to Backups only takes no work.
  */
 export async function strongestHire(cached = false): Promise<StaffMember | null> {
-  const hires = chatHires().filter(m => { const now = nowModel(m) ?? m.model ?? ''; return !(now.startsWith('remote:') && backupsOnly(now.slice(7))); });
+  const hires = chatHires().filter(m => { const now = nowModel(m) ?? m.model ?? ''; return !(now.startsWith('remote:') && (backupsOnly(now.slice(7)) || clusterHeld(now.slice(7)))); });
   const sat = (await Promise.all(hires.map(async h => ({ h, seat: await hireSeat(h, cached) })))).filter((x): x is { h: StaffMember; seat: seats.Seat } => !!x.seat);
   const best = seats.strongest(sat.map(x => x.seat));
   return sat.find(x => x.seat === best)?.h ?? null;

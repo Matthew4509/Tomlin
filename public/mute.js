@@ -118,7 +118,7 @@ $('#rail').addEventListener('contextmenu', e => {
   openMute(key, key.startsWith('chat:') ? `"${name}"` : name);
 });
 
-// ---- The top bar: a bell for Mute all; while all is muted, "All muted until …" and one Unmute button ----
+// ---- The top bar: a bell for Mute all; while all is muted, one Unmute button (the bell's tip says until when) ----
 
 $('#mute-all').addEventListener('click', () => openMute('all'));
 $('#mute-all-off').addEventListener('click', async () => {
@@ -137,7 +137,7 @@ function drawMuteBar() {
   $('#mute-all').title = all ? `Everything is muted ${all.text}: change it or unmute` : 'Mute all (1 hour, until tomorrow morning or until you unmute) and notification settings';
   $('#mute-all').setAttribute('aria-label', all ? `All muted ${all.text}` : 'Mute all');
   $('#mute-all-line').hidden = !all;
-  $('#mute-all-text').textContent = all ? `All muted ${all.text}` : '';
+  $('#mute-all-off').title = all ? `All muted ${all.text}: unmute now` : '';
 }
 app.drawMuteBar = drawMuteBar;
 
@@ -155,21 +155,36 @@ function openSettings() {
   showSettingsPage('settings', '#settings');
 }
 
-/** Data and lock: your data, the app lock, alerts and web search, each drawn fresh from what the server says now. */
+/** Data and lock: your data and backups, the app lock and notifications, each drawn fresh from what the server says now. */
 function openDataLock() {
   $('#settings-keep').replaceChildren(app.keepBox?.() ?? '');
   $('#settings-lock').replaceChildren(app.appLockBox?.() ?? '');
   $('#settings-notify').replaceChildren(app.notifyBox?.() ?? '');
-  $('#settings-permissions').replaceChildren(app.permissionsBox?.() ?? '');
-  $('#settings-rules').replaceChildren(app.rulesBox?.() ?? '');
-  $('#settings-web').replaceChildren(app.webSearchBox?.() ?? '');
   showSettingsPage('data', '#settings-data');
+}
+
+/** Permissions: what a chat's model may do on its own (Files and web with web search, Screen, Coding, Research), and the rules. */
+function openPermissions() {
+  $('#settings-perms-body').replaceChildren(...(app.permissionsPage?.() ?? []));
+  showSettingsPage('perms', '#settings-perms');
 }
 
 app.openSettings = openSettings;
 app.openDataLock = openDataLock;
+app.openPermissions = openPermissions;
 app.openColours = () => showSettingsPage('colours', '#settings-colours');
 $('#settings-open').addEventListener('click', () => openSettings());
+
+/**
+ * Breadcrumb on a Settings page ("Settings > Colours"): every section marked data-crumb gets one at its top. Settings is
+ * a button that goes up one level, to the tiles; the page's own name is plain text and marked as the current page.
+ */
+for (const page of document.querySelectorAll('[data-crumb]')) {
+  const up = el('button', { class: 'link', type: 'button', text: 'Settings', onclick: () => openSettings() });
+  page.prepend(el('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' },
+    el('ol', {}, el('li', {}, up), el('li', { 'aria-current': 'page', text: page.dataset.crumb }))));
+}
+
 
 /** Redraws everything that shows a mute: the rows (which redraw the bar). */
 function drawMuted() {

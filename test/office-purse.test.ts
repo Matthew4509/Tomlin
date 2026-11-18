@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as home from '../src/home.ts';
+import { testEnv } from './env.ts';
 
 const { SHOP, buy, cleanBought, purseOf, roomsOf, trophyOf } = home;
 type Bought = home.Bought;
@@ -193,7 +194,7 @@ before(async () => {
   writeFileSync(join(dir, 'data', 'usage-staff.json'), JSON.stringify({ mira: { out: EARNED, written: { [today]: 500 } } }));
   const port = await freePort();
   server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    env: { ...process.env, TOMLIN_HOME: dir, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(dir, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(dir, 'startup'), TOMLIN_OPEN: '' },
+    env: testEnv({ TOMLIN_HOME: dir, TOMLIN_PORT: String(port), TOMLIN_MODELS_FILE: join(dir, 'models-folder.txt'), TOMLIN_NO_TOAST: '1', TOMLIN_STARTUP_DIR: join(dir, 'startup'), TOMLIN_OPEN: '' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let said = '';

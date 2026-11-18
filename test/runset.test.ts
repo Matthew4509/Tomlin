@@ -20,10 +20,10 @@ test('the node tick "Allow host to test and change model run settings" is its ow
   assert.equal(carry.NO_ALLOW.tune, false);
   assert.equal(carry.cleanAllow({}).tune, false);
   assert.equal(carry.cleanAllow({ tune: 'yes' }).tune, false);
-  assert.equal(carry.cleanAllow({ tune: true, lend: true, receive: true, give: false }).tune, true);
+  assert.equal(carry.cleanAllow({ tune: true, lend: true, receive: true, give: false, off: true }).tune, true);
   // A node that had "Allow all" before this tick: Allow all shows unticked until the new one is ticked too.
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: false, lend: false, receive: false, give: false }), false);
-  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true }), true);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: false, lend: false, receive: false, give: false, off: true }), false);
+  assert.equal(carry.allowsAll({ pull: true, backup: true, update: true, tune: true, lend: true, receive: true, give: true, off: true }), true);
 });
 
 test('a guessing model is another chat model of the same family on that PC, at most half the size; never Ollama, never another family', () => {
@@ -67,7 +67,7 @@ test('what a host may ask: one of the node\'s chat models and one of its guesser
 });
 
 test('the host asks only a node that is on, not in use by its owner, and new enough; the tick itself is the node\'s to check', () => {
-  const pc = (o: Record<string, unknown> = {}) => ({ name: 'Worker PC', ok: true, away: null, can: ['models', 'tune'], allow: { ...carry.NO_ALLOW, tune: true, lend: true, receive: true, give: false }, ...o }) as Parameters<typeof rs.tuneWhy>[0];
+  const pc = (o: Record<string, unknown> = {}) => ({ name: 'Worker PC', ok: true, away: null, can: ['models', 'tune'], allow: { ...carry.NO_ALLOW, tune: true, lend: true, receive: true, give: false, off: true }, ...o }) as Parameters<typeof rs.tuneWhy>[0];
   assert.equal(rs.tuneWhy(pc()), '');
   assert.match(rs.tuneWhy(pc({ ok: false })), /off or not answering/);
   assert.match(rs.tuneWhy(pc({ away: '2026-10-21T03:00:00Z' })), /being used by its owner/);
@@ -147,4 +147,24 @@ test('a model\'s runner is kept only as CUDA or Vulkan, and a saved runner is th
   assert.deepEqual(rs.devicesForRun(['vulkan', 'cpu'], 'cuda'), ['vulkan', 'cpu']);
   // CPU chosen for the PC: the CPU, whatever the model's runner.
   assert.deepEqual(rs.devicesForRun(['cpu'], 'vulkan'), ['cpu']);
+});
+
+test('a model nobody set a context for starts roomy only when it was trained for it and fits with room to spare', () => {
+  assert.equal(rs.pickRoomyCtx(262144, () => true), 32768, 'a roomy PC and a long-context model: 32k');
+  assert.equal(rs.pickRoomyCtx(262144, n => n <= 16384), 16384, '32k does not fit with room: 16k');
+  assert.equal(rs.pickRoomyCtx(262144, () => false), 8192, 'nothing fits with room: the old default');
+  assert.equal(rs.pickRoomyCtx(8192, () => true), 8192, 'trained for 8k only: never more');
+  assert.equal(rs.pickRoomyCtx(16384, () => true), 16384, 'trained for 16k: 16k');
+  assert.equal(rs.pickRoomyCtx(0, () => true), 8192, 'an unknown model: the old default');
+});
+
+test('a model loaded with the linked PCs\' memory gets the roomy context counted with theirs, only when nobody chose one (F9)', async () => {
+  const { withLendersRoomy } = await import('../src/runset.ts');
+  const run = { ctx: 8192, cache: 'f16' };
+  const roomy = () => 32768;
+  assert.deepEqual(withLendersRoomy(run, undefined, { lentBytes: 90e9, fitsAlone: () => false, roomy }), { ctx: 32768, cache: 'f16' });
+  assert.equal(withLendersRoomy(run, { ctx: 8192 }, { lentBytes: 90e9, fitsAlone: () => false, roomy }), run, 'a context that was chosen stays');
+  assert.equal(withLendersRoomy({ ...run, ctx: 16384 }, undefined, { lentBytes: 90e9, fitsAlone: () => false, roomy }).ctx, 16384, 'a context already above the default stays');
+  assert.equal(withLendersRoomy(run, undefined, { lentBytes: 0, fitsAlone: () => false, roomy }), run, 'no lender, no change');
+  assert.equal(withLendersRoomy(run, undefined, { lentBytes: 90e9, fitsAlone: () => true, roomy }), run, 'a model that fits alone is not loaded roomier on what is lent');
 });

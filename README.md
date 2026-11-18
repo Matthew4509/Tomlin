@@ -213,7 +213,7 @@ Everything you keep lives in one folder outside the app: `TOMLIN` in your Window
 `runtime` (downloaded graphics-card runners) and `backups`. The app folder holds only the program.
 
 To update: **Manage updates** (under Settings; also Update TOMLIN in the My PC window) opens **Update this
-install**, with **Check git** or **Check zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
+install**, with **Check for updates** or **Update via zip**; or by hand, unzip the new version into its own folder and start it. It finds the same `TOMLIN` folder, so
 nothing is lost and nothing is downloaded again, and PCs linked to it stay linked. Before a new version first uses your
 data it zips the `data` folder into `backups` (models are not in them). The newest 5 are kept, and older ones thin out:
 one a day for a week, one a week for a month, one every 3 months for a year. **Settings** (top bar),
@@ -638,8 +638,8 @@ rather than misread it.
   database on cPanel. The address it goes to becomes the project's live address. Licence: PolyForm Noncommercial 1.0.0.
   Two linked PCs with one name show their address on their cards (and linking the second says so); a PC that answers
   with nothing loaded says Asleep; a queued chat message stopped with Stop is sent again on Resume; half-sent updates
-  are cleared; a PIN file holding nothing keeps the app locked. Tidying: the second look's files and Start Shelby.cmd
-  are gone (SHELBY_* settings are still read, for PCs whose launcher started before the rename).
+  are cleared; a PIN file holding nothing keeps the app locked. Tidying: the second look's files and the old-name
+  launcher are gone (the old-name settings were still read then, for PCs whose launcher started before the rename).
   Push live, hardened: two sites in one secrets folder each get their own Live secrets file; a saved secret inside a
   big binary file stops the push; files left out by .gitignore and sent with the tick must all be seen, and a file
   that cannot be read stops it; Set up, Secrets, the database and Disconnect wait while a push runs. Two queued chat
@@ -697,12 +697,12 @@ rather than misread it.
   A chat model's **Guessing model** (a smaller same-family model speeds it up; the answer stays its own) can be picked
   for a linked PC's model on its card, once that PC ticks **Allow host to test and change model run settings**.
 - **2.0.55:** Hire staff: **Add new** beside the model search opens Add a model; **Push to node** on each of All
-  models sends that model to any PC on the list. Update this install: **Check git** (newest signed GitHub Release),
-  **Check zip**, and the offline steps. Colours: a Day / Night / Auto switch at the top. Office: sandwiches, energy drinks (vending machine), indoor plants,
+  models sends that model to any PC on the list. Update this install: **Check for updates** (newest signed GitHub Release),
+  **Update via zip**, and the offline steps. Colours: a Day / Night / Auto switch at the top. Office: sandwiches, energy drinks (vending machine), indoor plants,
   beach volleyball. Models page: Size and A to Z order buttons, and an MoE's category. Top bar: GPU and GPU mem show a disconnected symbol when unreadable.
   Bridge part: a start entry's `cwd` and `env` are used (a React dev server on its `PORT`), and a local copy gets a
   minute to answer, not 20 seconds. "No start command" and the empty list offer a prompt that teaches your AI to save
-  each project's start line (also first on Prompts). Check zip checks the zip's .sig too (pick both; none or a failing
+  each project's start line (also first on Prompts). Update via zip checks the zip's .sig too (pick both; none or a failing
   one warns, with Install anyway), every update is started once as a test before it takes over, and `npm run pack`
   signs each zip. The chat runner answers only TOMLIN (a new key each start); restore points kept on another PC carry
   no link keys, sharing code or PIN, and one changed there is refused when it comes back. Models page: **Fits my card**
@@ -769,8 +769,8 @@ rather than misread it.
   with its address, as two PCs can share a name). The built-in audit rates a fault in a file git ignores as a
   warning (it stays on this PC); anything git keeps or would add, and any folder without git, keeps its rating.
 - **2.0.45:** The name TOMLIN: icon, installer, shortcuts, window and notification titles; **Start TOMLIN.cmd**
-  (Start Shelby.cmd only runs it, for old shortcuts); settings TOMLIN_* (SHELBY_* still read); new copies in
-  `tomlin-<version>` folders (`shelby-` copies still recognised). Bumped so linked PCs on an earlier 2.0.44 can be updated.
+  (the old-name launcher only ran it, for old shortcuts); settings TOMLIN_*; new copies in `tomlin-<version>`
+  folders. Bumped so linked PCs on an earlier 2.0.44 can be updated.
 - **2.0.44:** Updates you can watch, a lock screen that asks, and Chats | Tools.
   - **Projects: Myia Bridge built in** (left panel, under Home; see The page). Project backups to nodes now take the
     projects ticked **Copy to my other PCs** too, each in `Bridge projects/<folder name>/` of the backup (a git project
@@ -1102,7 +1102,18 @@ Main PC: HP Z240, Quadro P2000 5 GB, 48 GB DDR4. Linked PC: HP 800 G1, Quadro K1
 | Qwen3-Next-80B-A3B UD-Q3_K_XL | 33.2 GB | 10.9 | — |
 | Qwen3-Coder-Next UD-Q3_K_XL | 33.8 GB | 5.9 | — |
 
-**One model across both PCs (Max mode, hidden, still being tested).** Splitting a model that fits on the main PC was
+**Max mode and Cluster: which is which.**
+
+- **Max mode** is for a model that fits on one PC. It borrows from the network to try to raise the tokens a second (built, not yet run on two PCs, so no gain is measured). Each chat has it as an option: the **Max** switch beside Web.
+- **Cluster** is for a model that will not fit on a single PC. It is built to let that model run in the first place.
+
+One rule says which of the two a model is (`fitsOnePc`, src/cluster/engine.ts): the model's file and context cache, a tenth more and 0.8 GB for the runner, against this PC's free card memory and RAM, the lending PCs not counted. It does not decide all the borrowing: with the switch off, the automatic borrowing (`borrowRule`) also lends a card to a dense model that fits this PC's RAM but not its card (a dense 24B ran 12.2 tok/s with a lent card against 4.2 alone).
+
+Where each stands (16 Nov 2026). Cluster works on two PCs: the app sets expert parallel itself (2.0.95), 1.84 tokens a second for DeepSeek-V4-Flash and 2.45 for Qwen3.8-Flash-Next, each a model too big for one of those PCs. It borrows by itself, switch or not (`borrowRule`, src/cluster/engine.ts). Every layer split of a mixture-of-experts model, or of one that fits this PC's card, measured below, was slower than that PC alone, so Max mode never uses the layer split itself.
+
+The chat's Max switch (src/maxmode.ts) is built, not yet run on two PCs. Kept per chat and sent with each message. Shown with a dashed edge, with the reason in its tip and in words under the chat box once pressed, when the model does not fit one PC ("Cluster runs it"), when no linked PC allows lending, when none is on, or when the PCs' llama.cpp builds differ (the PC that blocks is named). For a model that fits, Max mode uses expert parallel with the lending PCs, and only for a mixture-of-experts model on a PC with an NVIDIA card; any other model (a dense one, no NVIDIA card, measured slower, no lender ready) loads as it would with Max off and says why, so the switch never makes a load worse (a dense model that spills its card still gets the lent card). Whether expert parallel beats one PC alone for a model that fits has never been measured, so the first Max load of a model on a set of PCs is the measurement (kept in data/max-speeds.json with each answer's speed alone): once Max mode was slower, it is not used for that model, and the answer says "it was faster alone (X against Y tok/s)". Nothing reloads by itself: with Max on and the model loaded alone, a card under the answer offers "Reload with linked PCs" or "Not now", with the expected load time, once for each load; the model is unloaded only when every check for the Max load has passed. Under each answer with lenders: which PCs lent, the tokens a second, and the last speed on this PC alone. If expert parallel does not beat one PC, the next engine to try is speculative decoding (a small guessing model on a linked PC); it is not built.
+
+**One model across both PCs by a layer split (measured before 16 Nov 2026; Cluster may use it, Max mode never does).** Splitting a model that fits on the main PC was
 slower every time: Qwen3.5-35B 7.0 against 11.2, Qwen3-Next-80B 4.6 against 10.9 (llama.cpp's own placement).
 Placed by hand (Qwen3.6-35B): the main PC's CPU alone writes 7.4; with the linked PC's K1200 taking the last 4, 8
 or 12 layers, 6.1, 6.7 and 6.7; the P2000 alone 12.5, and with the K1200 added 8.2. Each word crosses the network
@@ -1152,11 +1163,8 @@ How to read it:
 `npm test`. `test/filter.test.ts` is a release blocker: picture prompts that sexualise anyone under 18, or real
 people, are refused.
 
-Two tests start real PCs on this one (`test/pcs.ts` starts each copy on 127.0.0.1 with a home of its own in the
-temp folder, and moves every place a copy could write there): `test/doors.test.ts` links a host and a node with the
+Some tests start real PCs on this one (`test/pcs.ts` starts each copy on 127.0.0.1 with a home of its own in the
+temp folder, and moves every place a copy could write there). For example, `test/doors.test.ts` links a host and a node with the
 setup code and tries the node's front door (a web page, an unknown or unsealed link, sizes per door), then project
 backups through it (the round, with `TOMLIN_PROJECT_ROUND_SECONDS=3` instead of 10 minutes; "I need to use the pc";
-Back up now; brought back). `test/oldnode.test.ts` takes 2.0.44 (the last version before the TOMLIN name) out of git
-history and pushes Update it to it from a copy of this one: it must refuse the new launcher name, take the copy as
-`Start Shelby.cmd`, end with 76 and come back as this version with the same build. It is skipped where there is no git
-history. Together they add about two minutes to `npm test`.
+Back up now; brought back).

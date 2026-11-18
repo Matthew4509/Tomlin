@@ -6,19 +6,22 @@ import { streamChat, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
-import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOfHire, roleOf, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
+import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOfHire, roleOf, drawAsChange, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
 import { staffState as homeState, activityOf, awardBehind, awardPeriods, bookAfter, buy, cleanAwards, cleanBook, doingOf, DOING_WORDS, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Award } from '../home.ts';
 import { DamagedFile, markMended, readData, updateData, writeAtomic } from '../atomic.ts';
 import * as mute from '../mute.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
-import { hereKey, pcKey, TEST_PROMPT, TEST_TOKENS, type Summary as SpeedSummary } from '../speed.ts';
-import { HOST_ON, type Routes, byStaff, chats, faces, faultWords, hidden, json, mutes, notifier, pcProfiles, publicSettings, shortName, speeds, staff, staffId, store } from './core.ts';
+import { hereKey, pcKey, quantOf, TEST_PROMPT, TEST_TOKENS, type ModelInfo, type Sample, type Snap, type Summary as SpeedSummary } from '../speed.ts';
+import { onShow, sameFiles } from '../models.ts';
+import { HOST_ON, type Routes, chatModels, byStaff, chats, faultWords, hardware, hidden, json, mutes, notifier, pcProfiles, publicSettings, shortName, speeds, staff, staffId, store } from './core.ts';
 import { shownName } from '../pcprofile.ts';
 import { chat, chatList, chatPlace, connectChat, images, lastUsed, main, runnerFor, runners } from './panes.ts';
 import { answerPhases, answeringBusy, endAnswer, lastWorked, reserve, stopChats, stopOn, takeChat } from './answering.ts';
-import { answeringNow, offHost, setWho, whoList } from './people.ts';
+import { answeringNow, hireModelOf, offHost, setWho, whoList } from './people.ts';
+import { hireModelShort } from '../hiremodel.ts';
 import { jobRoutes } from './jobs.ts';
+import { freeOn } from '../jobrun/copies.ts';
 import { officeFeed } from './notices.ts';
 import { queueHome } from './queue.ts';
 import { staffUsage } from './costs.ts';
@@ -28,25 +31,32 @@ import { chatNeed, memOfReport, moveWontFit, ramFit } from '../calc.ts';
 // ---- Staff ----
 
 /** The roster for the page: each hire with every installed chat model laid against their level (suggestion, never a limit). */
-async function staffView() {
+async function staffView(o: { known?: boolean } = {}) {
   const models = chatList();
   const done = staff.auditions();
   const s = await store.settings();
-  // Each paired PC as a brain (asked now, a few seconds at most): the chat models it lets linked PCs use, by name (they
-  // load there when asked); and what it has loaded, for an older PC, a PC that shares none, or a hire already on it.
-  const pcs = s.remotes.length ? await jobRoutes.remoteStatus() : [];
+  // Each paired PC as a brain (asked now, a few seconds at most; `known`: as each said last, at once, for Hire staff's
+  // first drawing): the chat models it lets linked PCs use, by name (they load there when asked); and what it has
+  // loaded, for an older PC, a PC that shares none, or a hire already on it.
+  const pcs = s.remotes.length ? await jobRoutes.remoteStatus({ known: o.known }) : [];
   const inUse = (ref: string) => staff.list().some(m => m.model === ref || m.fallback === ref);
+  // The same model file found twice (TOMLIN's folder and the other folder): offered once; a hire on one sees theirs.
+  const twins = sameFiles(chatModels.list(), ids => ids.find(inUse));
+  // A split model with a part missing says so in its name: it cannot be loaded (src/models.ts incompleteWords).
+  const marked = (name: string, x: { incomplete?: string }) => (x.incomplete ? `${name}, not complete` : name);
+  // Two linked PCs with one name ("Worker PC") are told apart (src/brains.ts pcLabels).
+  const labels = brains.pcLabels(s.remotes);
   const pcBrains = (image: boolean) => pcs.flatMap(r => {
     // A "Backups only" PC takes no staff: it is not offered at all.
-    if (r.backupsOnly) return [];
+    if (r.backupsOnly || r.heldByCluster) return [];
     const loaded = r.ok ? (image ? r.image?.name ?? null : r.model ?? null) : null;
     const now = !r.ok ? 'off now' : image && !r.can?.includes('draw') ? 'its TOMLIN is too old to draw for this PC' : loaded ? `now ${shortName(loaded)}${image && r.image?.styles.length ? `, draws ${r.image.styles.join(', ')}` : ''}` : 'nothing loaded now';
-    const old = { id: `remote:${r.id}`, name: `On "${r.name}": the model it has loaded (${now})`, ok: !!loaded, nick: loaded ? nickname(loaded) : '', audition: null as ReturnType<typeof summary>, hidden: false, label: loaded ? shortName(loaded) : 'The model it has loaded', bytes: 0, loaded: !!loaded, busy: false };
+    const old = { id: `remote:${r.id}`, name: `On "${labels[r.id] ?? r.name}": the model it has loaded (${now})`, ok: !!loaded, nick: loaded ? nickname(loaded) : '', audition: null as ReturnType<typeof summary>, hidden: false, label: loaded ? shortName(loaded) : 'The model it has loaded', bytes: 0, loaded: !!loaded, busy: false };
     // While it is off, the list it sent last (kept), so a hire on one of them still shows by name. Chat models for chat
     // hires, picture models for artists (an older node shares chat models only).
     const shared = ((r.ok ? r.models : s.remotes.find(x => x.id === r.id)?.models) ?? []).filter(x => (x.kind === 'image') === image);
     const busyWord = image ? ' (drawing now)' : ' (answering now)';
-    const named = shared.map(x => ({ id: brains.remoteRef(r.id, x.id), name: `${shortName(x.name) || x.name} on "${r.name}"${!r.ok ? ' (off now)' : x.busy ? busyWord : x.loaded ? ' (loaded there)' : ' (loads there when asked)'}`, ok: r.ok, nick: nickname(x.name), audition: null as ReturnType<typeof summary>, hidden: x.hidden === true, label: shortName(x.name) || x.name, bytes: x.bytes || 0, loaded: r.ok && !!x.loaded, busy: r.ok && !!x.busy }));
+    const named = shared.map(x => ({ id: brains.remoteRef(r.id, x.id), name: `${shortName(x.name) || x.name} on "${labels[r.id] ?? r.name}"${!r.ok ? ' (off now)' : x.busy ? busyWord : x.loaded ? ' (loaded there)' : ' (loads there when asked)'}`, ok: r.ok, nick: nickname(x.name), audition: null as ReturnType<typeof summary>, hidden: x.hidden === true, label: shortName(x.name) || x.name, bytes: x.bytes || 0, loaded: r.ok && !!x.loaded, busy: r.ok && !!x.busy }));
     return [...named, ...(!named.length || inUse(old.id) ? [old] : [])];
   });
   const usage = Object.fromEntries(await Promise.all(staff.list().map(async m => [m.id, await staffUsage(m.id)] as const)));
@@ -70,14 +80,16 @@ async function staffView() {
   };
   return {
     sharing: jobRoutes.shareView().on,
-    pcs: pcs.map(r => ({ id: r.id, name: r.name, ok: r.ok, away: r.ok && !!r.away, ...pcMem.get(r.id)! })),
+    pcs: pcs.map(r => ({ id: r.id, name: r.name, label: labels[r.id] ?? r.name, ok: r.ok, away: r.ok && !!r.away, asking: !r.ok && 'asking' in r && r.asking === true, ...pcMem.get(r.id)! })),
+    // The PCs as each said last, not asked now: the page asks again for the full list (public/hire.js).
+    known: o.known === true,
     here,
     roles: ROLES.map(({ id, name, hint, examples, kind }) => ({ id, name, hint, examples, kind: kind ?? 'chat' })),
     levels: LEVEL_CHOICES.map(({ id, name, size, suggest }) => ({ id, name, size, suggest, imageSuggest: IMAGE_TIERS[id].suggest, imageSize: IMAGE_TIERS[id].size })),
     connected: chat.view.state === 'connected' ? chat.view.model : null,
     // For Hire staff (public/hire.js): every model a new hire can start on, with the short name the name box offers (src/nicknames.ts).
     hireChoices: {
-      chat: [...models.map(x => ({ id: x.id, name: shortName(x.name) || x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, ramFit: ramFit(Math.round(chatNeed(x.bytes)), here), loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
+      chat: [...models.filter(x => onShow(x.id, twins)).map(x => ({ id: x.id, name: marked(shortName(x.name) || x.name, x), nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, ramFit: ramFit(Math.round(chatNeed(x.bytes)), here), loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
       image: [...images.list().filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
     },
     connectedAll: runners.filter(p => p.view.state === 'connected').map(p => p.view.model),
@@ -86,6 +98,7 @@ async function staffView() {
       ? {
         ...m,
         kind: 'image',
+        use: hireModelOf(m),
         pcBrains: pcBrains(true),
         styles: brains.STYLES.map(st => ({ id: st, name: brains.STYLE_NAME[st] })),
         models: images.list().map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, installed: x.installed, hidden: hidden.has(x.id), unit: 'GB', ...matchImageModel(m, x.bytes), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
@@ -94,10 +107,11 @@ async function staffView() {
       : {
         ...m,
         kind: 'chat',
+        use: hireModelOf(m),
         pcBrains: pcBrains(false).map(b => ({ ...b, audition: summary(done[`${roleOf(m.role).id}:${b.id}`]) })),
         speed: speedOfRef(nowModel(m) ?? m.model),
         usage: usage[m.id],
-        models: models.map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, hidden: hidden.has(x.id), unit: 'B', ...matchModel(m, x), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
+        models: models.filter(x => onShow(x.id, twins, [m.model, m.fallback, nowModel(m)])).map(x => ({ id: x.id, name: marked(x.name, x), bytes: x.bytes, fit: x.fit.level, hidden: hidden.has(x.id), unit: 'B', ...matchModel(m, x), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
           .sort((a, b) => b.rank - a.rank || a.bytes - b.bytes),
       }),
   };
@@ -110,6 +124,8 @@ function remoteState(ref: string | null | undefined, image: boolean): { state: '
   if (b.kind !== 'remote') return null;
   const r = store.peek()?.remotes.find(x => x.id === b.pc);
   if (!r) return { state: 'none', text: 'Its PC is no longer paired', modelName: '', pc: '' };
+  // On a PC this one is a guest on: said where and as what; once the pass ended, kept to read, with the way on.
+  if (r.role === 'guest' && r.passEnd) return { state: 'off', text: r.passEnd.state === 'expired' ? `On "${r.name}", guest: the guest pass there ended. Kept to read; ask its host for more time (Network, Find PCs on my network)` : `On "${r.name}", guest: that PC no longer lets this one in. Kept to read`, modelName: b.model ? shortName(jobRoutes.sharedName(r.id, b.model)) : '', pc: `${r.name}, guest` };
   const h = jobRoutes.lastHello(r.id);
   const loaded = image ? h?.image?.name : h?.model;
   if (!h || Date.now() - h.at > 5 * 60_000) return { state: 'off', text: `On "${r.name}": not heard from lately`, modelName: b.model ? shortName(jobRoutes.sharedName(r.id, b.model)) : '', pc: r.name };
@@ -119,7 +135,8 @@ function remoteState(ref: string | null | undefined, image: boolean): { state: '
     if (h.away) return { state: 'off', text: `"${r.name}": its owner is using it for now`, modelName: name, pc: r.name, owner: true };
     if (!sh) return { state: 'none', text: `${name} is no longer on "${r.name}"`, modelName: name, pc: r.name };
     if (sh.busy) return { state: 'on', text: `${name} on "${r.name}" is ${image ? 'drawing' : 'answering'} for someone else now: yours waits for it`, modelName: name, pc: r.name, busy: true };
-    return sh.loaded ? { state: 'on', text: `On, on "${r.name}"`, modelName: name, pc: r.name } : { state: 'asleep', text: `Asleep: ${name} loads on "${r.name}" when asked`, modelName: name, pc: r.name };
+    const as = r.role === 'guest' ? ', guest' : '';
+    return sh.loaded ? { state: 'on', text: `On, on "${r.name}"${as}`, modelName: name, pc: `${r.name}${as}` } : { state: 'asleep', text: `Asleep: ${name} loads on "${r.name}"${as} when asked`, modelName: name, pc: `${r.name}${as}` };
   }
   return loaded ? { state: 'on', text: `On, on "${r.name}"`, modelName: shortName(loaded), pc: r.name } : { state: 'asleep', text: `Asleep: "${r.name}" has no model loaded`, modelName: '', pc: r.name };
 }
@@ -139,6 +156,43 @@ function speedOfRef(ref: string | null | undefined): SpeedSummary | null {
 // ---- Test speed: one fixed example prompt on a person's model (here or on a linked PC), timed ----
 
 let speedTesting = false;
+
+/** The test running now, for the "Testing in progress" screen (GET /api/speed/live). Tokens are counted from the streamed text, so the live figure is an estimate; the kept figure is the runner's own. */
+interface Live { who: string; model: string; node: string; startedAt: number; loaded: boolean; firstAt: number; tokens: number; tps: number }
+let speedLive: Live | null = null;
+/** About how many tokens a streamed text holds (a word is about 1.3 tokens). */
+const guessTokens = (t: string) => Math.round(t.trim().split(/\s+/).filter(Boolean).length * 1.3);
+const gb = (bytes: number) => `${Math.round((bytes / 2 ** 30) * 10) / 10} GB`;
+
+/** The PC and the model as a test ran: this PC's own hardware, or what a linked PC's meters and hello say (a field it does not tell is left out). */
+async function snapshotOf(rb: ReturnType<typeof brains.parseRef>, node: string, modelName: string, view: { device?: unknown; modelName?: string | null } | null): Promise<{ snap: Snap; model: ModelInfo }> {
+  const model: ModelInfo = { name: modelName, ...(quantOf(modelName) ? { quant: quantOf(modelName) } : {}) };
+  const snap: Snap = { node };
+  if (rb.kind === 'remote') {
+    const st = await jobRoutes.nodeStats(rb.pc).catch(() => null);
+    if (st && st.state === 'on') {
+      if (st.stats.gpu?.name) snap.gpu = st.stats.gpu.name;
+      if (st.stats.gpu?.total) snap.vram = gb(st.stats.gpu.total);
+      if (st.stats.ram.total) snap.ram = gb(st.stats.ram.total);
+    }
+    const h = jobRoutes.lastHello(rb.pc);
+    if (h?.ctx) model.ctx = Number(h.ctx);
+    if (h?.runner) model.backend = String(typeof h.runner === 'string' ? h.runner : JSON.stringify(h.runner)).slice(0, 80);
+    return { snap, model };
+  }
+  const card = hardware.gpus.find(g => !g.integrated) ?? hardware.gpus[0];
+  if (card) {
+    snap.gpu = card.name;
+    if (card.total) snap.vram = gb(card.total);
+  }
+  if (hardware.nvidiaDriver) snap.driver = hardware.nvidiaDriver;
+  snap.cpu = hardware.cpuName;
+  snap.ram = gb(hardware.ram);
+  const s = await store.settings();
+  model.ctx = s.run?.[rb.kind === 'here' ? rb.id : '']?.ctx ?? 8192;
+  if (view?.device) model.backend = String(typeof view.device === 'object' ? JSON.stringify(view.device) : view.device).slice(0, 80);
+  return { snap, model };
+}
 /**
  * Runs the example prompt on what `who` answers with: the host ('manager'), a hire ('staff:<id>', their first choice),
  * a linked PC's loaded model ('remote:<pc>') or a model here ('model:<id>').
@@ -159,7 +213,17 @@ async function speedTest(b: Record<string, unknown>): Promise<{ status: number; 
   }, 15 * 60_000);
   let first = 0;
   let t0 = Date.now();
-  const onText = (t: string) => { if (!first && t.trim()) first = (Date.now() - t0) / 1000; };
+  let release: (() => Promise<string>) | null = null;
+  const onText = (t: string) => {
+    if (!t.trim()) return;
+    if (!first) first = (Date.now() - t0) / 1000;
+    if (speedLive) {
+      if (!speedLive.firstAt) speedLive.firstAt = Date.now();
+      speedLive.tokens = guessTokens(t);
+      const secs = (Date.now() - speedLive.firstAt) / 1000;
+      if (secs > 0.5) speedLive.tps = Math.round((speedLive.tokens / secs) * 10) / 10;
+    }
+  };
   const turns: ChatTurn[] = [{ role: 'system', content: 'You are a helpful assistant. Answer in plain sentences.' }, { role: 'user', content: TEST_PROMPT }];
   try {
     const m = staffId(who) ? staff.get(who.slice(6)) : undefined;
@@ -169,6 +233,11 @@ async function speedTest(b: Record<string, unknown>): Promise<{ status: number; 
     if (ref === null) return { status: 400, body: { error: 'Test speed for whom?' } };
     const as = m ?? ({ id: 'speed-test', name: 'The speed test', role: 'coder', level: 'junior', model: ref || null } as StaffMember);
     const rb = brains.parseRef(ref);
+    // A model the test has to load is unloaded again when it is done; one that was already loaded (someone's choice) stays.
+    // A linked PC that has not said what it holds is left alone.
+    const hello = rb.kind === 'remote' ? jobRoutes.lastHello(rb.pc) : null;
+    const loadedBefore = rb.kind === 'here' ? runnerFor(rb.id)?.view.state === 'connected' : rb.kind === 'remote' ? !hello || !!hello.model : true;
+    speedLive = { who, model: '', node: rb.kind === 'remote' ? jobRoutes.lastHello(rb.pc)?.name ?? 'a linked PC' : 'this PC', startedAt: Date.now(), loaded: false, firstAt: 0, tokens: 0, tps: 0 };
     if (rb.kind === 'remote') speeds.testing.add(`pc:${rb.pc}|`);
     if (rb.kind === 'here') speeds.testing.add(hereKey(rb.id));
     const got = await jobRoutes.hireBrain(as, () => undefined, ac.signal, ref);
@@ -179,9 +248,28 @@ async function speedTest(b: Record<string, unknown>): Promise<{ status: number; 
     if (got.here) reserve(ac, got.pane ?? main());
     // The first word is timed from here: loading the model first is not part of it.
     t0 = Date.now();
-    await got.brain.chat(turns, TEST_TOKENS, onText, ac.signal);
+    if (speedLive) Object.assign(speedLive, { model: shortName(got.model), node: got.pc === 'this PC' ? 'this PC' : got.pc, loaded: true, startedAt: t0 });
+    release = async () => {
+      if (loadedBefore) return '';
+      if (got.here) {
+        const held = runnerFor(id);
+        if (!held || held.view.state !== 'connected' || held.busy()) return '';
+        await held.disconnect();
+        return 'The model was unloaded again after the test.';
+      }
+      if (rb.kind !== 'remote') return '';
+      const r = await freeOn({ pc: rb.pc });
+      const freed = (r.body as { freed?: unknown[]; said?: string }).freed;
+      return r.status === 200 && freed?.length ? 'The model was unloaded from that PC after the test.' : '';
+    };
+    try { await got.brain.chat(turns, TEST_TOKENS, onText, ac.signal); } catch (e) { await release().catch(() => undefined); release = null; throw e; }
+    const total = (Date.now() - t0) / 1000;
+    const unloaded = await release().catch(() => '');
+    release = null;
     const pc = rb.kind === 'remote' ? rb.pc : '';
-    return keepTest(got.here ? hereKey(id) : pcKey(pc, got.model), shortName(got.model), got.pc === 'this PC' ? 'this PC' : got.pc, got.brain.last ?? null, first);
+    const where = got.pc === 'this PC' ? 'this PC' : got.pc;
+    const extra = await snapshotOf(rb, where, shortName(got.model), got.here ? got.pane?.view ?? null : null).catch(() => null);
+    return keepTest(got.here ? hereKey(id) : pcKey(pc, got.model), shortName(got.model), where, got.brain.last ?? null, first, total, extra, unloaded);
   } catch (e) {
     // A model that cannot answer now says why in plain words (not as a hire's backup question).
     const reasons = (e as { reasons?: string[] }).reasons;
@@ -191,13 +279,17 @@ async function speedTest(b: Record<string, unknown>): Promise<{ status: number; 
     clearTimeout(timer);
     endAnswer(ac);
     speeds.testing.clear();
+    speedLive = null;
     speedTesting = false;
   }
 }
-function keepTest(key: string, name: string, where: string, s: { write: number; tokens: number; read?: number } | null, first: number): { status: number; body: unknown } {
+function keepTest(key: string, name: string, where: string, s: { write: number; tokens: number; read?: number } | null, first: number, total: number, extra: { snap: Snap; model: ModelInfo } | null, unloaded = ''): { status: number; body: unknown } {
   if (!s) return { status: 500, body: { error: `${where === 'this PC' ? 'The model' : `"${where}"`} did not report its speed${where === 'this PC' ? '' : ' (its TOMLIN may be older than this one: update it)'}. Nothing was kept.` } };
-  if (!speeds.add(key, name, where, { ...s, first }, 'test')) return { status: 500, body: { error: 'The answer was too short to measure. Try again.' } };
-  return { status: 200, body: { key, summary: speeds.get(key) } };
+  const sample: Partial<Sample> = { ...s, first, total, ok: true, ...(extra ?? {}) };
+  if (!speeds.add(key, name, where, sample, 'test')) return { status: 500, body: { error: 'The answer was too short to measure. Try again.' } };
+  const summary = speeds.get(key);
+  // The results screen: this run's figures, and its change against the run before it (same model, same PC).
+  return { status: 200, body: { key, summary, result: summary?.history[0] ?? null, before: summary?.history[1] ?? null, unloaded } };
 }
 
 /** The last time each hire was seen working here (a project step, a loading model): with lastWorked, how long idle. */
@@ -242,8 +334,10 @@ async function homeView() {
       level: levelOfHire(m).name,
       kind: image ? 'image' : 'chat',
       model: m.model ?? null,
-      modelName: away ? away.modelName : shortName(entry?.name),
-      pc: away?.pc ? (where.kind === 'remote' ? shownName(profiles[where.pc], away.pc) : away.pc) : null,
+      // Not away: the answer every screen gives (src/hiremodel.ts), so a model no longer here is not "no model given".
+      modelName: away ? away.modelName : entry ? shortName(entry.name) : hireModelShort(hireModelOf(m)),
+      // Two linked PCs with one name ("Worker PC") are told apart (src/brains.ts pcLabels).
+      pc: away?.pc ? (where.kind === 'remote' ? shownName(profiles[where.pc], brains.pcLabels(s.remotes)[where.pc] ?? away.pc) : away.pc) : null,
       // On a PC set to Backups only: it takes no work, so nobody offers this hire a task (Home's pickers).
       backupsOnly: where.kind === 'remote' && s.remotes.some(x => x.id === where.pc && x.backupsOnly === true),
       ...st,
@@ -563,7 +657,7 @@ async function officeView() {
 }
 
 export const teamGet: Routes = {
-  '/api/staff': async ({ res }) => json(res, 200, await staffView()),
+  '/api/staff': async ({ res, url }) => json(res, 200, await staffView({ known: url.searchParams.get('known') === '1' })),
   '/api/office': async ({ res }) => json(res, 200, await officeView()),
   '/api/staff/wake': async ({ res, url }) => json(res, 200, await wakeView(url.searchParams.get('who') ?? '')),
   '/api/home': async ({ res, url }) => {
@@ -620,6 +714,8 @@ export const teamPost: Routes = {
     return json(res, 200, { bought: said.bought, ...(await officeView()) });
   },
   '/api/staff': async ({ res, b }) => {
+    // The id of the person this call hired (a program picking its new hire by name could get an older one of that name).
+    let hired: string | undefined;
     try {
       if (b.action === 'hire') {
         // Someone who left before leavers were listed may still have chats or a notebook under their id: a new
@@ -632,7 +728,11 @@ export const teamPost: Routes = {
           const ok = ref.kind === 'remote' ? (await store.settings()).remotes.some(r => r.id === ref.pc) : ref.kind === 'here' && (image ? images.has(ref.id) : chatList().some(x => x.id === ref.id));
           if (!ok) return json(res, 400, { error: `That is not a ${image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
         }
-        await staff.hire(b.name, b.role, b.level, b.model,id => had.has(`staff:${id}`) || existsSync(join(store.dir, memory.scopeFile(`staff:${id}`))), b.look);
+        const made = await staff.hire(b.name, b.role, b.level, b.model,id => had.has(`staff:${id}`) || existsSync(join(store.dir, memory.scopeFile(`staff:${id}`))), b.look);
+        hired = made.id;
+        // {drawAs: true}: the new artist becomes "Draw as" (as the Hire window sets it); only someone who draws can be.
+        const drawAs = drawAsChange(b.drawAs, made, (await store.settings()).imageAs);
+        if (drawAs !== null) await store.saveSettings({ imageAs: drawAs });
         // The chat keeps whoever it had, and "Draw as" whoever it had: the window that hired opens the new hire's chat,
         // or picks a new artist to draw, itself (another window's choice is not changed under it). Only with the host
         // off and the host still chosen does the first hire who chats become the one chosen.
@@ -667,7 +767,12 @@ export const teamPost: Routes = {
         }
         const ran = was ? { model: was.model, group: [...(was.group ?? [])], active: was.active } : null;
         const wasChat = !!was && !roleOf(was.role).kind;
+        if (b.drawAs === true && !roleOf(change.role ?? was?.role).kind) return json(res, 400, { error: 'Only a hire who draws (an artist or a designer) can be "Draw as".' });
         if (!(await staff.change(String(b.id), change))) return json(res, 404, { error: 'There is no such person on the team.' });
+        // {drawAs: true | false}: they become "Draw as", or stop being it; a hire who no longer draws stops being it.
+        const nowDraws = staff.get(String(b.id));
+        const drawAs = nowDraws ? drawAsChange(b.drawAs, nowDraws, (await store.settings()).imageAs) : null;
+        if (drawAs !== null) await store.saveSettings({ imageAs: drawAs });
         // Given another chat model: the old one is unloaded when it is idle and nobody else runs on it, so the new one
         // takes its place instead of loading beside it.
         const now = staff.get(String(b.id));
@@ -680,8 +785,8 @@ export const teamPost: Routes = {
       } else if (b.action === 'fire') {
         const was = staff.get(String(b.id));
         if (!(await staff.fire(String(b.id)))) return json(res, 404, { error: 'There is no such person on the team.' });
-        // Someone hired later with the same name starts without this one's photo.
-        await faces.clear(`staff:${String(b.id)}`);
+        // Their photo stays with their chats (an id is never given out again, so nobody hired later inherits it); it
+        // goes with their last chat (Clear chats from people who left, src/server/people.ts).
         if ((await store.settings()).who === 'staff:' + b.id) await setWho('standard');
         if ((await store.settings()).imageAs === b.id) await store.saveSettings({ imageAs: '' });
         // Their answer ends with them, and their chat model is unloaded when nobody else runs on it. A stopped answer
@@ -698,7 +803,7 @@ export const teamPost: Routes = {
     } catch (error) {
       return json(res, 400, { error: faultWords(error) });
     }
-    return json(res, 200, { ...(await staffView()), who: whoList(), settings: publicSettings(await store.settings()) });
+    return json(res, 200, { ...(await staffView()), who: whoList(), settings: publicSettings(await store.settings()), ...(hired ? { hired } : {}) });
   },
   '/api/staff/wake': async ({ res, b }) => {
     const r = await wake(String(b.who ?? ''), String(b.model ?? ''));
@@ -714,6 +819,7 @@ export const teamPost: Routes = {
     await staff.change(m.id, how === 'always' ? { fallback: ref, cover: null } : { cover: { ref, once: how === 'once' } });
     return json(res, 200, { ok: true, staff: staff.get(m.id) });
   },
+  '/api/speed/live': async ({ res }) => json(res, 200, { live: speedLive ? { ...speedLive, seconds: Math.round((Date.now() - speedLive.startedAt) / 1000) } : null }),
   '/api/speed/test': async ({ res, b }) => {
     const r = await speedTest(b);
     return json(res, r.status, r.body);

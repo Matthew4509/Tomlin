@@ -123,11 +123,11 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
     wire.destroy();
     done(reason);
   };
-  const toWire = (frames: Buffer[]) => {
-    let room = true;
-    for (const f of frames) room = wire.write(f) && room;
-    return room;
-  };
+  // A frame's length and body, and every frame of one turn, go out in ONE write: llama.cpp's RPC sends each message in
+  // several small writes (a command byte, an 8-byte size, the data), and a write each cost a Node turn and a packet each
+  // way (14 Nov 2026: a 10 KB frame there and back took 0.9 to 1.4 ms through the two sealed relays, 0.34 ms through
+  // two bare ones). The bytes on the wire are the same frames as before, so an older PC on the other end reads them.
+  const toWire = (frames: Buffer[]) => wire.write(frames.length === 1 ? frames[0] : Buffer.concat(frames));
   const fromWire = (chunk: Buffer) => {
     heard = Date.now();
     let parts: Buffer[];
@@ -136,11 +136,10 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
     } catch (e) {
       return end((e as Error).message);
     }
-    for (const p of parts) {
-      if (p.length && !plain.write(p)) {
-        holding = true;
-        wire.pause();
-      }
+    const opened = parts.filter(p => p.length);
+    if (opened.length && !plain.write(opened.length === 1 ? opened[0] : Buffer.concat(opened))) {
+      holding = true;
+      wire.pause();
     }
   };
   const beat = setInterval(() => {
@@ -148,8 +147,18 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
     if (Date.now() - heard > (o.silentMs ?? SILENT_MS)) return end('the other PC went quiet (off the network, or stopped).');
     toWire(sealer.frames(Buffer.alloc(0)));
   }, o.beatMs ?? BEAT_MS);
+  // What the runner writes in one go arrives as several reads: they are gathered until the end of this turn of the
+  // event loop and sealed as one frame (cut at FRAME as before).
+  let gathered: Buffer[] = [];
+  const seal = () => {
+    const all = gathered.length === 1 ? gathered[0] : Buffer.concat(gathered);
+    gathered = [];
+    if (why || !all.length) return;
+    if (!toWire(sealer.frames(all))) plain.pause();
+  };
   plain.on('data', (c: Buffer) => {
-    if (!toWire(sealer.frames(c))) plain.pause();
+    if (!gathered.length) setImmediate(seal);
+    gathered.push(c);
   });
   wire.on('drain', () => plain.resume());
   plain.on('drain', () => {

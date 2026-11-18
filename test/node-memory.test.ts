@@ -7,7 +7,8 @@ import { makeWayOrder, type LoadedFor } from '../src/nodestaff.ts';
 import { lentBytes } from '../src/jobrun/maxhost.ts';
 
 const GB = 2 ** 30;
-const row = (by: string[], at: number) => ({ by: new Set(by), links: new Set(['l']), at });
+// The links here are named as the PCs are; the test below gives two links one name.
+const row = (by: string[], at: number, links = by) => ({ by: new Set(by), links: new Set(links), at });
 
 test('every idle model loaded only for the asking PC makes way, oldest first; not the one asked for', () => {
   const loaded: LoadedFor = new Map([
@@ -33,6 +34,15 @@ test('nothing loaded for that PC: nothing makes way', () => {
   assert.deepEqual(makeWayOrder(new Map(), 'worker', 'want', () => true), []);
 });
 
+test('room is made by the link\'s own id, not its name: a guest that takes the name of another PC unloads none of its models', () => {
+  const loaded: LoadedFor = new Map([
+    ['hosts', row(['Main PC'], 1, ['aaaa1111'])],
+    ['guests', row(['Main PC'], 2, ['bbbb2222'])],
+  ]);
+  assert.deepEqual(makeWayOrder(loaded, 'bbbb2222', 'want', () => true), ['guests']);
+  assert.deepEqual(makeWayOrder(loaded, 'aaaa1111', 'want', () => true), ['hosts']);
+});
+
 const hello = (memory: unknown, can = ['max']) => ({ can, memory });
 
 test('a lending PC with a card adds that card\'s free memory, less 0.5 GB kept free', () => {
@@ -40,14 +50,16 @@ test('a lending PC with a card adds that card\'s free memory, less 0.5 GB kept f
   assert.equal(lentBytes([h]), 3 * GB);
 });
 
-test('a lending PC with no card adds its free RAM, less the 3 GB kept for Windows', () => {
-  const h = hello({ cards: { count: 0, total: 0 }, ram: { total: 32 * GB, used: 12 * GB }, gpu: null });
-  assert.equal(lentBytes([h]), 17 * GB);
+test('a lending PC with no card adds its free RAM, less the 4 GB it aims to keep and 0.5 GB for the runner', () => {
+  const h = hello({ cards: { count: 0, total: 0 }, ram: { total: 64 * GB, used: 44 * GB }, gpu: null });
+  assert.equal(lentBytes([h]), 15.5 * GB);
+  // A PC with 32 GB of RAM or less: at most 55% of its free RAM (a 24 GB PC stalled with 14 to 17 GB lent).
+  assert.equal(lentBytes([hello({ cards: { count: 0, total: 0 }, ram: { total: 32 * GB, used: 12 * GB }, gpu: null })]), 20 * GB * 0.55);
 });
 
 test('two lending PCs add up; one with no Max, no memory reading, or a card it cannot read adds nothing', () => {
   const ram = (free: number) => hello({ cards: { count: 0, total: 0 }, ram: { total: 16 * GB, used: (16 - free) * GB }, gpu: null });
-  assert.equal(lentBytes([ram(10), ram(5)]), 9 * GB);
+  assert.equal(lentBytes([ram(10), ram(5)]), 6 * GB);
   assert.equal(lentBytes([hello({ cards: { count: 0 }, ram: { total: 16 * GB, used: 0 } }, [])]), 0);
   assert.equal(lentBytes([hello(null), null]), 0);
   assert.equal(lentBytes([hello({ cards: { count: 1, total: 8 * GB }, ram: { total: 16 * GB, used: 0 }, gpu: null })]), 0);

@@ -1,7 +1,7 @@
 // TOMLIN.exe (Smart Manager.exe in an install made before the TOMLIN name): the installed app's own program (2.0.34).
 // The installer (tools/install.ts) builds it on the PC with
 // the C# compiler that comes with Windows (.NET Framework 4), so nothing is downloaded and nothing needs signing. It
-// sits in the install folder beside current.txt, which names the copy to run (tomlin-<version>; older copies shelby-<version>), and:
+// sits in the install folder beside current.txt, which names the copy to run (tomlin-<version>), and:
 //  - starts that copy's TOMLIN with no console window (the bundled Node.js, else the one on the PATH), inside a
 //    Windows job object, so closing this program also ends TOMLIN and every model runner it started;
 //  - opens TOMLIN in its own window (Microsoft Edge app mode; the default browser when there is no Edge);
@@ -108,7 +108,16 @@ static class TomlinTray
         // Already running, started another way (Start TOMLIN.cmd in a folder): that one is opened, nothing is started.
         if (Answers()) AlreadyRunning();
         else Start(!quiet);
-        Application.ApplicationExit += delegate { Stop(); icon.Visible = false; };
+        Application.ApplicationExit += delegate { if (child != null) LogLine("TOMLIN was ended because the TOMLIN program by the clock closed."); Stop(); icon.Visible = false; };
+        // Signing out, a restart or a shutdown ends this program and TOMLIN with it: said first, while there is time.
+        // SessionEnded, not SessionEnding: Ending only asks whether Windows may end the session (a restart that is then
+        // cancelled, or another program that says no, left TOMLIN ended with the icon still there).
+        Microsoft.Win32.SystemEvents.SessionEnded += delegate (object s, Microsoft.Win32.SessionEndedEventArgs e)
+        {
+            if (child != null) LogLine("TOMLIN is being ended because Windows is " + (e.Reason == Microsoft.Win32.SessionEndReasons.Logoff ? "signing out." : "shutting down or restarting."));
+            Stop();
+            child = null;
+        };
         Application.Run();
         GC.KeepAlive(one);
         return 0;
@@ -209,6 +218,8 @@ static class TomlinTray
         int code = proc.ExitCode;
         child = null;
         if (quitting) { Application.Exit(); return; }
+        // Its own reasons (75, 76, 77, 78) are in its log already (src/lastwords.ts); an end it never wrote is said here.
+        if (code != 75 && code != 76 && code != 77 && code != 78) LogLine("TOMLIN (process " + proc.Id + ") ended with code " + code + (code == 1 ? "" : " (" + (uint)code + ")") + "; the program by the clock saw it end. Its last lines are in last-run.txt in " + installDir + ".");
         if (code == 75) { Start(false); return; }
         // 77: another TOMLIN runs for this Windows user (src/server/core.ts): that one is opened.
         if (code == 77 && Answers()) { AlreadyRunning(); return; }
@@ -228,7 +239,7 @@ static class TomlinTray
                 copyDir = next;
                 // The next start (Start with Windows, the Start menu) runs the new copy too.
                 WriteCurrent(next);
-                icon.ShowBalloonTip(5000, "TOMLIN", "Updated by a linked PC: starting the new version.", ToolTipIcon.Info);
+                icon.ShowBalloonTip(5000, "TOMLIN", "TOMLIN was updated: starting the new version.", ToolTipIcon.Info);
                 Start(false);
                 return;
             }
@@ -299,7 +310,7 @@ static class TomlinTray
             foreach (string d in Directory.GetDirectories(installDir, "*-*"))
             {
                 string n = Path.GetFileName(d);
-                if (!n.StartsWith("tomlin-") && !n.StartsWith("shelby-")) continue;
+                if (!n.StartsWith("tomlin-")) continue;
                 if (!File.Exists(Path.Combine(d, "tools\\install.ts")) || !File.Exists(Path.Combine(d, "src\\server.ts"))) continue;
                 DateTime t = Directory.GetLastWriteTime(d);
                 if (t > when) { when = t; best = d; }
@@ -384,10 +395,14 @@ static class TomlinTray
 
     static void OpenFolder()
     {
-        // The same folder as src/keep.ts resolveHome: TOMLIN_HOME (or its old name), else around TOMLIN_DATA, else
+        try { Process.Start("explorer.exe", "\"" + HomeDir() + "\""); } catch { }
+    }
+
+    static string HomeDir()
+    {
+        // The same folder as src/keep.ts resolveHome: TOMLIN_HOME, else around TOMLIN_DATA, else
         // "TOMLIN" in the user's folder, or "Smart Manager" when only that one holds data (set up before the TOMLIN name).
         string home = Environment.GetEnvironmentVariable("TOMLIN_HOME");
-        if (string.IsNullOrEmpty(home)) home = Environment.GetEnvironmentVariable("SHELBY_HOME");
         string data = Environment.GetEnvironmentVariable("TOMLIN_DATA");
         if (string.IsNullOrEmpty(home) && !string.IsNullOrEmpty(data)) home = Path.GetDirectoryName(Path.GetFullPath(data));
         if (string.IsNullOrEmpty(home))
@@ -397,7 +412,25 @@ static class TomlinTray
             string old = Path.Combine(user, "Smart Manager");
             if (!Directory.Exists(Path.Combine(home, "data")) && Directory.Exists(Path.Combine(old, "data"))) home = old;
         }
-        try { Process.Start("explorer.exe", "\"" + home + "\""); } catch { }
+        return home;
+    }
+
+    /**
+     * One line in TOMLIN's own log (src/log.ts: data\logs\<day>.log, "14:02:31 WARN [tray] ..."): why this program
+     * ended TOMLIN or saw it end, which TOMLIN cannot write itself when it is ended from outside (src/lastwords.ts).
+     */
+    static void LogLine(string what)
+    {
+        try
+        {
+            string data = Environment.GetEnvironmentVariable("TOMLIN_DATA");
+            if (string.IsNullOrEmpty(data)) data = Path.Combine(HomeDir(), "data");
+            string dir = Path.Combine(data, "logs");
+            if (!Directory.Exists(dir)) return;
+            DateTime now = DateTime.Now;
+            File.AppendAllText(Path.Combine(dir, now.ToString("yyyy-MM-dd") + ".log"), now.ToString("HH:mm:ss") + " WARN [tray] " + what + "\n");
+        }
+        catch { }
     }
 
     static void Restart()
@@ -405,6 +438,7 @@ static class TomlinTray
         if (child == null) { Start(false); return; }
         Process old = child;
         child = null;
+        LogLine("TOMLIN was ended to start it again (Start it again in the icon's menu).");
         Kill(old);
         Start(false);
     }
@@ -413,7 +447,10 @@ static class TomlinTray
     {
         quitting = true;
         if (child == null) { Application.Exit(); return; }
-        Kill(child);
+        LogLine("TOMLIN was ended by Quit TOMLIN in the icon's menu.");
+        Process gone = child;
+        child = null;
+        Kill(gone);
         Application.Exit();
     }
 

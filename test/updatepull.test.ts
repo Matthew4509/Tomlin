@@ -2,7 +2,7 @@
 // TOMLIN that says an older version) links to a PC running this copy's files and presses Update this PC from it. Refused
 // until that PC's owner ticks "Let linked PCs pull TOMLIN updates from here"; then no PIN of that PC is asked, and the
 // PC behind ends with 76 and next-copy.txt naming a whole copy of the other PC's files beside its own. Both copies are
-// small (no models, no runners) and share one node_modules in the folder above them, as test/oldnode.test.ts does.
+// small (no models, no runners) and share one node_modules in the folder above them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';

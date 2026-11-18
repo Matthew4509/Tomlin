@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as inst from '../src/installer.ts';
@@ -12,6 +13,7 @@ import { buildSetupExe, setupCscArgs } from '../tools/setupexe.ts';
 import { installedExe, startupScript } from '../src/autostart.ts';
 import { PARTS } from '../src/update.ts';
 import { refreshTray, STAMP, traySum } from '../src/trayfresh.ts';
+import { testEnv } from './env.ts';
 
 const made: string[] = [];
 const tmp = () => {
@@ -62,6 +64,55 @@ test('an install made before the TOMLIN name keeps its folder, program and Setti
   assert.equal(inst.places(env).root, now);
   assert.equal(inst.exeIn(now), join(now, 'TOMLIN.exe'));
   assert.equal(inst.sideExe(join(now, 'TOMLIN.exe'), 'new'), join(now, 'TOMLIN.new.exe'));
+});
+
+test('with a keyboard, setup names the copy it found and offers Repair | Update | Uninstall by name', () => {
+  const older = inst.actionMenu('2.0.33', '2.0.34', 'C:\\x\\tomlin-2.0.33');
+  assert.match(older.intro, /2\.0\.33 is installed in C:\\x\\tomlin-2\.0\.33/);
+  assert.deepEqual(older.options.map(o => o.key), ['update', 'repair', 'uninstall', 'quit']);
+  assert.equal(older.defaultKey, 'update');
+  const same = inst.actionMenu('2.0.34', '2.0.34', 'C:\\x');
+  assert.equal(same.defaultKey, 'quit');
+  assert.deepEqual(same.options.map(o => o.key), ['repair', 'update', 'uninstall', 'quit']);
+  const newer = inst.actionMenu('2.0.40', '2.0.34', 'C:\\x');
+  assert.equal(newer.defaultKey, 'repair');
+  assert.ok(!newer.options.some(o => o.key === 'update'), 'a newer copy is never replaced by an older setup');
+  assert.equal(inst.pickAction('', older), 'update');
+  assert.equal(inst.pickAction('3', older), 'uninstall');
+  assert.equal(inst.pickAction('Re', older), 'repair');
+  assert.equal(inst.pickAction('un', older), 'uninstall');
+  assert.equal(inst.pickAction('u', older), null, 'one letter is ambiguous');
+  assert.equal(inst.pickAction('9', older), null);
+  assert.equal(inst.pickAction('update', newer), null, 'not offered');
+});
+
+test('the setup window names the copy it found and offers Repair | Update | Uninstall to click; Cancel is its own button', () => {
+  const older = inst.windowMenu('2.0.87', '2.0.88', 'C:\\P\\TOMLIN\\tomlin-2.0.87', 'C:\\P\\TOMLIN', 'C:\\Users\\sam\\TOMLIN');
+  assert.match(older.intro, /TOMLIN 2\.0\.87 is installed in C:\\P\\TOMLIN\\tomlin-2\.0\.87\./, 'the folder and version found');
+  assert.match(older.intro, /This setup holds TOMLIN 2\.0\.88\./, 'the version it would put in');
+  assert.match(older.intro, /Cancel to change nothing/);
+  assert.deepEqual(older.choices.map(c => c.key), ['update', 'repair', 'uninstall'], 'no Quit: Cancel is the window\'s own button');
+  assert.equal(older.pick, 'update');
+  assert.match(older.uninstall, /removes TOMLIN 2\.0\.87 from C:\\P\\TOMLIN/);
+  assert.match(older.uninstall, /chats, staff, pictures and models in C:\\Users\\sam\\TOMLIN are kept/, 'says what is kept');
+  const same = inst.windowMenu('2.0.88', '2.0.88', 'C:\\x', 'C:\\x', 'C:\\h');
+  assert.deepEqual(same.choices.map(c => c.key), ['repair', 'update', 'uninstall']);
+  assert.match(same.choices[1].label, /^Reinstall/);
+  assert.equal(same.pick, '', 'the same version: nothing ticked, so no default decides it');
+  const newer = inst.windowMenu('2.0.90', '2.0.88', 'C:\\x', 'C:\\x', 'C:\\h');
+  assert.deepEqual(newer.choices.map(c => c.key), ['repair', 'uninstall'], 'a newer copy is never replaced by an older setup');
+  assert.equal(newer.pick, 'repair');
+  // The choice is passed by name (install --action ...), never left to a yes/no default.
+  assert.equal(inst.actionFlag(null, '2.0.88', '2.0.88'), null, 'no --action: the questions decide, as before');
+  assert.deepEqual(inst.actionFlag('update', '2.0.88', '2.0.88'), { action: 'update' });
+  assert.deepEqual(inst.actionFlag('Repair', '2.0.87', '2.0.88'), { action: 'repair' });
+  assert.deepEqual(inst.actionFlag('uninstall', '2.0.90', '2.0.88'), { action: 'uninstall' });
+  assert.deepEqual(inst.actionFlag('update', null, '2.0.88'), { action: 'install' }, 'nothing installed: a plain install');
+  assert.ok('error' in inst.actionFlag('update', '2.0.90', '2.0.88')!, 'update over a newer copy is refused');
+  assert.ok('error' in inst.actionFlag('repair', null, '2.0.88')!);
+  assert.ok('error' in inst.actionFlag('uninstall', null, '2.0.88')!);
+  assert.ok('error' in inst.actionFlag('', '2.0.88', '2.0.88')!);
+  assert.ok('error' in inst.actionFlag('quit', '2.0.88', '2.0.88')!, 'Cancel never runs the installer');
 });
 
 test('the first question: install, update, repair, or a newer one already there (nothing changed)', () => {
@@ -136,29 +187,50 @@ test('a program on the port is called TOMLIN only when its /api/status says so; 
 });
 
 test('old copies: the one in use and the one before stay; earlier ones go', () => {
-  const names = ['shelby-2.0.31', 'shelby-2.0.34', 'shelby-2.0.33', 'shelby-2.0.32', 'icon.ico', 'Smart Manager.exe', 'current.txt', 'shelby-2.0.34 (2)'];
-  assert.deepEqual(inst.copiesToRemove(names, 'shelby-2.0.34 (2)').sort(), ['shelby-2.0.31', 'shelby-2.0.32', 'shelby-2.0.33']);
-  assert.deepEqual(inst.copiesToRemove(names, 'shelby-2.0.34').sort(), ['shelby-2.0.31', 'shelby-2.0.32', 'shelby-2.0.33']);
-  assert.deepEqual(inst.copiesToRemove(['shelby-2.0.33', 'shelby-2.0.34'], 'shelby-2.0.34'), []);
+  const names = ['tomlin-2.0.31', 'tomlin-2.0.34', 'tomlin-2.0.33', 'tomlin-2.0.32', 'icon.ico', 'Smart Manager.exe', 'current.txt', 'tomlin-2.0.34 (2)', 'tomlin-notes', 'tomlin-2'];
+  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34 (2)').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.33']);
+  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.33']);
+  assert.deepEqual(inst.copiesToRemove(['tomlin-2.0.33', 'tomlin-2.0.34'], 'tomlin-2.0.34'), []);
 });
 
-test('old copies: copies named before TOMLIN (shelby-) and after (tomlin-) are one list, by version', () => {
-  const names = ['shelby-2.0.42', 'shelby-2.0.43', 'tomlin-2.0.44', 'tomlin-2.0.45', 'tomlin-notes', 'shelby-2'];
-  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.45').sort(), ['shelby-2.0.42', 'shelby-2.0.43']);
-  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.44').sort(), ['shelby-2.0.42', 'shelby-2.0.43']);
-  assert.deepEqual(inst.copiesToRemove(['shelby-2.0.44', 'tomlin-2.0.45'], 'tomlin-2.0.45'), []);
+test('every start from the install folder removes the earlier copies an update left (20 copies, 8.5 GB, 17 Nov)', async () => {
+  const root = tmp();
+  const copy = (name: string, pkg = true) => {
+    mkdirSync(join(root, name), { recursive: true });
+    writeFileSync(join(root, name, 'x.txt'), 'x');
+    if (pkg) writeFileSync(join(root, name, 'package.json'), JSON.stringify({ name: 'tomlin', version: name.replace(/^tomlin-/, '') }));
+  };
+  const old = ['2.0.79', '2.0.81', '2.0.84', '2.0.84 (2)', '2.0.84 (3)', '2.0.88', '2.0.90', '2.0.95'];
+  for (const v of [...old, '2.0.97']) copy(`tomlin-${v}`);
+  copy('tomlin-2.0.50', false); // a half-made copy: no package.json, left alone
+  mkdirSync(join(root, 'other-tool')); // not a copy of TOMLIN
+  writeFileSync(join(root, 'current.txt'), 'tomlin-2.0.97');
+  const gone = await inst.pruneOldCopies(root, 'tomlin-2.0.97');
+  assert.equal(gone.length, old.length - 1, 'all earlier ones but the newest');
+  assert.deepEqual(readdirSync(root).sort(), ['current.txt', 'other-tool', 'tomlin-2.0.50', 'tomlin-2.0.95', 'tomlin-2.0.97']);
+  assert.deepEqual(await inst.pruneOldCopies(root, 'tomlin-2.0.97'), [], 'nothing more to remove the next time');
+  // current.txt names a copy that is not the running one (the installed program starts that one): it is kept as well.
+  const other = tmp();
+  for (const v of ['2.0.80', '2.0.85', '2.0.90', '2.0.96', '2.0.97']) copy2(other, v);
+  writeFileSync(join(other, 'current.txt'), 'tomlin-2.0.85');
+  await inst.pruneOldCopies(other, 'tomlin-2.0.97');
+  assert.deepEqual(readdirSync(other).sort(), ['current.txt', 'tomlin-2.0.85', 'tomlin-2.0.96', 'tomlin-2.0.97']);
+  function copy2(dir: string, v: string) {
+    mkdirSync(join(dir, `tomlin-${v}`), { recursive: true });
+    writeFileSync(join(dir, `tomlin-${v}`, 'package.json'), JSON.stringify({ name: 'tomlin', version: v }));
+  }
 });
 
 test('Start with Windows for an installed copy starts its program, quietly; an unzipped copy keeps Start TOMLIN.cmd', () => {
   const root = tmp();
-  const copy = join(root, 'shelby-2.0.34');
+  const copy = join(root, 'tomlin-2.0.34');
   mkdirSync(copy);
   // The PC running this may have TOMLIN installed (it did, 27 Oct): the unzipped copy looks at an install root that is not there.
   const env = { TOMLIN_INSTALL_ROOT: join(root, 'no-install-here') };
   assert.equal(installedExe(copy), null);
   assert.match(startupScript(copy, env), /Start TOMLIN.cmd/);
   writeFileSync(join(root, inst.EXE), '');
-  writeFileSync(join(root, inst.CURRENT), 'shelby-2.0.34');
+  writeFileSync(join(root, inst.CURRENT), 'tomlin-2.0.34');
   assert.equal(installedExe(copy), join(root, inst.EXE));
   assert.equal(startupScript(copy, env), inst.startupScriptFor(join(root, inst.EXE)));
   assert.match(startupScript(copy, env), /start "" ".*TOMLIN.exe" --quiet\r\n$/);
@@ -179,11 +251,21 @@ test('every release and every pushed update carries the installer, the program\'
 });
 
 const onWindows = process.platform === 'win32';
-const run = (args: string[], env: Record<string, string>) => execFileSync(process.execPath, [join(rootPath, 'tools', 'install.ts'), ...args], { env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 240_000 });
+// A port nobody listens on: the installer will not install while anything answers on TOMLIN's port (a fixed 8787 fails
+// whenever another copy or program on the PC had it).
+const freePort = () => new Promise<string>(resolve => {
+  const s = createServer().listen(0, '127.0.0.1', () => {
+    const port = (s.address() as { port: number }).port;
+    s.close(() => resolve(String(port)));
+  });
+});
+// A hard limit for a hang, not a speed check: a real install copies the app and its runners (about 20 s on a quiet PC,
+// over 240 s seen with the CPU loaded and other tests copying at the same time).
+const run = (args: string[], env: Record<string, string>) => execFileSync(process.execPath, [join(rootPath, 'tools', 'install.ts'), ...args], { env: testEnv(env), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 900_000 });
 
-test('a dry run says every step and changes nothing', { skip: !onWindows }, () => {
+test('a dry run says every step and changes nothing', { skip: !onWindows }, async () => {
   const t = tmp();
-  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'HKCU\\Software\\SmartManagerTestDry', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787' };
+  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'HKCU\\Software\\SmartManagerTestDry', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: await freePort() };
   mkdirSync(env.TOMLIN_STARTUP_DIR);
   const out = run(['install', '--yes', '--dry-run', '--no-firewall', '--autostart'], env);
   for (const want of [/Install TOMLIN [\d.]+ for this Windows user\? Yes/, /\(would\) copy \d+ files to /, /\(would\) build .*TOMLIN.exe/, /\(would\) point current\.txt at tomlin-/,/\(would\) add TOMLIN to the Start menu/, /\(would\) add a shortcut to /, /\(would\) start TOMLIN with Windows/, /\(would\) list TOMLIN in Settings > Apps \(HKCU\\Software\\SmartManagerTestDry\)/, /\(would\) start TOMLIN/]) assert.match(out, want);
@@ -193,7 +275,7 @@ test('a dry run says every step and changes nothing', { skip: !onWindows }, () =
 
 test('a real install into a test folder: the app, the program built here, current.txt, shortcuts; then uninstall removes them and keeps the data', { skip: !onWindows || !inst.places().csc.some(existsSync) }, async () => {
   const t = tmp();
-  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787' };
+  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'Smart Manager'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: await freePort() };
   for (const d of [env.TOMLIN_START_MENU_DIR, env.TOMLIN_DESKTOP_DIR, env.TOMLIN_STARTUP_DIR, join(env.TOMLIN_HOME, 'data')]) mkdirSync(d, { recursive: true });
   writeFileSync(join(env.TOMLIN_HOME, 'data', 'settings.json'), '{}');
   run(['install', '--yes', '--no-start', '--no-firewall', '--desktop', '--no-autostart'], env);
@@ -273,6 +355,83 @@ test('the setup window asks the installer: status says what is there, check says
   assert.match(out, /\(would\) copy \d+ files to .*D apps.TOMLIN/);
 });
 
+/** status lines as a map; the choice lines as a list. */
+const statusOf = (out: string) => {
+  const lines = out.split(/\r?\n/).filter(l => l.includes('='));
+  const s: Record<string, string> = Object.fromEntries(lines.map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  return { s, choices: lines.filter(l => l.startsWith('choice=')).map(l => l.slice(7).split('|')[0]) };
+};
+
+test('the setup window: status names the copy found and the choices; the choice is passed by name, so the same version is copied in again', { skip: !onWindows }, () => {
+  const t = tmp();
+  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'TOMLIN'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787' };
+  mkdirSync(env.TOMLIN_STARTUP_DIR, { recursive: true });
+  const version = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf8')).version;
+  const copy = join(env.TOMLIN_INSTALL_ROOT, `tomlin-${version}`);
+  mkdirSync(copy, { recursive: true });
+  writeFileSync(join(copy, 'package.json'), JSON.stringify({ version }));
+  writeFileSync(join(env.TOMLIN_INSTALL_ROOT, inst.CURRENT), `tomlin-${version}`);
+  const { s, choices } = statusOf(run(['status'], env));
+  assert.equal(s.installed, version);
+  assert.equal(s.found, copy, 'the folder of the copy found');
+  assert.match(s.intro, new RegExp(`installed in .*tomlin-${version.replace(/\./g, '\\.')}\\. It is the same version as this setup\\. This setup holds TOMLIN ${version.replace(/\./g, '\\.')}\\.`));
+  assert.deepEqual(choices, ['repair', 'update', 'uninstall']);
+  assert.equal(s.pick, '');
+  assert.match(s.removes, /are kept/);
+  // What the window used to run: with no keyboard the same-version question took its default, No, and did nothing.
+  assert.match(run(['install', '--yes', '--dry-run', '--no-firewall', '--no-vcrt'], env), /Nothing was changed/);
+  // The window's Reinstall, by name: copied in again, beside the copy there.
+  const out = run(['install', '--yes', '--dry-run', '--no-start', '--no-firewall', '--no-vcrt', '--action', 'update'], env);
+  assert.match(out, /copying it in again/);
+  assert.match(out, new RegExp(`\\(would\\) copy \\d+ files to .*tomlin-${version.replace(/\./g, '\\.')} \\(2\\)`));
+  assert.doesNotMatch(out, /Nothing was changed/);
+  // A newer copy: Repair or Uninstall only; Update is refused, and nothing is touched.
+  writeFileSync(join(copy, 'package.json'), JSON.stringify({ version: '99.0.0' }));
+  const n = statusOf(run(['status'], env));
+  assert.deepEqual(n.choices, ['repair', 'uninstall']);
+  assert.equal(n.s.pick, 'repair');
+  assert.throws(() => run(['install', '--yes', '--dry-run', '--no-vcrt', '--action', 'update'], env), (e: { status?: number; stdout?: string }) => e.status === 1 && /newer than this setup/.test(e.stdout ?? ''));
+  assert.throws(() => run(['install', '--yes', '--dry-run', '--no-vcrt', '--action', 'everything'], env), (e: { status?: number }) => e.status === 1);
+  assert.deepEqual(readdirSync(env.TOMLIN_INSTALL_ROOT).sort(), [inst.CURRENT, `tomlin-${version}`].sort());
+  // Nothing installed: no choices, the plain install.
+  const none = statusOf(run(['status'], { ...env, TOMLIN_INSTALL_ROOT: join(t, 'empty') }));
+  assert.equal(none.s.installed, '');
+  assert.equal(none.s.found, undefined);
+  assert.deepEqual(none.choices, []);
+});
+
+test('the setup window\'s three choices, as it runs them, in a test install folder: Update copies it in again, Repair puts back what is gone, Uninstall removes it and keeps the data', { skip: !onWindows || !inst.places().csc.some(existsSync) }, () => {
+  const t = tmp();
+  const env = { TOMLIN_INSTALL_ROOT: join(t, 'Programs', 'TOMLIN'), TOMLIN_START_MENU_DIR: join(t, 'menu'), TOMLIN_DESKTOP_DIR: join(t, 'desk'), TOMLIN_STARTUP_DIR: join(t, 'startup'), TOMLIN_UNINSTALL_KEY: 'none', TOMLIN_HOME: join(t, 'home'), TOMLIN_PORT: '8787' };
+  for (const d of [env.TOMLIN_START_MENU_DIR, env.TOMLIN_DESKTOP_DIR, env.TOMLIN_STARTUP_DIR, join(env.TOMLIN_HOME, 'data')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(env.TOMLIN_HOME, 'data', 'settings.json'), '{}');
+  const version = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf8')).version;
+  const r = env.TOMLIN_INSTALL_ROOT;
+  run(['install', '--yes', '--no-start', '--no-firewall', '--no-vcrt', '--desktop', '--no-autostart'], env);
+  assert.equal(readFileSync(join(r, inst.CURRENT), 'utf8'), `tomlin-${version}`);
+  // Update (the same version: Reinstall), with the arguments the window passes.
+  run(['install', '--yes', '--no-start', '--action', 'update', '--desktop', '--no-autostart', '--no-firewall', '--no-vcrt'], env);
+  assert.equal(readFileSync(join(r, inst.CURRENT), 'utf8'), `tomlin-${version} (2)`, 'a fresh copy, and current.txt points at it');
+  assert.ok(existsSync(join(r, `tomlin-${version} (2)`, 'src', 'server.ts')));
+  assert.ok(existsSync(join(r, `tomlin-${version}`)), 'the copy before stays for going back');
+  // Repair: the Start menu shortcut is gone; Repair puts it back. A source checkout has no runtime or node_modules
+  // (a release zip carries them): stand-ins, so Repair sees a whole copy and does not refuse it as damaged.
+  for (const f of inst.missingFiles(join(r, `tomlin-${version} (2)`))) {
+    mkdirSync(join(r, `tomlin-${version} (2)`, ...f.split('/').slice(0, -1)), { recursive: true });
+    writeFileSync(join(r, `tomlin-${version} (2)`, ...f.split('/')), '');
+  }
+  rmSync(join(env.TOMLIN_START_MENU_DIR, inst.LINK));
+  assert.match(run(['repair', '--yes'], env), /Done: .*Start menu/);
+  assert.deepEqual(readdirSync(env.TOMLIN_START_MENU_DIR), [inst.LINK]);
+  assert.equal(readFileSync(join(r, inst.CURRENT), 'utf8'), `tomlin-${version} (2)`, 'Repair keeps the copy');
+  // Uninstall, after the window's confirm page.
+  run(['uninstall', '--yes', '--no-firewall'], env);
+  assert.equal(existsSync(r), false);
+  assert.deepEqual(readdirSync(env.TOMLIN_START_MENU_DIR), []);
+  assert.deepEqual(readdirSync(env.TOMLIN_DESKTOP_DIR), []);
+  assert.ok(existsSync(join(env.TOMLIN_HOME, 'data', 'settings.json')), 'the data is kept');
+});
+
 test('the setup window builds with the compiler that comes with Windows, and the .cmd falls back to the text setup', { skip: !onWindows || !inst.places().csc.some(existsSync) }, () => {
   const t = tmp();
   const csc = inst.places().csc.find(existsSync)!;
@@ -284,7 +443,8 @@ test('the setup window builds with the compiler that comes with Windows, and the
   assert.match(cmd, /--console/);
   assert.match(cmd, /"%SM_CODE%"=="9"\s+goto console/, 'a window that cannot start falls back to the text setup');
   const setup = readFileSync(join(rootPath, 'tools', 'setup.cs'), 'utf8');
-  for (const flag of ['--yes', '--no-start', '--dir', '--desktop', '--no-desktop', '--autostart', '--no-autostart', '--firewall', '--no-firewall', '--vcrt', '--no-vcrt']) assert.ok(setup.includes(flag), `${flag} is passed by the window`);
+  for (const flag of ['--yes', '--no-start', '--dir', '--desktop', '--no-desktop', '--autostart', '--no-autostart', '--firewall', '--no-firewall', '--vcrt', '--no-vcrt', '--action update', '"repair --yes"', '"uninstall --yes"']) assert.ok(setup.includes(flag), `${flag} is passed by the window`);
+  assert.doesNotMatch(setup, /MessageBoxButtons\.YesNo/, 'no yes/no question: the choices are clicked by name');
 });
 
 test('the one-file installer carries the zip, checks it, unpacks it, and refuses a damaged one', { skip: !onWindows || !inst.places().csc.some(existsSync) }, async () => {
@@ -310,4 +470,44 @@ test('the one-file installer carries the zip, checks it, unpacks it, and refuses
   const damaged = join(t, 'TOMLIN-Setup-damaged.exe');
   writeFileSync(damaged, bad);
   assert.throws(() => execFileSync(damaged, ['--extract', join(t, 'out2')], { windowsHide: true }), (e: { status?: number }) => e.status === 3);
+});
+
+test('setup finds copies started from a folder (Desktop, Downloads, two levels down) and changes none of them', () => {
+  const t = tmp();
+  const copyAt = (dir: string, version: string, name = 'tomlin', data = false) => {
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version }));
+    writeFileSync(join(dir, 'src', 'server.ts'), '');
+    if (data) mkdirSync(join(dir, 'data'), { recursive: true }), writeFileSync(join(dir, 'data', 'settings.json'), '{}');
+  };
+  const desk = join(t, 'Desktop'), down = join(t, 'Downloads'), root = join(t, 'Programs', 'TOMLIN');
+  copyAt(join(desk, 'TOMLIN'), '2.0.60', 'tomlin', true);
+  copyAt(join(down, 'tomlin-2.0.70', 'tomlin-2.0.70'), '2.0.70');
+  copyAt(join(down, 'smart-manager-2.0.20'), '2.0.20', 'smart-manager');
+  copyAt(join(down, 'setup-2.0.85'), '2.0.85'); // the setup's own folder: skipped
+  copyAt(join(root, 'tomlin-2.0.84'), '2.0.84'); // inside the install: not loose
+  copyAt(join(down, 'a', 'b', 'too-deep'), '2.0.10'); // three levels down: not looked at
+  mkdirSync(join(down, 'not-tomlin'), { recursive: true });
+  writeFileSync(join(down, 'not-tomlin', 'package.json'), JSON.stringify({ name: 'other', version: '1.0.0' }));
+  const before = readdirSync(down).sort();
+  const found = inst.findLooseCopies(inst.lookIn({ TOMLIN_LOOK_IN: `${desk};${down};${root}` }, null), root, [join(down, 'setup-2.0.85')]);
+  assert.deepEqual(found.map(c => [c.version, c.dir, c.ownData]), [
+    ['2.0.70', join(down, 'tomlin-2.0.70', 'tomlin-2.0.70'), false],
+    ['2.0.60', join(desk, 'TOMLIN'), true],
+    ['2.0.20', join(down, 'smart-manager-2.0.20'), false],
+  ]);
+  assert.deepEqual(readdirSync(down).sort(), before, 'nothing is changed');
+  const said = inst.looseCopyLines(found).join('\n');
+  assert.match(said, /Also found 3 copies of TOMLIN started from a folder \(not installed\)/);
+  assert.match(said, /2\.0\.60 in .*Desktop.TOMLIN \(it keeps its own chats inside/);
+  assert.match(said, /Setup does not change them/);
+  assert.deepEqual(inst.looseCopyLines([]), []);
+});
+
+test('where setup looks: Desktop, Downloads, Documents and the user folder; a test install nowhere unless told', () => {
+  const places = inst.lookIn({ USERPROFILE: 'C:\\Users\\sam' }, 'D:\\Desk');
+  assert.deepEqual(places.map(p => p.dir), ['D:\\Desk', join('C:\\Users\\sam', 'Desktop'), join('C:\\Users\\sam', 'OneDrive', 'Desktop'), join('C:\\Users\\sam', 'Downloads'), join('C:\\Users\\sam', 'Documents'), join('C:\\Users\\sam', 'OneDrive', 'Documents'), 'C:\\Users\\sam']);
+  assert.equal(places.at(-1)?.depth, 1, 'the user folder only one level down');
+  assert.deepEqual(inst.lookIn({ USERPROFILE: 'C:\\Users\\sam', TOMLIN_INSTALL_ROOT: 'C:\\t' }, null), []);
+  assert.deepEqual(inst.lookIn({ TOMLIN_LOOK_IN: '' }, null), []);
 });

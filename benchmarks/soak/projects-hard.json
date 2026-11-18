@@ -1,0 +1,90 @@
+[
+  {
+    "id": "lisp",
+    "title": "A Lisp interpreter in Node",
+    "prompt": "Write a small Lisp interpreter in plain Node.js (no packages). File lisp.js exports a function run(source) (module.exports = { run }). run evaluates every top-level form in the source text, in order, and returns the value of the last one. Numbers are JavaScript numbers, #t and #f are true and false, lists are JavaScript arrays. Support: comments from ; to the end of the line, the quote form and the ' shorthand, define (both (define x 1) and (define (f a b) ...)), lambda with closures, if, cond with else, let, begin, set!, the functions + - * / < > <= >= = list car cdr cons null? length. Function calls in tail position must not grow the stack, so a loop of 50000 calls does not overflow. An unbound name throws an Error whose message contains that name. Every call of run starts with a fresh set of definitions.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: lisp.js. No prose outside the blocks.",
+    "deliverable": ["lisp.js"],
+    "hidden": "lisp.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "large"
+  },
+  {
+    "id": "sudoku",
+    "title": "Sudoku solver and generator in Node",
+    "prompt": "Write a Sudoku library in plain Node.js (no packages). File sudoku.js exports solve, isValid, countSolutions and generate (module.exports = { ... }). A grid is a string of 81 characters, row by row, where 1-9 are digits and 0 or . is a blank. solve(grid) returns the solved grid as a string of 81 digits, or null when the grid has a conflict or no solution; a grid that is already solved comes back as it is. isValid(grid) is true when no digit repeats in a row, a column or a 3x3 box (blanks ignored). countSolutions(grid, limit = 2) counts the solutions but stops counting at limit. generate(clues) returns a puzzle string with exactly one solution and no more than clues given digits (try to reach clues). It must solve the hardest known puzzles in a few seconds, so use constraint propagation or bit masks and choose the most constrained cell first.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: sudoku.js. No prose outside the blocks.",
+    "deliverable": ["sudoku.js"],
+    "hidden": "sudoku.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "large"
+  },
+  {
+    "id": "sheet",
+    "title": "A spreadsheet formula engine in Node",
+    "prompt": "Write a spreadsheet engine in plain Node.js (no packages). File sheet.js exports a class Sheet (module.exports = { Sheet }) with set(ref, input) and get(ref). A ref is like A1 or Z99 (any letters, not case sensitive). The input is a string: text that starts with = is a formula; text that is a number is a number; anything else is text. get returns a number, a string, or '' for a cell that was never set. Formulas support numbers, cell references, + - * / with the usual precedence, brackets, unary minus, and the functions SUM, MIN, MAX and AVERAGE over a range such as A1:B3 (a range covers every cell in the rectangle). An empty cell counts as 0 in arithmetic. When a cell changes, every cell that depends on it gives the new value. Errors are values, not exceptions: a cycle gives '#CYCLE' in every cell of the cycle, division by zero gives '#DIV/0', a formula that does not parse or names an unknown function gives '#ERR', arithmetic on a text cell gives '#VALUE', and a cell that uses an error cell gives the same error. A chain of 2000 cells must work without overflowing the stack.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: sheet.js. No prose outside the blocks.",
+    "deliverable": ["sheet.js"],
+    "hidden": "sheet.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "large"
+  },
+  {
+    "id": "regex",
+    "title": "A regular expression engine in Node",
+    "prompt": "Write a regular expression matcher in plain Node.js (no packages, and do not use the built-in RegExp to do the matching). File regex.js exports a function test(pattern, text) (module.exports = { test }) that returns true when the pattern matches anywhere in the text, like RegExp.prototype.test. Support: literal characters, . (any character), the quantifiers * + ?, alternation |, groups ( ), character classes [abc] [a-z] [^abc], the anchors ^ and $, and the escapes \\d \\w \\s and backslash plus any punctuation character taken literally (also inside classes). A malformed pattern (unbalanced bracket, a quantifier with nothing before it) throws an Error. It must not backtrack exponentially: patterns like ^(a*)*b$ on forty a's must answer false at once, so compile to an NFA and simulate it, or use another linear-time method. A text of 300,000 characters must be matched in under a few seconds.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: regex.js. No prose outside the blocks.",
+    "deliverable": ["regex.js"],
+    "hidden": "regex.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "large"
+  },
+  {
+    "id": "chess",
+    "title": "Chess move generator (perft) in Node",
+    "prompt": "Write a chess move generator in plain Node.js (no packages). File chess.js exports a function perft(fen, depth) (module.exports = { perft }) that parses a position in FEN and returns the number of leaf positions reachable by legal moves in exactly depth plies (depth 0 gives 1). Implement every rule: all piece moves, captures, pawn double steps, en passant (including the case where it would expose the king along the rank), promotion to queen, rook, bishop and knight, castling on both sides (not out of, through or into check, and not after the king or rook has moved or the rook was captured), and a move that leaves your own king in check is illegal. Checkmate and stalemate simply have no moves. It must give the published counts, for example 20, 400, 8902 and 197281 from the starting position at depths 1 to 4, and do depth 4 in well under a minute.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: chess.js. No prose outside the blocks.",
+    "deliverable": ["chess.js"],
+    "hidden": "chess.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "xlarge"
+  },
+  {
+    "id": "api",
+    "title": "A REST API with the node http module",
+    "prompt": "Write a small JSON REST API in plain Node.js using only the built-in http module (no packages). File server.js exports a function createApp() (module.exports = { createApp }) that returns an http.Server that is NOT listening yet (the caller calls listen). Resource /items, each item is { id, name, qty }: id is an integer starting at 1 that counts up and is never reused after a delete, name is a non-empty string, qty is an integer of 0 or more. Routes: POST /items (201 and the item), GET /items (200 and { total, items }, with optional limit and offset query numbers, an optional name filter that matches the whole name, and 400 when limit or offset is not a non-negative integer), GET /items/:id (200 or 404), PUT /items/:id (replaces the item, needs both fields, 200, 404 for a missing item), PATCH /items/:id (changes only the fields sent, 200), DELETE /items/:id (204 with an empty body, or 404). Every error is JSON { error: '<message>' }: 400 for a body that is not valid JSON, 404 for an unknown path or id, 405 for a method the path does not allow (for example DELETE /items), 422 for a value that is not valid; fields other than id, name and qty are ignored and never stored. All responses have content-type application/json except the empty 204. Many requests may arrive at once.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: server.js. No prose outside the blocks.",
+    "deliverable": ["server.js"],
+    "hidden": "api.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "large"
+  },
+  {
+    "id": "diff",
+    "title": "A line diff and patch library in Node",
+    "prompt": "Write a line diff library in plain Node.js (no packages). File diff.js exports diff and patch (module.exports = { diff, patch }). diff(a, b) takes two arrays of strings and returns an array of { op, line } where op is 'keep', 'add' or 'del': the 'keep' and 'del' lines in order are exactly a, the 'keep' and 'add' lines in order are exactly b, and the number of 'add' and 'del' ops is the smallest possible (a longest common subsequence). patch(a, ops) applies the ops to the array a and returns the new array; it throws an Error when a line of a does not match what the ops expect. Two 5,000-line files with a few changes must be diffed in well under five seconds.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: diff.js. No prose outside the blocks.",
+    "deliverable": ["diff.js"],
+    "hidden": "diff.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "medium"
+  },
+  {
+    "id": "scheduler",
+    "title": "An async job scheduler with priorities and retries",
+    "prompt": "Write an async job scheduler in plain Node.js (no packages). File scheduler.js exports a class Scheduler (module.exports = { Scheduler }). new Scheduler({ concurrency }) (concurrency must be a whole number of 1 or more, otherwise throw). add(fn, { priority = 0, retries = 0 } = {}) queues the function fn (it may be async or plain, and may throw) and returns a promise of its result. At most concurrency jobs run at the same moment. Waiting jobs start highest priority first, and in the order they were added among equal priorities. When a job fails it is put back in the queue (with its priority) and tried again, up to retries more times; when the retries are used up the promise rejects with the last error. onIdle() returns a promise that resolves when nothing is running or waiting (at once if the scheduler is already idle). A failing job must never stop the others.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: scheduler.js. No prose outside the blocks.",
+    "deliverable": ["scheduler.js"],
+    "hidden": "scheduler.test.mjs",
+    "acceptance": ["hidden tests pass"],
+    "size": "medium"
+  },
+  {
+    "id": "minesweeper",
+    "title": "Minesweeper in one HTML file",
+    "prompt": "Build Minesweeper as a single self-contained HTML file with inline CSS and JavaScript, no libraries. A difficulty menu: Beginner 9x9 with 10 mines, Intermediate 16x16 with 40, Expert 30x16 with 99. Left click reveals a cell, right click (contextmenu, prevented) puts or removes a flag, and middle click or clicking a revealed number whose flags match it reveals the unflagged neighbours (chording). The first click is never a mine (the mines are placed after it, and not on its neighbours). Revealing a cell with no neighbouring mines opens the empty area around it without recursion that can overflow the stack. Numbers are coloured. A counter shows mines minus flags, a timer starts on the first click, and a face button restarts. Winning shows a message; losing shows all mines and the wrongly flagged cells. Keep the best time for each difficulty in localStorage.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+    "deliverable": ["index.html"],
+    "acceptance": ["it uses localStorage", "a contextmenu handler", "the file is a complete document"],
+    "size": "xlarge"
+  },
+  {
+    "id": "kanban",
+    "title": "A Kanban board in one HTML file",
+    "prompt": "Build a Kanban board as a single self-contained HTML file with inline CSS and JavaScript, no libraries. Three columns to start (To do, Doing, Done) and the user can add, rename, reorder and delete columns. Cards have a title, a description and a colour label; add a card with a button on each column, edit it by clicking it in a dialog (the dialog element), and delete it. Drag and drop with the HTML5 drag events moves cards between columns and orders them inside a column, showing where the card will land; keyboard users can move a selected card with Alt+arrow keys. A search box dims cards that do not match. The whole board is saved in localStorage after every change and loaded on start, and an Export button downloads it as a JSON file and an Import button reads one back. It must stay usable on a phone-width screen.\n\nOutput format: reply with exactly one fenced code block per file, nothing else. The opening fence line must be ```<language> title=<file name>, for example ```html title=index.html. Files to output: index.html. No prose outside the blocks.",
+    "deliverable": ["index.html"],
+    "acceptance": ["it uses localStorage", "drag events", "the file is a complete document"],
+    "size": "xlarge"
+  }
+]

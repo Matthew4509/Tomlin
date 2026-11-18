@@ -9,6 +9,7 @@ const path = require('path');
 const assert = require('assert');
 const { runAudit } = require('../../src/bridge/audit');
 const { CROSS_RULES } = require('../../src/bridge/cross');
+const { quick } = require('./pace');
 
 let failures = 0;
 const check = (name, fn) => { try { fn(); console.log('ok   ' + name); } catch (e) { failures++; console.log('FAIL ' + name + ': ' + e.message); } };
@@ -603,7 +604,7 @@ async function main() {
     const { notes } = crossAudit(files, {}, (r, f, i, title) => ({ rule: r.id, title }));
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     worstCross = Math.max(worstCross, ms);
-    check('the cross-file rules read a hostile project in well under a second: ' + name + ' (' + Math.round(size / 1024) + ' KB, ' + Math.round(ms) + ' ms)', () => { assert(ms < 800, Math.round(ms) + ' ms'); assert(!notes.length, notes.join('; ')); });
+    check('the cross-file rules read a hostile project in well under a second: ' + name + ' (' + Math.round(size / 1024) + ' KB, ' + Math.round(ms) + ' ms)', () => { quick(ms, 800); assert(!notes.length, notes.join('; ')); });
   }
   const fire = await scan('fire', { 'firebase.json': '{}\n', 'firestore.rules': "match /{document=**} {\n  allow read, write: if true;\n}\n", 'storage.rules': "match /{allPaths=**} {\n  allow write: if true;\n}\n", 'node_modules/x/firestore.rules': "allow write: if true;\n" });
   check('FIRE-001 is High, one finding a rules file, at the open line, none from node_modules', () => {

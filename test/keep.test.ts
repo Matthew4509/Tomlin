@@ -20,10 +20,10 @@ async function world(oldPins: object = PINS) {
   const top = await mkdtemp(join(tmpdir(), 'sm-keep-'));
   const parent = join(top, 'apps');
   const root = join(parent, 'tomlin-2.0.27');
-  const old = join(parent, 'shelby-2.0.25');
+  const old = join(parent, 'tomlin-2.0.25');
   await put(join(root, 'package.json'), JSON.stringify({ name: 'tomlin', version: '2.0.27' }));
   await put(join(root, 'runtimes.json'), JSON.stringify(PINS));
-  await put(join(old, 'package.json'), JSON.stringify({ name: 'shelby', version: '2.0.25' }));
+  await put(join(old, 'package.json'), JSON.stringify({ name: 'tomlin', version: '2.0.25' }));
   await put(join(old, 'runtimes.json'), JSON.stringify(oldPins));
   await put(join(old, 'data', 'settings.json'), '{"managerName":"Ann"}');
   await put(join(old, 'data', 'chats', 'c1.json'), '[]');
@@ -151,6 +151,36 @@ test('data already in the home (a test copy) is adopted without a question, afte
     assert.equal(back.state === 'ready' ? back.noteTitle : 'x', 'Your data');
     assert.match(back.state === 'ready' ? back.note ?? '' : '', /TOMLIN 2\.0\.27 is older than the version that last used your data \(2\.0\.28\), so no backup was made/);
     assert.equal((await keep.listBackups(w.home)).length, 2);
+    // The page reads its note from the version file: it is there, and the data stays marked as the newer version's.
+    assert.match(keep.readVersion(w.home)?.note ?? '', /TOMLIN 2\.0\.27 is older than the version that last used your data/);
+    assert.equal(keep.readVersion(w.home)?.noteTitle, 'Your data');
+    assert.equal(keep.readVersion(w.home)?.app, '2.0.28');
+    // The newer one started again before the page was opened: that note was for the older copy, so it is not shown.
+    const again = await keep.prepare(w.home, w.root, '2.0.28');
+    assert.equal(again.state === 'ready' ? again.note : 'x', undefined);
+    assert.equal(keep.readVersion(w.home)?.note, undefined);
+  } finally {
+    await rm(w.top, { recursive: true, force: true });
+  }
+});
+
+test('after Start TOMLIN.cmd moves on to a new copy, the update note says which folder to start from, once', async () => {
+  const w = await world();
+  try {
+    await put(join(w.home.data, 'settings.json'), '{"x":1}');
+    await keep.prepare(w.home, w.root, '2.0.27');
+    await keep.prepare(w.home, w.root, '2.0.28');
+    const before = keep.readVersion(w.home)?.note ?? '';
+    await keep.noteStartFrom(w.home, w.root);
+    await keep.noteStartFrom(w.home, w.root);
+    const v = keep.readVersion(w.home);
+    assert.equal(v?.noteTitle, 'Update Successful!');
+    assert.equal(v?.note, `${before}\nFrom now on, start TOMLIN with Start TOMLIN.cmd in this folder:\n${w.root}\nThe folder of the version before it is kept for going back.`);
+    // Shown: gone. With no note waiting, the words are the note, under a heading of their own.
+    await keep.noteShown(w.home);
+    await keep.noteStartFrom(w.home, w.root);
+    assert.equal(keep.readVersion(w.home)?.noteTitle, 'Where TOMLIN is now');
+    assert.match(keep.readVersion(w.home)?.note ?? '', /^From now on, start TOMLIN with Start TOMLIN\.cmd in this folder:\n/);
   } finally {
     await rm(w.top, { recursive: true, force: true });
   }

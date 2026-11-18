@@ -91,6 +91,9 @@ export function withRules<T extends { role: string; content: string }>(turns: T[
 
 const SECRET = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bsk-[A-Za-z0-9_-]{20,}|\bghp_[A-Za-z0-9]{30,}|\bxox[abp]-[A-Za-z0-9-]{10,}|\b(?:api[_-]?key|secret|password|passwd|token)\s*[:=]\s*['"]?[A-Za-z0-9_\-/+=]{12,}/i;
 
+/** Whether a text looks like it holds a key, a token or a password: what a tool read is withheld then, as a save is refused. */
+export const looksSecret = (text: string): boolean => SECRET.test(text);
+
 /**
  * A reason a model's save must be refused, or null. `old`: the file's text now (null: new file). Refuses an empty save over
  * a file, a save that cuts a file of 400+ characters to under a third, and text that holds a key or password.

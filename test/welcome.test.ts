@@ -33,4 +33,9 @@ test('Help: every picture it shows is in public/, and every "On this page" link 
   for (const src of pictures) assert.ok(/^[\w.-]+\.webp$/.test(src) && existsSync(join(ROOT, 'public', src)), src);
   assert.match(readFileSync(join(ROOT, 'src', 'server', 'core.ts'), 'utf8'), /'\.webp': 'image\/webp'/);
   for (const [, id] of help.matchAll(/data-help="([\w-]+)"/g)) assert.match(html, new RegExp(`id="${id}"`), id);
+  // And the other way: every section of Help has its line in "On this page" (Max mode and Cluster had none).
+  const toc = help.slice(help.indexOf('class="hint help-toc"'), help.indexOf('</p>', help.indexOf('class="hint help-toc"')));
+  const sections = [...help.matchAll(/<h4 id="([\w-]+)"/g)].map(m => m[1]);
+  assert.ok(sections.length >= 20);
+  for (const id of sections) assert.ok(toc.includes(`data-help="${id}"`), `${id} is on "On this page"`);
 });

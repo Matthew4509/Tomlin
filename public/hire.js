@@ -7,16 +7,27 @@
 {
   const dlg = $('#hire-dlg');
   // fromMenu: opened from the Staff menu's Create, so Cancel and Close go back to that menu.
-  const hs = { role: '', pc: '', model: '', look: null, lookPicked: false, nameAuto: '', q: '', net: null, moving: new Map(), fromMenu: false };
+  // turn: each opening counts one, so a slow answer for an earlier one is not drawn over a later one.
+  const hs = { role: '', pc: '', model: '', look: null, lookPicked: false, q: '', net: null, moving: new Map(), fromMenu: false, turn: 0, fresh: false };
 
-  /** Names of four or five letters for Random, never one already on the team or the one in the box now. */
-  const NAMES = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina', 'Adam', 'Alan', 'Brian', 'Colin', 'David', 'Dylan', 'Ethan', 'Frank', 'Gavin', 'Harry', 'Henry', 'Isaac', 'Jack', 'James', 'Jason', 'Kyle', 'Liam', 'Lucas', 'Mark', 'Mason', 'Neil', 'Noah', 'Oscar', 'Owen', 'Peter', 'Ryan', 'Simon', 'Tyler', 'Wade'];
+  /** Names of four or five letters for Random and the name filled in on opening: a woman's, then a man's. */
+  const WOMEN = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina'];
+  const MEN = ['Adam', 'Alan', 'Brian', 'Colin', 'David', 'Dylan', 'Ethan', 'Frank', 'Gavin', 'Harry', 'Henry', 'Isaac', 'Jack', 'James', 'Jason', 'Kyle', 'Liam', 'Lucas', 'Mark', 'Mason', 'Neil', 'Noah', 'Oscar', 'Owen', 'Peter', 'Ryan', 'Simon', 'Tyler', 'Wade'];
+  const NAMES = [...WOMEN, ...MEN];
+  /** The look's gender a name calls for: a woman's name a woman, a man's name a man; null for a name not on the lists. */
+  const genderOf = name => {
+    const first = String(name ?? '').trim().split(/\s+/)[0].toLowerCase();
+    return WOMEN.some(n => n.toLowerCase() === first) ? 'woman' : MEN.some(n => n.toLowerCase() === first) ? 'man' : null;
+  };
+  app.genderOfName = genderOf;
 
   const d = () => team.data;
   const role = () => d()?.roles.find(r => r.id === hs.role);
   const kind = () => (role()?.kind === 'image' ? 'image' : 'chat');
   const GBs = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
-  const pcName = id => (id ? homeUi.pcs.find(p => p.id === id)?.name ?? d()?.pcs.find(p => p.id === id)?.name ?? 'A linked PC' : app.pcProfileOf?.('here')?.name || 'My PC');
+  // Two linked PCs with one name are told apart (app.pcLabel, public/home.js); before Home has read the PCs, by the
+  // names the staff list gave (src/brains.ts pcLabels).
+  const pcName = id => (id ? (homeUi.pcs.some(p => p.id === id) ? app.pcLabel?.(id) : null) ?? d()?.pcs.find(p => p.id === id)?.label ?? homeUi.pcs.find(p => p.id === id)?.name ?? d()?.pcs.find(p => p.id === id)?.name ?? 'A linked PC' : app.pcProfileOf?.('here')?.name || 'My PC');
 
   /** A fault shows in the Hire staff window, and in Push to node too while that is open over it. */
   function fault(text) {
@@ -38,7 +49,8 @@
       $('#hs-look-btn').hidden = true;
       return;
     }
-    if (!hs.look || !hs.lookPicked) hs.look = app.look.random(hs.role);
+    // A look not chosen by hand follows the name: a woman's name draws a woman, a man's name a man.
+    if (!hs.look || !hs.lookPicked) hs.look = app.look.random(hs.role, undefined, undefined, genderOf($('#hs-name').value));
     $('#hs-pic').src = app.look.picture(hs.look, 192);
     $('#hs-pic').hidden = false;
     $('#hs-look-btn').hidden = false;
@@ -81,16 +93,13 @@
     $('#hs-role-line').textContent = role()?.hint ?? '';
   }
 
-  /** The name: from the model ("Qwen", "Qwen 2" when a Qwen is on the team), unless one was typed. */
-  function fillName() {
-    const box = $('#hs-name');
-    if (box.value.trim() && box.value !== hs.nameAuto) return;
-    const nick = onPc(hs.pc).find(c => c.id === hs.model)?.nick || '';
-    const taken = new Set((d()?.staff ?? []).map(m => m.name.trim().toLowerCase()));
-    let name = nick;
-    for (let n = 2; name && taken.has(name.toLowerCase()); n++) name = `${nick} ${n}`;
-    box.value = name;
-    hs.nameAuto = name;
+  /** A name typed or drawn: a look not chosen by hand is drawn again when the name calls for the other gender. */
+  function nameChanged() {
+    const want = genderOf($('#hs-name').value);
+    if (want && !hs.lookPicked && hs.look && hs.look.gender !== want) {
+      hs.look = null;
+      drawLook();
+    }
   }
 
   function drawSummary() {
@@ -106,12 +115,14 @@
     const p = id ? d().pcs.find(x => x.id === id) : { ok: true, away: false, ...d().here };
     const n = offered(id).length;
     const thing = kind() === 'image' ? 'picture model' : 'chat model';
-    const state = !id ? 'This PC' : !p?.ok ? 'Off now' : p.away ? 'Away: its owner is using it' : 'On';
-    const mem = p?.ram ? `${GBs(p.ram)} RAM${p.vram ? ` · ${GBs(p.vram)} graphics memory` : ''}` : id ? 'Memory not known' : '';
+    const state = !id ? 'This PC' : p?.asking ? 'Asking it…' : !p?.ok ? 'Off now' : p.away ? 'Away: its owner is using it' : 'On';
+    const was = id ? homeUi.pcMem?.[id] : null;
+    const ram = p?.ram || was?.ram, vram = p?.ram ? p.vram : was?.vram;
+    const mem = ram ? `${GBs(ram)} RAM${vram ? ` · ${GBs(vram)} graphics memory` : ''}` : id ? 'Memory not known' : '';
     const count = n ? `${n} ${thing}${n === 1 ? '' : 's'}${id ? ' shared' : ''}` : id ? `Shares no ${thing}s` : `No ${thing}s yet`;
-    return el('label', { class: 'pick-card hs-pc' },
+    return el('label', { class: `pick-card hs-pc${p?.asking ? ' hs-wait' : ''}` },
       el('input', { type: 'radio', name: 'hs-pc', value: id, checked: hs.pc === id, onchange: () => pickPc(id) }),
-      el('span', { class: 'hs-pc-icon', 'aria-hidden': 'true' }, el('span', { class: 'sdot', 'data-state': !id || (p?.ok && !p.away) ? 'on' : p?.ok ? 'asleep' : 'off' })),
+      el('span', { class: 'hs-pc-icon', 'aria-hidden': 'true' }, el('span', { class: 'sdot', 'data-state': !id || (p?.ok && !p.away) ? 'on' : p?.ok || p?.asking ? 'asleep' : 'off' })),
       el('span', { class: 'hs-pc-text' },
         el('strong', { text: pcName(id) }),
         el('span', { class: 'hint', text: [state, mem].filter(Boolean).join(' · ') })),
@@ -142,7 +153,6 @@
   function pickModel(id) {
     hs.model = id;
     drawRoleLine();
-    fillName();
     drawSummary();
   }
   function drawModels() {
@@ -174,9 +184,16 @@
   /** A hire choice's key: a linked PC's is "remote:<pc>:<its model id>". */
   const choiceKey = c => keyOf(kind(), c.pc ? c.id.slice(`remote:${c.pc}:`.length) : c.id);
 
-  async function loadNet() {
-    hs.net = await api('/api/network').catch(() => null);
-    drawAllModels();
+  /** The models on the network: as the PCs said last (at once), then asked now. `turn`: the opening it is for. */
+  async function loadNet(turn = hs.turn) {
+    for (const known of [true, false]) {
+      const net = await api(`/api/network${known ? '?known=1' : ''}`).catch(() => null);
+      if (turn !== hs.turn || !dlg.open) return;
+      // The quick list never replaces one already asked now (a copy that just ended reads the full list again).
+      if (net && (!known || !hs.net?.fresh)) hs.net = { ...net, fresh: !known };
+      drawAllModels();
+      if (pushDlg.open) drawPush();
+    }
   }
 
   /** Each model on the network of this kind: where it is ('' = this PC), by its key. */
@@ -214,11 +231,14 @@
     const q = hs.q.trim().toLowerCase();
     const list = networkModels().filter(e => !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
+    block.classList.toggle('hs-wait', !hs.net);
     $('#hs-all-line').textContent = !hs.net ? 'Asking the linked PCs which models they have…'
       : list.length ? `${kind() === 'image' ? 'Picture models' : 'Chat models'} available from across your network.`
       : `${pcName(target)} has every ${thing.slice(0, -1)} your linked PCs share${q ? ` that matches "${hs.q.trim()}"` : ''}.`;
-    keepButtons($('#hs-all'), list.map(allCard));
+    // Blurred stand-ins while the PCs are asked: the page keeps its shape, then the cards come in.
+    keepButtons($('#hs-all'), !hs.net ? [1, 2, 3, 4].map(waitCard) : list.map(allCard));
   }
+  const waitCard = () => el('div', { class: 'pick-card hs-model hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'hs-model-text' }, el('strong', { text: 'A model name here' }), el('span', { class: 'hint', text: 'file 0.0 GB · On a PC' })));
 
   function allCard(e) {
     const target = hs.pc;
@@ -235,9 +255,10 @@
       el('span', { class: 'hs-net-acts' }, btn, push));
   }
   const cap = t => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
-  const whereOf = e => e.on.map(o => (o.pc && o.name) || pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
+  // Each PC by the name that tells it apart (two linked PCs both called "Worker PC" are not one PC).
+  const whereOf = e => e.on.map(o => pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
 
-  // ---- Push to node: one model, sent to any PC on the list ----
+  // ---- Push to node: one model, from the PC it is on (left) to any other PC (tiles on the right) ----
   const pushDlg = $('#hs-push-dlg');
   let pushKey = '';
   function openPush(e) {
@@ -246,27 +267,59 @@
     drawPush();
     pushDlg.showModal();
   }
-  /** Each PC ('' = this PC) for the model in the window: it has it, it can take it, or why not now. */
+
+  /** A PC as a tile, as Home's left side shows it: its picture, its name, its memory and make, and whether it is on. */
+  function pcTile(pc, ...below) {
+    const p = pc ? d().pcs.find(x => x.id === pc) : null;
+    const net = pc ? hs.net?.pcs.find(x => x.id === pc) : null;
+    const on = !pc || (p ? p.ok : net?.ok === true);
+    const state = !pc ? 'This PC' : p?.asking ? 'Asking it…' : !on ? 'Off now' : p?.away ? 'Away: its owner is using it' : 'On';
+    const mem = pc ? { ram: p?.ram || homeUi.pcMem?.[pc]?.ram, vram: p?.ram ? p.vram : homeUi.pcMem?.[pc]?.vram } : d().here;
+    const specs = [mem?.ram ? memWords(mem.ram, mem.vram) : '', app.pcProfileOf?.(pc || 'here')?.model || ''].filter(Boolean).join(' · ');
+    const dot = on && !p?.away ? 'on' : p?.asking || p?.away ? 'asleep' : 'off';
+    const pic = app.avatar ? app.avatar(pc ? `pc:${pc}` : 'pc:mine', 'PC') : el('span', { class: 'rail-avatar', text: 'PC' });
+    return el('div', { class: `hs-tile${on ? '' : ' hs-tile-off'}`, 'data-pc': pc || 'here' },
+      el('span', { class: 'hs-tile-pic' }, pic, el('span', { class: 'sdot', 'data-state': dot, 'aria-hidden': 'true' })),
+      el('strong', { class: 'hs-tile-name', text: pcName(pc) }),
+      specs ? el('span', { class: 'hint', text: specs }) : null,
+      el('span', { class: `hs-tile-state${on ? ' on' : ''}`, text: state }),
+      ...below);
+  }
+
+  /** The PCs it is on (from, on the left, each saying whether it can send it now) and every other PC (to, on the right). */
   function drawPush() {
     const e = networkModels().find(x => x.key === pushKey);
     if (!e) {
       $('#hs-push-line').textContent = 'That model is no longer on your linked PCs.';
+      $('#hs-push-from').replaceChildren();
       $('#hs-push-list').replaceChildren();
+      $('#hs-push-none').hidden = true;
       return;
     }
     const moving = hs.moving.get(e.key);
-    $('#hs-push-line').textContent = `${e.name}${e.bytes ? ` (file ${GBs(e.bytes)})` : ''} is on ${whereOf(e)}. Push it to any PC on the list.`;
-    keepButtons($('#hs-push-list'), ['', ...d().pcs.map(p => p.id)].map(pc => {
-      const has = e.on.some(o => (o.pc ?? '') === pc) || onPc(pc).some(c => choiceKey(c) === e.key);
-      const route = has ? null : routeTo(e, pc);
-      const here = !!moving && moving.to === pc;
-      const said = has ? '✓ Already on it' : here ? moving.said : route.why ? `${cap(route.why)}.` : route.via ? 'Goes through this PC' : '';
-      return el('div', { class: 'pick-card hs-model hs-net' },
-        el('span', { class: 'hs-model-text' },
-          el('strong', { text: pcName(pc) }),
-          said ? el('span', { class: has ? 'hs-state on' : route.why && !here ? 'hs-warn' : 'hint', role: here ? 'status' : null, text: said }) : null),
-        has ? null : el('button', { class: 'btn', type: 'button', 'data-key': pc || 'here', text: `Push to ${pcName(pc)}`, disabled: !!route.why || !!moving, onclick: () => pull(e, pc) }));
+    $('#hs-push-line').textContent = `${e.name}${e.bytes ? ` (file ${GBs(e.bytes)})` : ''}: from ${whereOf(e)} to any other PC.`;
+    const all = ['', ...d().pcs.map(p => p.id)];
+    const has = pc => e.on.some(o => (o.pc ?? '') === pc) || onPc(pc).some(c => choiceKey(c) === e.key);
+    // From: each PC that has it. A PC that cannot send it now says why on its own tile, never on another PC's.
+    $('#hs-push-from').replaceChildren(...all.filter(has).map(pc => {
+      const o = e.on.find(x => (x.pc ?? '') === pc);
+      const why = pc && o && !o.copy ? `${cap(o.why || 'it cannot send it now')}.` : '';
+      return pcTile(pc, why ? el('span', { class: 'hs-warn', text: why }) : el('span', { class: 'hs-state on', text: '✓ Has it' }));
     }));
+    const to = all.filter(pc => !has(pc));
+    const stuck = !e.on.some(o => !o.pc || o.copy);
+    $('#hs-push-none').hidden = !stuck || !to.length;
+    $('#hs-push-none').textContent = `No PC that has ${e.name} can send it now, so it cannot be pushed until one can.`;
+    keepButtons($('#hs-push-list'), to.length ? to.map(pc => {
+      const route = routeTo(e, pc);
+      const here = !!moving && moving.to === pc;
+      // The target's own reason (off, or it takes no models); a source that cannot send says so on its own tile.
+      const own = pc ? hs.net?.pcs.find(p => p.id === pc)?.send : '';
+      const said = here ? moving.said : own ? `${cap(own)}.` : !route.why && route.via ? `Goes through ${pcName('')}` : '';
+      return pcTile(pc,
+        said ? el('span', { class: own && !here ? 'hs-warn' : 'hint', role: here ? 'status' : null, text: said }) : null,
+        el('button', { class: 'btn', type: 'button', 'data-key': pc || 'here', text: `Push to ${pcName(pc)}`, disabled: !!route.why || !!moving, onclick: () => pull(e, pc) }));
+    }) : [el('p', { class: 'hint', text: `Every PC has ${e.name} already.` })]);
   }
 
   /** Buttons drawn again keep the keyboard on the same one. */
@@ -343,37 +396,63 @@
     drawModels();
     drawAllModels();
     drawRoleLine();
-    fillName();
     drawSummary();
     for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === hs.role;
   }
 
+  /** Before the first staff list has come: the window's frame with blurred stand-ins where the roles and models go. */
+  function drawWaiting() {
+    $('#hs-roles').replaceChildren(...['Writer', 'Coder', 'Designer', 'Artist'].map(t => el('span', { class: 'pick-card hs-role hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'role-icon' }), el('span', { text: t }))));
+    $('#hs-pcs-block').hidden = true;
+    $('#hs-all-block').hidden = true;
+    $('#hs-models-title').textContent = 'Choose a model';
+    $('#hs-models').replaceChildren(...[1, 2, 3, 4].map(waitCard));
+    $('#hs-role-line').textContent = '';
+    $('#hs-sum-pc').textContent = pcName('');
+    $('#hs-sum-model').textContent = 'Reading the models…';
+    $('#hs-go').disabled = true;
+  }
+
+  /** A role or PC asked for that the list has not got: the first role, this PC. A choice made since is kept. */
+  function settle() {
+    if (!d().roles.some(r => r.id === hs.role)) hs.role = d().roles[0]?.id ?? '';
+    if (hs.pc && !d().pcs.some(p => p.id === hs.pc)) hs.pc = '';
+  }
+
+  /** A name nobody on the team has (nor the one in the box now): a woman's or a man's, at random. */
+  function freeName(now = '') {
+    const taken = new Set([...(d()?.staff ?? []).map(s => s.name.trim().toLowerCase()), now.trim().toLowerCase()]);
+    const free = NAMES.filter(n => !taken.has(n.toLowerCase()));
+    const list = free.length ? free : NAMES;
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
   /**
    * Opens Hire staff: `role` and `pc` pick those first (a PC's window passes its own). `page`: as the Staff page, with
-   * the Settings menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`).
+   * the Settings menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`); else a
+   * name is made up. Shown at once, never waiting on a linked PC: blurred stand-ins first (before any staff list has
+   * come), then the PCs as they said last, then as they answer now (one that is off takes 3 s to give up on).
    */
   app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false } = {}) => {
-    try {
-      team.data = await api('/api/staff');
-    } catch (e) {
-      return app.chatNote?.(e.message);
-    }
-    hs.role = d().roles.some(r => r.id === role) ? role : d().roles[0]?.id ?? '';
-    hs.pc = pc === 'here' ? '' : d().pcs.some(p => p.id === pc) ? pc : '';
+    const turn = ++hs.turn;
+    hs.role = role;
+    hs.pc = pc === 'here' ? '' : pc;
     hs.model = '';
     hs.lookPicked = false;
     hs.look = null;
     hs.q = '';
-    hs.nameAuto = '';
+    hs.net = null;
     hs.fromMenu = fromMenu;
-    $('#hs-name').value = name;
+    $('#hs-name').value = name.trim() || freeName();
     $('#hs-search').value = '';
     fault('');
     closeLook();
-    drawRoles();
     drawLook();
-    drawAll();
-    void loadNet();
+    if (d()?.roles) {
+      settle();
+      drawRoles();
+      drawAll();
+    } else drawWaiting();
     if (page) app.showAsPage(dlg, 'staff');
     else {
       // Shown as the page before: back to a window of its own (closing it there goes back to where it was opened from).
@@ -384,7 +463,27 @@
       }
       if (!dlg.open) dlg.showModal();
     }
+    // The made-up name is selected: typing replaces it.
     $('#hs-name').focus();
+    $('#hs-name').select();
+    void loadNet(turn);
+    for (const known of [true, false]) {
+      let got;
+      try {
+        got = await api(`/api/staff${known ? '?known=1' : ''}`);
+      } catch (e) {
+        if (!known && turn === hs.turn && dlg.open && !d()?.roles) fault(e.message);
+        continue;
+      }
+      // Closed, or opened again, while the list was read: nothing is drawn over what is on screen now.
+      if (turn !== hs.turn || !dlg.open) return;
+      const first = !d()?.roles;
+      team.data = got;
+      settle();
+      if (first) drawRoles();
+      if (!hs.look) drawLook();
+      drawAll();
+    }
   };
   /** A model hidden, shown, deleted or got: the cards are read again while the window is open. */
   app.hireRedraw = async () => {
@@ -413,12 +512,13 @@
   });
   /** A random name for `box`: never one already on the team or the one in the box now (Random here, the Staff menu's dice). */
   app.randomName = box => {
-    const taken = new Set([...(d()?.staff ?? []).map(s => s.name.toLowerCase()), box.value.trim().toLowerCase()]);
-    const free = NAMES.filter(n => !taken.has(n.toLowerCase()));
-    box.value = (free.length ? free : NAMES)[Math.floor(Math.random() * (free.length || NAMES.length))];
+    box.value = freeName(box.value);
     box.focus();
+    if (box === $('#hs-name')) nameChanged();
   };
   $('#hs-random').addEventListener('click', () => app.randomName($('#hs-name')));
+  // A name typed: the look follows it (a woman's name, a woman) until a look is chosen by hand.
+  $('#hs-name').addEventListener('input', nameChanged);
   // Add new: the Models page (Models: add or remove), as "get a model" does.
   $('#hs-add-model').addEventListener('click', () => {
     dlg.close();
