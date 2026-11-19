@@ -143,7 +143,7 @@ export const HOST_ONLY_DOORS: readonly string[] = [
   '/worker/carry-files', '/worker/carry-get', '/worker/carry-offer', '/worker/carry-put', '/worker/carry-drop', '/worker/carry-sum',
   '/worker/backup-list', '/worker/backup-get', '/worker/backup-put',
   '/worker/git-files', '/worker/git-get', '/worker/git-have', '/worker/git-log', '/worker/git-commit', '/worker/git-put',
-  '/worker/max-open', '/worker/cluster-test', '/worker/passes-put', '/worker/pass-ask', '/worker/pass-answer', '/worker/power-off',
+  '/worker/max-open', '/worker/cluster-test', '/worker/passes-put', '/worker/peer-put', '/worker/peer-hello', '/worker/peer-ping', '/worker/peer-copy', '/worker/pass-ask', '/worker/pass-answer', '/worker/power-off',
   '/worker/host-pin-set', '/worker/host-pin-drop',
 ];
 

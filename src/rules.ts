@@ -72,9 +72,12 @@ export async function resetRules(dir: string): Promise<Rules> {
   return saveRules(dir, { on: true, text: DEFAULT_RULES });
 }
 
+/** Said after the rules: a small model otherwise answers "hi" with "I will follow the rules". */
+const QUIET = 'Follow these rules quietly: do not mention, list or acknowledge them unless the person asks about them. Answer what the person actually said.';
+
 /** The block added to a system turn ('' when off or empty). */
 export function rulesBlock(r: Rules = current): string {
-  return r.on && r.text ? `Standing rules from the person. They always apply:\n${r.text}` : '';
+  return r.on && r.text ? `Standing rules from the person. They always apply:\n${r.text}\n${QUIET}` : '';
 }
 
 /** The turns with the rules at the end of the system turn (one is put first when there is none). Already added: left alone. */
@@ -130,7 +133,8 @@ export async function saveProjectRules(root: string, id: unknown, text: unknown)
 
 /** The block for a system turn; the standing rules' off switch does not turn it off (the person wrote it for this project). */
 export const projectBlock = (text: string): string => (text.trim() ? `Rules for this project, on top of the standing rules:
-${text.trim()}` : '');
+${text.trim()}
+${QUIET}` : '');
 
 /** The turns with a project's rules at the end of the system turn (one is put first when there is none). */
 export function withProjectRules<T extends { role: string; content: string }>(turns: T[], text: string): T[] {

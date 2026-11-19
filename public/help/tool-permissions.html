@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permissions: what a chat may do - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="tool-permissions">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-staff">Staff and chats</a></li><li aria-current="page">Permissions: what a chat may do</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Permissions: what a chat may do</h1>
+<p class="lead">Ask first or Auto for files and web, the coding, research and screen roles, standing rules.</p>
+<p>Settings, Permissions says what a chat's model may do on its own. Pages on this PC or your home network are never opened, and files outside the chat's folder are never touched, whatever is chosen there.</p>
+<h2>Files and Web: Ask first or Auto</h2>
+<p><b>Ask first</b>: the chat asks you the first time in each answer. <b>Auto</b>: it goes ahead without asking. Files means listing, reading and saving files in the chat's folder; Web means searching and opening pages (see <a href="web.html">Web</a>).</p>
+<h2>The roles</h2>
+<ul>
+<li><b>Coding role</b>: in a chat whose folder is listed under Coding folders, read git, and run a named command when allowed. Coding folders: one folder a line (the whole path); only a chat that works in one of them gets the coding tools. Your named commands: one a line, as name=command; it must start with node, npm, npx, python or php, with no pipes, &amp;&amp; or redirects. With none of your own, test, build, lint and typecheck come from package.json.</li>
+<li><b>Research role</b>: in a chat with Web on, read more pages, save notes with their sources, and suggest findings. A finding is kept only when you press Save under the answer.</li>
+<li><b>Screen roles</b>: Windows it may look at, one a line: the window's whole title, with * for any letters, and its program before a | if you wish. A window that is not listed is never named, read or touched. With none listed there are no screen tools.</li>
+</ul>
+<h2>Standing rules</h2>
+<p>One rule per line, added to every message a model gets and to the Connect Claude prompt. A rule is a request, not a lock. Checked in code as well: files outside the chat folder are never touched, no tool can delete a file, and a save that would empty or gut a file (or hold a password or key) is refused. <b>Reset to the 12 defaults</b> puts the starting rules back.</p>
+<h2>Web search</h2>
+<p>Which engine a chat with Web on searches with (DuckDuckGo with no key, Brave Search with your own key, or a SearXNG of your own) is set under Settings, Data and lock, Web search.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="memory.html" rel="prev"><span>&larr; Previous</span><b>Memory</b></a><a class="next" href="office.html" rel="next"><span>Next &rarr;</span><b>The office (Staff overview)</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

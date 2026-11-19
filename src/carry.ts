@@ -47,6 +47,12 @@ export interface Allow {
    * with no one logging in to tick it. Never given to a guest link.
    */
   off: boolean;
+  /**
+   * "Let PCs my host introduces connect to this PC directly": a PC linked to the same host may call this one with no
+   * host in the middle, for what the host allowed that pair (src/peerlink.ts). Off until ticked; the other ticks still
+   * apply to what such a PC does. Left out when off, so a set of ticks saved before reads back the same.
+   */
+  peer?: boolean;
 }
 
 /** The ticks of a PC that has saved none: every one off except "Allow host to turn this PC off", which is on until unticked. */
@@ -57,7 +63,7 @@ export const NO_ALLOW: Allow = { pull: false, backup: false, update: false, tune
  */
 export function cleanAllow(raw: unknown): Allow {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: o.lend === true, receive: o.receive === true, give: o.give === true, off: o.off !== false };
+  return { pull: o.pull === true, backup: o.backup === true, update: o.update === true, tune: o.tune === true, lend: o.lend === true, receive: o.receive === true, give: o.give === true, off: o.off !== false, ...(o.peer === true ? { peer: true } : {}) };
 }
 
 /** "Allow all" is ticked when every one is. */
@@ -599,6 +605,17 @@ export function nodeSide(d: NodeDeps) {
       // Read only: the SHA-256 of one range of a model file received here, so the sender can check the copy before it lets go of
       // its own. Needs the same tick as receiving (the copy is the sender's, put here with it).
       case '/worker/carry-sum': {
+        // Of a model this PC shares (the file a copy is made from), asked by the PC that pulled it: read only, and the
+        // "Sharing of models" tick as for the copy itself. An older TOMLIN does not know `source` and refuses it.
+        if (b.source === true) {
+          const files = shared(b);
+          if (typeof files === 'string') return no(403, files);
+          const f = files[int(b.file)];
+          const from = int(b.from);
+          const len = int(b.length);
+          if (!f || from < 0 || len <= 0 || len > SUM_RANGE || from + len > f.bytes) return no(400, 'that range is not part of the model.');
+          return { status: 200, json: { sha256: await sumRange(f.path, from, len), bytes: f.bytes } };
+        }
         const got = await incoming(b);
         if (typeof got === 'string') return no(403, got);
         const f = got.files[int(b.file)];
@@ -959,6 +976,35 @@ export async function verifySent(w: Wire, o: { kind: 'chat' | 'image'; model: st
       const got = await w.ask('/worker/carry-sum', { ...ask, file: k, from: at, length: len });
       if (int(got.bytes) !== f.bytes) return `${f.name} is ${int(got.bytes)} bytes there and ${f.bytes} here`;
       if (got.sha256 !== mine) return `${f.name} differs from this PC's file (bytes ${at} to ${at + len})`;
+    }
+    before += f.bytes;
+  }
+  o.progress({ done: bytes, bytes });
+  return null;
+}
+
+/**
+ * Checks a model this PC pulled from a PC that shares it: each file's size, then its SHA-256 in ranges of SUM_RANGE, hashed
+ * on both PCs at once. Null when everything matches, else why not (nothing is changed on either PC). A PC that cannot
+ * answer, or a dropped link, throws: the copy is then not proved.
+ */
+export async function verifyPulled(w: Wire, o: { kind: 'chat' | 'image'; model: string; paths: string[]; progress: (p: Progress) => void; signal: AbortSignal; range?: number }): Promise<string | null> {
+  const step = Math.min(SUM_RANGE, o.range ?? SUM_RANGE);
+  const got = await w.ask('/worker/carry-files', { kind: o.kind, model: o.model });
+  const files = (Array.isArray(got.files) ? got.files : []).map(f => ({ name: String((f as Record<string, unknown>).name ?? ''), bytes: int((f as Record<string, unknown>).bytes) }));
+  if (!files.length || files.length !== o.paths.length) return 'that PC names other files for this model than were copied';
+  const bytes = files.reduce((n, f) => n + f.bytes, 0);
+  let before = 0;
+  for (const [k, f] of files.entries()) {
+    const have = await sizeOf(o.paths[k]);
+    if (have !== f.bytes) return `${f.name} is ${have} bytes here and ${f.bytes} there`;
+    for (let at = 0; at < f.bytes; at += step) {
+      if (o.signal.aborted) throw new Error('Stopped.');
+      o.progress({ done: before + at, bytes });
+      const len = Math.min(step, f.bytes - at);
+      const [mine, theirs] = await Promise.all([sumRange(o.paths[k], at, len), w.ask('/worker/carry-sum', { kind: o.kind, model: o.model, source: true, file: k, from: at, length: len })]);
+      if (int(theirs.bytes) !== f.bytes) return `${f.name} is ${int(theirs.bytes)} bytes there and ${f.bytes} here`;
+      if (theirs.sha256 !== mine) return `${f.name} differs from the file it was copied from (bytes ${at} to ${at + len})`;
     }
     before += f.bytes;
   }

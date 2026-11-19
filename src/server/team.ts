@@ -336,6 +336,9 @@ async function homeView() {
       model: m.model ?? null,
       // Not away: the answer every screen gives (src/hiremodel.ts), so a model no longer here is not "no model given".
       modelName: away ? away.modelName : entry ? shortName(entry.name) : hireModelShort(hireModelOf(m)),
+      // Their model's file is gone from this PC: modelName then reads as a fault, so the move window needs the plain name.
+      modelGone: !away && !entry && hireModelOf(m).state === 'missing',
+      modelWas: !away && !entry && hireModelOf(m).state === 'missing' ? hireModelOf(m).name : '',
       // Two linked PCs with one name ("Worker PC") are told apart (src/brains.ts pcLabels).
       pc: away?.pc ? (where.kind === 'remote' ? shownName(profiles[where.pc], brains.pcLabels(s.remotes)[where.pc] ?? away.pc) : away.pc) : null,
       // On a PC set to Backups only: it takes no work, so nobody offers this hire a task (Home's pickers).

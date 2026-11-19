@@ -44,9 +44,10 @@ test('This PC lists every permission a linked PC may have, and says turning it o
   assert.match(read('home.js'), /receive: false, give: false, off: true \}/);
 });
 
-test('a line of Help\'s "On this page" takes the keyboard to its part, after the page\'s own focus', () => {
+test('a Help button takes the person to its topic: the frame is pointed at it, and an old section name is sent on by Help\'s own script', () => {
   const view = read('chatview.js');
   const open = view.slice(view.indexOf('function openHelp('), view.indexOf('app.openHelp = openHelp;'));
-  assert.match(open, /setTimeout\(\(\) => \{\n\s*if \(!at\.hasAttribute\('tabindex'\)\) at\.setAttribute\('tabindex', '-1'\);\n\s*at\.focus\(\{ preventScroll: true \}\);/);
-  assert.ok(open.indexOf("setView('help')") < open.indexOf('setTimeout('), 'queued after setView queues the title focus');
+  assert.match(open, /frame\.src = `help\/index\.html\?go=\$\{encodeURIComponent\(part\)\}`/);
+  assert.ok(open.indexOf("setView('help')") < open.indexOf('frame.src'), 'the page is up before the frame moves');
+  assert.match(read('help/help.js'), /location\.replace\(map\.aliases\[go\]\)/);
 });

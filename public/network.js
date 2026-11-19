@@ -43,11 +43,30 @@ async function netDo(path, body) {
 }
 
 let netLast = [];
+
+/** Seconds as plain words: "40 s", "3 min", "1 h 5 min". */
+const netSpan = s => (s < 60 ? `${Math.max(1, Math.round(s))} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
+
+/**
+ * How long a transfer still has, from its speed so far: '' until enough has moved to say (10 seconds and 1 MB), and while
+ * nothing is counted yet it says how long it has been going instead, so a long compare does not look stuck.
+ */
+function netEta(t) {
+  if (t.state !== 'working' || t.queued || !t.started) return '';
+  const gone = (Date.now() - t.started) / 1000;
+  if (!t.bytes || !t.done) return gone >= 5 ? ` (${netSpan(gone)} so far)` : '';
+  if (t.done >= t.bytes || gone < 10 || t.done < 2 ** 20) return '';
+  return ` · about ${netSpan(((t.bytes - t.done) * gone) / t.done)} left`;
+}
+
 function drawNetTransfers(list) {
   netLast = list;
   const verb = t => (t.state === 'done'
     ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, move: `Moved ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, pull: `Took ${t.what} from "${t.pcName}" for this PC`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
     : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, move: `Moving ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
+  // While one is going: the window can be closed (they run on the server), and more can be started (they wait their turn).
+  const going = list.some(t => t.state === 'working');
+  const safe = going ? el('p', { class: 'hint', text: 'Safe to close this window: it carries on. You can also start more downloads; they wait their turn.' }) : null;
   $('#net-transfers').replaceChildren(...list.map(t => {
     const fill = el('div', { class: 'p-fill' });
     const frac = t.bytes ? t.done / t.bytes : 0;
@@ -69,18 +88,32 @@ function drawNetTransfers(list) {
       : null;
     // Waiting its turn: a few run at a time (src/carry.ts Transfers.AT_ONCE), the rest start as those finish.
     const queued = working && t.queued ? 'Waiting its turn: it starts when one of the others finishes.' : null;
-    const line = queued ?? sent ?? runner ?? moveLine ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`);
+    const line = (queued ?? sent ?? runner ?? moveLine ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`)) + netEta(t);
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: verb(t) })),
       working ? el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: () => netDo('/api/network/stop', { id: t.id }) }) : null,
       el('div', { class: 'progress' }, working ? el('div', { class: 'p-track' }, fill) : null, el('div', { class: 'p-text', role: t.state === 'failed' ? 'alert' : null, text: line })));
-  }));
+  }), ...(safe ? [safe] : []));
 }
 
 function drawNet(v) {
   drawNetTransfers(v.transfers);
   const running = new Set(v.transfers.filter(t => t.state === 'working').map(t => `${t.kind}|${t.pc}|${t.what}`));
   const busyPc = pc => v.transfers.some(t => t.pc === pc && t.state === 'working');
+
+  // What a PC is, as its last hello said: shown on hover of the (!) beside its name.
+  const specText = p => {
+    const s = p.specs ?? {};
+    const parts = [
+      p.cpu ? `${p.cpu.name || 'Processor'}, ${p.cpu.cores} cores${p.cpu.threads > p.cpu.cores ? `, ${p.cpu.threads} threads` : ''}` : null,
+      s.ram ? `${gb(s.ram)} of RAM` : null,
+      s.gpu ? `${s.gpu}${s.vram ? ` with ${gb(s.vram)}` : ''}` : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join('\n') : 'Nothing is known about this PC yet: it has not told this PC what it is.';
+  };
+  const nameOf = p => el('strong', {}, p.name, ' ', el('span', { class: 'net-spec', tabindex: '0', role: 'img', 'aria-label': `About ${p.name}: ${specText(p).replace(/\n/g, ', ')}`, title: specText(p), text: '(!)' }));
+  // An off PC says when it last answered, instead of only "off".
+  const lastSeen = p => p.seenAt ? `Last seen ${new Date(p.seenAt).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Not answering now';
 
   // Shared by linked PCs: one tile for each PC, its models behind "See models installed" (a tile stays open while the window redraws).
   const modelsOn = p => v.rows.filter(r => r.on.some(o => o.pc === p.id));
@@ -101,7 +134,7 @@ function drawNet(v) {
         action);
     });
     return el('article', { class: `net-tile${p.ok ? '' : ' is-off'}` },
-      el('div', { class: 'net-tile-head' }, el('strong', { text: p.name }), el('span', { class: 'hint', text: p.ok ? `${mine.length} model${mine.length === 1 ? '' : 's'}${mine.length ? ` · ${netSize(total)}` : ''}` : 'Off or not answering now' })),
+      el('div', { class: 'net-tile-head' }, nameOf(p), el('span', { class: 'hint', text: p.ok ? `${mine.length} model${mine.length === 1 ? '' : 's'}${mine.length ? ` · ${netSize(total)}` : ''}` : lastSeen(p) })),
       mine.length ? netFold(`models:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: `See models installed (${mine.length})` }), el('div', { class: 'net-list' }, ...list)))
         : el('p', { class: 'hint', text: p.ok ? 'Shares no models.' : '' }));
   }) : [el('p', { class: 'hint', text: v.pcs.length ? 'No shared models yet. Each node has to select "yes" to sharing. It will then display here.' : 'No PCs are linked to this one yet: link one under Network.' })]));
@@ -129,7 +162,7 @@ function drawNet(v) {
     const d = p.projectsDone;
     const projLine = p.projects ? `Projects: ${p.projects}.` : d ? `Projects: last backed up ${new Date(d.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} (${d.files} file${d.files === 1 ? '' : 's'}). Backed up every 10 minutes when something changed.` : 'Projects: not backed up there yet. Backed up every 10 minutes when something changed.';
     return el('article', { class: `net-tile${p.ok ? '' : ' is-off'}` },
-      el('div', { class: 'net-tile-head' }, el('strong', { text: p.name }), el('span', { class: 'hint', text: p.ok ? '' : 'Off or not answering now' })),
+      el('div', { class: 'net-tile-head' }, nameOf(p), el('span', { class: 'hint', text: p.ok ? '' : lastSeen(p) })),
       netFold(`backups:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: 'See backups and restore points' }),
       el('div', { class: 'net-row' },
         el('span', { class: 'net-name' }, el('strong', { text: p.name }), p.backup ? el('br') : null, p.backup ? el('span', { class: 'hint', text: `${netUp(p.backup)}.` }) : null),

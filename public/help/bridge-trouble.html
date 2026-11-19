@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Bridge: privacy and trouble - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="bridge-trouble">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-bridge">Projects and the Bridge</a></li><li aria-current="page">The Bridge: privacy and trouble</li></ol></nav><!--/nav-top-->
+<article>
+<h1>The Bridge: privacy and trouble</h1>
+<p class="lead">What leaves this PC, if something goes wrong, and where its data is.</p>
+<h2 id="b-privacy">What leaves this PC</h2>
+        <p>Nothing about you or your projects goes to the internet unless you send it with Push live (off until you turn it on): then the project's files, and its Live secrets, go to the web host you connected, and nowhere else. The only other requests that leave for the internet are plain page requests to the live addresses you add under Hosted live, and, only if you tick it, one request a day to GitHub for the newest Git version. A project you tick under Copies on my other PCs goes only to your own linked PCs, over your home network and encrypted. Tokens are counted from the AI transcripts already on this PC; they are read, never changed or sent.</p>
+<h2 id="b-trouble">If something goes wrong</h2>
+        <ul>
+          <li><b>The page says Connection lost</b>: TOMLIN stopped. Start it again (its desktop icon, or Start TOMLIN.cmd); this page reconnects by itself.</li>
+          <li><b>A project shows "No start command"</b>: click it for a prompt to paste into your AI, which adds a <code>"start"</code> to the project's own <code>project.json</code>. Or list it in <code>projects.json</code> in the Bridge's data folder (TOMLIN's home, <code>data\bridge</code>; see README.md).</li>
+          <li><b>Your folders or prompts are suddenly back to the start</b>: the file that held them could not be read. It was kept in the Bridge's data folder (TOMLIN's home, <code>data\bridge</code>) as <code>settings.damaged-…json</code> or <code>prompts.damaged-…json</code>; close TOMLIN, copy back what you need, and start it again.</li>
+          <li><b>Git error on a project</b>: click the mark; it says why (git not installed, folder owned by another account, or git settings that could run a program).</li>
+        </ul>
+<h2 id="b-remove">Where its data is</h2>
+        <p>Its settings, audits, prompts and lists are in TOMLIN's home, in <code>data\bridge</code>, and go with TOMLIN's own backups. Uninstalling TOMLIN removes the Bridge with it.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="bridge-backups.html" rel="prev"><span>&larr; Previous</span><b>The Bridge: backups</b></a><a class="next" href="colours.html" rel="next"><span>Next &rarr;</span><b>Colours</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

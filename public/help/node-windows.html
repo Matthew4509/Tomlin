@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windows settings for a node - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="node-windows">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Windows settings for a node</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Windows settings for a node</h1>
+<p class="lead">Hibernation, automatic sign-in, setup reminders, sleep and waking, start with the PC.</p>
+<p>A node that runs on its own (no screen, no keyboard) needs three Windows settings, listed on the Network page under <b>(!) Three Windows settings for a node that runs on its own</b>.</p>
+<h2>The three settings</h2>
+<ol class="steps">
+          <li><b>Turn off hibernation.</b> A hibernating node stops answering. Windows also keeps a hidden file for it about three quarters the size of this PC's RAM. In Command Prompt, run as administrator, type <code>powercfg /h off</code> (<code>powercfg /h /size</code> shows how big the file is).</li>
+          <li><b>Sign in automatically.</b> For a node with no screen or keyboard (headless). After a restart Windows waits at the password screen, and TOMLIN does not start until someone signs in. Press Windows + R, type <code>netplwiz</code>, untick <b>Users must enter a user name and password to use this computer</b>, and enter the password once. If that box is missing, turn off <b>Settings › Accounts › Sign-in options › For improved security, only allow Windows Hello sign-in</b> first. Anyone at the PC can then sign in, so use it only for a PC in a safe place.</li>
+          <li><b>Stop the "finish setting up your device" and backup reminders.</b> Windows can show a full-screen prompt after an update or start, and TOMLIN does not answer behind it. In <b>Settings › System › Notifications › Additional settings</b>, untick the options about suggesting ways to finish setting up this device and about tips and suggestions. Names differ a little between Windows versions.</li>
+        </ol>
+<h2>Start TOMLIN when this PC starts</h2>
+<p>On the node, <b>Start TOMLIN when this PC starts</b> (Network, This PC; the same as <b>Start on start up</b> in the My PC window) starts TOMLIN with Windows, and <b>Start it again</b> starts it if it has stopped. It needs TOMLIN started by its installed program or by Start TOMLIN.cmd (see <a href="installing.html">Installing TOMLIN</a>).</p>
+<h2>Sleep and waking</h2>
+<p><b>Sleep and waking.</b> A node stays awake by itself while a linked PC has a model loaded on it or is waiting for an answer, and may go to sleep when it has been idle for a minute or more (it keeps to your Windows power settings then).</p>
+<p>When a request comes for a node that is asleep, this PC wakes it with a wake-on-LAN message and waits up to 90 seconds. That works only if wake-on-LAN is switched on in the node's BIOS (often called Wake on LAN or Power On by PCI-E) and in its network card's settings in Windows (Device Manager, the card, Power Management, Allow this device to wake the computer, and Only allow a magic packet).</p>
+<p>The node's network address is learned while it is awake, so it must have answered this PC once first. A laptop on Wi-Fi usually cannot be woken; use a cable.</p>
+<h2>Can other PCs reach this one?</h2>
+<p>On the node, <b>Check</b> under this question looks at the PC's own settings (its connection, how its address was set, its router, network type and firewall) and changes nothing. It gives the steps, or the lines, that fix each fault, with <b>Copy</b> for one line that runs them: Start menu, type PowerShell (or cmd), right-click, Run as administrator, paste, press Enter, then Check again. The address to type on the main PC is shown under it.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="cluster.html" rel="prev"><span>&larr; Previous</span><b>Max mode and Cluster</b></a><a class="next" href="moving-staff.html" rel="next"><span>Next &rarr;</span><b>Moving staff to another PC</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

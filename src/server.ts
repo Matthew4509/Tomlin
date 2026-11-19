@@ -15,7 +15,7 @@ import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
 import { followAppsEntry, refreshTray } from './trayfresh.ts';
 import { autostart } from './autostart.ts';
-import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store, modelsHome, runtimes, notifier, mutes } from './server/core.ts';
+import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store, modelsHome, backupsHome, runtimes, notifier, mutes } from './server/core.ts';
 import { startDiskCare } from './diskcare.ts';
 import { settingsGet, settingsPost } from './server/settings.ts';
 import { appLock, appLockAction, appLockOn, appLockView, appOk } from './server/locks.ts';
@@ -28,6 +28,7 @@ import { previewFile, projectPost, workGet, workPost } from './server/work.ts';
 import { teamGet, teamPost } from './server/team.ts';
 import { hfGet, hfPost } from './server/hf.ts';
 import { modelHomeGet, modelHomePost } from './server/modelhome.ts';
+import { backupHomeGet, backupHomePost } from './server/backuphome.ts';
 import { noticesGet, noticesPost, tellChat } from './server/notices.ts';
 import { thispcGet, thispcPost } from './server/thispc.ts';
 import { sitecheckGet, sitecheckPost } from './server/sitecheck.ts';
@@ -96,8 +97,8 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
-const POST = routesOf(toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
+const GET = routesOf(backupHomeGet, toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
+const POST = routesOf(backupHomePost, toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
 
 // The holding page's socket (src/waitdoor.ts) when it is listening, so the port never goes quiet; else a new one.
 // Runner faults and whole answers go to the run history (the crash notice reads it).
@@ -208,7 +209,7 @@ const started = () => {
     }).catch(() => undefined);
   }
   // What could fill a drive is kept within bounds, and a nearly full drive is said (src/diskcare.ts lists each cleanup).
-  startDiskCare({ data: HOME.data, models: () => [modelsHome.dir(), HOME.models], keptRoot: join(HOME.home, 'backups from other PCs'), runtimes, notifier, mutes });
+  startDiskCare({ data: HOME.data, models: () => [modelsHome.dir(), HOME.models], get keptRoot() { return backupsHome.dir(); }, runtimes, notifier, mutes });
   // Sharing this PC as a worker is off unless its owner turned it on in Jobs.
   void jobRoutes.startShare().catch(error => console.error(`Sharing as a worker could not start: ${(error as Error).message}`));
   // Linked PCs are asked once at start, so their staff show as on (or off) straight away.

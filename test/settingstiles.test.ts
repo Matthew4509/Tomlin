@@ -110,7 +110,7 @@ test('everywhere else the foot of the left panel shows nothing, and the submenu 
 test('links to what moved go to its new place, and no words send anyone to "Set up"', () => {
   assert.match(read('mute.js'), /text: 'Settings, Data and lock'/);
   assert.match(read('owner.js'), /Settings, Data and lock, then Put back/);
-  assert.match(html, /Settings, Data and lock<\/b>/);
+  assert.match(read('help/backups.html'), /Settings, Data and lock<\/b>/);
   for (const f of ['app.js', 'chatview.js', 'images.js', 'jobs.js', 'team.js', 'homeview.js']) assert.doesNotMatch(read(f), /(under |\()?Set up, /, f);
   const words = html.replace(/<!--[\s\S]*?-->/g, '');
   assert.doesNotMatch(words, /<b>Set up<\/b>|Set up menu|Set up, /);

@@ -14,7 +14,7 @@ import { hello, pullOf, seen, sendPassAsk, workerPost } from './links.ts';
 import * as guestpass from '../guestpass.ts';
 import { setup } from './sizing.ts';
 import { clusterGaps, labelOf, lendersInUse, membersFacts, setBorrow } from './maxhost.ts';
-import { heldFor, withHere, withMembers, withOn, without } from '../cluster/members.ts';
+import { addWhy, heldFor, withHere, withMembers, withOn, without } from '../cluster/members.ts';
 import { chooseLoader, loaderWhy } from '../cluster/loader.ts';
 import { lanAddresses, lanList, shareState } from './node.ts';
 
@@ -204,6 +204,14 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const was = s.cluster;
     let next = was;
     if (Array.isArray(b.members)) next = withMembers(next, b.members, s.remotes.map(r => r.id));
+    // A PC added now must answer now: one that is off, asleep or not answering cannot join (it could not load or lend).
+    for (const id of next.members.filter(x => !was.members.includes(x))) {
+      const r = s.remotes.find(x => x.id === id);
+      if (!r) continue;
+      const h = await hello(r, 4000).then(x => ({ ok: true, away: x.away }), () => ({ ok: false, away: undefined }));
+      const why = addWhy(labelOf(r), { ...h, seenAt: seen.get(id)?.at ?? null });
+      if (why) return { status: 400, body: { error: why } };
+    }
     const loose = next.members.map(id => s.remotes.find(r => r.id === id)).filter(r => r?.backupsOnly === true);
     if (loose.length) return { status: 400, body: { error: `${loose.map(r => `"${labelOf(r!)}"`).join(' and ')} ${loose.length === 1 ? 'is' : 'are'} set to Backups only, so ${loose.length === 1 ? 'it' : 'they'} cannot be in the cluster. Untick Backups only on ${loose.length === 1 ? 'its' : 'their'} card first (Network, Linked PCs).` } };
     if (typeof b.on === 'boolean') {
@@ -213,7 +221,8 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     }
     const said: string[] = [];
     const wantOut = typeof b.takesPart === 'boolean' ? !b.takesPart : next.out === true;
-    if (!wantOut && next.out) next = withHere(next, true)!;
+    // Only the owner's own press makes "takes part" a saved choice; nothing else switches it on.
+    if (!wantOut && (next.out || b.takesPart === true)) next = withHere(next, true, '', b.takesPart === true)!;
     if (wantOut) {
       // Each member asked now, so the choice reads what they say this moment (on, its links, its network).
       await Promise.all(s.remotes.filter(r => next.members.includes(r.id)).map(r => hello(r, 4000).catch(() => undefined)));

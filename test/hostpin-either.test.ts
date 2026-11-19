@@ -73,10 +73,11 @@ test('two PCs: the host PIN typed as a linked PC\'s PIN opens it once that PC ho
   }
 });
 
-test("a linked PC's PIN window says either PIN opens it, in its title too", () => {
+test("a linked PC's PIN window names the node and says either PIN opens it", () => {
   const js = readFileSync(join(ROOT, 'public', 'home.js'), 'utf8');
-  assert.match(js, /Type the admin PIN, or the "\$\{other\}" PIN/);
-  assert.match(js, /if \(!either\.hidden && !doing\?\.title\)/);
+  assert.ok(js.includes('`Enter pin for ${other}:`'));
+  assert.ok(js.includes("'To update, enter either your admin pin, or the individual pin for the node.'"));
+  assert.ok(js.includes("'To shut down, enter either your admin pin, or the individual pin for the node.'"));
 });
 
 test('the permissions page says who the admin is, what its PIN can do and that an update is trusted code', () => {

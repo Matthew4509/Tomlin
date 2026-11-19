@@ -22,8 +22,8 @@ import { gitExe } from './backup-source.ts';
 import { keyHits } from './sign.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-/** Never public: the working notes and the design record. */
-export const DROP = ['docs', 'PLAN.md', 'TOKEN-LOG.md', 'USABILITY-AUDIT*', '.gitattributes'];
+/** Never public: the working notes and the design record, the handoffs, scratch pages, benchmark runs and pictures kept with them. */
+export const DROP = ['docs', 'PLAN.md', 'TOKEN-LOG.md', 'USABILITY-AUDIT*', 'HANDOFF-*', 'scratch', 'benchmarks', 'images_and_animations', '.gitattributes'];
 // Keys GitHub refuses on push, as docs/public-scan.py looked for them. Spelled in parts so this file is not a hit itself.
 const KEY = new RegExp(['sk_live_[0-9A-Za-z]{8,}', 'sk_test_[0-9A-Za-z]{16,}', 'AKIA[0-9A-Z]{16}', 'ghp_[0-9A-Za-z]{30,}', 'github_pat_[0-9A-Za-z_]{30,}',
   'xox[baprs]-[0-9A-Za-z-]{10,}', 'AIza[0-9A-Za-z_-]{35}', 'sk-ant-[0-9A-Za-z_-]{20,}', 'sk-[0-9A-Za-z]{40,}'].join('|'));

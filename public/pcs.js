@@ -11,6 +11,7 @@
   /** Settings > This PC: the box the models list is drawn into there (the same list as in this PC's window), and its confirm box. */
   let page = null;
   let pageAsk = null;
+  let pageTop = null;
   const askBox = () => (!dlg.open && pageAsk ? pageAsk : $('#pc-ask'));
   // The Updates page's section is lent to this window (Manage PC and updates): given back when the window closes.
   dlg.addEventListener('close', () => {
@@ -480,6 +481,126 @@
     return words ? el('span', { class: 'hint pc-free-space', title: 'Free space on each drive of this PC, as it said just now', text: `Free space: ${words}` }) : null;
   }
 
+  // ---- This PC: what it is (admin, node, network backup) and where its models and backups are kept ----
+  // One element kept across redraws, so a folder typed and not yet kept stays typed; the figures are read again each time it is drawn.
+  const here = { el: null, share: null, linked: null, models: null, backups: null, form: null, said: { models: '', backups: '' }, fault: '', shareFault: '', timer: 0, wasMoving: false };
+
+  /** Saves a change to this PC's sharing as the Network page does (a node asks for the app lock PIN): the new state, or null when cancelled. */
+  async function saveShare(body) {
+    let appPin;
+    for (;;) {
+      try {
+        return await api('/api/share', appPin === undefined ? body : { ...body, appPin });
+      } catch (e) {
+        if (!e.data?.needAppPin || typeof askAppPin !== 'function') throw e;
+        appPin = await askAppPin(appPin === undefined ? '' : e.message);
+        if (appPin === null) return null;
+      }
+    }
+  }
+
+  async function readThis() {
+    clearTimeout(here.timer);
+    try {
+      const [n, others, models, backups] = await Promise.all([api('/api/nodes'), api('/api/nodes/others').catch(() => null), api('/api/models/where').catch(() => null), api('/api/backups/where').catch(() => null)]);
+      Object.assign(here, { share: n.share, linked: others ? (others.pcs ?? []).filter(p => p.role !== 'guest').length : null, models, backups, fault: '' });
+    } catch (e) {
+      here.fault = e.message;
+    }
+    paintThis();
+    const moving = here.models?.move?.state === 'moving';
+    if (moving) here.timer = setTimeout(readThis, 1500);
+    // The move ended: each model shows in its new place.
+    else if (here.wasMoving) load(showing);
+    here.wasMoving = moving;
+  }
+
+  function paintThis() {
+    const sh = here.share;
+    const title = el('h3', { id: 'pc-this-title', text: 'This PC is' });
+    if (!sh) return here.el.replaceChildren(title, el('p', { class: here.fault ? 'fault-line' : 'hint', text: here.fault || 'Reading…' }));
+    const allow = sh.allow ?? {};
+    const node = sh.on === true;
+    const backup = node && allow.backup === true;
+    const change = async body => {
+      here.shareFault = '';
+      try {
+        const r = await saveShare(body);
+        if (r) here.share = r;
+      } catch (e) {
+        here.shareFault = e.message;
+      }
+      await readThis();
+    };
+    const role = (label, about, on, disabled, onChange) => {
+      const input = el('input', { type: 'checkbox', role: 'switch', 'aria-label': label, disabled });
+      input.checked = on;
+      input.addEventListener('change', () => onChange(input.checked));
+      return el('label', { class: `pc-role${disabled ? ' pc-role-off' : ''}`, title: about }, el('span', { class: 'set-sw' }, input, el('i', { 'aria-hidden': 'true' })), el('span', { class: 'pc-role-name', text: label }));
+    };
+    const linked = here.linked === null ? '' : here.linked ? ` · ${here.linked} linked PC${here.linked === 1 ? '' : 's'}` : ' · no PC linked yet (Network)';
+    const roles = el('div', { class: 'pc-roles' },
+      el('span', { class: 'pc-role pc-role-admin', title: 'Any PC becomes an admin when it links other PCs (Network). It can also be a node and a network backup.' }, el('b', { text: 'An admin PC' }), el('span', { class: 'hint', text: linked })),
+      el('span', { class: 'pc-role-bar', 'aria-hidden': 'true' }),
+      role('A node', 'Other PCs can use this PC: its models, its graphics card and RAM (what they may do is under Sharing and cluster permissions).', node, false, on => change({ on })),
+      role('A network backup', 'Other PCs keep their backups and project history here. It listens on the home network like a node, so it needs the node switch.', backup, !node, on => change({ allow: { ...allow, backup: on } })));
+    const where = (key, name, w, disabled, off) => {
+      const shown = el('span', { class: 'pc-store-where' }, w ? `${w.missing ?? w.dir}${w.missing ? ' (not there now)' : w.free !== null ? `, ${GBs(w.free)} free on ${w.drive}` : ''}` : 'not known');
+      const open = here.form === key && !disabled;
+      const btn = el('button', { class: 'btn quiet', type: 'button', text: 'Change folder or drive', disabled, 'aria-expanded': String(open), onclick: () => openStoreForm(key) });
+      const input = el('input', { type: 'text', autocomplete: 'off', placeholder: key === 'models' ? 'D:\\Tomlin\\models' : 'D:\\Tomlin\\backups', 'aria-label': `The folder to keep ${key} in`, id: `pc-store-${key}`, value: w && !w.isUsual ? w.dir : '' });
+      // One click per drive (FAT drives are refused, so not offered): it fills <drive>\Tomlin\<models or backups>, to keep or change.
+      const fit = (w?.drives ?? []).filter(d => d.total > 0 && !/^fat/i.test(d.fs || ''));
+      const drivesRow = fit.length ? el('div', { class: 'pc-store-drives', role: 'group', 'aria-label': `Drives to keep ${key} on` }, el('span', { class: 'hint', text: 'Pick a drive:' }),
+        ...fit.map(d => el('button', { class: 'btn quiet', type: 'button', title: `Fills in ${d.drive}\\Tomlin\\${key}${d.removable ? ' (a removable drive: keep it plugged in)' : ''}`, text: `${d.drive}${d.label ? ` ${d.label}` : ''} · ${GBs(d.free)} free`, onclick: () => {
+          input.value = `${d.drive}\\Tomlin\\${key}`;
+          input.focus();
+        } }))) : null;
+      const form = open ? el('form', { class: 'pc-store-form' }, drivesRow, el('label', { class: 'field grow' }, el('span', { class: 'sr-only', text: `The folder to keep ${key} in` }), input), el('button', { class: 'btn', type: 'submit', text: `Keep ${key} here` }), w && !w.isUsual ? el('button', { class: 'btn quiet', type: 'button', text: 'Back to the usual folder', onclick: () => keepIn(key, null) }) : null) : null;
+      form?.addEventListener('submit', e => {
+        e.preventDefault();
+        keepIn(key, input.value);
+      });
+      const said = here.said[key] || (disabled ? off : '');
+      const toMove = key === 'models' && w?.toMove?.files ? el('p', { class: 'hint' }, `${w.toMove.files} model file${w.toMove.files === 1 ? ' is' : 's are'} still in ${w.toMove.from.join(' and ')} (${GBs(w.toMove.bytes)}). `, w.move?.state === 'moving' ? `Moving ${w.move.now || 'the models'}: ${GBs(w.move.got)} of ${GBs(w.move.bytes)}.` : el('button', { class: 'btn', type: 'button', text: 'Move them to the new folder', onclick: () => api('/api/models/move', {}).then(readThis, e => { here.said.models = e.message; paintThis(); }) })) : null;
+      const kept = key === 'backups' && w && !disabled ? el('span', { class: 'hint', text: w.kept ? ` ${w.kept} linked PC${w.kept === 1 ? ' keeps' : 's keep'} backups here now.` : ' No backups kept here yet.' }) : null;
+      return el('div', { class: `pc-store-row${disabled ? ' pc-store-off' : ''}` }, el('div', { class: 'pc-store-line' }, el('b', { text: name }), shown, kept, btn), form, said ? el('p', { class: 'hint', role: 'status', text: said }) : null, toMove);
+    };
+    here.el.replaceChildren(...[title, roles,
+      here.shareFault || here.fault ? el('p', { class: 'fault-line', role: 'alert', text: here.shareFault || here.fault }) : null,
+      el('div', { class: 'pc-store' },
+        where('models', 'Models are kept in', here.models, false, ''),
+        where('backups', 'Backups from other PCs are kept in', here.backups, !backup, 'Switch on "A network backup" to keep other PCs\' backups on this PC.'))].filter(Boolean));
+  }
+
+  /** Keeps models or backups in `dir` (null: the usual folder), and says how it went in the row. */
+  async function keepIn(key, dir) {
+    try {
+      const w = await api(`/api/${key}/where`, { dir });
+      here.said[key] = w.said ?? '';
+      here.form = null;
+    } catch (e) {
+      here.said[key] = e.message;
+    }
+    await readThis();
+  }
+
+  /** Opens the folder box of one row ("models" or "backups"), and puts the cursor in it. */
+  function openStoreForm(key) {
+    here.form = here.form === key ? null : key;
+    here.said[key] = '';
+    paintThis();
+    if (here.form) here.el.scrollIntoView({ block: 'nearest' });
+    document.getElementById(`pc-store-${key}`)?.focus();
+  }
+
+  function thisPcPart() {
+    if (!here.el) here.el = el('section', { class: 'pc-part pc-card-part pc-this', 'aria-labelledby': 'pc-this-title' });
+    if (!here.share) paintThis();
+    readThis();
+    return here.el;
+  }
+
   function modelsPart(v) {
     const count = k => v.models.filter(x => (k === 'hidden' ? x.hidden : (!x.hidden || !v.here) && (k === 'all' || x.kind === k))).length;
     const cats = ['all', 'chat', 'image', ...(v.here && v.models.some(x => x.hidden) ? ['hidden'] : [])];
@@ -509,11 +630,28 @@
     const add = v.here ? el('button', { class: 'btn', type: 'button', text: 'Get a model', onclick: () => { dlg.close(); app.openModels?.(); } }) : null;
     // Free up space: the models used least, to tick and remove (src/cleanup.ts). A linked PC's are only listed here: they go on that PC.
     const free = el('button', { class: 'btn', type: 'button', text: 'Free up space', title: v.here ? 'Lists the models used least, to remove the ones you do not need' : `Lists the models used least on ${v.name}`, onclick: () => app.openCleanup?.({ pc: v.id, onChanged: modelsChanged }) });
-    return el('section', { class: 'pc-part pc-card-part' },
-      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Memory needed is an estimate (a chat model with an 8K context).', text: `Models (${shown})` }), many ? search : null, el('div', { class: 'pc-free' }, freeSpaceLine(v), free), add),
+    // This PC's list starts folded away (the roles and where things are kept come first); a linked PC's window shows it as before.
+    const fold = v.here;
+    const open = !fold || foldsOpen.models === true;
+    const toggle = fold ? el('button', { class: 'btn quiet pc-models-toggle', type: 'button', text: open ? 'Hide models' : 'Show models', 'aria-expanded': String(open), 'aria-controls': 'pc-models-body' }) : null;
+    // Where new models go is chosen in the part above (Models: Change folder or drive); this button takes you there.
+    const change = v.here ? el('button', { class: 'btn', type: 'button', text: 'Change folder or drive', title: 'Where new models are kept on this PC', onclick: () => openStoreForm('models') }) : null;
+    const listBody = el('div', { class: 'pc-models-body', id: 'pc-models-body', hidden: !open },
+      many ? search : null,
       many ? el('div', { class: 'pc-tools' }, shelf, el('label', { class: 'pc-sort' }, 'Sort ', sort)) : cats.includes('hidden') ? el('div', { class: 'pc-tools' }, shelf) : null,
       v.here ? null : el('p', { class: 'hint', text: 'Hide is on that PC itself. Delete works here when its owner ticks Accept models from linked PCs.' }),
       listBox);
+    toggle?.addEventListener('click', () => {
+      listBody.hidden = !listBody.hidden;
+      foldsOpen.models = !listBody.hidden;
+      toggle.textContent = listBody.hidden ? 'Show models' : 'Hide models';
+      toggle.setAttribute('aria-expanded', String(!listBody.hidden));
+    });
+    // The buttons share one row and the free-space words sit under them, on a row of their own: long words no longer push a button down.
+    return el('section', { class: 'pc-part pc-card-part' },
+      el('div', { class: 'pc-part-head' }, el('h3', { title: 'Memory needed is an estimate (a chat model with an 8K context).', text: `Models (${shown})` }), toggle, el('div', { class: 'pc-free-actions' }, free, change, add)),
+      freeSpaceLine(v),
+      listBody);
   }
 
   // ---- Who works on it, and its most-used models (last 7 days) ----
@@ -652,7 +790,11 @@
 
   function draw(v) {
     // Settings > This PC: only the models list, the same one as in this PC's window (drawn into the page, not the window).
-    if (!dlg.open && page) return page.replaceChildren(modelsPart(v));
+    // On the page, what this PC is and where things are kept have a card of their own above the models (`pageTop`).
+    if (!dlg.open && page) {
+      if (pageTop && v.here) pageTop.replaceChildren(thisPcPart());
+      return page.replaceChildren(...(v.here && !pageTop ? [thisPcPart()] : []), modelsPart(v));
+    }
     // Two linked PCs with one name are told apart here as in the left panel (app.pcLabel, public/home.js).
     const title = pcTitle(v);
     $('#pc-title').textContent = title;
@@ -743,11 +885,14 @@
       const upBtn = go ?? el('button', { class: 'btn', type: 'button', disabled: true, title: v.fault ? 'It is not answering, so it cannot be updated now.' : older ? (v.update.why ? `${v.update.why.charAt(0).toUpperCase()}${v.update.why.slice(1)}.` : '') : 'It runs the same TOMLIN as this PC: nothing to update.', text: older ? 'Update' : 'Up to date' });
       upBtn.prepend(mark('M12 19V5M6.5 10.5 12 5l5.5 5.5') ?? '');
       let offBtn = null;
+      // The question before a shut down, asked in the window (the browser's own confirm box is silently refused in some
+      // windows, so the press did nothing).
+      const offAsk = el('div', { class: 'pc-off-ask', hidden: true });
       if (v.off?.can) {
         const why = !v.off.allowed ? 'Its owner has not switched on "Allow host to turn this PC off" (Network, sharing permissions).' : v.off.away ? 'Someone is using it now.' : 'Shuts that PC down. It asks for its PIN (its own, or the host PIN), and stays off until someone switches it on again.';
         offBtn = el('button', { class: 'btn', type: 'button', title: why, disabled: !v.off.allowed || !!v.off.away }, mark('M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0') ?? '', 'Shut down');
         offBtn.addEventListener('click', async () => {
-          if (!confirm(`Turn off "${title}"?\n\nIt shuts down about 15 seconds after it answers, and stays off until someone switches it on again. Anything it is doing for you stops.`)) return;
+          if (!(await askHere(offAsk, `Turn off "${title}"? It shuts down about 15 seconds after it answers, and stays off until someone switches it on again. Anything it is doing for you stops.`, `Turn off ${title}`, 'Keep it on'))) return;
           offBtn.disabled = true;
           try {
             const r = typeof powerOffWithPin === 'function' ? await powerOffWithPin({ id: v.id, name: v.name }) : null;
@@ -758,7 +903,7 @@
           offBtn.disabled = false;
         });
       }
-      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, upBtn, offBtn ?? '');
+      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, upBtn, offBtn ?? '', offAsk);
     }
 
     // ---- The strip: TOMLIN, tokens, time worked, power cost ----
@@ -877,7 +1022,7 @@
     const lowDisk = v.disk && v.disk.free < LOW_DISK ? el('p', { class: 'fault-line pc-warn', role: 'alert', text: `The disk is nearly full: ${GBs(v.disk.free)} free. A model or a backup may not fit.` }) : null;
     const away = !v.here && v.fault ? el('p', { class: 'fault-line pc-warn', role: 'status', text: v.fault })
       : v.checking ? el('p', { class: 'hint pc-warn', role: 'status', text: `Shown as ${title} said last. Asking it now…` }) : null;
-    body.replaceChildren(head, actions ?? '', away ?? '', lowDisk ?? '', v.here ? installBox : '', modelsPart(v), peoplePart(v), detailsFold, nameFold, fold, logFold ?? ''
+    body.replaceChildren(head, actions ?? '', away ?? '', lowDisk ?? '', v.here ? installBox : '', v.here ? thisPcPart() : '', modelsPart(v), peoplePart(v), detailsFold, nameFold, fold, logFold ?? ''
     );
   }
   const foldsOpen = {};
@@ -920,9 +1065,10 @@
     closeMenu(menu);
   });
   /** Settings > This PC: draws this PC's models list (search, All | Chat | Pictures, sort, Test speed, Hide, Delete) into `host`. */
-  app.pcModelsInto = (host, ask) => {
+  app.pcModelsInto = (host, ask, top) => {
     page = host;
     pageAsk = ask;
+    pageTop = top ?? null;
     host.replaceChildren(el('p', { class: 'hint', text: 'Reading…' }));
     return load('here');
   };

@@ -118,26 +118,25 @@ $('#rail').addEventListener('contextmenu', e => {
   openMute(key, key.startsWith('chat:') ? `"${name}"` : name);
 });
 
-// ---- The top bar: a bell for Mute all; while all is muted, one Unmute button (the bell's tip says until when) ----
+// ---- The top bar: the bell turns Mute all on and off. Muted: one press unmutes. Not muted: it asks for how long ----
 
-$('#mute-all').addEventListener('click', () => openMute('all'));
-$('#mute-all-off').addEventListener('click', async () => {
+$('#mute-all').addEventListener('click', async () => {
+  if (!muteNow().all) return openMute('all');
   try {
     homeUi.data && (homeUi.data.mute = await api('/api/mute', { key: 'all', for: 'off' }));
     drawMuted();
   } catch (err) {
-    $('#mute-all-line').title = err.message;
+    $('#mute-all').title = err.message;
   }
 });
 
-/** The top bar's bell and line (drawRail calls this on every refresh: a mute ends by itself). */
+/** The top bar's bell (drawRail calls this on every refresh: a mute ends by itself). */
 function drawMuteBar() {
   const all = muteNow().all;
   $('#mute-all').replaceChildren(bellIcon(!!all, 18));
-  $('#mute-all').title = all ? `Everything is muted ${all.text}: change it or unmute` : 'Mute all (1 hour, until tomorrow morning or until you unmute) and notification settings';
-  $('#mute-all').setAttribute('aria-label', all ? `All muted ${all.text}` : 'Mute all');
-  $('#mute-all-line').hidden = !all;
-  $('#mute-all-off').title = all ? `All muted ${all.text}: unmute now` : '';
+  $('#mute-all').title = all ? `Everything is muted ${all.text}. Press to unmute` : 'Mute all: for 1 hour, until tomorrow morning or until you unmute';
+  $('#mute-all').setAttribute('aria-label', all ? `All muted ${all.text}: press to unmute` : 'Mute all');
+  $('#mute-all').setAttribute('aria-pressed', String(!!all));
 }
 app.drawMuteBar = drawMuteBar;
 

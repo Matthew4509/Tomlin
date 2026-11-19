@@ -86,14 +86,14 @@ test('a version or build mismatch takes a full row under the name, specs and but
   assert.match(css, /\.pc-dlg \.pc-head-name \+ \.pc-head-ver\.long-line \{[^}]*grid-column: 1 \/ -1[^}]*grid-row: 2/);
 });
 
-test('Models: free space on each drive is said above Free up space (a PC that lists no drives gives its one drive)', () => {
+test('Models: free space on each drive is said on a row of its own under the buttons (a PC that lists no drives gives its one drive)', () => {
   const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
   const part = /function modelsPart\(v\) \{[\s\S]*?\n  \}\n/.exec(pcs)?.[0] ?? '';
-  assert.match(part, /el\('div', \{ class: 'pc-free' \}, freeSpaceLine\(v\), free\)/, 'the line sits in the same column as the button, above it');
+  assert.match(part, /el\('div', \{ class: 'pc-free-actions' \}, free, change, add\)\),\s+freeSpaceLine\(v\),/, 'the buttons share a row and the line sits under it, so long words never push a button down');
   const line = /function freeSpaceLine\(v\) \{[\s\S]*?\n  \}\n/.exec(pcs)?.[0] ?? '';
   assert.match(line, /v\.drives\?\.length/);
   assert.match(line, /Free space: \$\{words\}/);
   assert.match(line, /on the drive it keeps its data on/, 'an older PC names the one drive it reports');
-  assert.match(css, /\.pc-free \{[^}]*flex-direction: column/);
-  assert.match(css, /\.pc-free \.pc-free-space \{[^}]*font-size: 12px/, 'no text under 12px');
+  assert.match(css, /\.pc-free-actions \{[^}]*flex-wrap: wrap/);
+  assert.match(css, /\.pc-card-part > \.pc-free-space \{[^}]*font-size: 12px/, 'no text under 12px');
 });

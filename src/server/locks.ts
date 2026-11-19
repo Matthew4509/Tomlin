@@ -173,6 +173,8 @@ export function hostPinDoor(p: string, b: Record<string, unknown>, who: { key: s
 
 /** Whether the link `link` (its whole id) gives this PC a host PIN: told to that link only, in its hello. */
 export const hostPinHeld = (link: string | undefined) => !!hostPins.get(link);
+/** The short id of the host key that link gave this PC (not secret), or empty for none or a typed PIN. */
+export const hostKeyHeld = (link: string | undefined) => hostPins.keyIdOf(link);
 
 /**
  * The linked hosts that gave this PC a host PIN, for its Network page (`alive`: the ids of the links there are now; one

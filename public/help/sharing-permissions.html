@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sharing and cluster permissions - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="sharing-permissions">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Sharing and cluster permissions</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Sharing and cluster permissions</h1>
+<p class="lead">Each tick a node owner can give a linked host, and the host PIN.</p>
+<p>What linked PCs may do on a node is ticked on that node, under <b>Settings, This PC, Sharing and cluster permissions</b> (Network, Sharing shows the same). Set on the PC that shares. Each tick asks the app lock PIN; <b>Allow all</b> ticks them all (but not "connect directly", below); all are off until you tick them, except turning the PC off, which is on until you untick it. A linked host is trusted like an administrator, but only for what is switched on. An update is program code sent over the link, so a guest never can.</p>
+<h2>Models</h2>
+<ul>
+<li><b>Sharing of models</b> lets them copy the shared models. Visible only to computers connected on your network. If permissions are enabled, anyone with the PIN can push, pull, access or delete these models.</li>
+<li><b>Accept models from linked PCs</b> lets them send it models.</li>
+</ul>
+<h2>Host control</h2>
+<ul>
+<li><b>Enable backups</b> lets them back their projects up there and keep restore points (<a href="backups.html">Backups</a>). It is a local git that backs up the host's projects to this node.</li>
+<li><b>Allow host to update TOMLIN remotely</b> lets a newer TOMLIN be installed there, each time with that PC's app lock PIN typed on the PC sending it (<a href="updates.html">Updates</a>). It makes it easy to update headless nodes. A copy not started by the installed TOMLIN or Start TOMLIN.cmd cannot start a new version by itself: install it with Install TOMLIN.cmd, or start it with Start TOMLIN.cmd.</li>
+<li><b>Allow host to test and change model run settings</b> lets them pick the Guessing model of a model there, on that PC's card under Linked PCs (<a href="speed.html">Speed</a>).</li>
+<li><b>Allow host to turn this PC off</b>: a linked host may shut this PC down, one PC at a time, with this PC's app lock PIN typed on the host. On unless you turn it off. A guest can never do it.</li>
+<li><b>Let PCs my host introduces connect to this PC directly</b>: <a href="direct-links.html">direct links</a>. Off until you switch it on, and not part of Allow all.</li>
+<li><b>Let linked PCs pull TOMLIN updates from here</b> lets someone at a linked PC with an older TOMLIN copy this PC's TOMLIN (its app files only, never your data or models) to update their own (no PIN: nothing changes on the PC it comes from).</li>
+</ul>
+<h2>Cluster</h2>
+<ul>
+<li><b>Allow to be used as part of a cluster</b> (it serves both: Cluster, for a model that will not fit on one PC, and Max mode, a chat's <b>Max</b> switch, for a model that does fit, to raise its tokens a second; see <a href="cluster.html">Max mode and Cluster</a>) lets one of them at a time run a model too big for it with part of it on that PC's card and RAM, only while nobody is using that PC (Windows locked, or no key press or mouse move for the minutes chosen there; using the PC again ends it at once). It is the only tick a cluster needs: the borrowing PC borrows from every linked PC that allows it, only for a model that does not fit it alone, unless <b>Don't borrow from it</b> is ticked on that PC's tile under Linked PCs.</li>
+</ul>
+<p>Sending the NVIDIA runner needs no tick (it must be the very runner TOMLIN names, file for file): any linked PC may, while nobody is using that PC.</p>
+<h2>The host PIN</h2>
+    <p><b>The host PIN</b> (Network, Linked PCs, <b>Set the host PIN</b>): one PIN of 6 to 12 digits, or a password of 6 characters or more, typed on this PC for all the linked PCs. Setting it gives it to each linked PC: each asks for its own app lock PIN once, then holds the host PIN for this PC only. From then on <b>Update all linked PCs</b> asks for the host PIN once and updates every PC that holds it; a PC that does not asks for its own PIN, as before. The host PIN also turns a PC off or deletes a model there, and the ticks on that PC are still needed. This PC keeps only a scrambled copy of it. <b>Change the host PIN</b> gives the new one to the PCs that hold the old one without asking their own PINs again; <b>Turn the host PIN off</b> takes it back from every PC that answers.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="linked-pcs.html" rel="prev"><span>&larr; Previous</span><b>Linked PCs</b></a><a class="next" href="guest-passes.html" rel="next"><span>Next &rarr;</span><b>Guest passes</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

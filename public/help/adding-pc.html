@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adding a PC - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="adding-pc">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Adding a PC</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Adding a PC</h1>
+<p class="lead">Turn on the node, find it, type its setup code; the link helper when it will not link.</p>
+<h2 id="help-nodes">1. On the other PC</h2>
+    <p>On the other PC, install TOMLIN, then <b>Settings</b>, <b>Network</b>, turn on <b>Enable this PC as a node</b> (a node must have the app lock, so it asks for that PIN first). Give it a name. Every model on it can be used by the PCs linked to it (chat models answer, picture models draw): nothing to tick. Several PCs can link to one node; it answers one at a time. Its <b>Setup Code</b> is shown there.</p>
+    <figure class="help-shot"><img src="../help-node.webp" alt="Network on the node: Enable this PC as a node ticked, Node name Worker PC, the setup code, the models to share, the sharing permissions and this PC's address" width="1003" height="680" loading="lazy"><figcaption>On the node: its name, setup code, the models it shares and what linked PCs may do.</figcaption></figure>
+<h2>2. On this PC</h2>
+<p>Then on this PC: <b>Network</b>, <b>Find PCs on my network</b>, and type the setup code beside the PC it finds.</p>
+<p>Not found? <b>Not found? Type its address instead</b> takes the address shown on the node ("This PC's address").</p>
+<p>On the node, <b>Can other PCs reach this one?</b> Check lists its own settings with a ✓ or ✗ each: its connection, how its address was set (one typed in by hand with no router behind it keeps every PC out, even when shared files still work), its router, network type, firewall, other security programs and VPNs, then the address to type on this PC; it gives the steps, or the lines, that fix each ✗.</p>
+<p>On this PC, the <b>Link helper</b> (under Find other PCs; it opens by itself when Find finds nothing or a link fails) asks whether TOMLIN is open there, its address and its name, tests it from here and says what is in the way: off or asleep, a firewall or antivirus blocking it, TOMLIN not listening, another network, or an address typed wrong (192.178 for 192.168, or the router's own address).</p>
+<p>The link PIN box is only for the 6 digits the node shows: its 4-digit app lock PIN never goes there. <b>Also ask for a PIN</b> on the node adds a link PIN (never its app lock PIN) to type as well.</p>
+<p>The link is encrypted and the node keeps no history of the work, except a finished answer this PC has not collected yet (kept encrypted for up to 3 days) and token counts for each project, by its name.</p>
+<p>The setup code box also takes a guest pass code: see <a href="guest-passes.html">Guest passes</a>.</p>
+<h2>3. Use it</h2>
+    <p>Then hire staff on this PC as usual and pick the node under Assign a PC and one of its models under Choose a model (or change it later in Edit Staff): each reads like Qwen3.5-9B on "Worker PC". An artist picks one of its picture models the same way. Two PCs can use the same node: while its model works for one, the other waits. On the node, Network says which models linked PCs are using now, and someone at the node is asked first ("Using this can impact connected users", I agree) before using one of them. Staff hired on a node and lent out are retired: their old chats are kept to read.</p>
+<p>The PCs you have linked are on <a href="linked-pcs.html">Linked PCs</a>; what each may do is <a href="sharing-permissions.html">ticked on the node</a>.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="network-roles.html" rel="prev"><span>&larr; Previous</span><b>Admin PC, node and storage</b></a><a class="next" href="linked-pcs.html" rel="next"><span>Next &rarr;</span><b>Linked PCs</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

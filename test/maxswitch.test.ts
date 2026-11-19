@@ -333,7 +333,7 @@ test("the switch on the page: beside Web, its tip the server's definition, its r
   assert.doesNotMatch(press, /chatNote/, 'the reason is not said a second time in the chat');
   assert.ok(src('public/app.js').includes(`'${CLUSTER_RUNS_IT}'`), "the page greys a model that does not fit with the server's words");
   // The Help says it is not yet run on two PCs and gives no made-up speeds.
-  const help = html.slice(html.indexOf('id="help-max"'), html.indexOf('id="help-notebooks"'));
+  const help = src('public/help/cluster.html');
   assert.match(help, /not yet run on two PCs/);
   assert.doesNotMatch(help, /\d+(\.\d+)? against \d+(\.\d+)? tok\/s/);
 });

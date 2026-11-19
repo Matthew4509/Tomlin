@@ -9,9 +9,9 @@ import { createJobs } from '../jobrun.ts';
 import * as keep from '../keep.ts';
 import * as carry from '../carry.ts';
 import { pinWhy } from '../runtimes.ts';
-import { BUILD, GB, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, lastUsed, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir } from './core.ts';
+import { BUILD, GB, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, lastUsed, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir, backupsHome } from './core.ts';
 import { scope } from '../meter.ts';
-import { appLock, appLockOn, appPinCheck, hostPinDoor, hostPinDrop, hostPinHeld, recoveryHashes, sameAsLock, updatePinCheck, whenCodesChange } from './locks.ts';
+import { appLock, appLockOn, appPinCheck, hostPinDoor, hostPinDrop, hostKeyHeld, hostPinHeld, recoveryHashes, sameAsLock, updatePinCheck, whenCodesChange } from './locks.ts';
 import { chat, chatCardBytes, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcBuilds, rpcProgram, runOf, runOn, runnerFor, runnerOptions, runnerUsed, runners } from './panes.ts';
 import * as panesSlots from './panes.ts';
 import { checkBusy, checkState, checkTesting, checkTuneDoor, unsafeWhy } from './runnercheck.ts';
@@ -109,6 +109,7 @@ export function startJobs(): void {
     updatePinCheck,
     hostPinDoor,
     hostPinHeld,
+    hostKeyHeld,
     hostPinDrop,
     unloadAll: async (still = () => true) => {
       for (const p of [...runners]) if (still() && (p.view.state === 'connected' || p.view.state === 'loading')) await p.disconnect();
@@ -172,7 +173,8 @@ export function startJobs(): void {
           return { name: images.registry.fileName(f), path: images.registry.ownPath(m, f), bytes: f.bytes, have, sha256: f.sha256 };
         });
       },
-      keptRoot: join(HOME.home, 'backups from other PCs'),
+      // Read each time it is used: the folder can be changed while the app runs (src/server/backuphome.ts).
+      get keptRoot() { return backupsHome.dir(); },
       backupsDir: HOME.backups,
       makeBackup: (label, o) => keep.backup(HOME, label, o),
       onInstalled: () => void loadShapes().catch(() => undefined),

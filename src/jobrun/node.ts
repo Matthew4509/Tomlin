@@ -12,6 +12,9 @@ import * as jobs from '../jobs.ts';
 import * as share from '../share.ts';
 import * as link from '../link.ts';
 import * as guestpass from '../guestpass.ts';
+import * as peerlink from '../peerlink.ts';
+import { peerPing } from './peercall.ts';
+import { peerCopy } from './peercopy.ts';
 import * as nodeline from '../nodeline.ts';
 import * as slotsLib from '../slots.ts';
 import { everyFew, paced, runnerFetch, type AskOpts, type ChatTurn, type ToolBox } from '../engine.ts';
@@ -102,7 +105,7 @@ function clusterHello(local: string | undefined): { borrows: string[]; via: stri
 export const shareListening = () => !!shareServer;
 
 export function shareView() {
-  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash, role, passId, expires }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12), ...(role === 'guest' ? { guest: true, passId, expires: expires ?? null } : {}) })), passes: guestpass.passView(shareState.passes, Date.now(), shareState.paired), passNodes: passHooks.nodes(), passesMade: !!shareState.passGen, passLastLength: shareState.passLastLength ?? 'week', renewLengths: guestpass.RENEW_LENGTHS, line: line.view(id => d.chatList().find(m => m.id === id)?.name ?? pictureName(d.pictureModels().find(m => m.id === id)) ?? id), guestCaps: nodeline.cleanCaps(shareState.guestCaps), hostFirst: shareState.hostFirst !== false, atOnce: slotsLib.cleanAtOnce(shareState.atOnce), slotsNow: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => ({ name: m.name, slots: d.slotsOf?.(m.id) ?? 1, note: d.slotNote?.(m.id) ?? '' })), passAsks: [...ownAsks(), ...(passHooks.asks() as object[])], away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...oncePerFile(d.chatList()).map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash, role, passId, expires }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12), ...(role === 'guest' ? { guest: true, passId, expires: expires ?? null } : {}) })), passes: guestpass.passView(shareState.passes, Date.now(), shareState.paired), passNodes: passHooks.nodes(), passesMade: !!shareState.passGen, passLastLength: shareState.passLastLength ?? 'week', peerLinks: peerHooks.view(), peersHere: peersHereView(), renewLengths: guestpass.RENEW_LENGTHS, line: line.view(id => d.chatList().find(m => m.id === id)?.name ?? pictureName(d.pictureModels().find(m => m.id === id)) ?? id), guestCaps: nodeline.cleanCaps(shareState.guestCaps), hostFirst: shareState.hostFirst !== false, atOnce: slotsLib.cleanAtOnce(shareState.atOnce), slotsNow: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => ({ name: m.name, slots: d.slotsOf?.(m.id) ?? 1, note: d.slotNote?.(m.id) ?? '' })), passAsks: [...ownAsks(), ...(passHooks.asks() as object[])], away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, lend: lendView(), shareable: [...oncePerFile(d.chatList()).map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Requests for more time from guests on passes made here (the node's own), for this PC's page. */
@@ -180,6 +183,15 @@ function nodePairKey(): Promise<Buffer> {
  * Copying this PC's passes to the nodes it is linked to (src/jobrun/passsync.ts sets these when it starts): `changed`
  * sends them now; `nodes` is each PC a pass can be for, with its models and whether it holds the latest.
  */
+/** Set by src/jobrun/peersync.ts (this PC as a host): introducing two linked PCs to each other, ending it, and the page's list. */
+export const peerHooks: { introduce: (b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>; remove: (b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>; check: (b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>; copy: (b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>; view: () => unknown } = {
+  copy: async () => ({ status: 409, body: { error: 'This PC is not ready to introduce PCs yet.' } }),
+  check: async () => ({ status: 409, body: { error: 'This PC is not ready to introduce PCs yet.' } }),
+  introduce: async () => ({ status: 409, body: { error: 'This PC is not ready to introduce PCs yet.' } }),
+  remove: async () => ({ status: 409, body: { error: 'This PC is not ready to introduce PCs yet.' } }),
+  view: () => ({ pairs: [], pcs: [], scopes: [] }),
+};
+
 export const passHooks: { changed: () => void; nodes: () => unknown[]; asks: () => unknown[]; answer: (pc: string, b: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }> } = {
   changed: () => undefined,
   nodes: () => [],
@@ -468,6 +480,59 @@ async function rawBody(req: IncomingMessage, limit: number): Promise<Buffer> {
 /** Each answer to a linked PC is sealed with that link's keys (src/link.ts); set per request once its token and seal are checked. */
 const sealers = new WeakMap<ServerResponse, { keys: Buffer; id: string; n: number }>();
 export const taken = new link.Seen();
+
+/**
+ * The direct links on this PC, for its owner (Network, Direct links between PCs): one line a PC, nothing secret. A link in
+ * both directions with one PC is one line; ended ones and the ones the owner removed are not listed.
+ */
+function peersHereView() {
+  const hostName = (by: string) => shareState.paired.find(l => l.role === undefined && keepOf(l) === by)?.name ?? 'a host no longer linked';
+  const out = new Map<string, { id: string; pc: string; name: string; host: string; scopes: string[]; expires: string | null; lastUsed: string | null }>();
+  for (const p of [...(shareState.peers?.in ?? []), ...(shareState.peers?.out ?? [])]) {
+    if (p.revoked || p.removedHere) continue;
+    const had = out.get(p.pc);
+    if (had) {
+      for (const s of p.scopes) if (!had.scopes.includes(s)) had.scopes.push(s);
+      if ('lastUsed' in p && p.lastUsed && (!had.lastUsed || p.lastUsed > had.lastUsed)) had.lastUsed = p.lastUsed;
+      continue;
+    }
+    out.set(p.pc, { id: p.pc, pc: p.pc, name: p.name, host: hostName(p.by), scopes: [...p.scopes], expires: p.expires, lastUsed: 'lastUsed' in p ? p.lastUsed : null });
+  }
+  return [...out.values()];
+}
+
+/**
+ * A request from a peer (src/peerlink.ts): a PC a host linked here introduced, found by its token's fingerprint. Sealed
+ * with the peer keys both ways; one that does not open is refused. Then THE peer check, before anything is read or done:
+ * the record, its host still linked here, the owner's tick, the home network, its end, and the door against its scopes.
+ * Only the ping is answered so far: a door its scope allows but this TOMLIN does not carry for a peer yet says so.
+ */
+async function peerDoor(req: IncomingMessage, res: ServerResponse, p: string, peer: peerlink.PeerIn): Promise<void> {
+  const keys = link.keysOf(peer.key);
+  if (!keys) return workerJson(res, 401, { error: 'that PC no longer knows this one (it was removed there, or its host is no longer linked there)' });
+  if (req.method !== 'POST') return workerJson(res, 405, { error: 'this PC only takes sealed messages.' });
+  if (Number(req.headers['content-length']) > 16_384) return workerJson(res, 400, { error: 'that request is too large for this PC to take at once, so it was refused.' });
+  const opened = link.openRequest(keys, await d.body(req, 16_384), p, taken);
+  if ('error' in opened) return workerJson(res, 400, { error: opened.error });
+  sealers.set(res, { keys, id: opened.id, n: 0 });
+  const no = peerlink.peerRefusal({ id: shareState.id, name: shareState.name, allowPeers: carry.cleanAllow(shareState.allow).peer === true, paired: shareState.paired, passes: shareState.passes }, peer, p, req.socket.remoteAddress);
+  if (no) return workerJson(res, no.status, no);
+  if (peerlink.touchPeer(peer)) void saveShare().catch(() => undefined);
+  if (p === peerlink.PEER_HELLO) return workerJson(res, 200, { name: shareState.name, id: shareState.id, version: d.version, scopes: peer.scopes, expires: peer.expires });
+  // The read side of a copy (a model this PC shares: its "Sharing of models" tick is asked inside, as for a linked PC):
+  // what the model's files are, a piece of one, and the sum of a range of one so the PC that pulled it can check the copy.
+  // Never the sending side: nothing is ever written here by a peer.
+  if (p === '/worker/carry-files' || p === '/worker/carry-get' || p === '/worker/carry-sum') {
+    if (shareState.away) return workerJson(res, 503, { error: `I need to log off for now: someone is using ${shareState.name}. Try again when it is started again.` });
+    const a = await carryNode(p, p === '/worker/carry-sum' ? { ...opened.body, source: true } : opened.body, { key: `peer-${peer.pc}`, name: peer.name });
+    if ('piece' in a) {
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return void res.end(link.sealBytes(link.toHost(keys), a.piece, `piece|${opened.id}`));
+    }
+    return workerJson(res, a.status, a.json);
+  }
+  return workerJson(res, 501, { error: `"${shareState.name}" cannot do that for a PC linked directly yet.` });
+}
 
 function workerJson(res: ServerResponse, status: number, value: unknown) {
   const s = sealers.get(res);
@@ -1191,7 +1256,12 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     // The link is named by its token's fingerprint: the token itself never crosses the network after linking.
     const named = /^Link ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1];
     const who = share.pairedByHash(shareState, named);
-    if (!who) return workerJson(res, 401, { error: 'that PC no longer knows this one (it was removed there, or set up again)' });
+    if (!who) {
+      // Not a link: a PC a host introduced to this one (src/peerlink.ts) has its own, much shorter, set of doors.
+      const peer = peerlink.peerByHash(shareState.peers ?? peerlink.NO_PEERS, named);
+      if (peer) return peerDoor(req, res, p, peer);
+      return workerJson(res, 401, { error: 'that PC no longer knows this one (it was removed there, or set up again)' });
+    }
     // Every message from here on is sealed both ways (F7 E1): one that does not open is refused.
     const keys = link.keysOf(who.key);
     if (!keys) return workerJson(res, 401, { error: 'this link was made before links were encrypted. Link this PC again from the main PC (Network, Find PCs on my network, then the setup code).' });
@@ -1199,7 +1269,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     // A piece of a file (a model or a restore point sent here): the request rides in a header, the piece is the body.
     const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put' || p === '/worker/runner-put';
     // A project backup's file list and the ids asked about are long (up to 100,000 files).
-    const limit = p === '/worker/run' || p === '/worker/tool-result' ? 600_000 : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' || p === '/worker/passes-put' ? 1 << 20 : 16_384;
+    const limit = p === '/worker/run' || p === '/worker/tool-result' ? 600_000 : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' || p === '/worker/passes-put' || p === '/worker/peer-put' ? 1 << 20 : 16_384;
     // Read whole before the seal can be checked: refused at once when it says it is larger than this door takes, or when
     // this link (or all of them) already has that much being read (S4). A piece is read only after its header opens.
     const declared = Number(req.headers['content-length']);
@@ -1247,7 +1317,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // long it has been up, or when its owner is at it: only whether it is busy. Its own tally is at /worker/usage.
       const asGuest = <T extends Record<string, unknown>>(h: T) => {
         // A host's link may give this PC a host PIN (src/hostpin.ts): it is told so, and whether it holds one here now.
-        if (!guest) return { ...h, can: [...(h.can as string[]), hostpin.CAN], hostPin: d.hostPinHeld(who.hash) };
+        if (!guest) return { ...h, can: [...(h.can as string[]), hostpin.CAN], hostPin: d.hostPinHeld(who.hash), hostKey: d.hostKeyHeld(who.hash) };
         const pass = guestpass.passOf(shareState, who);
         const busy = !!away || line.running().length > 0 || line.waiting().length > 0;
         return { ...h, state: h.state === 'away' ? 'busy' : h.state, busy, away: null, memory: null, meter: null, up: null, installed: null, restarts: false, runner: null, speed: null, can: (h.can as string[]).filter(c => GUEST_CAN.includes(c)), allow: { ...carry.NO_ALLOW, give: allow.give, off: false }, ask: null, lentTo: null, cluster: null, disk: null, drives: [], modelsDrive: '', cpu: null, passAsks: [], guest: { label: pass?.label ?? '', expires: pass ? guestpass.linkEnds(who, pass) : who.expires ?? null, caps: nodeline.cleanCaps(shareState.guestCaps) } };
@@ -1266,11 +1336,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // Its processor: name, cores and threads, for the host's Cluster page (not told to a guest: asGuest).
       const cpu = d.cpu?.() ?? null;
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length } }));
+      if (away) return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', 'peers', 'peer-copy'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length } }));
       // The connected models are named (every model here is lent; to a guest, only its pass's).
       const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id) && may(id);
       const img = imageHello();
-      return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length }, cluster: guest ? null : clusterHello(req.socket.localAddress) }));
+      return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', 'peers', 'peer-copy'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length }, cluster: guest ? null : clusterHello(req.socket.localAddress), addrs: guest ? [] : lanList().map(n => n.address) }));
     }
     // An expired guest asks its host for more (src/guestpass.ts): only a guest link whose pass expired gets here (the
     // check above), one request waiting at a time, 10 minutes apart, 5 a day, plain text of 200 characters at most.
@@ -1321,6 +1391,41 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         if (got.taken) noted(`"${who.name}" sent its guest passes for this PC (${got.taken} changed).`);
       }
       return workerJson(res, 200, { ok: true, gen: got.stale ? shareState.passGens?.[by] ?? gen : gen, stale: got.stale, held: (shareState.passes ?? []).filter(x => x.by === by && !x.revoked).length });
+    }
+    // A host's introductions for this PC (src/peerlink.ts mergePeers): which PCs may call it directly, and which it may
+    // call. Only from a link with no role (a guest was refused above), kept as given by that link in a list of their own,
+    // never among this PC's links. An older set or revision is never taken over a newer one, and a peer removed on this
+    // PC is not brought back. Taking the list starts nothing: each use is checked again when it happens.
+    if (p === '/worker/peer-put') {
+      if (who.role !== undefined) return workerJson(res, 403, { error: 'only a host linked here can introduce PCs to this one.' });
+      const gen = Number(body.gen);
+      if (!Number.isSafeInteger(gen) || gen <= 0 || !body.peers || typeof body.peers !== 'object') return workerJson(res, 400, { error: 'the introductions sent were not in the expected form.' });
+      const by = keepOf(who);
+      const linked = new Set(shareState.paired.filter(l => l.role === undefined).map(l => keepOf(l)));
+      const got = peerlink.mergePeers(shareState.peers ?? peerlink.NO_PEERS, body.peers, { by, gen, lastGen: shareState.peerGens?.[by], nodeId: shareState.id, gone: k => !linked.has(k) });
+      if (!got.stale) {
+        shareState.peers = got.peers;
+        shareState.peerGens = { ...shareState.peerGens, [by]: gen };
+        await saveShare();
+        if (got.taken) noted(`"${who.name}" sent the PCs this one may talk to directly (${got.taken} changed).`);
+      }
+      const mine = [...(shareState.peers?.in ?? []), ...(shareState.peers?.out ?? [])].filter(x => x.by === by);
+      return workerJson(res, 200, { ok: true, gen: got.stale ? shareState.peerGens?.[by] ?? gen : gen, stale: got.stale, held: mine.filter(x => !x.revoked).length, removedHere: [...new Set(mine.filter(x => x.removedHere).map(x => x.id))] });
+    }
+    // The host asks whether this PC reaches a PC it was introduced to, directly (src/jobrun/peercall.ts): on which
+    // address and how fast, or why not. Only a ping goes out, and only to a peer this PC holds.
+    if (p === '/worker/peer-ping') {
+      if (who.role !== undefined) return workerJson(res, 403, { error: 'only a host linked here can ask that.' });
+      const out = (shareState.peers?.out ?? []).find(x => x.pc === body.pc && !x.revoked);
+      if (!out) return workerJson(res, 404, { error: 'this PC has not been introduced to that PC.' });
+      return workerJson(res, 200, await peerPing(out));
+    }
+    // The host orders a model copied straight from a PC it introduced this one to (src/jobrun/peercopy.ts): this PC pulls
+    // it, and the host asks how far it got. Only a host (an admin link) may order it, and only from a peer this PC holds.
+    if (p === '/worker/peer-copy') {
+      if (who.role !== undefined) return workerJson(res, 403, { error: 'only a host linked here can order that.' });
+      const a = await peerCopy(body, !!away);
+      return workerJson(res, a.status, a.body);
     }
     // This PC's meters for the head of a paired PC's chat with someone here: read from what the sampler measured in
     // the last second for this PC's own top bar, so asking every few seconds adds no measuring here.
@@ -1626,6 +1731,12 @@ export async function startShare() {
     const counts = (v: unknown) => Object.fromEntries(Object.entries(v && typeof v === 'object' ? v : {}).filter(([k, n]) => /^[\w-]{1,64}$/.test(k) && Number.isSafeInteger(n) && (n as number) > 0)) as Record<string, number>;
     shareState.passAcks = counts(shareState.passAcks);
     shareState.passGens = counts(shareState.passGens);
+    // Peers as kept (src/peerlink.ts): one that is not whole is dropped.
+    shareState.peers = peerlink.cleanPeers(shareState.peers);
+    shareState.peerGens = counts(shareState.peerGens);
+    shareState.intros = peerlink.cleanIntros(shareState.intros);
+    shareState.introAcks = counts(shareState.introAcks);
+    if (!Number.isSafeInteger(shareState.introGen)) delete shareState.introGen;
     if (!Number.isSafeInteger(shareState.passGen)) delete shareState.passGen;
   } finally {
     shareRead();
@@ -1709,10 +1820,36 @@ export async function setShare(b: Record<string, unknown>) {
   }
   // A guest pass (src/guestpass.ts) lets another PC in: made or removed only with the app lock PIN when there is one,
   // whether or not this PC is a node itself (a host makes passes for the nodes it is linked to).
-  const passChange = (b.passMake && typeof b.passMake === 'object') || (typeof b.passRemove === 'string' && !!b.passRemove) || (!!b.passAnswer && typeof b.passAnswer === 'object');
+  // Whether two introduced PCs reach each other now (each is asked to ping the other): nothing changes.
+  if (b.peerCopy && typeof b.peerCopy === 'object') {
+    const r = await peerHooks.copy(b.peerCopy as Record<string, unknown>);
+    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
+  }
+  if (b.peerCheck && typeof b.peerCheck === 'object') {
+    const r = await peerHooks.check(b.peerCheck as Record<string, unknown>);
+    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
+  }
+  const removeHere = typeof b.peerRemoveHere === 'string' && !!b.peerRemoveHere;
+  const peerChange = (!!b.peerIntroduce && typeof b.peerIntroduce === 'object') || (!!b.peerRemove && typeof b.peerRemove === 'object') || removeHere;
+  const passChange = peerChange || (b.passMake && typeof b.passMake === 'object') || (typeof b.passRemove === 'string' && !!b.passRemove) || (!!b.passAnswer && typeof b.passAnswer === 'object');
   if (passChange && !pinChecked && d.appLockOn()) {
     const ok = await d.appPinCheck(b.appPin);
     if ('error' in ok) return { status: ok.status, body: { error: ok.error, needAppPin: true } };
+  }
+  // Two linked PCs introduced to each other, or that ended (src/jobrun/peersync.ts): with the app lock PIN, as for a
+  // guest pass, and nothing else changes in the same request.
+  // The owner of this PC ends its direct links with one PC (named by that PC's id) here, at once: both directions go, their
+  // keys too, and the host cannot put them back.
+  if (removeHere) {
+    const ids = [...(shareState.peers?.in ?? []), ...(shareState.peers?.out ?? [])].filter(p => p.pc === b.peerRemoveHere && !p.revoked && !p.removedHere).map(p => p.id);
+    if (!ids.length) return { status: 404, body: { error: 'That direct link is not on this PC (it ended already).' } };
+    shareState.peers = ids.reduce((t, id) => peerlink.removeHere(t, id), shareState.peers ?? peerlink.NO_PEERS);
+    await saveShare();
+    return { status: 200, body: shareView() };
+  }
+  if (peerChange) {
+    const r = b.peerIntroduce ? await peerHooks.introduce(b.peerIntroduce as Record<string, unknown>) : await peerHooks.remove(b.peerRemove as Record<string, unknown>);
+    return r.status === 200 ? { status: 200, body: shareView() } : r;
   }
   // Made here, for this PC (when it is a node) and the nodes it is linked to, each with the models picked for it;
   // checked before anything changes. Its code is in this answer only: kept nowhere, shown once.
@@ -1808,6 +1945,8 @@ export async function setShare(b: Record<string, unknown>) {
     const r = guestpass.endGiver(shareState.passes ?? [], shareState.paired, keepOf(gone));
     shareState.passes = r.passes;
     shareState.paired = r.paired;
+    // The peers it introduced end with it too.
+    shareState.peers = peerlink.endPeerGiver(shareState.peers ?? peerlink.NO_PEERS, keepOf(gone));
     // Its host PIN goes with it (it could never be used again: it was good only from that link).
     if (gone.hash) await d.hostPinDrop(gone.hash).catch(() => false);
   }
@@ -1864,7 +2003,8 @@ export function startNode(): void {
     get chatDir() { return d.carry.chatDir; },
     chatHas: d.carry.chatHas,
     pictureDest: d.carry.pictureDest,
-    keptRoot: d.carry.keptRoot,
+    // Read each time: the folder other PCs' backups are kept in can be changed while TOMLIN runs (src/server/backuphome.ts).
+    get keptRoot() { return d.carry.keptRoot; },
     onProjects: () => void readKept(),
     onInstalled: (name, model) => {
       noted(`A linked PC installed ${name} on this PC.`);

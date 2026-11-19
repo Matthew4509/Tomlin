@@ -191,5 +191,5 @@ test('the pages, the installer and Help use it', () => {
   assert.match(read('src/jobrun.ts'), /p === '\/api\/share\/reach'/);
   // The installer's firewall question: Yes unless answered No (a node needs it; the rule covers the home network only).
   assert.match(read('tools/install.ts'), /Is this a worker PC that your other PCs will use[^']*', true, 'firewall'\)/);
-  assert.match(html, /<b>Link helper<\/b>/);
+  assert.match(read('public/help/adding-pc.html'), /<b>Link helper<\/b>/);
 });

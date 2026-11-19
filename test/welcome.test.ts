@@ -24,18 +24,11 @@ test('the welcome page ships at the top of the zip and works offline: nothing fr
   for (const [, id] of page.matchAll(/href="#([\w-]+)"/g)) assert.match(page, new RegExp(`id="${id}"`), id);
 });
 
-test('Help: every picture it shows is in public/, and every "On this page" link has its section', () => {
+test('Help: it is a folder of pages (test/help.test.ts checks them); every Help button in the app has a place there', () => {
   const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
   const help = html.slice(html.indexOf('id="help"'), html.indexOf('</section>', html.indexOf('id="help"')));
-  const pictures = [...help.matchAll(/<img src="([^"]+)"/g)].map(m => m[1]);
-  assert.ok(pictures.length >= 10);
-  // The page server serves flat names from public/ only (src/server/core.ts staticFile), WebP among its types.
-  for (const src of pictures) assert.ok(/^[\w.-]+\.webp$/.test(src) && existsSync(join(ROOT, 'public', src)), src);
+  assert.match(help, /<iframe id="help-frame"/);
+  // The page server serves public/help/ and WebP among its types (src/server/core.ts staticFile).
   assert.match(readFileSync(join(ROOT, 'src', 'server', 'core.ts'), 'utf8'), /'\.webp': 'image\/webp'/);
-  for (const [, id] of help.matchAll(/data-help="([\w-]+)"/g)) assert.match(html, new RegExp(`id="${id}"`), id);
-  // And the other way: every section of Help has its line in "On this page" (Max mode and Cluster had none).
-  const toc = help.slice(help.indexOf('class="hint help-toc"'), help.indexOf('</p>', help.indexOf('class="hint help-toc"')));
-  const sections = [...help.matchAll(/<h4 id="([\w-]+)"/g)].map(m => m[1]);
-  assert.ok(sections.length >= 20);
-  for (const id of sections) assert.ok(toc.includes(`data-help="${id}"`), `${id} is on "On this page"`);
+  assert.ok(existsSync(join(ROOT, 'public', 'help', 'index.html')));
 });

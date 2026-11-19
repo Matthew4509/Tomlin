@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web: searching and reading pages - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="web">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-staff">Staff and chats</a></li><li aria-current="page">Web: searching and reading pages</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-web">Web: searching and reading pages</h1>
+<p class="lead">The Web switch, the search engine, and the pace it reads at.</p>
+<p>Beside Quick and Think, each chat has <b>Web: off</b>. Press it (<b>Web: on</b>) and the model may search the web and read pages while it answers: it searches, opens the results that look best and answers from them, and the answer's place says what it is doing ("Searching the web", "Reading example.com"). Under the answer, <b>Web:</b> says what it searched for and which pages it read.</p>
+<p>Your search words go to the search engine chosen in <b>Settings, Data and lock, Web search</b> (DuckDuckGo unless you change it; Brave Search with your own key, or a SearXNG of your own); the pages come straight to this PC, and PDFs are read too.</p>
+<p>A page is opened only at an address given in the chat (a search result, a link on a page it read, or one you wrote), so words on a page cannot make the model send your chat to an address it makes up; a page on this PC or your home network is never opened.</p>
+<p>It reads at about a person's pace, so a site's firewall is far less likely to take it for an attack and ban your home address (every PC at home shares one, and each PC keeps its own pace): 5 to 7 seconds between pages on the same site (other sites at once), 10 seconds between searches, at most 3 pages at a time and 8 for one answer. The answer's place says when it is waiting ("Waiting 6 s before the next page on github.com").</p>
+<p>A site that says it is busy or asks to slow down is waited for once, as long as it asks up to a minute; if it still says no, it is left alone for the rest of that answer.</p>
+<p>It works with models on this PC whose chat format has tools (Qwen 3 and 3.5 have them; a model without says so under the answer). Small models search less well than bigger ones. Each page read takes room in the model's context, so a bigger context (the gear beside its Connect button) lets it read more.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="quick-think.html" rel="prev"><span>&larr; Previous</span><b>Quick or Think</b></a><a class="next" href="memory.html" rel="next"><span>Next &rarr;</span><b>Memory</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

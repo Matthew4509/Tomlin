@@ -99,7 +99,7 @@ test('the page always shows the Lend tick and its Help line, and Allow all ticks
   const html = readFileSync(join(import.meta.dirname, '..', 'public', 'index.html'), 'utf8');
   assert.match(html, /<input type="checkbox" id="allow-lend" data-allow="lend"/);
   // The tick serves both: Cluster (a model that will not fit one PC) and a chat's Max switch (a model that fits).
-  assert.match(html, /<b>Allow to be used as part of a cluster<\/b> \(it serves both: Cluster, for a model that will not fit on one PC, and Max mode, a chat's <b>Max<\/b> switch, for a model that does fit/);
+  assert.match(readFileSync(join(import.meta.dirname, '..', 'public', 'help', 'sharing-permissions.html'), 'utf8'), /<b>Allow to be used as part of a cluster<\/b> \(it serves both: Cluster, for a model that will not fit on one PC, and Max mode, a chat's <b>Max<\/b> switch, for a model that does fit/);
   assert.doesNotMatch(html, /data-max/);
   assert.doesNotMatch(html, /ticks all five/);
   const js = readFileSync(join(import.meta.dirname, '..', 'public', 'home.js'), 'utf8');
@@ -446,7 +446,9 @@ test('a loan ended by force: the cache files of its last 5 minutes go, older one
     await l.open({ hash: 'a', name: 'Main PC' }, PROGRAM);
     const written = put(join('ab', 'written-now.bin'), 0);
     await l.end('someone started using it');
-    for (let i = 0; i < 20 && existsSync(written); i++) await new Promise(r => setTimeout(r, 100));
+    // The file goes first and the line saying so comes after it: on a busy PC that can be a moment later, so both are waited for.
+    const told = () => said.some(s => /removed 1 file .* cut short would load as wrong weights/.test(s));
+    for (let i = 0; i < 100 && (existsSync(written) || !told()); i++) await new Promise(r => setTimeout(r, 100));
     assert.ok(!existsSync(written), 'the file the stop may have cut short went');
     assert.ok(existsSync(before), 'one written before the loan stays');
     assert.ok(said.some(s => /removed 1 file .* cut short would load as wrong weights/.test(s)), said.join(' / '));

@@ -56,8 +56,7 @@ test('with no release on GitHub, Check git says what to do instead (Update via z
 });
 
 test('Help and the README name the new ways in', () => {
-  const html = page('index.html');
-  const help = html.slice(html.indexOf('id="help-copies"'), html.indexOf('id="help-git"'));
+  const help = page('help/updates.html') + page('help/copying-models.html');
   assert.match(help, /<b>Manage updates<\/b>/);
   assert.match(help, /under Settings/);
   assert.match(help, /My PC window/);

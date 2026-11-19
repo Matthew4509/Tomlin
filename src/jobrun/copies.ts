@@ -21,7 +21,7 @@ import { cleanBackupName, NUDGE_CHECKS } from '../owner.ts';
 import type { Remote } from '../store.ts';
 import { d, sleep } from './shared.ts';
 import { hello, lastHello, onHomeNetwork, remoteStatus } from './links.ts';
-import { ownPinTaken, pinTyped } from './hostpins.ts';
+import { keyIdHeld, ownPinTaken, pinTyped } from './hostpins.ts';
 import { pullHere } from './node.ts';
 import type { Hello } from '../jobrun.ts';
 
@@ -46,14 +46,16 @@ export function wireFor(r: Remote): carry.Wire {
     for (;;) {
       if (stop?.aborted) throw new Error('Stopped.');
       // Sealed afresh for each try: the node takes each sealed request once, so a resend of the same one is refused.
-      const req = link.sealRequest(keys, path, body);
+      const req = link.sealRequest(keys, path, body, link.nodeNow(r.url));
       const id = link.requestId(req.box);
       // A piece sent: the request rides in a header and the piece, sealed, is the body.
       const init: RequestInit = piece
         ? { method: 'POST', headers: { ...headers, 'x-link': req.box, 'content-type': 'application/octet-stream' }, body: new Uint8Array(link.sealBytes(link.toNode(keys), piece, `piece|${id}`)) }
         : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(req) };
       try {
-        return { res: await fetch(`${r.url}${path}`, { ...init, signal: stop ? AbortSignal.any([stop, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000) }), id };
+        const res = await fetch(`${r.url}${path}`, { ...init, signal: stop ? AbortSignal.any([stop, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000) });
+        link.noteClock(r.url, res.headers.get('date'));
+        return { res, id };
       } catch (e) {
         if (stop?.aborted) throw new Error('Stopped.');
         // The network dropped for a moment: twice more, a few seconds apart, before it counts.
@@ -120,7 +122,9 @@ export async function network(known = false) {
   const chats = d.chatList();
   return {
     rows: carry.networkList(pcs, { chatFiles: chats.map(m => m.id), pictures: pictures.filter(m => m.installed).map(m => m.id) }),
-    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(d.runner.runtimes.idsOf('llama', 'cuda').map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
+    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length,
+      // What tells the PCs apart (shown on hover), and when an off one last answered: both from its last hello.
+      specs: specsOf(pc.memory ?? lastHello(pc.id)?.memory), cpu: lastHello(pc.id)?.cpu ?? null, seenAt: lastHello(pc.id)?.at ?? null, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(d.runner.runtimes.idsOf('llama', 'cuda').map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
     mine: [
       ...chats.filter(m => !m.id.startsWith('ollama:')).map(m => ({ kind: 'chat' as const, id: m.id, name: m.name, bytes: m.bytes })),
       ...pictures.filter(m => m.installed).map(m => ({ kind: 'image' as const, id: m.id, name: m.name.replace(/\s*\(.*\)$/, ''), bytes: m.bytes ?? 0 })),
@@ -142,29 +146,37 @@ export async function copyFrom(b: Record<string, unknown>) {
   const why = !shared ? `"${r.name}" no longer shares that model.` : carry.copyWhy(pc, model);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.`.replace(/\.\.$/, '.') } };
   const w = wireFor(r);
-  const dest = async (files: { name: string; bytes: number }[]): Promise<string[] | string> => {
-    const need = files.reduce((n, f) => n + f.bytes, 0);
-    if (kind === 'image') {
-      const here = d.carry.pictureDest(model);
-      if (!here) return 'this PC does not know that picture model: update TOMLIN here first.';
-      if (here.length !== files.length || here.some((f, k) => f.bytes !== files[k].bytes)) return `"${r.name}" has another version of that picture model: update TOMLIN on both PCs.`;
-      if (here.every(f => f.have)) return 'it is on this PC already.';
-      const room = carry.roomWhy(need, await carry.freeBytes(here[0].path), 'this PC');
-      return room ?? here.map(f => f.path);
-    }
-    const names = files.map(f => carry.safeModelFile(f.name));
-    if (names.some(n => !n)) return `"${r.name}" named a file that is not a model file, so nothing was copied.`;
-    // There only when every part is whole: a split model cut off part way is carried on with.
-    if ((await Promise.all(names.map((n, k) => carry.sizeOf(join(d.carry.chatDir, n!))))).every((n, k) => n === files[k].bytes)) return 'it is on this PC already (Models).';
-    const room = carry.roomWhy(need, await carry.freeBytes(d.carry.chatDir), 'this PC');
-    return room ?? names.map(n => join(d.carry.chatDir, n!));
-  };
+  const dest = destFor(kind, model, r.name);
   const t = transfers.start({ kind: 'copy', what: shared!.name, pc: r.id, pcName: r.name }, async (progress, signal) => {
     await carry.pull(w, { kind, model, dest, progress, signal });
     d.carry.onInstalled();
     return `${shared!.name} is on this PC now (${GBs(shared!.bytes)}), copied from "${r.name}". ${kind === 'image' ? 'An artist can draw with it.' : 'Pick it in the chat or for a hire.'}`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
+}
+
+/**
+ * Where the files of a model pulled from the PC called `from` go on this PC, or why they cannot (no room, a name that is not
+ * a model file, already here). One function for both ways of pulling: from a linked PC, and directly from a peer.
+ */
+export function destFor(kind: 'chat' | 'image', model: string, from: string) {
+  return async (files: { name: string; bytes: number }[]): Promise<string[] | string> => {
+    const need = files.reduce((n, f) => n + f.bytes, 0);
+    if (kind === 'image') {
+      const here = d.carry.pictureDest(model);
+      if (!here) return 'this PC does not know that picture model: update TOMLIN here first.';
+      if (here.length !== files.length || here.some((f, k) => f.bytes !== files[k].bytes)) return `"${from}" has another version of that picture model: update TOMLIN on both PCs.`;
+      if (here.every(f => f.have)) return 'it is on this PC already.';
+      const room = carry.roomWhy(need, await carry.freeBytes(here[0].path), 'this PC');
+      return room ?? here.map(f => f.path);
+    }
+    const names = files.map(f => carry.safeModelFile(f.name));
+    if (names.some(n => !n)) return `"${from}" named a file that is not a model file, so nothing was copied.`;
+    // There only when every part is whole: a split model cut off part way is carried on with.
+    if ((await Promise.all(names.map((n, k) => carry.sizeOf(join(d.carry.chatDir, n!))))).every((n, k) => n === files[k].bytes)) return 'it is on this PC already (Models).';
+    const room = carry.roomWhy(need, await carry.freeBytes(d.carry.chatDir), 'this PC');
+    return room ?? names.map(n => join(d.carry.chatDir, n!));
+  };
 }
 
 /** Starts sending one of this PC's models to a linked PC (installed in its models folder). */
@@ -329,7 +341,7 @@ export async function runnerTo(b: Record<string, unknown>) {
 /** Whether linked PC `r` last said it holds this PC's host PIN (src/hostpin.ts). */
 const holdsHostPin = (r: Remote): boolean => {
   const h = lastHello(r.id);
-  return !!h?.can.includes(hostpin.CAN) && h.hostPin === true;
+  return !!h?.can.includes(hostpin.CAN) && h.hostPin === true && !h.hostKey;
 };
 
 /**
@@ -343,9 +355,9 @@ export async function removeModelOn(b: Record<string, unknown>) {
   const why = carry.removeWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
   try {
-    const sent = await pinTyped(b, holdsHostPin(r));
+    const sent = await pinTyped(b, holdsHostPin(r), keyIdHeld(r));
     const a = await wireFor(r).ask('/worker/model-remove', { kind: b.kind === 'image' ? 'image' : 'chat', id: String(b.id ?? ''), ...sent });
-    await ownPinTaken(sent);
+    await ownPinTaken(sent, r);
     return { status: 200, body: { said: String(a.said ?? `Deleted from "${r.name}".`) } };
   } catch (e) {
     const { status, said, data } = e as { status?: number; said?: string; data?: Record<string, unknown> };
@@ -367,9 +379,9 @@ export async function powerOffOn(b: Record<string, unknown>) {
   const why = carry.powerOffWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
   try {
-    const sent = await pinTyped(b, holdsHostPin(r));
+    const sent = await pinTyped(b, holdsHostPin(r), keyIdHeld(r));
     const a = await wireFor(r).ask('/worker/power-off', sent);
-    await ownPinTaken(sent);
+    await ownPinTaken(sent, r);
     return { status: 200, body: { said: String(a.said ?? `"${r.name}" is turning off.`) } };
   } catch (e) {
     const { status, said, data } = e as { status?: number; said?: string; data?: Record<string, unknown> };
@@ -550,7 +562,7 @@ export async function updatePc(b: Record<string, unknown>) {
   const asksPin = Array.isArray(h.can) && h.can.includes('update-pin');
   // Or the host PIN (src/hostpin.ts), typed once for Update all or in that PC's own PIN window: only to a PC that holds
   // it from this one.
-  const typed = await pinTyped(b, h.can.includes(hostpin.CAN) && h.hostPin === true);
+  const typed = await pinTyped(b, h.can.includes(hostpin.CAN) && h.hostPin === true && !h.hostKey, h.hostKey ?? '');
   const pin = 'appPin' in typed ? typed.appPin : '';
   const hostPin = 'hostPin' in typed ? typed.hostPin : '';
   if (hostPin && !(h.can.includes(hostpin.CAN) && h.hostPin)) return { status: 409, body: { error: `"${r.name}" holds no host PIN from this PC: type its own app lock PIN to update it.`, needNodePin: true } };
@@ -558,7 +570,7 @@ export async function updatePc(b: Record<string, unknown>) {
     if (!pin && !hostPin) return { status: 409, body: { error: `Type the app lock PIN of "${r.name}" (the one that opens TOMLIN there) to update it.`, needNodePin: true } };
     try {
       await w.ask('/worker/update-pin', hostPin ? { hostPin } : { appPin: pin });
-      await ownPinTaken(typed);
+      await ownPinTaken(typed, r);
     } catch (e) {
       // Its own words (they name it); the wire's message when it said none (not reached, an older answer).
       return { status: 403, body: { error: (e as { said?: string }).said || (e as Error).message, needNodePin: true } };

@@ -19,6 +19,12 @@ export interface ClusterSet {
   out?: true;
   /** With `out`: the member that loads the model. Always one of `members`. */
   loader?: string;
+  /**
+   * Set when the owner chose "This PC takes part" on (an explicit saved choice). Unset with `out` unset: nothing was chosen
+   * yet, which the page shows as Off; a cluster saved that way still runs the old way (this PC loads the model) until the
+   * owner chooses, and a choice is never made for them. Never set with `out`.
+   */
+  part?: true;
 }
 
 export const NO_CLUSTER: ClusterSet = { on: false, members: [] };
@@ -31,10 +37,10 @@ export const MAX_MEMBERS = 8;
  * PC out only with a loader that is still a member (otherwise it takes part again, as before the switch existed).
  */
 export function cleanCluster(raw: unknown): ClusterSet {
-  const o = raw && typeof raw === 'object' ? (raw as { on?: unknown; members?: unknown; out?: unknown; loader?: unknown }) : {};
+  const o = raw && typeof raw === 'object' ? (raw as { on?: unknown; members?: unknown; out?: unknown; loader?: unknown; part?: unknown }) : {};
   const members = [...new Set((Array.isArray(o.members) ? o.members : []).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 64))].slice(0, MAX_MEMBERS);
   const out = o.out === true && typeof o.loader === 'string' && members.includes(o.loader);
-  return { on: o.on === true && members.length > 0, members, ...(out ? { out: true as const, loader: o.loader as string } : {}) };
+  return { on: o.on === true && members.length > 0, members, ...(out ? { out: true as const, loader: o.loader as string } : o.part === true && members.length > 0 ? { part: true as const } : {}) };
 }
 
 /** The set with `ids` as its members: only PCs still linked, kept in the order given; off when it is left empty. */
@@ -49,12 +55,28 @@ export function withOn(c: ClusterSet, on: boolean): ClusterSet | null {
   return cleanCluster({ ...c, on });
 }
 
-/** The set with this PC taking part (its old way: it loads the model) or out, connecting only, with `loader` loading it. */
-export function withHere(c: ClusterSet, takesPart: boolean, loader = ''): ClusterSet | null {
-  const { out: _out, loader: _loader, ...rest } = c;
-  if (takesPart) return cleanCluster(rest);
+/**
+ * The set with this PC taking part (its old way: it loads the model) or out, connecting only, with `loader` loading it.
+ * `chosen`: true only when the owner pressed it on (their saved choice, `part`); a fall-back by the server never sets it.
+ */
+export function withHere(c: ClusterSet, takesPart: boolean, loader = '', chosen = false): ClusterSet | null {
+  const { out: _out, loader: _loader, part: _part, ...rest } = c;
+  if (takesPart) return cleanCluster(chosen ? { ...rest, part: true } : rest);
   if (!c.members.includes(loader)) return null;
   return cleanCluster({ ...rest, out: true, loader });
+}
+
+/** Whether the owner chose "This PC takes part" on, as the page shows it: never on by itself (no set, or nothing chosen: Off). */
+export const takesPartChosen = (c: ClusterSet | undefined | null): boolean => !!c && c.members.length > 0 && c.part === true && !c.out;
+
+/**
+ * Why a PC cannot be added to the cluster now ('' when it can): it is off, asleep or not answering, or its owner logged it
+ * off. `seenAt`: when it last answered (ms), when known.
+ */
+export function addWhy(name: string, h: { ok: boolean; away?: unknown; seenAt?: number | null }): string {
+  if (h.ok && !h.away) return '';
+  const seen = h.seenAt ? ` (last seen ${new Date(h.seenAt).toISOString().slice(0, 16).replace('T', ' ')})` : '';
+  return h.ok ? `"${name}" is logged off for now: its owner pressed "I need to use the pc". Add it when it is started again.` : `"${name}" is off, asleep or not answering${seen}, so it cannot be added to the cluster. Switch it on, then add it.`;
 }
 
 /** Whether this PC takes part in the set (it loads the model): true unless it was switched out. */

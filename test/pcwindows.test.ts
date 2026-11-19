@@ -234,7 +234,8 @@ test('Open sharing and cluster permissions: the ticks are found after Network is
   const handler = js.slice(from, js.indexOf('\n};', from));
   // One place, opened from Network, This PC, and Manage PC and updates.
   assert.ok(js.includes("for (const b of document.querySelectorAll('[data-perms-open]')) b.addEventListener('click', () => app.openSharePermissions());"));
-  assert.equal((html.match(/data-perms-open/g) ?? []).length, 2, 'a button on Network and on This PC');
+  // Network no longer has its own button: its Sharing page is the ticks themselves.
+  assert.equal((html.match(/data-perms-open/g) ?? []).length, 1, 'a button on This PC');
   assert.ok(readFileSync(join(import.meta.dirname, '..', 'public', 'pcs.js'), 'utf8').includes("text: 'Sharing and cluster permissions', onclick: () => { dlg.close(); app.openSharePermissions?.(); }"), 'and in Manage PC and updates');
   // Not under the Permissions page's name: mute.js, loaded after home.js, sets app.openPermissions to that page, and
   // these buttons opened it instead of the ticks.

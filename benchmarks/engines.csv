@@ -1,5 +1,0 @@
-engine,setup,tokens_per_s_median,min,max,first_word_long_prompt_s,date,notes
-LM Studio 0.4.28,its defaults,6.5,5.2,7.8,4.97,2026-11-07,"Qwen3.6-35B-A3B UD-Q2_K_XL on the Main PC (Quadro P2000, CUDA). 15 requests: write, code and read prompts, 256/256/200 tokens, temperature 0"
-TOMLIN 2.0.75,its defaults,10.0,8.9,10.3,3.91,2026-11-07,"same file and requests"
-LM Studio 0.4.28,settings matched to TOMLIN's,10.7,9.4,11.0,4.83,2026-11-07,"same file and requests"
-TOMLIN 2.0.75,settings matched to LM Studio's,9.7,8.6,10.6,3.98,2026-11-07,"same file and requests"

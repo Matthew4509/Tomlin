@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Bridge: backups - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="bridge-backups">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-bridge">Projects and the Bridge</a></li><li aria-current="page">The Bridge: backups</li></ol></nav><!--/nav-top-->
+<article>
+<h1>The Bridge: backups</h1>
+<p class="lead">Zips to a drive, and copies on your other PCs.</p>
+<h2 id="b-backups">Backups to a drive</h2>
+        <ul>
+          <li><b>Backups</b> (left panel) › <b>Turn on backups…</b>: choose where they go. A USB drive is best, so a copy survives this PC; another drive or a network folder works too. The zips go in a <b>TOMLIN Backups</b> folder there. A drive is known by its serial number, so a new letter (E: one day, F: the next) does not matter.</li>
+          <li>Tick a project (the box before its name, or <b>Select all</b>), then <b>Run backups</b>. It shows each project's size, how long it should take and the drive's free space before it starts, and will not start when it will not fit. <b>…</b> menu › <b>Back up now…</b> backs up one project.</li>
+          <li>Each project becomes one zip, with a .txt beside it saying what is in it. Every file in the zip is read back and checked before it counts. The git history goes in; folders a project rebuilds by itself (node_modules and the like) are left out unless <b>Full backup</b> is ticked on the Backups page.</li>
+          <li>The mark on each row: <b>● Zipped</b> (and when), <b>▲ Changed since zip</b>, <b>✕ Zip backup failed</b> (click it for why). <b>Other PCs</b> beside it is the other kind of backup: copies on your linked PCs.</li>
+          <li>Backups are only ever added: nothing on the drive is deleted to make room (<b>Keep</b> can keep only the last few, off to start). A full drive keeps its backups: plug in another and add it. To restore: right-click a zip › Extract All.</li>
+        </ul>
+<h2 id="b-nodes">Copies on my other PCs</h2>
+        <p>Besides git, TOMLIN can keep a copy of a project on your other PCs (the ones linked to it that have <b>Enable backups</b> ticked). Tick <b>Copy this project to my other PCs</b> in its git window: from then on it goes with TOMLIN's backup every 10 minutes when something changed, and only what changed crosses your home network. Each PC keeps the older versions too. In a git repository the copy takes what git keeps (saved files and new ones its <code>.gitignore</code> does not leave out); anywhere else, the whole folder except <code>.git</code> and <code>node_modules</code>. A file over 256 MB is left out and named. <b>Back up now</b> sends it straight away; <b>Bring back</b> puts a PC's newest copy in a new folder (TOMLIN's home, <code>restored projects</code>), never over the project.</p>
+        <dl class="help-dl">
+          <dt><span class="l-up">● On <i>PC</i></span></dt><dd>Its newest copy on that PC holds everything in it now.</dd>
+          <dt><span class="l-unsure">▲ Changed since copy</span></dt><dd>It changed after the last copy; the next backup takes the changes.</dd>
+          <dt><span class="l-none">○ Not copied yet</span></dt><dd>Ticked, but no copy has been made yet.</dd>
+        </dl>
+        <p>A project is safe from losing this PC when everything is pushed (● Backed up, nothing unsaved) or its copy is up to date (● On <i>PC</i>). The <b>Git</b> count's list of projects only on this PC says which of them have a copy on another PC.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="bridge-pages.html" rel="prev"><span>&larr; Previous</span><b>The Bridge: folders, audits and prompts</b></a><a class="next" href="bridge-trouble.html" rel="next"><span>Next &rarr;</span><b>The Bridge: privacy and trouble</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

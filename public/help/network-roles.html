@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin PC, node and storage - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="network-roles">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Admin PC, node and storage</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Admin PC, node and storage</h1>
+<p class="lead">What each PC can be, and where models and backups are kept.</p>
+<p>A PC is not one thing or another: it can be an admin PC, a node and a network backup all at once. Settings, This PC has a <b>This PC is</b> card with a switch for each; Network has a tab for each: <b>This is an admin PC (it connects to nodes)</b>, <b>This is a node</b> and <b>Backup, model and LLM storage</b>.</p>
+<h2>An admin PC</h2>
+<p>Any PC becomes an admin when it links other PCs (Network). The PC that links to a node becomes that node's admin, its host. Your staff, their memory and their chats stay on the admin PC; a node only loads the model and answers (or draws). A linked host is trusted like an administrator, but only for what the node's owner has ticked: see <a href="sharing-permissions.html">Sharing and cluster permissions</a>.</p>
+<h2>A node</h2>
+<p>On a node, <b>Enable this PC as a node</b> is on (a node must have the app lock, so it asks for that PIN first). It has a name, a <b>Setup Code</b> (and <b>New code</b> for another), and an address and port other PCs use (8741 unless something else uses it). Every model on it can be used by the PCs linked to it: chat models answer, picture models draw. Several PCs can link to one node; it answers one at a time (<b>At once</b>, under Port, PIN and slots, can give a model more than one slot, each keeping its whole context, so it needs more memory; it takes effect when the model loads next). To add one, see <a href="adding-pc.html">Adding a PC</a>; to keep one running on its own, <a href="node-windows.html">Windows settings for a node</a>.</p>
+<h2>A network backup (storage)</h2>
+<p>A PC with <b>Enable backups</b> ticked keeps copies of the projects and restore points of the PCs linked to it (see <a href="backups.html">Backups and restore points</a>); on the This PC card it is the switch <b>A network backup</b>, and it needs the node switch on. A linked PC can also be marked <b>Backups only</b> on its card on the main PC: no staff, chats, jobs or pictures run there, and no model is copied to it.</p>
+<h2>Where models and backups are kept</h2>
+<ul>
+<li><b>Models are kept in</b>: TOMLIN's <code>models</code> folder in your user folder, or the folder you chose. <b>Change folder or drive</b> opens a box to pick another; new downloads go there. The Models folder form is also under Models, Import models (Where models are kept), which can move the models already there to the new folder. The list of models on this PC is folded: press <b>Show models</b>. Under it, how much room is free, and <b>Free up space</b>.</li>
+<li><b>Backups from other PCs are kept in</b>: a folder inside TOMLIN's folder, with one folder for each linked PC, or the folder you chose. It can be changed the same way.</li>
+<li>TOMLIN refuses a whole drive, a folder given without its drive, a folder inside its own program, data, backups or models folders, a network path, and a drive formatted as FAT. A folder cannot be changed while backups are being kept in the current one.</li>
+</ul>
+<p>Keep 2 to 10 GB free on a node, and remove a model from the main PC's disk only after the question about where else it is held (see <a href="copying-models.html">Copying models between PCs</a>).</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="todo.html" rel="prev"><span>&larr; Previous</span><b>To Do</b></a><a class="next" href="adding-pc.html" rel="next"><span>Next &rarr;</span><b>Adding a PC</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

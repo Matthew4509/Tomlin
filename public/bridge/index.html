@@ -153,76 +153,16 @@
       <div class="page-head"><h1>Help</h1></div>
       <p class="lead">The Bridge is the part of TOMLIN that lists the projects on this PC, starts their local copies, checks them for common faults and keeps an eye on their git backups and live sites. It runs inside TOMLIN, on this PC only.</p>
       <div class="card help-card">
-        <h2 id="help-start">Getting started</h2>
-        <p>It comes with TOMLIN: nothing to install. <b>TOMLIN</b> at the top of the left panel goes back to chats, staff and jobs; TOMLIN's own left panel has <b>Projects</b> to come back here. TOMLIN's app lock covers these pages too.</p>
-        <p>The first list holds the folders beside TOMLIN's own folder (or, for an installed copy, its workspace). Add the folder that holds your projects on the <a href="#folders">Folders</a> page, or single projects kept somewhere else. Used Myia Bridge before? <b>About › Bring in from Myia Bridge</b> copies its folders, prompts, private details and lists here.</p>
-        <h2 id="help-projects">Projects</h2>
-        <p>Each row shows the tokens your AI tools used on it, when it last changed, and its state, with two buttons and a <b>…</b> menu:</p>
+        <h2 id="help-start">Help topics</h2>
+        <p>Help opens in its own tab, with every topic on its own page and a search box.</p>
         <ul>
-          <li><b>Copy prompt</b> gives you a line to paste into the AI you use. <b>…</b> menu › <b>Start with a hire…</b> hands the same line to one of your staff instead: TOMLIN's Send to card opens with it, and nothing goes until you press Send. In an audit, <b>Fix with a hire</b> does the same with its faults, and <b>Review with AI…</b> has <b>Start with a hire</b> beside <b>Copy prompt</b>. A hire answers from the words it is sent: it does not open the project's folder, so for work across a whole project, Copy is still the way to an AI that reads folders (Claude Code, Codex).</li>
-          <li><b>Run local copy</b> starts the project's own dev server (from its <code>.claude/launch.json</code> or <code>project.json</code>) and opens it. <b>Stop</b> ends it.</li>
-          <li><b>…</b> menu › <b>Scan app (audit)</b> runs the built-in audit (about 140 rules: keys, including a key removed from the files that the git history still holds, injection, sign-in and payment gaps, uploads, saving and replies, .htaccess, accessibility, and checks that read the project as a whole: limits, clean-up jobs, the privacy page against the code, release builds). It catches common core faults, not everything. It also finds what publishing the project would give away about you; list your own private details under <b>Audits › Private details</b>. A finding names the detail's label, never the detail. <b>Not a fault…</b> beside a finding sets that one place aside with your reason (it comes back if the line is edited); <b>Import report-back…</b> does the same from a pasted "False flags" table. <b>Review with AI…</b> builds a prompt to copy into any AI for the faults no rule finds (money, access, promises); paste its answer into Import report-back… and its findings go on the project's fault list, each open, fixed or not a fault. Old copies of the app inside the project folder (an "original" or "-fixes" copy, an unpacked release beside its zip, older versions side by side) are left out so a fault is counted once, where the app lives; the audit's notes name each one and why. To scan one anyway, list it under <code>auditInclude</code> in the project's project.json.</li>
-          <li><b>…</b> menu › <b>Hosted live</b> takes the address the project is hosted at: a green, amber or red light shows whether it answers. It is checked when the Bridge starts and then every 5, 10 or 15 minutes (<b>Check every</b> in the Live sites panel, which also shows how long each page took). A site that goes down shows a red message that stays until you close it. The Bridge sends no emails or phone alerts: a site that must not go down unnoticed needs a monitoring service of its own.</li>
-          <li><b>…</b> menu › <b>Push live</b> sends the project to your web host in one press: cPanel (your password is used once to make TOMLIN's own token, then dropped), FTPS or SFTP (with a key TOMLIN makes). It is off until you turn it on in that window. Before anything is sent it checks the files: .env files, git's history, packages, keys and AI working notes never go; a file with a key, a written-out password or one of your private details stops it and names the file and line. Only new and changed files are sent, a copy is kept of every file it replaces, and <b>Go back</b> undoes the last push. <b>Secrets</b> keeps passwords and API keys locked by Windows on this PC: the Local value goes to the local copy, the Live value to one file outside the site's web folder that your code reads with getenv(). On cPanel, <b>Database</b> makes the MySQL database and loads a .sql file. The address it pushes to becomes the project's live address, with its light.</li>
-          <li><b>…</b> menu › <b>Remove from list</b> only takes a project off the list. Its folder and files are never touched. <b>Folders › Removed from the list</b> brings it back.</li>
-          <li><b>…</b> menu › <b>Last audit</b>, <b>Open folder</b>, <b>Open terminal here</b>, <b>Move to top / up / down / bottom</b>, and <b>Hide from display</b>: a hidden project stays on the list but out of view until <b>Show hidden</b> is on.</li>
+          <li><a href="/help/bridge-projects.html" target="_blank" rel="noopener">Projects</a>: getting started, each project's buttons and menu, and the window around the list.</li>
+          <li><a href="/help/bridge-pages.html" target="_blank" rel="noopener">Folders, audits and prompts</a></li>
+          <li><a href="/help/git.html" target="_blank" rel="noopener">Git marks</a> and keeping Git itself up to date.</li>
+          <li><a href="/help/bridge-backups.html" target="_blank" rel="noopener">Backups</a>: zips to a drive, and copies on my other PCs.</li>
+          <li><a href="/help/bridge-trouble.html" target="_blank" rel="noopener">What leaves this PC, if something goes wrong, and where its data is</a></li>
+          <li><a href="/help/index.html" target="_blank" rel="noopener">All of TOMLIN's Help</a>, to search.</li>
         </ul>
-        <p>The bar above the list has <b>Add project</b>, <b>Scan folders</b> (what is new or gone since the last scan), <b>Refresh</b>, <b>List / Tiles</b>, the sort order (Last updated, My order, Most tokens, Name, Running first; in My order you can also drag a row), <b>Stop all</b> (everything the Bridge started; a tick adds other programs holding your projects' ports, each named first), <b>Show hidden</b> and search.</p>
-        <h2 id="help-window">The window</h2>
-        <ul>
-          <li><b>Bridge</b> near the top of the left panel takes you home to Projects. Its light shows ● Connected, or Connection lost in red when TOMLIN stops; then <b>Reconnect</b> appears and the page reconnects by itself once TOMLIN answers again.</li>
-          <li><b>This PC</b>: CPU, memory, disk and GPU, uptime, and the AI tokens used this month and in total (<b>Recount</b> counts them again).</li>
-          <li><b>Running</b>: every site that is up. ● started by the Bridge, ◐ another program holds that project's port. Click a name to open it; the square stops it.</li>
-          <li><b>Live sites</b>: every live address with its light and how long it took to answer, worst first, with <b>Check now</b> and <b>Check every</b>.</li>
-          <li>The bar at the bottom: how many projects, how many running, when the tokens were counted, and the <b>Git</b> count (click it for the projects waiting for a save or push).</li>
-          <li>The <b>Orbital</b> theme (About › Theme) shows your running sites as satellites over the Earth: click one to shoot it down (that stops it), ↗ opens it. The other themes are Windows, Light and Dark.</li>
-        </ul>
-        <h2 id="help-pages">Folders, Audits and Prompts</h2>
-        <ul>
-          <li><a href="#folders">Folders</a>: your working folders (every folder inside one is a project), projects added one by one, and projects removed from the list (bring one back here). <b>Add working folder</b> opens the Windows folder picker.</li>
-          <li><a href="#audits">Audits</a>: the latest audit of each project. <b>Private details…</b> holds the details about you (email, phone, street, full name) the audit looks for in what you would publish. A detail is typed once and never shown again; the audit shows only its label. <b>Check a skill…</b> checks a Claude Code skill, plugin or agent folder before you install it: paste its SKILL.md, or choose its folder or .zip / .skill file. It answers <b>Do not install</b>, <b>Read these first</b> or <b>No known attack found</b> (never "safe"), and lists the scripts and hooks it runs, the services it talks to and the keys it reads. Nothing in it is run or sent anywhere. Every audit also reads a project's own AI agent files (CLAUDE.md, AGENTS.md, skills and their scripts, hooks, permissions, MCP servers).</li>
-          <li><a href="#prompts">Prompts</a>: prompts you use again and again, a tile per category. Click a tile for its prompts, then <b>Copy</b>, <b>Start</b> (to one of your staff, in TOMLIN), <b>Edit</b> (which can move it to another category) or <b>Remove</b>. <b>New category</b> and <b>Add prompt</b> sit above the tiles; inside a category, <b>Rename category</b> and <b>Delete category</b> (which deletes its prompts, and says how many first). Words in [brackets] are yours to fill in. Kept on this PC only.</li>
-        </ul>
-        <h2 id="help-git">Git marks</h2>
-        <p>Git keeps a saved history of a project, and a copy on GitHub (or another host) is its backup. The Bridge only reads git: it never commits, pushes or changes a folder.</p>
-        <dl class="help-dl">
-          <dt><span class="l-up">● Backed up</span></dt><dd>Everything saved is on the backup copy.</dd>
-          <dt><span class="l-unsure">▲ unsaved</span></dt><dd>Files changed since the last save. <b>Commit</b> them, then <b>push</b>.</dd>
-          <dt><span class="l-unsure">▲ not pushed</span></dt><dd>Saved here but not on the backup copy yet. <b>Push</b>.</dd>
-          <dt><span class="l-unsure">▲ Only on this PC</span></dt><dd>No backup copy at all. Make an empty repository on GitHub, then link it and push.</dd>
-          <dt><span class="l-none">○ No git</span></dt><dd>No history and no backup. Fine for scratch folders.</dd>
-        </dl>
-        <p>Click a mark for the exact commands to copy into a terminal (<b>…</b> menu › Open terminal here). The <b>Git</b> count in the bar at the bottom lists every project waiting for a save or push.</p>
-        <p>When files have changed, <b>See what changed</b> in the project's git window shows every changed file since the last save, line by line (green new, red gone), so you can read what an AI changed before you commit. It only reads: nothing is saved or undone.</p>
-        <h2 id="help-backups">Backups to a drive</h2>
-        <ul>
-          <li><b>Backups</b> (left panel) › <b>Turn on backups…</b>: choose where they go. A USB drive is best, so a copy survives this PC; another drive or a network folder works too. The zips go in a <b>TOMLIN Backups</b> folder there. A drive is known by its serial number, so a new letter (E: one day, F: the next) does not matter.</li>
-          <li>Tick a project (the box before its name, or <b>Select all</b>), then <b>Run backups</b>. It shows each project's size, how long it should take and the drive's free space before it starts, and will not start when it will not fit. <b>…</b> menu › <b>Back up now…</b> backs up one project.</li>
-          <li>Each project becomes one zip, with a .txt beside it saying what is in it. Every file in the zip is read back and checked before it counts. The git history goes in; folders a project rebuilds by itself (node_modules and the like) are left out unless <b>Full backup</b> is ticked on the Backups page.</li>
-          <li>The mark on each row: <b>● Zipped</b> (and when), <b>▲ Changed since zip</b>, <b>✕ Zip backup failed</b> (click it for why). <b>Other PCs</b> beside it is the other kind of backup: copies on your linked PCs.</li>
-          <li>Backups are only ever added: nothing on the drive is deleted to make room (<b>Keep</b> can keep only the last few, off to start). A full drive keeps its backups: plug in another and add it. To restore: right-click a zip › Extract All.</li>
-        </ul>
-        <h2 id="help-nodes">Copies on my other PCs</h2>
-        <p>Besides git, TOMLIN can keep a copy of a project on your other PCs (the ones linked to it that have <b>Enable backups</b> ticked). Tick <b>Copy this project to my other PCs</b> in its git window: from then on it goes with TOMLIN's backup every 10 minutes when something changed, and only what changed crosses your home network. Each PC keeps the older versions too. In a git repository the copy takes what git keeps (saved files and new ones its <code>.gitignore</code> does not leave out); anywhere else, the whole folder except <code>.git</code> and <code>node_modules</code>. A file over 256 MB is left out and named. <b>Back up now</b> sends it straight away; <b>Bring back</b> puts a PC's newest copy in a new folder (TOMLIN's home, <code>restored projects</code>), never over the project.</p>
-        <dl class="help-dl">
-          <dt><span class="l-up">● On <i>PC</i></span></dt><dd>Its newest copy on that PC holds everything in it now.</dd>
-          <dt><span class="l-unsure">▲ Changed since copy</span></dt><dd>It changed after the last copy; the next backup takes the changes.</dd>
-          <dt><span class="l-none">○ Not copied yet</span></dt><dd>Ticked, but no copy has been made yet.</dd>
-        </dl>
-        <p>A project is safe from losing this PC when everything is pushed (● Backed up, nothing unsaved) or its copy is up to date (● On <i>PC</i>). The <b>Git</b> count's list of projects only on this PC says which of them have a copy on another PC.</p>
-        <h2 id="help-gitprog">Keeping Git itself up to date</h2>
-        <p>Old versions of the Git program had security holes that a single <code>git clone</code> of a bad repository could set off. <b>About › Git</b> shows your version and warns when it is older than the last security fix this Bridge knows about. To update: <code>winget upgrade --id Git.Git -e</code>, or download it from git-scm.com. Ticking <b>Check online for a newer Git</b> lets the Bridge ask GitHub once a day for the newest version; until you tick it, it asks nothing.</p>
-        <h2 id="help-privacy">What leaves this PC</h2>
-        <p>Nothing about you or your projects goes to the internet unless you send it with Push live (off until you turn it on): then the project's files, and its Live secrets, go to the web host you connected, and nowhere else. The only other requests that leave for the internet are plain page requests to the live addresses you add under Hosted live, and, only if you tick it, one request a day to GitHub for the newest Git version. A project you tick under Copies on my other PCs goes only to your own linked PCs, over your home network and encrypted. Tokens are counted from the AI transcripts already on this PC; they are read, never changed or sent.</p>
-        <h2 id="help-trouble">If something goes wrong</h2>
-        <ul>
-          <li><b>The page says Connection lost</b>: TOMLIN stopped. Start it again (its desktop icon, or Start TOMLIN.cmd); this page reconnects by itself.</li>
-          <li><b>A project shows "No start command"</b>: click it for a prompt to paste into your AI, which adds a <code>"start"</code> to the project's own <code>project.json</code>. Or list it in <code>projects.json</code> in the Bridge's data folder (TOMLIN's home, <code>data\bridge</code>; see README.md).</li>
-          <li><b>Your folders or prompts are suddenly back to the start</b>: the file that held them could not be read. It was kept in the Bridge's data folder (TOMLIN's home, <code>data\bridge</code>) as <code>settings.damaged-…json</code> or <code>prompts.damaged-…json</code>; close TOMLIN, copy back what you need, and start it again.</li>
-          <li><b>Git error on a project</b>: click the mark; it says why (git not installed, folder owned by another account, or git settings that could run a program).</li>
-        </ul>
-        <h2 id="help-remove">Where its data is</h2>
-        <p>Its settings, audits, prompts and lists are in TOMLIN's home, in <code>data\bridge</code>, and go with TOMLIN's own backups. Uninstalling TOMLIN removes the Bridge with it.</p>
       </div>
     </section>
 

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backups and restore points - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="backups">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-backups">Backups, updates and data</a></li><li aria-current="page">Backups and restore points</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-backups">Backups and restore points</h1>
+<p class="lead">Projects and restore points on your other PCs; what is and is not backed up.</p>
+    <p>Your other PCs can keep copies of your projects and of TOMLIN's own data, over your home network, with no internet needed.</p>
+    <ul>
+      <li><strong>Let a PC keep backups</strong>: on that PC, Network, Sharing and cluster permissions, tick <b>Enable backups</b>.</li>
+      <li><strong>Backups only</strong>: tick it on a linked PC's card on this PC (Network, under the linked PCs). No staff, chats, jobs or pictures run there, and no model is copied to it; it is first in line for project backups. Its card says what it keeps and how much disk is free.</li>
+      <li><strong>Your workspace</strong> is the folder TOMLIN keeps its own work in: every project made with Lets create a project, and the files your staff write and save. It is inside TOMLIN's data folder unless you chose another one (Settings, Files and blog writer, Workspace folder). The whole workspace is backed up with no tick: everything in it except <code>.git</code> and <code>node_modules</code> folders.</li>
+      <li><strong>Project backups</strong>: your workspace, and each Bridge project you tick <b>Copy this project to my other PCs</b> in its git window (<a href="git.html">Git</a>), go to your linked PCs that have Enable backups ticked every 10 minutes when something changed, and only what changed is sent; each PC keeps the older versions too. In Models on my other PCs, <b>Back up projects now</b> sends them at once and <b>Bring projects back</b> puts a copy in a new folder, never over the project.</li>
+      <li><strong>Restore points</strong> (your chats, staff and settings): Models on my other PCs, <b>Back up to it now</b> beside a PC keeps one there (the newest 3 are kept); <b>Restore points kept there</b> lists them, and Bring back puts one in this PC's backups, which <b>Settings, Data and lock</b>, <b>Put back</b> uses. A restore point kept on another PC holds no keys to your linked PCs, no web search key, no sharing code and no PIN, so putting it back keeps this PC's own; one changed on that PC is refused when it comes back.</li>
+    </ul>
+    <figure class="help-shot"><img src="../help-llms.webp" alt="Models on my other PCs: models shared by linked PCs, some On this PC and some with Get a copy from Worker PC; below, Restore points on linked PCs with Back up to it now and Back up projects now" width="860" height="720" loading="lazy"><figcaption>Models on my other PCs: the models your PCs share, and the backups kept on them.</figcaption></figure>
+<h2>What TOMLIN backs up, and what it does not</h2>
+    <p><b>What TOMLIN backs up, and what it doesn't.</b> TOMLIN backs up your workspace, the projects you select, and its own data to your other PCs. It is not a full backup of your PC.</p>
+    <ul>
+      <li><strong>Backed up</strong>: your workspace, and each project ticked <b>Copy this project to my other PCs</b>, every 10 minutes when something changed; every version is kept. Your chats, staff and settings as a restore point, only when you press <b>Back up to it now</b>; the newest 3 are kept on each PC.</li>
+      <li><strong>Not backed up</strong>: anything else on your PC (Documents, Desktop, Pictures, email, other folders). Files over 256 MB inside a ticked project. A project's git history: only its files go. Models: they are copied only to the PCs you send them to.</li>
+      <li><strong>Good to know</strong>: backups go only to your own PCs on your home network, never to the cloud, so a fire, flood or theft at home can take every copy. Backups are not locked on the PC that keeps them: whoever uses that PC can open them.</li>
+    </ul>
+<h2>For everything else</h2>
+    <p><b>For everything else.</b> These free tools are made by other people. We don't make, check or support them, so read about each one and choose for yourself.</p>
+    <ul>
+      <li><strong>Syncthing</strong>: keeps a folder the same on several PCs, like Dropbox without the cloud. Deleting a file deletes it everywhere unless you turn on its old versions.</li>
+      <li><strong>Kopia</strong> or <strong>restic</strong>: versioned backups of the folders you choose, to another drive, PC or network folder.</li>
+      <li><strong>UrBackup</strong>: makes one PC a backup server for your others.</li>
+      <li><strong>Windows File History</strong>: already in Windows; it keeps old versions of your files on another drive or network folder.</li>
+    </ul>
+<p>Backups of project folders to a drive (zips) are in <a href="bridge-backups.html">The Bridge: backups</a>.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="moving-staff.html" rel="prev"><span>&larr; Previous</span><b>Moving staff to another PC</b></a><a class="next" href="copying-models.html" rel="next"><span>Next &rarr;</span><b>Copying models between PCs</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

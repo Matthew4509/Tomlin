@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moving staff to another PC - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="moving-staff">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Moving staff to another PC</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-move">Moving staff to another PC</h1>
+<p class="lead">Drag a person to another desk; what fits, and what to do when the model is missing.</p>
+    <p>Drag a person onto another desk in the office, or drag them from the left panel onto a PC, to move them. The <b>Move</b> window opens: the software they run on there (their own model, when that PC has it), and they carry their box over to the new desk. A PC that is off or in use by its owner does not take a drop; nor, in the left panel, does a Backups only PC.</p>
+    <figure class="help-shot help-shot-narrow"><img src="../help-move.webp" alt="Move Maya to Worker PC: Qwen3.5-9B picked; a line says Qwen3.5-35B-A3B is not offered because it needs about 27 GB and Worker PC has 16 GB of RAM; Send Qwen3.5-2B to Worker PC; Move them" width="480" height="354" loading="lazy"><figcaption>A model too big for that PC is not offered, and the window says why (the screenshot is from before the choices were reworded).</figcaption></figure>
+<h2>Only a model that fits</h2>
+<p><b>Only a model that fits that PC's memory can be picked.</b> TOMLIN works out what each model needs (its file, its working memory and the runner) and compares it with that PC's memory as a whole: its RAM, with 3 GB kept for Windows, and the memory of its graphics cards (every card counts; a model is spread over them and the RAM). The need is an estimate and runs a little high, so a model is called too big only when it needs more than all that memory and 5% on top.</p>
+<p>A model that will not fit is shown greyed with what it needs, and named under the list; one that only just fits says "tight fit". When none fits, Move them is not offered: send a smaller model there first, or move them to a PC with more memory.</p>
+<p>TOMLIN checks again when Move them is pressed, so a move never goes through to a PC that cannot hold the model. A PC whose memory is not known (while it is off, for example) is not checked.</p>
+<h2>A yellow (!) on a PC</h2>
+    <p><b>A yellow (!) on a PC's card</b> in the left panel means its RAM is 95% in use or more right now, so a model may not load there until one is unloaded or other programs are closed (hold the pointer on it for the figures). The same (!) says when a linked PC runs an older TOMLIN.</p>
+<h2>When that PC has not got their model</h2>
+<p>When that PC has not got their model, the window asks <b>Would you like to:</b> and offers only what can work: <b>Copy &lt;model&gt; to &lt;PC&gt;, then move them</b>; <b>Download &lt;model&gt; on &lt;PC&gt; from Hugging Face, then move them</b> (when the model was deleted from this PC and is in TOMLIN's suggested list); or <b>Use another model already on &lt;PC&gt;</b>.</p>
+<p>After Continue the window shows how far the copy or download is and moves them when the model is there; if you close the window first, they stay where they are, and the copy carries on (Models on my other PCs shows it). If the copy cannot start or fails, they stay where they are and the window says why.</p>
+<p><b>More</b> holds the sizes and the reasons a choice is not offered.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="node-windows.html" rel="prev"><span>&larr; Previous</span><b>Windows settings for a node</b></a><a class="next" href="backups.html" rel="next"><span>Next &rarr;</span><b>Backups and restore points</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

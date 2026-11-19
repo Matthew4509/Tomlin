@@ -1,0 +1,175 @@
+{
+  "about": "Runs that were really measured on the PCs listed, copied from the records named in each example's source. Nothing here is estimated or rounded. A figure the record does not give is written as null and said in the caveat. To add one, add an object with the same fields (hardware for every PC, model, settings, result, date, source).",
+  "examples": [
+    {
+      "id": "deepseek-expert-parallel-2pc-bench",
+      "title": "DeepSeek-V4-Flash on two PCs, expert parallel (test run)",
+      "date": "2026-11-15",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC, loads the model)", "cpu": "Intel Core i7-6700K, 4 threads used", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060 (not used in this run)", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "DeepSeek-V4-Flash", "quantisation": "UD-Q2_K_XL", "size": "90 GiB, 43 layers" },
+      "settings": { "cluster": "not the app: a test run through the cluster test door (llama-bench, not encrypted)", "loadedBy": "HP Z240", "maxMode": "not used (test run, not the app)", "layout": "experts 0-95 on the Z240 and 96-255 on the Z820, the rest on the P2000, 30 layers on the card, batch 32" },
+      "result": { "tokensPerSecond": 1.84, "loadSeconds": null, "what": "tokens a second writing, run EP8" },
+      "caveat": "Speed run only: answers were not checked on the real two-PC set-up. The HP 800 was down, so this is two PCs. Load time was not recorded. The same two PCs by layer split gave 1.16.",
+      "source": "docs/cluster-native/expert-parallel-real-2026-11-15.md"
+    },
+    {
+      "id": "deepseek-layer-split-2pc-bench",
+      "title": "DeepSeek-V4-Flash on two PCs, layer split (test run)",
+      "date": "2026-11-14",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "DeepSeek-V4-Flash", "quantisation": "UD-Q2_K_XL", "size": "90 GiB" },
+      "settings": { "cluster": "not the app: a test run through the cluster test door", "loadedBy": "HP Z240", "maxMode": "not used (test run, not the app)", "layout": "15 layers in Z240 RAM, 1 on the P2000, 4 on the 3060, 23 in Z820 RAM" },
+      "result": { "tokensPerSecond": 1.16, "loadSeconds": null, "what": "tokens a second writing, Run E" },
+      "caveat": "The comparison for the expert parallel run above. Load time was not recorded.",
+      "source": "docs/cluster-native/expert-parallel-real-2026-11-15.md"
+    },
+    {
+      "id": "qwen38-expert-parallel-2pc-bench",
+      "title": "Qwen3.8-Flash-Next on two PCs, expert parallel (test run)",
+      "date": "2026-11-15",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC, loads the model)", "cpu": "Intel Core i7-6700K, 4 threads used", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060 (not used in this run)", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "Qwen3.8-Flash-Next", "quantisation": "UD-Q3_K_XL", "size": "83 GiB, 48 layers" },
+      "settings": { "cluster": "not the app: a test run through the cluster test door (llama-bench, not encrypted)", "loadedBy": "HP Z240", "maxMode": "not used (test run, not the app)", "layout": "experts 0-255 on the Z240 and 256-511 on the Z820; the n-gram table in the Z820's RAM; the rest on the P2000, batch 32" },
+      "result": { "tokensPerSecond": 2.45, "loadSeconds": null, "what": "tokens a second writing, run Q-EP2" },
+      "caveat": "Speed run only; answers not checked. Load time was not recorded. About 138 ms of every word's 406 ms is the model's input embedding on the CPU.",
+      "source": "docs/cluster-native/expert-parallel-real-2026-11-15.md"
+    },
+    {
+      "id": "qwen38-layer-split-2pc-bench",
+      "title": "Qwen3.8-Flash-Next on two PCs, layer split (test run)",
+      "date": "2026-11-14",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "Qwen3.8-Flash-Next", "quantisation": "UD-Q3_K_XL", "size": "83 GiB" },
+      "settings": { "cluster": "not the app: a test run through the cluster test door", "loadedBy": "HP Z240", "maxMode": "not used (test run, not the app)", "layout": "3 layers in Z240 RAM, 1 on the P2000, 7 on the 3060, 37 in Z820 RAM" },
+      "result": { "tokensPerSecond": 1.69, "loadSeconds": null, "what": "tokens a second writing, Run Q1" },
+      "caveat": "The comparison for the expert parallel run above. Load time was not recorded.",
+      "source": "docs/cluster-native/expert-parallel-real-2026-11-15.md"
+    },
+    {
+      "id": "deepseek-in-app-z820-lender",
+      "title": "DeepSeek-V4-Flash in the app, the Z820 lending (Max mode)",
+      "date": "2026-11-15",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC, loads the model)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" },
+        { "pc": "HP 800 G1 (set to Don't borrow, not used)", "cpu": null, "ram": "24 GB", "card": "Quadro K1200", "cardMemory": "4 GB" }
+      ],
+      "model": { "name": "DeepSeek-V4-Flash", "quantisation": "UD-Q2_K_XL", "size": "90 GiB" },
+      "settings": { "cluster": "no saved cluster: the app's Max mode borrowing (TOMLIN 2.0.94)", "loadedBy": "HP Z240", "maxMode": "on, with the Z820 as the only lender; the HP 800 set to Don't borrow", "layout": "experts 0-96 here, 97-255 on the Z820, 22 layers on the card, batch 32, models on a hard disk at about 86 MB/s" },
+      "result": { "tokensPerSecond": 1.41, "loadSeconds": 1128, "what": "first request 1.41 tokens a second writing (later requests 1.01 and 1.40); ready after 1,128 s" },
+      "caveat": "Three requests of 40 to 48 words at temperature 0. Against 1.84 for the same layout in the test run (llama-bench): the gap was not separated (22 against 30 layers on the card, the app's encryption, threads, a cold first request). The 1,128 s load estimate was first 868 s.",
+      "source": "docs/cluster-native/app-load-2026-11-15.md"
+    },
+    {
+      "id": "deepseek-in-app-three-pcs-failed",
+      "title": "DeepSeek-V4-Flash in the app with three PCs: failed",
+      "date": "2026-11-15",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC, loads the model)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" },
+        { "pc": "HP 800 G1 (lends)", "cpu": null, "ram": "24 GB", "card": "Quadro K1200", "cardMemory": "4 GB" }
+      ],
+      "model": { "name": "DeepSeek-V4-Flash", "quantisation": "UD-Q2_K_XL", "size": "90 GiB" },
+      "settings": { "cluster": "no saved cluster: the app's Max mode borrowing (TOMLIN 2.0.94)", "loadedBy": "HP Z240", "maxMode": "on, with the Z820 and the HP 800 as lenders", "layout": "experts 0-81 here, 82-110 and 111-255 on the lenders" },
+      "result": { "tokensPerSecond": null, "loadSeconds": null, "failed": true, "what": "no speed: the load failed twice (died at 846 s with 'Remote RPC server crashed or returned malformed response'; died at 1,138 s with 'send failed' after a lender's stream went quiet at 6 minutes)" },
+      "caveat": "The HP 800 is the likely cause of the second failure. Three PCs together were not stable at this date: two worked.",
+      "source": "docs/cluster-native/app-load-2026-11-15.md"
+    },
+    {
+      "id": "three-cards-24b-bench",
+      "title": "A 24B model on two cards against three cards (test run)",
+      "date": "2026-11-14",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (this PC)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000 (Vulkan)", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" },
+        { "pc": "HP 800 G1 (lends, third card)", "cpu": null, "ram": "24 GB", "card": "Quadro K1200", "cardMemory": "4 GB" }
+      ],
+      "model": { "name": "a 23.57 B dense model (the result file does not name it)", "quantisation": "IQ4_XS", "size": "11.89 GiB" },
+      "settings": { "cluster": "not the app: a test run through the cluster test door, encrypted ('sealed')", "loadedBy": "HP Z240", "maxMode": "not used (test run, not the app)", "layout": "two cards P2000/3060 = 9/32 layers; three cards = 9/31/1 layers" },
+      "result": { "tokensPerSecond": 8.69, "loadSeconds": null, "what": "three cards, 8.69 tokens a second writing (plus or minus 1.49); the same model on two cards gave 12.15 (plus or minus 0.29); a 9/30/2 split on three cards gave 4.20" },
+      "caveat": "Adding the third PC made it slower, not faster. The model's file name is not recorded in the result file. Load time was not recorded.",
+      "source": "docs/cluster-native/threecard-2026-11-14.txt"
+    },
+    {
+      "id": "max-mode-35b-z820-3060-lender",
+      "title": "Qwen3.5-35B on the Z240 with the Z820's card lending (Max mode)",
+      "date": "2026-11-12",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (host, loads the model)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP Z820 (lends its card)", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "Qwen3.5-35B-A3B", "quantisation": "UD-Q2_K_XL", "size": "11.3 GB" },
+      "settings": { "cluster": "no saved cluster: Max mode, a throwaway TOMLIN on another port", "loadedBy": "HP Z240", "maxMode": "on, lender card only", "layout": "middle of three runs" },
+      "result": { "tokensPerSecond": 5.7, "loadSeconds": null, "what": "5.7 tokens a second writing, 403 reading; the Z240 alone gave 11.4 (12.8 tuned) in the speed chart" },
+      "caveat": "The lender raised reading about four times (101 to 403) but writing stayed 5 to 6, far below the host alone: Max mode is not a speed feature for a model that fits one PC.",
+      "source": "docs/LLM-TEST-LIST.md (section 1d)"
+    },
+    {
+      "id": "max-mode-80b-hp800-lender",
+      "title": "Qwen3-Next-80B on the Z240 with the HP 800 lending (Max mode)",
+      "date": "2026-11-03",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z240 (host, loads the model)", "cpu": "Intel Core i7-6700K", "ram": "48 GB", "card": "Quadro P2000", "cardMemory": "5 GB" },
+        { "pc": "HP 800 G1 (lends)", "cpu": null, "ram": "24 GB", "card": "Quadro K1200", "cardMemory": "4 GB" }
+      ],
+      "model": { "name": "Qwen3-Next-80B-A3B", "quantisation": "UD-Q3_K_XL", "size": "33.2 GB" },
+      "settings": { "cluster": "no saved cluster: Max mode split (TOMLIN 2.0.71)", "loadedBy": "HP Z240", "maxMode": "on", "layout": "split between the two cards" },
+      "result": { "tokensPerSecond": 4.6, "loadSeconds": null, "what": "4.6 tokens a second writing; the Z240 alone gave 10.9" },
+      "caveat": "Slower than the host alone for every model that fits on it. Load time was not recorded.",
+      "source": "docs/LLM-TEST-LIST.md (3 Nov night table)"
+    },
+    {
+      "id": "single-pc-z820-80b-3060",
+      "title": "Qwen3-Next-80B on the Z820 alone (cluster off)",
+      "date": "2026-11-10",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z820", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060 (power limit 85%)", "cardMemory": "12 GB" }
+      ],
+      "model": { "name": "Qwen3-Next-80B-A3B", "quantisation": "UD-Q3_K_XL", "size": "33.2 GB" },
+      "settings": { "cluster": "off: one PC (TOMLIN 2.0.81)", "loadedBy": "HP Z820", "maxMode": "off", "layout": "default offload: 49/49 layers offloaded with part of the file held in RAM" },
+      "result": { "tokensPerSecond": 8.67, "loadSeconds": 127, "what": "median of 14 answers in a 5 minute run (8.53 to 9.15); the first answer, which loads the model, took 127 s" },
+      "caveat": "The same PC with no card (CPU only) gave 3.39 tokens a second.",
+      "source": "docs/LLM-TEST-LIST.md (sections 1b and 1c)"
+    },
+    {
+      "id": "single-pc-z820-80b-cpu",
+      "title": "Qwen3-Next-80B on the Z820 alone, no card (cluster off)",
+      "date": "2026-11-10",
+      "verified": true,
+      "hardware": [
+        { "pc": "HP Z820", "cpu": "6-core Xeon E5-2640", "ram": "64 GB", "card": "none used (CPU only run)", "cardMemory": "0 GB" }
+      ],
+      "model": { "name": "Qwen3-Next-80B-A3B", "quantisation": "UD-Q3_K_XL", "size": "33.2 GB" },
+      "settings": { "cluster": "off: one PC (TOMLIN 2.0.81)", "loadedBy": "HP Z820", "maxMode": "off", "layout": "Run on CPU, 0 of 41 layers on a card, context 8,192" },
+      "result": { "tokensPerSecond": 3.39, "loadSeconds": 90, "what": "median of 6 answers in a 5 minute run (3.30 to 3.39); load and warm-up 90 s" },
+      "caveat": "Usable for one-off work, slow for chat.",
+      "source": "docs/LLM-TEST-LIST.md (section 1b)"
+    }
+  ],
+  "missing": [
+    "No measured example yet of a saved cluster switched on with 'This PC takes part' off (another PC loads the model).",
+    "No measured example yet of three PCs working together in the app: the only app runs with three PCs failed."
+  ]
+}

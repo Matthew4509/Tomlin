@@ -13,7 +13,7 @@ test('the models of each linked PC sit in a tile behind "See models installed", 
   assert.match(js, /el\('summary', \{ text: `See models installed \(\$\{mine\.length\}\)` \}\)/);
   assert.match(js, /v\.pcs\.map\(p => \{\s*const mine = modelsOn\(p\);/);
   assert.match(js, /`\$\{mine\.length\} model\$\{mine\.length === 1 \? '' : 's'\}/);
-  assert.match(js, /'Off or not answering now'/);
+  assert.match(js, /'Not answering now'/);
   // A PC that is off says so on its tile, not under every model.
   assert.match(js, /p\.ok && o\.why/);
 });

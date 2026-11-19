@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direct links between PCs - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="direct-links">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Direct links between PCs</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Direct links between PCs</h1>
+<p class="lead">Two linked PCs copy a model straight to each other.</p>
+<p>Two PCs linked to the same host can copy a model straight to each other over the home network, without it passing through the host. Each PC's owner must tick <b>Let PCs my host introduces connect to this PC directly</b>, and the PC that receives a model <b>Accept models from linked PCs</b> (see <a href="sharing-permissions.html">Sharing and cluster permissions</a>). The other ticks still decide what such a PC may do, and the PCs the host names are the only ones that may connect.</p>
+<h2>On the host</h2>
+<p>Network, <b>Direct links between PCs</b>: pick <b>One PC</b> and <b>The other PC</b> and press <b>Introduce them</b>. The host can check a link, end it, and order a model copied between the two; the host only orders and follows, and the receiving PC pulls the file from the other and checks it against the original before it is used.</p>
+<h2>On a node</h2>
+<p>The node's owner sees the direct links that PC has, and can remove one. Unticking the switch ends them all.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="guest-passes.html" rel="prev"><span>&larr; Previous</span><b>Guest passes</b></a><a class="next" href="cluster.html" rel="next"><span>Next &rarr;</span><b>Max mode and Cluster</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

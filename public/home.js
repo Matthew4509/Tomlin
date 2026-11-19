@@ -351,6 +351,7 @@ function staffRow({ key, name, avatar, sub, level, state, stateText, activity, a
 }
 
 function drawRail() {
+  app.drawNetMap?.();
   const d = homeUi.data;
   const onHome = homeUi.view === 'home';
   for (const b of [$('#rail-home'), $('#rail-home-row')]) {
@@ -591,10 +592,18 @@ function drawCluster(pcs, cl) {
   const byPower = (a, b) => memOf(b).vram - memOf(a).vram || memOf(b).ram - memOf(a).ram;
   const members = cl.members.map(id => usable.find(p => p.id === id)).filter(Boolean).sort(byPower);
   const others = usable.filter(p => !cl.members.includes(p.id)).sort(byPower);
+  // Why a PC cannot be added now ('' when it can): off, asleep or not answering says when it was last seen.
+  const offReason = p => (!p.ok ? `Off: ${p.seenAt ? `last seen ${new Date(p.seenAt).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : 'not seen since this PC started'}` : p.away ? 'Logged off for now: its owner pressed "I need to use the pc"' : '');
   /** The set as the server holds it now, with `id` put in (last) or taken out: two quick moves do not lose one. */
   const move = async (id, into) => {
     const have = (homeUi.cluster ?? cl).members;
     if (into === have.includes(id)) return;
+    // A PC that is off, asleep or not answering cannot be added (the server refuses it too).
+    const asked = into ? usable.find(x => x.id === id) : null;
+    if (asked && offReason(asked)) {
+      sayHere(ask, `"${asked.name}" was not added: ${offReason(asked)}.`);
+      return;
+    }
     await changeCluster({ members: into ? [...have, id] : have.filter(x => x !== id) }, ask);
   };
   const on = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: cl.on === true, disabled: !cl.members.length, 'data-key': 'cluster-on', 'aria-label': 'Cluster on', onchange: async e => {
@@ -606,7 +615,8 @@ function drawCluster(pcs, cl) {
   const has = m => [m.ram ? `${clusterGb(m.ram)} RAM` : '', m.vram ? `${clusterGb(m.vram)} card memory${m.card ? ` (${m.card})` : ''}` : 'no card', m.cores === undefined ? '' : m.cores ? `${m.cores} cores` : 'cores not known'].filter(Boolean).join(' · ');
   const tile = (p, inSet, rank) => {
     const m = memOf(p);
-    const why = !p.ok ? 'Not answering now' : p.allow?.lend === true ? '' : 'Its owner has not ticked "Allow to be used as part of a cluster" there';
+    const off = inSet ? '' : offReason(p);
+    const why = off || (!p.ok ? 'Not answering now' : p.allow?.lend === true ? '' : 'Its owner has not ticked "Allow to be used as part of a cluster" there');
     const li = el('li', { class: `cluster-pc${inSet ? ' cluster-node' : ''}`, draggable: 'true', 'data-pc': p.id, ...(why && !inSet ? { 'data-cannot': '1' } : {}),
       ondragstart: e => {
         e.dataTransfer.setData('text/plain', p.id);
@@ -622,11 +632,10 @@ function drawCluster(pcs, cl) {
       el('span', { class: 'cluster-mark' }, clusterIcon(ICON_PC, 20)),
       el('b', {}, app.pcLabel(p.id), inSet && rank === 0 && members.length > 1 ? el('span', { class: 'cluster-tag', text: 'Strongest' }) : null,
         inSet && cl.out && cl.loader === p.id ? el('span', { class: 'cluster-tag cluster-loads', text: 'Loads the model' }) : null),
-      el('button', { class: 'btn', type: 'button', 'data-key': `cluster-move:${p.id}`, text: inSet ? 'Remove' : 'Add', 'aria-label': inSet ? `Remove ${p.name} from the cluster` : `Add ${p.name} to the cluster`, onclick: async e => {
+      el('button', { class: 'btn', type: 'button', 'data-key': `cluster-move:${p.id}`, text: inSet ? 'Remove' : 'Add', disabled: !!off, title: off || null, 'aria-label': inSet ? `Remove ${p.name} from the cluster` : `Add ${p.name} to the cluster`, onclick: async e => {
         e.currentTarget.disabled = true;
         await move(p.id, !inSet);
       } }),
-      el('span', { class: 'hint', text: m.ram || m.vram ? has(m) : 'Its memory is not known yet' }),
       why ? el('span', { class: 'hint', role: inSet ? 'status' : null, text: inSet ? `${why}: a load leaves it out.` : `${why}.` }) : null);
     return li;
   };
@@ -641,12 +650,14 @@ function drawCluster(pcs, cl) {
   const host = el('div', { class: `cluster-pc cluster-host${cl.out ? ' cluster-host-out' : ''}`, 'data-pc': 'here' },
     el('span', { class: 'cluster-mark' }, clusterIcon(ICON_PC, 20)),
     el('b', {}, app.pcLabel('here'), el('span', { class: 'cluster-tag', text: 'This PC' }), cl.out ? null : el('span', { class: 'cluster-tag cluster-loads', text: 'Loads the model' })),
-    el('span', { class: 'hint', text: here.ram ? `${has(here)}${hw?.cpu?.cores ? ` · ${hw.cpu.cores} cores` : ''}` : 'This PC' }));
+    el('span', { class: 'hint', text: 'This PC' }));
   const joins = el('div', { class: `cluster-link${cl.out ? ' cluster-link-out' : ''}` }, el('span', { class: 'cluster-link-words', text: cl.out
     ? 'This PC connects to the cluster and sends the chat'
-    : 'This PC takes part: the model loads here' }));
+    : cl.part === true ? 'This PC takes part: the model loads here' : cl.members.length ? 'Not chosen yet: the model loads on this PC as it always has' : 'No cluster yet' }));
   // "This PC takes part": on is the old way; off is refused by the server, with why, when no member can load the model now.
-  const part = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: !cl.out, disabled: !cl.members.length, 'data-key': 'cluster-part', 'aria-label': 'This PC takes part', onchange: async e => {
+  // Never on by itself: with no cluster nothing is set, and a cluster nobody chose for shows Off (the server keeps the old way running until they choose).
+  const chosenPart = cl.members.length > 0 && cl.part === true && !cl.out;
+  const part = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: chosenPart, disabled: !cl.members.length, 'data-key': 'cluster-part', 'aria-label': 'This PC takes part', onchange: async e => {
     const want = e.target.checked;
     e.target.disabled = true;
     if (!(await changeCluster({ takesPart: want }, ask))) e.target.checked = !want;
@@ -656,6 +667,8 @@ function drawCluster(pcs, cl) {
     el('span', { class: 'set-tile' }, clusterIcon(ICON_PC, 18)),
     el('span', { class: 'set-txt' }, el('b', { text: 'This PC takes part' }), el('span', { class: 'set-about', text: cl.out
       ? `Off: this PC only connects to the cluster and sends the chat, as text. "${loaderName}" loads the model from its own disk and borrows the other PCs' cards and RAM itself, so this PC's card, processor and network link carry none of the model. Switch it on to load the model here again.`
+      : !cl.members.length ? 'Not set: there is no cluster yet. Nothing is chosen until you put PCs in the cluster and decide here.'
+      : cl.part !== true ? 'Off: you have not chosen yet. Until you do, the model loads on this PC as it always has, and nothing here changes by itself. Switch it on to choose that this PC takes part; switch it on and then off to choose that another PC loads the model.'
       : 'On: the model loads on this PC, which keeps a share of it on its own card and RAM and sends each other PC its part over this PC\'s network link. Switch it off to only connect, for example from a laptop on Wi-Fi: the strongest wired PC in the cluster then loads the model, if it can (it needs links of its own to the other PCs, made on it).' })),
     el('span', { class: 'set-side' }, part)));
   /** One side of the page: takes a PC dropped on it when the PC comes from the other side. */
@@ -693,6 +706,16 @@ function drawCluster(pcs, cl) {
     fig(ram ? clusterGb(ram) : 'not known', 'RAM in the pool', 'ram'),
     fig(vram ? clusterGb(vram) : 'none', `card memory on ${cards} card${cards === 1 ? '' : 's'}`, 'gpu'),
     fig(cores ? `${cores} cores` : 'not known', !members.length ? (cl.out ? 'no node yet' : 'on this PC') : silent ? `${whose} ${members.length - silent} of ${members.length} node${members.length === 1 ? '' : 's'}; ${silent} ${silent === 1 ? 'does' : 'do'} not say ${silent === 1 ? 'its' : 'theirs'} (an older TOMLIN)` : `${whose} the nodes`, 'cpu'));
+  // Specs: the pool's figures and each PC's hardware line, in one fold closed by default. Every figure is read from the PCs now
+  // (this PC's own hardware, each linked PC's last hello), never stored.
+  const specLine = (label, text) => el('li', {}, el('b', { text: `${label}: ` }), text);
+  const poolPcs = cl.out ? members.length : members.length + 1;
+  const specs = app.clusterExtra ? app.clusterExtra.fold('specs',
+    `${poolPcs} PC${poolPcs === 1 ? '' : 's'} · ${ram ? `${clusterGb(ram)} RAM` : 'RAM not known'} · ${vram ? `${clusterGb(vram)} card memory` : 'no card memory'}`,
+    pool,
+    el('ul', { class: 'cluster-specs' },
+      specLine(`${app.pcLabel('here')} (this PC)`, here.ram ? `${has(here)}${hw?.cpu?.cores ? ` · ${hw.cpu.cores} cores` : ''}` : 'its memory is not known yet'),
+      ...[...members, ...others].map(p => specLine(`${app.pcLabel(p.id)}${members.includes(p) ? '' : ' (not in the cluster)'}`, memOf(p).ram || memOf(p).vram ? has(memOf(p)) : 'its memory is not known yet')))) : pool;
   // Choose an LLM, confirm the name, start chatting: a chat belongs to a hire, so one is made on the spot with a short
   // name from the list above (any name can be typed over it, and changed later under Staff).
   // With this PC out of the cluster, only the chat models on the loader's own disk can be loaded there (it never takes a
@@ -700,39 +723,62 @@ function drawCluster(pcs, cl) {
   const llms = cl.out ? cl.loaderModels ?? [] : (app.models?.chat ?? []).filter(m => m.installed !== false);
   const taken = new Set((homeUi.data?.staff ?? []).map(x => String(x.name).toLowerCase()));
   const spare = CLUSTER_NAMES.find(n => !taken.has(n.toLowerCase())) ?? `Helper ${taken.size + 1}`;
-  const pick = el('select', { id: 'cluster-llm', 'data-key': 'cluster-llm', 'aria-label': 'Choose an LLM' }, ...llms.map(m => el('option', { value: m.id, text: String(m.name).split(' · ')[0] })));
-  if (llms.some(m => m.id === homeUi.clusterLlm)) pick.value = homeUi.clusterLlm;
-  pick.addEventListener('change', () => { homeUi.clusterLlm = pick.value; });
+  const ex = app.clusterExtra;
+  // Any chat model from anywhere (this PC, the linked PCs, Hugging Face) while this PC loads the model; with this PC out, only
+  // the models on the loader's own disk (it never takes a model over this PC's link).
+  const many = !cl.out && !!ex;
+  if (many && !ex.hasNet()) ex.ask(() => { if (homeUi.view === 'cluster') drawCluster(homeUi.others ?? [], homeUi.cluster ?? cl); });
+  const picker = many ? ex.picker((app.models?.chat ?? []).filter(m => m.installed !== false), homeUi.clusterLlm, r => { homeUi.clusterLlm = r.key; }) : null;
+  const pick = many ? null : el('select', { id: 'cluster-llm', 'data-key': 'cluster-llm', 'aria-label': 'Choose an LLM' }, ...llms.map(m => el('option', { value: m.id, text: String(m.name).split(' · ')[0] })));
+  if (pick && llms.some(m => m.id === homeUi.clusterLlm)) pick.value = homeUi.clusterLlm;
+  pick?.addEventListener('change', () => { homeUi.clusterLlm = pick.value; });
   const who = el('input', { id: 'cluster-name', 'data-key': 'cluster-name', type: 'text', maxlength: '30', value: homeUi.clusterName ?? spare, 'aria-label': 'Name of the new staff member' });
   who.addEventListener('input', () => { homeUi.clusterName = who.value; });
+  const hireAndTalk = async model => {
+    team.data = await api('/api/staff', { action: 'hire', name: who.value.trim() || spare, role: 'default', model });
+    const hired = team.data.staff.at(-1);
+    homeUi.clusterName = undefined;
+    await app.afterHire?.(hired);
+    await app.talkTo(`staff:${hired.id}`);
+  };
+  const startBtn = el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-start', text: 'Start chat', disabled: many && ex.busy(), onclick: async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      if (many) {
+        const r = picker.current();
+        if (!r) throw new Error('pick a model first');
+        // Picked from another PC or Hugging Face: it is brought here first, with its progress under the list.
+        ex.setBusy(true);
+        const id = await ex.bringHere(r);
+        ex.say('');
+        await hireAndTalk(id);
+      } else {
+        await hireAndTalk(pick.value);
+      }
+    } catch (err) {
+      ex?.say('');
+      sayHere(ask, `The chat was not started: ${err.message}`);
+      btn.disabled = false;
+    } finally {
+      ex?.setBusy(false);
+    }
+  } });
   const start = el('div', { class: 'set-card cluster-start' }, el('div', { class: 'set-row' },
     el('span', { class: 'set-tile' }, document.querySelector('[data-setup="models"] svg')?.cloneNode(true) ?? ''),
     el('span', { class: 'set-txt' }, el('b', { text: 'Choose an LLM' }), el('span', { class: 'set-about', text: cl.out
       ? (llms.length ? `The models on "${loaderName}", which loads the model for the cluster. Start chat hires someone with that model under the name shown and opens their chat: "${loaderName}" answers, borrowing from the other PCs in the cluster when the model is too big for it alone, and only the chat's words cross this PC's link.` : cl.loaderNoModel || `No chat model is on "${loaderName}" yet.`)
-      : llms.length
-        ? 'Start chat hires someone with that chat model under the name shown (change it if you like) and opens their chat. A model too big for this PC borrows from the cluster when the cluster is on.'
-        : 'No chat model is on this PC yet: add one under Models first.' })),
-    el('span', { class: 'set-side' }, ...(llms.length ? [pick, who,
-      el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-start', text: 'Start chat', onclick: async e => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        try {
-          team.data = await api('/api/staff', { action: 'hire', name: who.value.trim() || spare, role: 'default', model: pick.value });
-          const hired = team.data.staff.at(-1);
-          homeUi.clusterName = undefined;
-          await app.afterHire?.(hired);
-          await app.talkTo(`staff:${hired.id}`);
-        } catch (err) {
-          sayHere(ask, `The chat was not started: ${err.message}`);
-          btn.disabled = false;
-        }
-      } })] : [el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-models', text: 'Models', onclick: () => app.openModels?.() })]))));
+      : many
+        ? 'Any model from anywhere. One on a linked PC is copied here and one not installed is downloaded, with its progress shown, and then the chat starts under the name shown (change it if you like). A model too big for this PC borrows from the cluster when the cluster is on.'
+        : llms.length
+          ? 'Start chat hires someone with that chat model under the name shown (change it if you like) and opens their chat. A model too big for this PC borrows from the cluster when the cluster is on.'
+          : 'No chat model is on this PC yet: add one under Models first.' }),
+      many ? picker.node : null),
+    el('span', { class: 'set-side' }, ...(many || llms.length ? [pick, who, startBtn].filter(Boolean) : [el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-models', text: 'Models', onclick: () => app.openModels?.() })]))));
   // Shutdown turns the cluster's nodes off, asking each in turn (each asks its own PIN). Never this PC.
   const offAll = members.length ? el('p', { class: 'hint cluster-off' }, el('button', { class: 'btn', type: 'button', 'data-key': 'cluster-off', title: 'Turns each node of the cluster off, one at a time, asking each one for its app lock PIN. This PC stays on.', onclick: async e => {
     const btn = e.currentTarget;
-    if (!confirm(`Turn off ${members.map(p => `"${p.name}"`).join(', ')}?
-
-Each shuts down about 15 seconds after it answers, one after the other, and stays off until someone switches it on again. Each asks for its own app lock PIN. This PC stays on.`)) return;
+    if (!(await askHere(ask, `Turn off ${members.map(p => `"${p.name}"`).join(', ')}? Each shuts down about 15 seconds after it answers, one after the other, and stays off until someone switches it on again. Each asks for its own app lock PIN. This PC stays on.`, 'Turn them off', 'Keep them on'))) return;
     btn.disabled = true;
     const said = [];
     for (const p of members) {
@@ -766,13 +812,14 @@ Each shuts down about 15 seconds after it answers, one after the other, and stay
           : 'Put at least one PC in the cluster, then switch it on. With no cluster, any linked PC that allows it is borrowed from.' })),
       el('span', { class: 'set-side' }, on))),
     partRow,
-    pool,
+    specs,
     el('div', { class: 'cluster-cols' },
       // This PC above the cluster's box, joined to it: it connects to the cluster, it is not one of its nodes.
       el('div', { class: 'cluster-side' }, host, joins,
         zone(true, 'The cluster', cl.out ? 'Its nodes, strongest first. The one marked "Loads the model" starts it from its own disk and borrows from the others.' : 'Its nodes, strongest first. They lend their card and RAM to this PC, which loads the model.', [members.length ? el('ul', { class: 'cluster-list' }, ...members.map((p, k) => tile(p, true, k))) : el('p', { class: 'hint cluster-empty', text: 'Drag a PC here, or press Add on its tile.' })])),
       zone(false, 'Available', 'Linked PCs not in the cluster: they work as usual. Strongest first.', [others.length ? el('ul', { class: 'cluster-list' }, ...others.map(p => tile(p, false, -1))) : el('p', { class: 'hint cluster-empty', text: usable.length ? 'Every linked PC is in the cluster.' : 'No linked PC yet: link one under Network first.' })])),
     start,
+    app.clusterExtra ? app.clusterExtra.examples() : null,
     gaps || three || offAll ? el('div', { class: 'cluster-under' }, ...[gaps, three, offAll].filter(Boolean)) : null,
   ]);
 }
@@ -870,25 +917,61 @@ app.deskDragging = () => homeUi.dragging;
 
 /** The move window: the software on that PC for them (their own model first when it is there), or why there is none. */
 const moveDlg = $('#desk-move');
+// Counts the windows closed: a copy being followed stops when its window is closed (they are then not moved).
+const moveRun = { n: 0 };
+moveDlg.addEventListener('close', () => { moveRun.n++; });
+/** src/calc.ts ramFit and chatNeed, so the window need not offer what the server would refuse (it checks again at the move). */
+const moveFit = (need, mem) => (!mem?.ram || !need ? null : need <= (mem.vram ?? 0) + Math.max(0, mem.ram - 3 * GB) ? 'ok' : need <= ((mem.vram ?? 0) + mem.ram) * 1.05 ? 'tight' : 'no');
+const moveNeed = bytes => (bytes + Math.min(bytes * 0.2, 1.5 * GB)) * 1.1 + 0.8 * GB;
+/** A model's name for matching: no case, no .gguf, no punctuation. */
+const moveNorm = x => String(x ?? '').toLowerCase().replace(/\.gguf$/, '').replace(/[^a-z0-9]/g, '');
+const moveCap = x => `${x.charAt(0).toUpperCase()}${x.slice(1)}${/[.!?]$/.test(x) ? '' : '.'}`;
+
+/** The suggested-list model (models.js POPULAR) whose file is named like this, with what Download on a linked PC needs; null if it is not there. */
+async function moveCatalog(stem) {
+  if (typeof POPULAR === 'undefined' || !stem) return null;
+  const { sizes } = await api('/api/chatmodels/sizes', { repos: POPULAR.map(p => p.repo) });
+  for (const z of sizes) {
+    const m = z.error ? null : z.models?.find(x => moveNorm(x.name) === moveNorm(stem));
+    if (m) return { repo: z.repo, rev: z.rev, name: m.name, bytes: m.bytes, what: m.name.replace(/\.gguf$/i, '') };
+  }
+  return null;
+}
+
 async function deskMove(s, pc, pcName) {
+  let net = null;
+  let cat = null;
   try {
-    team.data = await api('/api/staff');
-    // A PC just linked, or slow to answer, has no list here yet: it is asked again before anything is said about it.
-    if (pc && !deskModels(s, pc).length) {
+    // The window opens at once (the answer from the PC can take a moment), and is filled when it comes.
+    const waiting = () => {
       $('#desk-move-title').textContent = `Move ${s.name} to ${pcName}`;
       $('#desk-move-line').textContent = `Asking ${pcName} what models it has…`;
       $('#desk-move-row').hidden = true;
       $('#desk-move-go').hidden = true;
-      $('#desk-move-big').hidden = true;
+      $('#desk-move-go').disabled = false;
+      $('#desk-move-how').hidden = true;
+      $('#desk-move-more').hidden = true;
+      $('#desk-move-progress').hidden = true;
       $('#desk-move-fault').hidden = true;
       $('#desk-move-send').replaceChildren();
       moveDlg.dataset.id = s.id;
       if (!moveDlg.open) moveDlg.showModal();
+    };
+    if (pc) waiting();
+    team.data = await api('/api/staff');
+    // A PC just linked, or slow to answer, has no list here yet: it is asked again before anything is said about it.
+    if (pc && !deskModels(s, pc).length) {
       for (let i = 0; i < 4 && !deskModels(s, pc).length; i++) {
         await new Promise(r => setTimeout(r, 1500));
         if (!moveDlg.open) return;
         team.data = await api('/api/staff');
       }
+      if (!moveDlg.open) return;
+    }
+    // What that PC lets this one do (Network's own words), and, for a model deleted here, its place in the suggested list.
+    if (pc) {
+      net = (await api('/api/network?known=1').catch(() => null))?.pcs?.find(p => p.id === pc) ?? null;
+      if (s.modelGone && s.kind !== 'image' && !net?.fetch) cat = await moveCatalog(s.modelWas).catch(() => null);
       if (!moveDlg.open) return;
     }
   } catch (err) {
@@ -900,61 +983,147 @@ async function deskMove(s, pc, pcName) {
   // Each model against that PC's memory as a whole (the server sends ramFit; src/calc.ts): one that will not fit is
   // shown but cannot be picked, and says what it needs and what the PC has.
   const mem = pc ? team.data?.pcs?.find(p => p.id === pc) : team.data?.here;
-  const gb = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
   const wontFit = c => c.ramFit === 'no';
   const fits = models.filter(c => !wontFit(c));
   const same = models.find(c => short(c.name) === short(s.modelName));
   $('#desk-move-title').textContent = `Move ${s.name} to ${pcName}`;
   const sel = $('#desk-move-model');
   sel.replaceChildren(...models.map(c => el('option', { value: c.id, disabled: wontFit(c),
-    text: `${c.name.replace(/ on ".*?"/, '')}${wontFit(c) ? ` (needs about ${gb(c.need)}: more than ${pcName} has)` : c.ramFit === 'tight' ? ' (tight fit)' : ''}` })));
+    text: `${c.name.replace(/ on ".*?"/, '').replace(/ \((loads there when asked|loaded there)\)/, '')}${wontFit(c) ? ` (needs about ${gb(c.need)}: more than ${pcName} has)` : c.ramFit === 'tight' ? ' (tight fit)' : ''}` })));
   if (same && !wontFit(same)) sel.value = same.id;
   else if (fits.length) sel.value = fits[0].id;
-  $('#desk-move-row').hidden = !models.length;
-  $('#desk-move-go').hidden = !fits.length;
-  // The ones left out, said in words (a greyed line in a closed list is not seen).
-  const big = fits.length ? models.filter(wontFit) : [];
-  $('#desk-move-big').hidden = !big.length;
-  $('#desk-move-big').textContent = big.length ? `Not offered, too big for ${pcName}${mem?.ram ? ` (${gb(mem.ram)} of RAM, 3 GB of it kept for Windows${mem.vram ? `, and ${gb(mem.vram)} of graphics-card memory` : ''})` : ''}: ${big.map(c => `${c.name.replace(/ on ".*?"/, '').replace(/ \(.*\)$/, '')} needs about ${gb(c.need)}`).join('; ')}.` : '';
   $('#desk-move-fault').hidden = true;
+  $('#desk-move-progress').hidden = true;
+  $('#desk-move-go').disabled = false;
   const line = $('#desk-move-line');
   const box = $('#desk-move-send');
   box.replaceChildren();
   const own = s.model && !String(s.model).startsWith('remote:') ? s.model : '';
-  const ram = mem?.ram ? `${pcName} has ${gb(mem.ram)} of RAM${mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : ''}` : '';
-  if (models.length && !fits.length) line.textContent = `None of the models on ${pcName} fits its memory${ram ? ` (${ram}, 3 GB of it kept for Windows)` : ''}. Send a smaller model there first, or move ${s.name} to a PC with more memory.`;
+  // Their model's file may be gone from this PC (the name then reads as a fault): the plain name is used.
+  const uses = s.modelGone ? (s.modelWas || '') : (s.modelName || '');
+  const ram = mem?.ram ? `${pcName} has ${gb(mem.ram)} of RAM${mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : ''}, 3 GB of it kept for Windows` : '';
+  const ownC = pc && own && !s.modelGone && !same ? (team.data?.hireChoices?.[s.kind === 'image' ? 'image' : 'chat'] ?? []).find(c => c.id === own) ?? null : null;
+  // The choices that can work, the likeliest first; the others are told in More, with why.
+  const opts = [];
+  const notes = [];
+  if (ownC && net?.send) notes.push(`Copying ${uses} to ${pcName} is not offered: ${moveCap(net.send)}`);
+  else if (ownC && moveFit(ownC.need, mem) === 'no') notes.push(`Copying ${uses} to ${pcName} is not offered: it needs about ${gb(ownC.need)} and ${ram || 'that PC has less'}.`);
+  else if (ownC) opts.push({ v: 'send', text: `Copy ${uses} to ${pcName}, then move ${s.name}`, note: `${uses} is ${gb(ownC.bytes)}. It is sent over your network, stays on this PC too, and ${s.name} moves when it has arrived.` });
+  if (pc && cat && !same) {
+    if (net?.fetch) notes.push(`Downloading ${uses} on ${pcName} is not offered: ${moveCap(net.fetch)}`);
+    else if (moveFit(moveNeed(cat.bytes), mem) === 'no') notes.push(`Downloading ${uses} on ${pcName} is not offered: it needs about ${gb(moveNeed(cat.bytes))} and ${ram || 'that PC has less'}.`);
+    else opts.push({ v: 'fetch', text: `Download ${uses} on ${pcName}, then move ${s.name}`, note: `${pcName} downloads ${uses} (${gb(cat.bytes)}) from Hugging Face itself; nothing passes through this PC. ${s.name} moves when it has arrived.` });
+  }
+  if (fits.length) opts.push({ v: 'pick', text: pc ? `Use another model already on ${pcName}` : 'Pick other software' });
+  const big = fits.length ? models.filter(wontFit) : [];
+  if (big.length) notes.push(`Not offered, too big for ${pcName}${mem?.ram ? ` (${gb(mem.ram)} of RAM, 3 GB of it kept for Windows${mem.vram ? `, and ${gb(mem.vram)} of graphics-card memory` : ''})` : ''}: ${big.map(c => `${c.name.replace(/ on ".*?"/, '').replace(/ \(.*\)$/, '')} needs about ${gb(c.need)}`).join('; ')}.`);
+  const extra = opts.some(o => o.v !== 'pick');
+  if (models.length && !fits.length && !extra) line.textContent = `None of the models on ${pcName} fits its memory${ram ? ` (${ram})` : ''}. Send a smaller model there first, or move ${s.name} to a PC with more memory.`;
   else if (same && wontFit(same)) line.textContent = `${pcName} has ${s.modelName}, but it needs about ${gb(same.need)} and ${ram || 'that PC has less'}. Pick a smaller model ${s.name} runs on there.`;
   else if (same) line.textContent = `${pcName} has ${s.modelName}${same.ramFit === 'ok' ? ', and it fits' : same.ramFit === 'tight' ? ', but it is a tight fit' : ''}: ${s.name} keeps the same software there.`;
-  else if (models.length) line.textContent = `${pcName} does not have ${s.modelName || 'their model'}. Pick the software ${s.name} runs on there${pc && own ? ', or send a copy of theirs first' : ''}.`;
+  else if (opts.length) {
+    // Two lines: what is wrong, then what to do.
+    const what = s.modelGone && uses ? `${uses}, ${s.name}'s model, was deleted from this PC, and ${pcName} does not have it.` : uses ? `${s.name} uses ${uses}, which ${pcName} does not have.` : `${pcName} does not have ${s.name}'s software.`;
+    line.replaceChildren(what, el('br'), extra ? 'Would you like to:' : `Pick the software ${s.name} runs on there.`);
+  }
   else if (!pc) line.textContent = `This PC has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet.`;
   else line.textContent = team.data?.pcs?.find(p => p.id === pc)?.ok ? `${pcName} has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet. Send one there from Models.` : `${pcName} is not answering just now. Check it is on, then try again.`;
-  if (pc && !models.length) box.append(el('button', { class: 'btn', type: 'button', text: 'Try again', onclick: () => deskMove(s, pc, pcName) }));
-  // Their model is on this PC and the target is a node: a copy can go there first (the node must allow it).
-  if (pc && own && !same) box.append(el('button', { class: 'btn', type: 'button', text: `Send ${s.modelName} to ${pcName}`, onclick: async e => {
-    e.target.disabled = true;
-    try {
-      await api('/api/network/send', { pc, kind: s.kind === 'image' ? 'image' : 'chat', model: own });
-      moveDlg.close();
-      app.openNet?.();
-    } catch (err) {
-      $('#desk-move-fault').textContent = err.message;
-      $('#desk-move-fault').hidden = false;
-      e.target.disabled = false;
-    }
-  } }));
+  if (pc && !models.length && !extra) box.append(el('button', { class: 'btn', type: 'button', text: 'Try again', onclick: () => deskMove(s, pc, pcName) }));
+  // The choices as radios (only the ones that apply; the first is ticked). A lone "pick" is the select itself.
+  const how = $('#desk-move-how');
+  const radios = extra;
+  const more = $('#desk-move-more');
+  const sync = () => {
+    const v = radios ? how.querySelector('input:checked')?.value : opts[0]?.v;
+    $('#desk-move-row').hidden = v !== 'pick';
+    const note = opts.find(o => o.v === v)?.note;
+    const lines = [...(radios && note ? [note] : []), ...notes];
+    $('#desk-move-more-body').replaceChildren(...lines.map(t => el('p', { class: 'hint', text: t })));
+    more.hidden = !lines.length;
+  };
+  how.hidden = !radios;
+  how.replaceChildren(...(radios ? opts.map((o, i) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'desk-move-how', value: o.v, checked: i === 0, onchange: sync }), ' ', el('span', { text: o.text }))) : []));
+  more.open = false;
+  sync();
+  moveDlg.dataset.send = ownC ? own : '';
+  moveDlg.dataset.kind = s.kind === 'image' ? 'image' : 'chat';
+  moveDlg.dataset.pc = pc || '';
+  moveDlg.dataset.pcName = pcName;
+  moveDlg.dataset.uses = uses;
+  moveDlg.dataset.cat = cat ? JSON.stringify(cat) : '';
+  $('#desk-move-go').hidden = !opts.length;
   if (!pc && !models.length) box.append(el('button', { class: 'btn', type: 'button', text: 'Get models', onclick: () => { moveDlg.close(); app.openModels(); } }));
   moveDlg.dataset.id = s.id;
   if (!moveDlg.open) moveDlg.showModal();
 }
 $('#desk-move-cancel').addEventListener('click', () => moveDlg.close());
+
+/** Starts the copy or download, shows how far it is, and moves them when the model is listed on that PC. Closing the window ends it with them where they were. */
+async function moveAfter(run, start, who, pcName, uses, matches) {
+  const say = text => { const p = $('#desk-move-progress'); p.textContent = text; p.hidden = false; };
+  const stage = t => {
+    const pct = t.bytes ? ` ${Math.min(99, Math.floor((t.done / t.bytes) * 100))}%` : '';
+    if (t.queued) return `${uses}: waiting for its turn…`;
+    return `${t.kind === 'fetch' ? `${pcName} is downloading` : `Copying to ${pcName}:`} ${uses}${pct}…`;
+  };
+  say('Starting…');
+  const started = (await api(start.path, start.body)).transfer;
+  if (run !== moveRun.n) return;
+  say(stage(started));
+  let t = started;
+  while (t.state === 'working') {
+    await new Promise(r => setTimeout(r, 2000));
+    if (run !== moveRun.n) return;
+    try {
+      t = (await api('/api/network/transfers')).transfers.find(x => x.id === started.id) ?? { ...started, state: 'failed', said: 'TOMLIN was restarted while it worked.' };
+    } catch {
+      // TOMLIN did not answer just now: asked again.
+    }
+    if (t.state === 'working') say(stage(t));
+  }
+  if (t.state !== 'done') throw new Error(`${t.said || 'The copy did not finish.'} ${who} stays where they are.`);
+  // The model is on that PC; it is listed here when that PC next says what it has (asked again until it does).
+  say(`${uses} has arrived. Waiting for ${pcName} to list it…`);
+  for (let i = 0; i < 30; i++) {
+    team.data = await api('/api/staff');
+    if (run !== moveRun.n) return;
+    const hit = deskModels({ kind: moveDlg.dataset.kind }, moveDlg.dataset.pc).find(matches);
+    if (hit) {
+      say(`Moving ${who}…`);
+      team.data = await api('/api/staff', { action: 'change', id: moveDlg.dataset.id, model: hit.id, move: true });
+      return;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+    if (run !== moveRun.n) return;
+  }
+  throw new Error(`${uses} has arrived on ${pcName}, but it is not listed there yet. ${who} stays where they are: try Move again in a moment.`);
+}
+
 $('#desk-move-go').addEventListener('click', async () => {
   const go = $('#desk-move-go');
   go.disabled = true;
+  const run = moveRun.n;
   try {
-    team.data = await api('/api/staff', { action: 'change', id: moveDlg.dataset.id, model: $('#desk-move-model').value, move: true });
+    const how = $('#desk-move-how').hidden ? 'pick' : $('#desk-move-how').querySelector('input:checked')?.value;
+    if (how === 'pick') {
+      team.data = await api('/api/staff', { action: 'change', id: moveDlg.dataset.id, model: $('#desk-move-model').value, move: true });
+    } else {
+      const { pcName, uses, pc } = moveDlg.dataset;
+      const who = team.data?.staff?.find(x => x.id === moveDlg.dataset.id)?.name ?? 'They';
+      if (how === 'send') {
+        const file = moveNorm(moveDlg.dataset.send);
+        await moveAfter(run, { path: '/api/network/send', body: { pc, kind: moveDlg.dataset.kind, model: moveDlg.dataset.send } }, who, pcName, uses, c => c.id === `remote:${pc}:${moveDlg.dataset.send}` || moveNorm(c.id).endsWith(file));
+      } else {
+        const c = JSON.parse(moveDlg.dataset.cat);
+        await moveAfter(run, { path: '/api/network/fetch', body: { pc, kind: 'chat', repo: c.repo, rev: c.rev, name: c.name, what: c.what } }, who, pcName, uses, m => moveNorm(m.id).endsWith(moveNorm(c.name)) || moveNorm(m.name).includes(moveNorm(c.name)));
+      }
+    }
+    if (run !== moveRun.n) return;
     moveDlg.close();
     await refresh();
   } catch (err) {
+    if (run !== moveRun.n) return;
+    $('#desk-move-progress').hidden = true;
     $('#desk-move-fault').textContent = err.message;
     $('#desk-move-fault').hidden = false;
   } finally {
@@ -1003,6 +1172,7 @@ function memLine(bar, label) {
 function drawNodes(n) {
   homeUi.nodes = n;
   drawNodeSwitch(n);
+  app.drawNetMap?.();
   // This PC's memory and what is loaded are in the top bar (its rings and the models loaded). The models list on
   // Settings > This PC is the one in this PC's window (pcs.js), drawn when the page opens.
 }
@@ -1013,6 +1183,37 @@ function modelListsChanged() {
   teamLoad().catch(() => undefined);
   app.hireRedraw?.();
 }
+
+/**
+ * Network starts with what this PC is: an admin PC (it connects to nodes), a node, or backup and model storage. Only the
+ * parts that apply show; the role is remembered in this browser. Everything stays in the page, so the code that draws it
+ * does not depend on which role is open. A part from another role is reached by name (netSection), which switches the role.
+ */
+const NET_ROLES = {
+  admin: ['linked', 'guests', 'advanced'],
+  node: ['pc', 'sharing'],
+  storage: ['pc', 'sharing'],
+};
+function netRole(role) {
+  const at = NET_ROLES[role] ? role : 'admin';
+  for (const s of document.querySelectorAll('#nodes .net-sec')) s.hidden = !NET_ROLES[at].includes(s.dataset.sec);
+  for (const b of document.querySelectorAll('#net-menu .net-tab')) {
+    const on = b.dataset.role === at;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  }
+  store('net-role', at);
+}
+/** Shows the part named (pc, linked, sharing, guests, advanced), changing the role when the part is not in this one. */
+function netSection(name) {
+  const now = store('net-role');
+  if (NET_ROLES[now]?.includes(name)) return netRole(now);
+  netRole(['admin', 'node'].find(r => NET_ROLES[r].includes(name)));
+}
+app.netSection = netSection;
+for (const b of document.querySelectorAll('#net-menu .net-tab')) b.addEventListener('click', () => netRole(b.dataset.role));
+netRole(store('net-role'));
 
 /** This PC as a node: one tick, then its setup (name, setup code, optional PIN, port) and the PCs linked to it. */
 function drawNodeSwitch(n) {
@@ -1026,7 +1227,10 @@ function drawNodeSwitch(n) {
   $('#node-on-line').textContent = sh.error ? `Not shared: ${sh.error}`
     : sh.on && sh.listening ? 'Enter the setup code into the other PCs to allow them remote access.'
     : 'Off. Turn on to let your main PC use this PC\'s models (home network only).';
-  $('#node-setup').hidden = !sh.on;
+  // Everything that only exists while this PC is a node (its setup, the permissions, the PIN and port) is hidden together;
+  // the Sharing page says why it is empty.
+  for (const g of document.querySelectorAll('.node-gated')) g.hidden = !sh.on;
+  $('#net-sharing-off').hidden = sh.on;
   // "Open sharing permissions" said why the ticks were not showing: gone once they show.
   if (sh.on) $('#node-allow-why').hidden = true;
   if (!typing($('#node-name')) && !saving) $('#node-name').value = sh.name;
@@ -1077,13 +1281,14 @@ function drawNodeSwitch(n) {
   if (psig !== homeUi.drawn.paired) {
     homeUi.drawn.paired = psig;
     $('#node-paired').replaceChildren(...(sh.paired.length ? [el('p', { class: 'hint', text: 'PCs linked to this one:' }), ...sh.paired.map((x, k) => el('div', { class: 'job-remote' }, el('span', { text: x.name }), el('span', { class: 'hint', text: x.old ? 'linked before the link was encrypted: link it again from that PC' : x.guest ? `guest, since ${new Date(x.at).toLocaleDateString()}${x.expires ? `, until ${new Date(x.expires).toLocaleDateString()}` : ''}` : `since ${new Date(x.at).toLocaleDateString()}` }),
-      el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-paired-ask'), `Stop lending to "${x.name}"? It would need the setup code again.`, `Stop lending to ${x.name}`, 'Keep it linked')) nodeShare({ unpair: k, unpairId: x.id }); } })))] : [el('p', { class: 'hint', text: 'No PC has linked to this one yet.' })]));
+      el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-paired-ask'), `Stop lending to "${x.name}"? It would need the setup code again.`, `Stop lending to ${x.name}`, 'Keep it linked')) nodeShare({ unpair: k, unpairId: x.id }); } })))] : []));
   }
   // A4: new PCs asking for backups kept here, each with Allow / Don't allow (owner.js).
   app.drawClaims?.(sh.claims);
   drawNodeShare(sh);
   drawNodeAllow(sh);
   drawGuestPasses(sh);
+  drawDirectLinks(sh);
   drawHostPinsHeld(n.hostPins ?? [], sh);
 }
 
@@ -1096,9 +1301,102 @@ function drawHostPinsHeld(list, sh) {
   if (sig === homeUi.drawn.hostPins) return;
   homeUi.drawn.hostPins = sig;
   const nameOf = x => sh.paired.find(p => p.id === x.id)?.name ?? x.name;
-  $('#node-host-pins').replaceChildren(...(list.length ? [el('p', { class: 'hint', text: 'Hosts that hold a host PIN for this PC (one PIN typed there updates it, turns it off or deletes a model, still only with the ticks above):' }),
+  $('#node-host-pins').replaceChildren(...(list.length ? [el('p', { class: 'hint', text: 'Hosts that hold a host key or host PIN for this PC (unlocking that host updates this PC, turns it off or deletes a model, still only with the ticks above):' }),
     ...list.map(x => el('div', { class: 'job-remote' }, el('span', { text: nameOf(x) }), el('span', { class: 'hint', text: x.at ? `since ${new Date(x.at).toLocaleDateString()}` : '' }),
-      el('button', { class: 'link', type: 'button', text: 'Take it away', onclick: async () => { if (await askHere($('#node-paired-ask'), `Take the host PIN away from "${nameOf(x)}"? It then asks for this PC's own app lock PIN again to update it, turn it off or delete a model. It stays linked.`, 'Take it away', 'Keep it')) nodeShare({ hostPinDrop: x.id }); } })))] : []));
+      el('button', { class: 'link', type: 'button', text: 'Take it away', onclick: async () => { if (await askHere($('#node-paired-ask'), `Take the host ${x.key ? 'key' : 'PIN'} away from "${nameOf(x)}"? It then asks for this PC's own app lock PIN again to update it, turn it off or delete a model. It stays linked.`, 'Take it away', 'Keep it')) nodeShare({ hostPinDrop: x.id }); } })))] : []));
+}
+
+/** A direct copy being followed on the page: the pair, the model's name, and the timer that asks how it goes. */
+const peerFollow = { timer: 0 };
+
+/**
+ * Direct links between PCs (src/jobrun/peersync.ts on a host, src/peerlink.ts on a node): the links on this PC, each with
+ * Remove; the pairs this PC introduced, each with Check, Copy a model and End; and Introduce two linked PCs. The part is
+ * shown only when there is something to show or do (a node with links, or a host with two PCs that can talk directly).
+ */
+function drawDirectLinks(sh) {
+  const view = sh.peerLinks ?? { pairs: [], pcs: [] };
+  const here = sh.peersHere ?? [];
+  const pcs = view.pcs ?? [];
+  const able = pcs.filter(p => p.can !== false);
+  $('#direct-links').hidden = !here.length && !(view.pairs ?? []).length && able.length < 2;
+  const sig = JSON.stringify([view, here]);
+  if (sig === homeUi.drawn.peers) return;
+  homeUi.drawn.peers = sig;
+  const said = $('#node-peer-said');
+  const ask = $('#node-peer-ask');
+  const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const scopeWords = s => (s ?? []).map(x => ({ copy: 'copies models', runner: 'sends runners', cluster: 'cluster' })[x] ?? x).join(', ');
+  $('#node-peers-here').replaceChildren(...(here.length ? [el('p', { class: 'hint', text: 'Linked directly to this PC:' }),
+    ...here.map(p => el('div', { class: 'job-remote' },
+      el('span', { text: p.name }),
+      el('span', { class: 'hint', text: `introduced by "${p.host}" · ${scopeWords(p.scopes)}` }),
+      el('span', { class: 'hint', text: p.lastUsed ? `last used ${when(p.lastUsed)}` : 'not used yet' }),
+      el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere(ask, `Remove the direct link with "${p.name}"? It stops at once on this PC, and "${p.host}" cannot put it back.`, 'Remove the link', 'Keep it')) nodeShare({ peerRemoveHere: p.id }); } })))] : []));
+  // The pairs this PC introduced: each with how it stands, Check, Copy a model and End.
+  const syncWords = s => (s.sync === 'latest' ? '' : ` · "${s.name}" ${s.said || 'has not been told yet'}`);
+  const modelsOf = id => (pcs.find(x => x.id === id)?.models ?? []);
+  const copyPick = p => {
+    const choices = [[p.a, p.b], [p.b, p.a]].flatMap(([from, to]) => modelsOf(from.id).map(m => ({ from, to, m })));
+    if (!choices.length) return el('span', { class: 'hint', text: 'Neither PC shares a model to copy.' });
+    const sel = el('select', { 'aria-label': `The model to copy between "${p.a.name}" and "${p.b.name}"` }, ...choices.map((c, i) => el('option', { value: String(i), text: `${c.m.name}: from ${c.from.name} to ${c.to.name}` })));
+    const go = el('button', { class: 'btn', type: 'button', text: 'Copy it', onclick: async () => {
+      const c = choices[Number(sel.value)];
+      said.textContent = `Asking "${c.to.name}" to copy ${c.m.name} from "${c.from.name}"…`;
+      await nodeShare({ peerCopy: { from: c.from.id, to: c.to.id, kind: c.m.kind, model: c.m.id } }, () => followCopy(c));
+    } });
+    return el('span', { class: 'node-peer-copy' }, sel, go);
+  };
+  $('#node-peer-pairs').replaceChildren(...((view.pairs ?? []).length ? [el('p', { class: 'hint', text: 'PCs this one introduced to each other:' }),
+    ...view.pairs.map(p => el('div', { class: 'job-remote node-peer-pair' },
+      el('span', { text: `${p.a.name} and ${p.b.name}` }),
+      el('span', { class: 'hint', text: `${scopeWords(p.scopes)}${syncWords(p.a)}${syncWords(p.b)}` }),
+      el('button', { class: 'link', type: 'button', text: 'Check', title: 'Each PC tries to reach the other directly now', onclick: () => {
+        said.textContent = `Asking "${p.a.name}" and "${p.b.name}" to reach each other…`;
+        nodeShare({ peerCheck: { a: p.a.id, b: p.b.id } }, r => { said.textContent = (r.peerCheck ?? []).map(l => `${l.from} to ${l.to}: ${l.ok ? `reached${l.address ? ` at ${l.address}` : ''}${l.ms ? ` in ${l.ms} ms` : ''}` : l.said || 'not reached'}`).join('. '); });
+      } }),
+      el('button', { class: 'link', type: 'button', text: 'End', onclick: async () => { if (await askHere(ask, `End the direct link between "${p.a.name}" and "${p.b.name}"? Each is told now, or when it is next on.`, 'End it', 'Keep it')) nodeShare({ peerRemove: { a: p.a.id, b: p.b.id } }); } }),
+      copyPick(p)))] : []));
+  // Introduce: two different linked PCs (one that runs an older TOMLIN is named as such, and refused by the host).
+  // A PC that cannot be chosen is greyed, and one line says why (the reason was repeated in both lists, for each PC).
+  const choosable = p => p.can !== false && p.allowed;
+  const opts = () => pcs.map(p => el('option', { value: p.id, text: p.name, disabled: !choosable(p) }));
+  const a = $('#node-peer-a');
+  const b = $('#node-peer-b');
+  a.replaceChildren(...opts());
+  b.replaceChildren(...opts());
+  const open = [...a.options].map((o, i) => (o.disabled ? -1 : i)).filter(i => i >= 0);
+  a.selectedIndex = open[0] ?? -1;
+  b.selectedIndex = open[1] ?? open[0] ?? -1;
+  const stuck = pcs.filter(p => !choosable(p));
+  const why = $('#node-peer-why');
+  why.hidden = !stuck.length;
+  why.textContent = stuck.length ? `Greyed PCs cannot be chosen: ${stuck.map(p => `${p.name} (${p.can === false ? 'older TOMLIN' : 'its owner has not ticked it'})`).join(', ')}.` : '';
+  $('#node-peer-make').onclick = async () => {
+    if (a.value === b.value) return void (said.textContent = 'Pick two different PCs.');
+    said.textContent = '';
+    await nodeShare({ peerIntroduce: { a: a.value, b: b.value, scopes: ['copy'] } }, () => { said.textContent = 'Introduced: each is told now, or when it is next on.'; });
+  };
+}
+
+/** Follows a direct copy on the page until it ends: how much has come, then what it said. */
+function followCopy(c) {
+  clearTimeout(peerFollow.timer);
+  const said = $('#node-peer-said');
+  const tick = async () => {
+    try {
+      const r = await api('/api/share', { peerCopy: { from: c.from.id, to: c.to.id, action: 'state' } });
+      const t = r.peerCopy?.transfer;
+      if (!t) return void (said.textContent = `"${c.to.name}" has no copy under way from "${c.from.name}".`);
+      if (t.state === 'working') {
+        said.textContent = `"${c.to.name}" is copying ${t.what} from "${c.from.name}": ${gb(t.done)} of ${gb(t.bytes)}.`;
+        peerFollow.timer = setTimeout(tick, 3000);
+      } else said.textContent = t.said || `The copy ${t.state}.`;
+    } catch (e) {
+      said.textContent = e.message;
+    }
+  };
+  tick();
 }
 
 /**
@@ -1124,6 +1422,12 @@ function drawGuestPasses(sh) {
       delete made.dataset.pass;
     }
     // Where a pass works: each PC with its models (made here), or the host that gave it and this PC's models.
+    // A row shows how many models on each PC; the names are one press away (a PC's whole list was repeated on every row).
+    const count = n => (n ? `${n} model${n === 1 ? '' : 's'}` : 'no models');
+    const whereShort = x => {
+      if (x.from) return `from "${x.from}": ${count(x.models.length)}`;
+      return x.nodes.map(id => `${pcName(id)} (${count((x.nodeModels?.[id] ?? x.models).length)})`).join('; ');
+    };
     const where = x => {
       if (x.from) return `from "${x.from}": ${x.models.length ? x.models.map(id => modelName(sh.passNodes?.find(p => p.self)?.id, id)).join(', ') : 'no models'}`;
       return x.nodes.map(id => {
@@ -1137,10 +1441,12 @@ function drawGuestPasses(sh) {
       el('span', { text: x.label }),
       el('span', { class: 'hint', text: x.expired ? `expired ${when(x.expires)}` : x.expires ? `until ${when(x.expires)}` : 'no limit' }),
       el('span', { class: 'hint', text: x.lastSeen ? `last seen here ${when(x.lastSeen)}` : 'not used here yet' }),
-      el('span', { class: 'hint', text: where(x) }),
+      el('span', { class: 'hint', text: whereShort(x) }),
+      x.from || x.nodes.length ? el('details', { class: 'net-more pass-models' }, el('summary', { text: 'Which models' }), el('span', { class: 'hint', text: where(x) })) : null,
       (x.renewals ?? []).length ? el('span', { class: 'hint ok', text: renewedWords(x) }) : null,
       el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-pass-ask'), x.from ? `Remove the guest pass "${x.label}" on this PC? A PC linked here with it stops at once. "${x.from}" gave it, and keeps it for its other PCs.` : `Remove the guest pass "${x.label}"? A PC linked with it stops at once on every PC it is for, and its code links nothing more.`, 'Remove the pass', 'Keep it')) nodeShare({ passRemove: x.id }); } })))
-      : [el('p', { class: 'hint', text: 'No guest passes yet.' })]));
+      : []));
+    $('#node-pass-none').hidden = passes.length > 0;
   }
   // Requests for more time from guests whose pass expired: one line each, answered here (Approve renews the same link).
   const asig = JSON.stringify(sh.passAsks ?? []);
@@ -1174,7 +1480,9 @@ function drawGuestPasses(sh) {
     const slotLines = (sh.slotsNow ?? []).filter(x => x.slots > 1 || x.note).map(x => `${x.name}: ${x.slots} at once.${x.note ? ` ${x.note}` : ''}`);
     $('#node-slots-now').hidden = !slotLines.length;
     $('#node-slots-now').textContent = slotLines.join(' ');
-    $('#node-line').textContent = run.length || wait.length ? `Running: ${run.join('; ') || 'nothing'}. Waiting: ${wait.join('; ') || 'nobody'}.` : "The line for other PCs' work here is empty.";
+    // An empty line says nothing (a line that is empty is not news).
+    $('#node-line').textContent = run.length || wait.length ? `Running: ${run.join('; ') || 'nothing'}. Waiting: ${wait.join('; ') || 'nobody'}.` : '';
+    $('#node-line').hidden = !run.length && !wait.length;
     if (!homeUi.nodeSaving) {
       $('#node-host-first').checked = sh.hostFirst !== false;
       $('#node-at-once').value = String(sh.atOnce ?? 1);
@@ -1201,10 +1509,12 @@ function drawGuestPasses(sh) {
   if (fsig !== homeUi.drawn.passModels) {
     homeUi.drawn.passModels = fsig;
     const ticked = new Set([...document.querySelectorAll('#node-pass-nodes input:checked')].map(t => t.value));
+    const openPcs = new Set([...document.querySelectorAll('#node-pass-nodes details[open]')].map(d => d.dataset.pc));
     $('#node-pass-make').disabled = !pcs.length;
     $('#node-pass-nodes').replaceChildren(...(pcs.length ? pcs.map(p => el('div', { class: 'node-pass-pc' },
       el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `pc:${p.id}`, 'data-pc': p.id, checked: ticked.has(`pc:${p.id}`) }), ` ${p.self ? `This PC (${p.name})` : p.name}`),
-      el('div', { class: 'node-pass-models' }, ...(p.models.length ? p.models.map(m => el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `m:${p.id}:${m.id}`, 'data-pc-model': p.id, 'data-model': m.id, checked: ticked.has(`m:${p.id}:${m.id}`) }), ` ${m.name}${m.kind === 'image' ? ' (pictures)' : ''}`)) : [el('p', { class: 'hint', text: p.self ? 'No models on this PC yet.' : 'No models there yet, or it has not answered since it was linked.' })]))))
+      // The models are one press away: a PC with many would otherwise list them all, again, for every pass.
+      el('details', { class: 'net-more node-pass-models', 'data-pc': p.id, open: openPcs.has(p.id) || p.models.some(m => ticked.has(`m:${p.id}:${m.id}`)) }, el('summary', { text: `Models (${p.models.length})` }), ...(p.models.length ? p.models.map(m => el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `m:${p.id}:${m.id}`, 'data-pc-model': p.id, 'data-model': m.id, checked: ticked.has(`m:${p.id}:${m.id}`) }), ` ${m.name}${m.kind === 'image' ? ' (pictures)' : ''}`)) : [el('p', { class: 'hint', text: p.self ? 'No models on this PC yet.' : 'No models there yet, or it has not answered since it was linked.' })]))))
       : [el('p', { class: 'hint', text: 'Turn on "Enable this PC as a node", or link a node under Find other PCs, to make a guest pass for it.' })]));
   }
 }
@@ -1230,6 +1540,63 @@ function showPassCode(made) {
   box.hidden = false;
 }
 
+/**
+ * Test network: one line for each linked PC (does it answer, is its TOMLIN the same, which of its ticks stop something here)
+ * and one for each pair this PC introduced (can they reach each other now). It only asks: nothing is changed on any PC.
+ */
+$('#node-test-net').addEventListener('click', async () => {
+  const btn = $('#node-test-net');
+  const out = $('#node-test-out');
+  btn.disabled = true;
+  out.hidden = false;
+  out.replaceChildren(el('p', { class: 'hint', text: 'Testing every linked PC…' }));
+  const row = (ok, name, text) => el('div', { class: 'pc-test-row' }, el('span', { class: 'sdot', 'data-state': ok ? 'on' : 'off', 'aria-hidden': 'true' }), el('strong', { text: name }), el('span', { class: 'hint', text }));
+  try {
+    const [{ pcs }, nodes] = await Promise.all([api('/api/nodes/others'), api('/api/nodes')]);
+    const blocks = [['pull', 'Sharing of models'], ['receive', 'Accept models from linked PCs'], ['lend', 'Allow to be used as part of a cluster'], ['peer', 'Let PCs my host introduces connect directly']];
+    const rows = pcs.map(p => {
+      if (!p.ok) return row(false, p.name, `does not answer${p.error ? `: ${p.error}` : ''}`);
+      const version = p.update ? `behind this PC (${p.version})` : p.pull ? `ahead of this PC (${p.version})` : p.version ? `same TOMLIN (${p.version})` : 'TOMLIN version not reported';
+      const off = p.allow ? blocks.filter(([k]) => p.allow[k] === false).map(([, w]) => w) : [];
+      return row(!p.update && !p.pull && !off.length, p.name, `answers · ${version}${off.length ? ` · off there: ${off.join(', ')}` : ''}`);
+    });
+    const byId = Object.fromEntries(pcs.map(p => [p.id, p]));
+    const pairs = nodes.share?.peerLinks?.pairs ?? [];
+    for (const pr of pairs) {
+      const a = byId[pr.a.id];
+      const b = byId[pr.b.id];
+      const name = `${pr.a.name} and ${pr.b.name}`;
+      if (!a?.ok || !b?.ok) { rows.push(row(false, name, 'cannot be tested while one of them is off')); continue; }
+      try {
+        const r = await api('/api/share', { peerCheck: { a: pr.a.id, b: pr.b.id } });
+        const lines = r.peerCheck ?? [];
+        rows.push(row(lines.length > 0 && lines.every(l => l.ok), name, lines.length ? lines.map(l => `${l.from} to ${l.to}: ${l.ok ? 'reached' : l.said || 'not reached'}`).join(' · ') : 'no answer'));
+      } catch (e) {
+        rows.push(row(false, name, e.message));
+      }
+    }
+    const answering = pcs.filter(p => p.ok).length;
+    const unpaired = answering > 1 && !pairs.length ? el('p', { class: 'hint', text: 'No two of these PCs are linked to each other directly yet.' }) : null;
+    out.replaceChildren(...[...(pcs.length ? rows : [el('p', { class: 'hint', text: 'No other PCs linked yet.' })]), unpaired].filter(Boolean));
+    drawOthers(pcs);
+  } catch (e) {
+    out.replaceChildren(el('p', { class: 'fault-line', role: 'alert', text: e.message }));
+  }
+  btn.disabled = false;
+});
+
+// Guests: two buttons. Add a node opens the Add another PC fold; Create a guest pass opens its form.
+$('#node-pass-addnode').addEventListener('click', () => {
+  netSection('linked');
+  $('#net-add').open = true;
+  $('#net-add').scrollIntoView({ block: 'start' });
+});
+$('#node-pass-create').addEventListener('click', e => {
+  const form = $('#node-pass-new');
+  form.hidden = !form.hidden;
+  e.currentTarget.setAttribute('aria-expanded', String(!form.hidden));
+  if (!form.hidden) $('#node-pass-label').focus();
+});
 $('#node-host-first').addEventListener('change', e => nodeShare({ hostFirst: e.target.checked }));
 $('#node-at-once').addEventListener('change', e => nodeShare({ atOnce: Number(e.target.value) }));
 for (const id of ['#node-cap-answer', '#node-cap-prompt']) $(id).addEventListener('change', () => nodeShare({ guestCaps: { answer: Number($('#node-cap-answer').value), prompt: Number($('#node-cap-prompt').value) } }));
@@ -1249,7 +1616,8 @@ $('#node-pass-make').addEventListener('click', async () => {
     if (!r?.madePass) return;
     showPassCode(r.madePass);
     $('#node-pass-label').value = '';
-    $('#node-pass-new').open = false;
+    $('#node-pass-new').hidden = true;
+    $('#node-pass-create').setAttribute('aria-expanded', 'false');
   });
 });
 // A model ticked ticks its PC too.
@@ -1271,11 +1639,11 @@ $('#node-pass-nodes').addEventListener('change', e => {
 function drawNodeAllow(sh) {
   const a = sh.allow ?? { pull: false, backup: false, update: false, tune: false, lend: false, receive: false, give: false, off: true };
   if (!homeUi.nodeSaving) {
-    for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.checked = a[t.dataset.allow] === true;
+    for (const t of document.querySelectorAll('#node-allow [data-allow]')) t.checked = a[t.dataset.allow] === true;
     const all = $('#node-allow-all');
     all.checked = a.pull && a.backup && a.update && a.tune && a.receive && a.give && a.lend;
     all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.receive || a.give || a.lend);
-    if (sh.lend) $('#node-lend-idle').value = String(sh.lend.idle);
+    if (sh.lend) lendIdleShown(sh.lend.idle);
   }
   // Lending (Cluster or Max mode): whom this PC lends its card memory to now, or how the last loan ended.
   const lend = sh.lend;
@@ -1320,14 +1688,22 @@ function drawNodeAllow(sh) {
   }
 }
 function saveAllow(changed) {
-  const now = Object.fromEntries([...document.querySelectorAll('#node-setup [data-allow]')].map(t => [t.dataset.allow, t.checked]));
+  const now = Object.fromEntries([...document.querySelectorAll('#node-allow [data-allow]')].map(t => [t.dataset.allow, t.checked]));
   return nodeShare({ allow: { ...now, ...changed } });
 }
-for (const t of document.querySelectorAll('#node-setup [data-allow]')) t.addEventListener('change', () => saveAllow({}));
+for (const t of document.querySelectorAll('#node-allow [data-allow]')) t.addEventListener('change', () => saveAllow({}));
 $('#node-allow-all').addEventListener('change', e => {
   saveAllow({ pull: e.target.checked, backup: e.target.checked, update: e.target.checked, tune: e.target.checked, receive: e.target.checked, give: e.target.checked, lend: e.target.checked });
 });
-$('#node-lend-idle').addEventListener('change', e => nodeShare({ lendIdle: Number(e.target.value) }));
+/** The idle minutes: the control shows the chosen one, and a plain-text reading of the line gets it too (not all six choices run together). */
+function lendIdleShown(minutes) {
+  $('#node-lend-idle').value = String(minutes);
+  $('#node-lend-idle-text').textContent = String($('#node-lend-idle').value);
+}
+$('#node-lend-idle').addEventListener('change', e => {
+  lendIdleShown(e.target.value);
+  nodeShare({ lendIdle: Number(e.target.value) });
+});
 
 /** "Models other PCs can use": every model on this PC, in two columns (nothing to tick: linked PCs may use them all). */
 function drawNodeShare(sh) {
@@ -1393,12 +1769,12 @@ function askAppPin(fault, other, doing) {
     const kind = doing?.kind ?? (other ? 'password' : app.lockKind?.() ?? 'pin');
     const w = kind === 'password' ? 'password' : 'PIN';
     app.fitSecret?.($('#node-pin-input'), kind);
-    $('#node-pin-title').textContent = other ? `Type the app lock PIN of "${other}"` : `Type the app lock ${w}`;
+    $('#node-pin-title').textContent = other ? `Enter pin for ${other}:` : `Type the app lock ${w}`;
     $('#node-pin-label').textContent = other ? 'PIN (or password)' : kind === 'password' ? 'Password' : 'PIN';
     // The button says what pressing it does: "Change it" read as changing the PIN (3 Nov).
     $('#node-pin-ok').textContent = other ? `Update "${other}"` : 'Apply the change';
     $('#node-pin-about').textContent = other
-      ? `Updating another PC needs the PIN (or password) that opens TOMLIN on "${other}", typed here for this update. It is checked there and not kept here, so only someone who knows it can update that PC.`
+      ? 'To update, enter either your admin pin, or the individual pin for the node.'
       : `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;
     // A delete or a removal on another PC names itself (the words above are for an update).
     if (doing?.button) $('#node-pin-ok').textContent = doing.button;
@@ -1411,9 +1787,7 @@ function askAppPin(fault, other, doing) {
     either.hidden = true;
     if (other && !doing?.own) api('/api/network/host-pin', { action: 'view' }).then(v => {
       if (!done && dlg.open) {
-        either.hidden = !(v.on && v.pcs.some(p => p.has && p.name === other));
-        // Either PIN opens it: the title says both (a title another step set, like the host PIN's own, stays).
-        if (!either.hidden && !doing?.title) $('#node-pin-title').textContent = `Type the admin PIN, or the "${other}" PIN`;
+        either.hidden = !(v.on && v.pcs.some(p => p.has && !p.holdsKey && p.name === other));
       }
     }).catch(() => {
       either.hidden = true;
@@ -1489,7 +1863,7 @@ async function powerOffWithPin(pc, held) {
       if (!e.data?.needNodePin) throw e;
       const tried = hostPin !== undefined || nodePin !== undefined;
       hostPin = undefined;
-      nodePin = await askAppPin(tried ? e.message : '', pc.name);
+      nodePin = await askAppPin(tried ? e.message : '', pc.name, { button: `Shut down "${pc.name}"`, about: 'To shut down, enter either your admin pin, or the individual pin for the node.' });
       if (nodePin === null) return null;
     }
   }
@@ -1556,7 +1930,7 @@ async function nodeShare(body, onSaved) {
   } finally {
     homeUi.nodeSaving--;
   }
-  homeUi.drawn.paired = homeUi.drawn.passes = homeUi.drawn.passSync = homeUi.drawn.passAsks = null;
+  homeUi.drawn.paired = homeUi.drawn.passes = homeUi.drawn.passSync = homeUi.drawn.passAsks = homeUi.drawn.peers = null;
   await refreshNodes();
   return saved;
 }
@@ -1732,6 +2106,7 @@ function passAskBox(f) {
 /** Opens the helper, with the address carried over when one was typed or found. */
 function openLinkHelp(address) {
   if (address && !$('#link-help-addr').value) $('#link-help-addr').value = address;
+  $('#net-add').open = true;
   $('#link-help').open = true;
 }
 $('#link-help-check').addEventListener('click', async () => {
@@ -1812,6 +2187,8 @@ $('#node-addr-form').addEventListener('submit', async e => {
 /** Other PCs (the rail, Home's set-up card, the Jobs window) open here. */
 app.openPcs = async () => {
   openNodes();
+  netSection('linked');
+  $('#net-add').open = true;
   await new Promise(r => setTimeout(r, 100));
   $('#node-link').scrollIntoView({ block: 'start' });
 };
@@ -1848,11 +2225,24 @@ app.updateInstallBack = () => {
   updateHome = null;
 };
 
+/** What a linked PC is, from what it last reported: shown on hover of the (!) beside its name. */
+function pcSpecs(p) {
+  const total = bar => bar.segments.reduce((n, s) => n + s.bytes, 0);
+  const lines = [
+    p.memory?.ram?.bar ? `${NODE_GB(total(p.memory.ram.bar))} of RAM` : null,
+    p.memory?.gpu ? `${p.memory.gpu.name}${p.memory.gpu.bar ? ` with ${NODE_GB(total(p.memory.gpu.bar))}` : ''}` : null,
+    p.version ? `TOMLIN ${p.version}` : null,
+  ].filter(Boolean);
+  return lines.length ? lines : ['Nothing is known about this PC yet: it has not told this PC what it is.'];
+}
+
 function drawOthers(pcs) {
   homeUi.others = pcs;
   drawUpdateAll(pcs);
+  app.drawNetMap?.();
   drawCluster(pcs, homeUi.cluster ?? { on: false, members: [] });
-  keepFocus($('#node-others'), pcs.length ? pcs.map(p => {
+  // Each linked PC is a small tile; its whole card (memory, models, Hire staff, Remove...) opens above the tiles on request.
+  const pcCard = p => {
     const mem = p.ok && p.memory?.ram?.bar;
     const away = p.ok && p.away ? new Date(p.away).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
     // A PC this one is a guest on says so, and when its pass ended (asked for more under Find PCs on my network).
@@ -1917,7 +2307,10 @@ function drawOthers(pcs) {
       el('div', { class: 'node-head' },
         el('span', { class: 'sdot', 'data-state': p.ok && !away ? (p.model ? 'on' : 'asleep') : 'off', 'aria-hidden': 'true' }),
         el('strong', { text: p.name }),
-        el('span', { class: 'hint', text: `${p.url} · ${state}` })),
+        // What tells two PCs of the same name apart: its address, and on hover of the (!) what it is (as on Models on my other PCs).
+        el('span', { class: 'net-spec', tabindex: '0', role: 'img', 'aria-label': `About ${p.name}: ${pcSpecs(p).join(', ')}`, title: pcSpecs(p).join('\n'), text: '(!)' }),
+        el('span', { class: 'hint', text: `· ${p.url.replace(/^https?:\/\//, '')}` })),
+      el('span', { class: 'hint node-state', text: state }),
       // Behind this PC (a lower version, or the same one with different files): "Update it" sends this PC's TOMLIN there
       // (it starts the new version by itself), or why not.
       p.ok && p.update ? el('div', { class: 'node-update' },
@@ -2022,8 +2415,47 @@ It shuts down about 15 seconds after it answers, and stays off until someone swi
         refreshOthers();
         refreshPcs();
       } })));
-  }) : [el('p', { class: 'hint', text: 'No other PCs linked yet.' })]);
+  };
+  homeUi.pcCard = pcCard;
+  const stateOf = p => (p.ok && !p.away ? (p.model ? 'on' : 'asleep') : 'off');
+  const wordOf = p => (!p.ok ? (p.seenAt ? `Off, last seen ${new Date(p.seenAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}` : 'Off') : p.away ? 'Logged off' : p.backupsOnly ? 'On: backups' : p.model ? 'On' : 'Asleep');
+  const tiny = p => {
+    const ram = p.memory?.ram?.bar ? NODE_GB(p.memory.ram.bar.segments.reduce((n, x) => n + x.bytes, 0)) : null;
+    const gpu = p.memory?.gpu?.name ? p.memory.gpu.name.replace(/^NVIDIA\s+(GeForce\s+)?/i, '') : null;
+    return [ram, gpu].filter(Boolean).join(' · ');
+  };
+  const find = $('#pc-find');
+  find.hidden = pcs.length < 6;
+  const q = find.hidden ? '' : $('#node-pc-find').value.trim().toLowerCase();
+  const want = find.hidden ? '' : $('#node-pc-status').value;
+  const shown = pcs.filter(p => (!q || `${p.name} ${p.url}`.toLowerCase().includes(q)) && (!want || stateOf(p) === want));
+  keepFocus($('#node-others'), pcs.length ? (shown.length ? shown.map(p => el('button', { class: 'pc-tile', type: 'button', 'data-key': `tile:${p.id}`, title: `Open ${p.name}: memory, models, Hire staff, Remove`, onclick: () => openPcDetail(p.id) },
+    el('span', { class: 'sdot', 'data-state': stateOf(p), 'aria-hidden': 'true' }),
+    el('span', { class: 'pc-tile-name' }, el('strong', { text: p.name }), ' ', el('span', { class: 'hint', text: p.url.replace(/^https?:\/\//, '') })),
+    el('span', { class: 'hint pc-tile-state', text: wordOf(p) }),
+    tiny(p) ? el('span', { class: 'hint pc-tile-tiny', text: tiny(p) }) : null)) : [el('p', { class: 'hint', text: 'No linked PC matches.' })]) : [el('p', { class: 'hint', text: 'No other PCs linked yet.' })]);
+  // An open card is drawn again from the newest answer (and closed when its PC is gone).
+  const open = homeUi.pcOpen && pcs.find(p => p.id === homeUi.pcOpen);
+  if (homeUi.pcOpen && !open) closePcDetail();
+  else if (open) {
+    $('#pc-detail-title').textContent = open.name;
+    keepFocus($('#pc-detail-body'), [pcCard(open)]);
+  }
 }
+function openPcDetail(id) {
+  homeUi.pcOpen = id;
+  $('#pc-detail').hidden = false;
+  drawOthers(homeUi.others ?? []);
+  $('#pc-detail').scrollIntoView({ block: 'nearest' });
+}
+function closePcDetail() {
+  homeUi.pcOpen = null;
+  $('#pc-detail').hidden = true;
+  $('#pc-detail-body').replaceChildren();
+}
+$('#pc-detail-close').addEventListener('click', closePcDetail);
+$('#node-pc-find').addEventListener('input', () => drawOthers(homeUi.others ?? []));
+$('#node-pc-status').addEventListener('change', () => drawOthers(homeUi.others ?? []));
 
 /**
  * A linked PC's chat model: its Guessing model (a smaller model of the same family on that PC guesses the next few
@@ -2083,7 +2515,7 @@ function openThisPc() {
   setView('thispc');
   homeUi.drawn.models = homeUi.drawn.team = null;
   refreshNodes();
-  app.pcModelsInto?.($('#node-models'), $('#node-models-ask'));
+  app.pcModelsInto?.($('#node-models'), $('#node-models-ask'), $('#thispc-roles'));
 }
 app.openThisPc = openThisPc;
 /**
@@ -2094,9 +2526,13 @@ app.openThisPc = openThisPc;
 // so under that name these three buttons opened that page, not the ticks.
 app.openSharePermissions = async () => {
   openNodes();
+  // The ticks are on the Sharing page; shown first so "hidden" below means "this PC is not a node".
+  netSection('sharing');
   // Drawn from the server's answer first, so the ticks are found where they are now (not where the last draw left them).
   await refreshNodes();
   const off = !!$('#node-allow').closest('[hidden]');
+  // Not a node: the switch and the reason are on This PC.
+  if (off) netSection('pc');
   // The ticks sit under Setup, shown only while this PC is a node: said, beside the tick that shows them.
   const why = $('#node-allow-why');
   why.hidden = !off;
@@ -2168,7 +2604,23 @@ async function askInstall(z, mine) {
   }
   installSaid(`Starting TOMLIN ${z.version} once as a test (up to a minute and a half)…`, 1);
   try {
-    const r = await api('/api/install/zip-go', { version: z.version, anyway: z.signed === false });
+    // An unsigned zip on a PC with the app lock: the PIN (or password) is asked, and asked again after a wrong one.
+    let appPin;
+    let r;
+    for (;;) {
+      try {
+        r = await api('/api/install/zip-go', { version: z.version, anyway: z.signed === false, ...(appPin === undefined ? {} : { appPin }) });
+        break;
+      } catch (e) {
+        if (!e.data?.needPin) throw e;
+        appPin = await askAppPin(appPin === undefined ? '' : e.message, undefined, { about: 'A zip that is not signed by TOMLIN\'s maker is installed only with the app lock PIN (or password).', button: 'Install anyway' });
+        if (appPin === null) {
+          installSaid('');
+          sayHere(box, 'Not updated: no PIN was typed.');
+          return;
+        }
+      }
+    }
     installSaid(`TOMLIN ${r.version} passed its test start and is starting (${r.folder}). This page opens again by itself when it answers.`, 1);
     waitForVersion(r.version);
   } catch (e) {
@@ -2345,7 +2797,7 @@ async function updateAllLinked() {
   const held = {};
   // The host PIN: asked once here for every PC that holds it, and held for this run only.
   const hp = await api('/api/network/host-pin', { action: 'view' }).catch(() => null);
-  const holders = new Set((hp?.pcs ?? []).filter(x => x.has).map(x => x.id));
+  const holders = new Set((hp?.pcs ?? []).filter(x => x.has && !x.holdsKey).map(x => x.id));
   const by = can.filter(p => holders.has(p.id)).length;
   if (hp?.on && by) {
     const who = by < can.length ? `${by} of the ${can.length} PCs to update hold` : by === 1 ? `"${can[0].name}" holds` : `All ${by} PCs to update hold`;
@@ -2397,14 +2849,47 @@ function hostPinSay(text) {
   $('#host-pin-said').hidden = !text;
 }
 
+/** What the last admin-access step said. */
+let hostKeySaid = '';
+async function hostKeyDo(action, ask) {
+  if (ask && !confirm(ask)) return;
+  try {
+    const r = await api('/api/network/host-pin', { action });
+    hostKeySaid = r.missed?.length ? `Not answering now, so still holding the key until their owner takes it away there (Network): ${r.missed.join(', ')}.` : action === 'key-off' ? 'Turned off.' : action === 'key-on' ? 'Turned on.' : 'Made a new key. Each PC takes it the next time its own app lock PIN is typed here.';
+  } catch (e) {
+    hostKeySaid = e.message;
+  }
+  drawHostPin();
+}
+$('#host-key-new').addEventListener('click', () => hostKeyDo('key-reset', 'Make a new key?\n\nThe linked PCs that hold the old one ask for their own app lock PIN once more, and then take the new one.'));
+$('#host-key-off').addEventListener('click', () => hostKeyDo('key-off', 'Turn admin access off?\n\nThe key is taken away here and from every linked PC that answers now. Each then asks for its own app lock PIN again to be updated, turned off or to delete a model.'));
+$('#host-key-on').addEventListener('click', () => hostKeyDo('key-on'));
+
 /** The host PIN's row under Linked PCs: whether one is set here, and which linked PCs hold it (as each last said). */
 async function drawHostPin() {
   const v = await api('/api/network/host-pin', { action: 'view' }).catch(() => null);
   if (!v) return;
   const names = list => list.map(p => `"${p.name}"`).join(', ');
-  const has = v.pcs.filter(p => p.has);
+  const has = v.pcs.filter(p => p.has && !p.holdsKey);
   const lack = v.pcs.filter(p => p.can && !p.has);
   const old = v.pcs.filter(p => p.heard && !p.can);
+  // Admin access: the host key (no PIN typed), used only while this PC is unlocked.
+  if (v.key) {
+    const keyed = v.pcs.filter(p => p.keyHeld);
+    const waiting = v.pcs.filter(p => p.can && !p.keyHeld && !(v.on && p.has && !p.holdsKey));
+    $('#host-key-line').textContent = v.key.on
+      ? `Unlocking TOMLIN here lets this PC update, turn off or delete models on the linked PCs, with no PIN typed.${keyed.length ? ` ${keyed.length} of ${v.pcs.length} linked PC${v.pcs.length > 1 ? 's' : ''} hold${keyed.length > 1 ? '' : 's'} this PC's key.` : ''}`
+      : 'Off: each linked PC asks for its own app lock PIN to be updated, turned off or to delete a model.';
+    $('#host-key-pcs').textContent = v.key.on ? [
+      keyed.length ? `Holding the key: ${names(keyed)}.` : '',
+      waiting.length ? `Not yet: ${names(waiting)}. Each takes it the first time its own app lock PIN is typed here for an update, a delete or a turn-off.` : '',
+    ].filter(Boolean).join(' ') : '';
+    $('#host-key-new').hidden = !(v.key.on && v.key.made);
+    $('#host-key-off').hidden = !v.key.on;
+    $('#host-key-on').hidden = v.key.on;
+    $('#host-key-said').textContent = hostKeySaid;
+    $('#host-key-said').hidden = !hostKeySaid;
+  }
   $('#host-pin-set').textContent = v.on ? 'Change the host PIN' : 'Set the host PIN';
   $('#host-pin-line').textContent = v.on
     ? `Set${v.at ? ` on ${new Date(v.at).toLocaleDateString()}` : ''}. ${has.length ? `Held by ${has.length} of ${v.pcs.length} linked PC${v.pcs.length > 1 ? 's' : ''}.` : 'No linked PC holds it yet.'}`

@@ -536,7 +536,9 @@
   $('#hs-form').addEventListener('submit', async e => {
     e.preventDefault();
     const go = $('#hs-go');
+    const goText = go.textContent;
     go.disabled = true;
+    go.textContent = 'Hiring…';
     fault('');
     try {
       team.data = await api('/api/staff', { action: 'hire', name: $('#hs-name').value, role: hs.role, model: hs.model || undefined, look: hs.look ?? undefined });
@@ -547,6 +549,7 @@
       fault(err.message);
     } finally {
       go.disabled = false;
+      go.textContent = goText;
       drawSummary();
     }
   });

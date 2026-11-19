@@ -74,7 +74,7 @@ test('this PC out of its cluster: refused with why until a node can load the mod
     assert.deepEqual(saved(), { on: false, members: [aId, bId], out: true, loader: aId });
     assert.equal((await post({ on: true })).status, 200);
     assert.equal((await post({ takesPart: true })).status, 200);
-    assert.deepEqual(saved(), { on: true, members: [aId, bId] });
+    assert.deepEqual(saved(), { on: true, members: [aId, bId], part: true }, 'pressing it on is a saved choice');
     assert.equal((await host.get('/api/home/pcs')).body.pcs.find((x: { id: string }) => x.id === aId).heldByCluster, true);
 
     // Out again, then B leaves the set: one node cannot be a cluster this PC stays out of, so it takes part again, said.

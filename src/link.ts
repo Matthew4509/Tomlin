@@ -133,6 +133,42 @@ export function openBytes(key: Buffer, raw: Buffer, aad: string): Buffer | null 
 /** A request's id: its nonce, which the answer is tied to. */
 export const requestId = (box: string) => box.slice(0, 16);
 
+/**
+ * How far each linked PC's clock is from this one's, in ms, by its address: learned from the Date header of its answers.
+ * A request to it is stamped in its own time, so a PC whose clock or time zone is wrong still takes requests (the stamp
+ * is only its guard against an old copy sent again, which still holds: it is checked against that PC's own clock).
+ */
+const clockGap = new Map<string, number>();
+const originOf = (url: string): string => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+};
+/** Learns `url`'s clock from an answer's Date header (seconds only, so a gap under 5 seconds is not kept). */
+export function noteClock(url: string, date: string | null | undefined, now = Date.now()): void {
+  const t = date ? Date.parse(date) : NaN;
+  if (!Number.isFinite(t)) return;
+  const gap = t - now;
+  if (Math.abs(gap) < 5_000) clockGap.delete(originOf(url));
+  else clockGap.set(originOf(url), gap);
+}
+/** The time now on `url`'s clock, as far as this PC knows it. */
+export const nodeNow = (url: string, now = Date.now()): number => now + (clockGap.get(originOf(url)) ?? 0);
+/**
+ * Asks `url` for its clock with one plain GET (its Date header). For the stream doors: their refusal is written straight
+ * on the socket and carries no Date header.
+ */
+export async function learnClock(url: string, ms = 5000): Promise<void> {
+  const res = await fetch(`${originOf(url)}/`, { method: 'GET', signal: AbortSignal.timeout(ms) }).catch(() => null);
+  if (!res) return;
+  noteClock(url, res.headers.get('date'));
+  await res.body?.cancel().catch(() => undefined);
+}
+/** The node refused a request for its time: learn its clock from that answer and send again. */
+export const clockRefused = (error: unknown): boolean => /clocks on the two PCs differ/.test(String(error ?? ''));
+
 /** The host's request: the door, the time and the body, sealed. */
 export function sealRequest(keys: Buffer, path: string, body: unknown, now = Date.now()): { v: number; box: string } {
   return { v: LINK_VERSION, box: seal(toNode(keys), Buffer.from(JSON.stringify({ path, t: now, body: body ?? {} })), 'request') };

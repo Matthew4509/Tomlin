@@ -33,9 +33,19 @@ function finderBox() {
 
 function finderFrame(...kids) {
   finderBox().replaceChildren(el('div', { class: 'help-body finder' },
-    el('h2', { id: 'finder-title', text: 'Find the fastest setup' }),
-    el('p', { class: 'hint', text: `${finder.t.name || finder.t.model} on ${fWhere()}` }),
+    el('h2', { id: 'finder-title', text: `Optimize ${finder.t.name || finder.t.model} on ${fWhere()}` }),
     ...kids));
+}
+
+/** A small (!) that opens its words on hover or focus: the long explanations are kept, out of the way. */
+const fBang = words => el('span', { class: 'net-spec', tabindex: '0', role: 'img', 'aria-label': words, title: words, text: '(!)' });
+
+/** What the PC the test runs on is, from what it last told this PC (RAM, card, its memory). */
+function finderSpecs() {
+  const d = typeof team !== 'undefined' ? team.data : null;
+  const m = finder.t.pc === 'here' ? d?.here : d?.pcs?.find(p => p.id === finder.t.pc);
+  const g = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
+  return [m?.ram ? `${g(m.ram)} of RAM` : null, m?.gpu ? String(m.gpu) : null, m?.vram ? `${g(m.vram)} of card memory` : null].filter(Boolean).join(' · ');
 }
 
 async function finderPreview() {
@@ -60,18 +70,19 @@ async function finderPreview() {
     el('div', { class: 'finder-ctx-list' }, ...p.contexts.map(n => el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: finder.contexts.has(n), onchange: e => { if (e.target.checked) finder.contexts.add(n); else finder.contexts.delete(n); finderPreview(); } }), ` ${n.toLocaleString()}`))));
   const start = el('button', { class: 'btn primary', type: 'button', text: 'Start the test', onclick: () => finderStart(start) });
   finderFrame(
-    finder.t.ask ? el('p', { text: `Test ${p.name} on ${fWhere()} now, to find its fastest setup? If you skip, it keeps the settings it has now; you can run the test later from Edit staff.` }) : null,
-    el('p', { text: `TOMLIN starts this model a few different ways and times each one with the same example prompts. Nothing changes until you press Go with this config. While it runs, chats on ${fWhere()} wait.` }),
+    el('p', {}, `Times ${p.name} a few ways with the same example prompts, then recommends one. `, fBang(`TOMLIN starts this model a few different ways and times each one with the same example prompts. Nothing changes until you press Go with this config. While it runs, chats on ${fWhere()} wait.${finder.t.ask ? ' If you skip, it keeps the settings it has now; you can run the test later from Edit staff.' : ''}`)),
     el('div', { class: 'finder-sizes', role: 'radiogroup', 'aria-label': 'How long' }, sizeRow('quick', 'Quick'), sizeRow('full', 'Full')),
-    el('h3', { text: 'It will try' }),
-    el('ol', { class: 'finder-plan' }, ...p.rows.map(r => el('li', {}, el('strong', { text: r.name }), r.tight ? ' (leaves little on the card)' : '', el('span', { class: 'hint', text: ` ${r.why}` })))),
+    el('details', { class: 'finder-tries' },
+      el('summary', { text: `What it will try (${p.rows.length}${p.left.length ? `, ${p.left.length} not tried` : ''})` }),
+      el('ol', { class: 'finder-plan' }, ...p.rows.map(r => el('li', {}, el('strong', { text: r.name }), r.tight ? ' (leaves little on the card)' : '', el('span', { class: 'hint', text: ` ${r.why}` })))),
+      p.left.length ? el('p', { class: 'hint', text: 'Not tried:' }) : null,
+      p.left.length ? el('ul', { class: 'finder-plan' }, ...p.left.map(l => el('li', {}, el('strong', { text: l.name || l.id || 'Another setup' }), l.why ? el('span', { class: 'hint', text: `: ${l.why}` }) : null))) : null,
+      p.card ? el('p', { class: 'hint', text: 'The list may change a little once the model is loaded as it is now (what it really holds on the card is read first).' }) : null),
     p.smaller ? finderSmaller(p.smaller) : null,
-    p.left.length ? el('details', {}, el('summary', { text: `Not tried (${p.left.length})` }), el('ul', { class: 'finder-plan' }, ...p.left.map(l => el('li', {}, el('strong', { text: l.name }), el('span', { class: 'hint', text: `: ${l.why}` }))))) : null,
-    p.card ? el('p', { class: 'hint', text: 'The list may change a little once the model is loaded as it is now (what it really holds on the card is read first).' }) : null,
     p.contexts.length ? ctxs : null,
     p.last ? el('p', { class: 'hint' }, `Last test: ${new Date(p.last.at).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. `, el('button', { class: 'link', type: 'button', text: 'Show its results', onclick: () => finderResults(p.last.run, p.undo) })) : null,
     el('p', { class: 'hint fault-line', id: 'finder-say', role: 'status' }),
-    el('div', { class: 'team-actions' }, start, el('button', { class: 'btn', type: 'button', text: finder.t.ask ? 'Skip' : 'Close', onclick: () => finderBox().close() })));
+    el('div', { class: 'team-actions' }, start, el('button', { class: 'btn finder-right', type: 'button', text: finder.t.ask ? 'Skip, open chat' : 'Close', onclick: () => finderBox().close() })));
 }
 
 /**
@@ -149,20 +160,38 @@ async function finderWatch() {
     return;
   }
   const run = job.run;
-  if (run && run.state !== 'running') return finderResults(run, null);
+  // "now" empties only once the model is put back and the pick is made: before that, best and why are not filled in yet.
+  if (run && run.state !== 'running' && !run.now) return finderResults(run, null);
   const rows = run?.rows ?? [];
+  // How far it is: the rows timed (or failed) of those that will be tried; the time left from the plan's minutes.
+  const planned = rows.filter(r => r.state !== 'not tried');
+  const finished = planned.filter(r => r.state === 'done' || r.state === 'failed').length;
+  const total = Math.max(planned.length, 1);
+  const mins = finder.preview?.minutes?.[finder.size];
+  const left = mins ? Math.max(1, Math.round(mins * (1 - finished / total))) : null;
+  const who = finder.t.who;
+  const specs = finderSpecs();
   finderFrame(
-    el('p', { role: 'status', text: run?.now || 'Starting…' }),
-    el('ol', { class: 'finder-rows' }, ...rows.map(r => el('li', { class: `finder-row is-${r.state.replace(' ', '-')}` },
-      el('span', { class: 'finder-mark', 'aria-hidden': 'true', text: STATE_MARK[r.state] ?? '' }),
-      el('strong', { text: r.name }),
-      el('span', { class: 'hint', text: r.state === 'done' ? ` ${fNum(r.write)} tok/s writing` : r.state === 'failed' ? ` failed: ${r.why}` : r.state === 'not tried' ? ` ${r.why}` : r.state === 'running' ? ' being timed now' : '' })))),
+    el('div', { class: 'finder-card' },
+      who ? app.avatar?.(who, (finder.t.staff || '?').slice(0, 2).toUpperCase()) : null,
+      el('div', { class: 'finder-card-text' },
+        who && finder.t.staff ? el('strong', { text: finder.t.staff }) : null,
+        el('span', { text: finder.preview?.name || finder.t.model }),
+        el('span', { class: 'hint', text: `${finder.t.pc === 'here' ? 'This PC' : finder.t.pcName}${specs ? ` · ${specs}` : ''}` }))),
+    el('progress', { class: 'finder-bar', max: total, value: finished, 'aria-label': 'Test progress' }),
+    el('p', { role: 'status', text: `${run?.now || 'Starting…'}${left ? ` About ${left} minute${left === 1 ? '' : 's'} left.` : ''}` }),
+    el('details', { class: 'finder-tries' }, el('summary', { text: `Each setup (${finished} of ${total} timed)` }),
+      el('ol', { class: 'finder-rows' }, ...rows.map(r => el('li', { class: `finder-row is-${r.state.replace(' ', '-')}` },
+        el('span', { class: 'finder-mark', 'aria-hidden': 'true', text: STATE_MARK[r.state] ?? '' }),
+        el('strong', { text: r.name || 'A setup' }),
+        el('span', { class: 'hint', text: r.state === 'done' ? ` ${fNum(r.write)} tok/s writing` : r.state === 'failed' ? ` failed: ${r.why}` : r.state === 'not tried' ? ` ${r.why}` : r.state === 'running' ? ' being timed now' : '' }))))),
+    el('p', { class: 'hint', text: 'You can close this window; the test continues in the background.' }),
     el('div', { class: 'team-actions' },
       el('button', { class: 'btn', type: 'button', text: 'Stop', onclick: async e => {
         e.target.disabled = true;
         await finderAsk('stop').catch(() => undefined);
       } }),
-      el('button', { class: 'btn', type: 'button', text: 'Close (it carries on)', onclick: () => finderBox().close() })));
+      el('button', { class: 'btn finder-right', type: 'button', text: 'Close', onclick: () => finderBox().close() })));
   finder.poll = setTimeout(finderWatch, 2000);
 }
 
@@ -183,7 +212,20 @@ function finderInfo(r, run) {
     line('Guesses kept', r.accepted !== null && r.accepted !== undefined ? `${Math.round(r.accepted * 100)}%` : null),
     line('Same words as without the trick', r.sameWords === null || r.sameWords === undefined ? null : r.sameWords ? 'yes' : 'no'),
     line('Why it was tried', r.why && r.state === 'done' ? null : r.why),
-    line('Recommended', run.best === r.id ? 'yes' : run.why?.[r.id] ? `no: ${run.why[r.id]}` : r.state === 'done' ? 'no: another was faster' : null));
+    line('Recommended', run.best === r.id ? 'yes' : run.why?.[r.id] ? `no: ${run.why[r.id]}` : r.state === 'done' ? `no: ${slowerThan(r, run)}` : null));
+}
+
+/** Why a timed row was not picked when no fault was found: slower than the one recommended (or the fastest). */
+function slowerThan(r, run) {
+  const best = run.rows.find(x => x.id === run.best && x.state === 'done');
+  return best?.write ? `slower (${fNum(r.write)} against ${fNum(best.write)} tok/s for the recommended one)` : 'another was faster';
+}
+
+/** How a timed row's writing speed compares with the fastest timed row: the fastest, within 30% of it, or further behind. */
+function speedBand(r, run) {
+  if (r.state !== 'done' || !r.write) return r.state === 'failed' ? 'slow' : '';
+  const top = Math.max(...run.rows.filter(x => x.state === 'done' && x.write).map(x => x.write));
+  return r.write >= top ? 'fastest' : r.write >= top * 0.7 ? 'near' : 'slow';
 }
 
 /** The results: the recommended row selected, more info on each, Go with this config, Undo. */
@@ -192,13 +234,16 @@ function finderResults(run, undo) {
   let picked = run.best ?? run.rows.find(r => r.state === 'done')?.id ?? null;
   const say = el('p', { class: 'hint', id: 'finder-say', role: 'status', text: run.said || '' });
   const go = el('button', { class: 'btn primary', type: 'button', text: 'Go with this config', onclick: async () => {
+    // After a hire (ask), the chat with them opens once this window closes (team.js afterHire): Go ends here.
     if (picked === 'a') {
+      if (finder.t.ask) return finderBox().close();
       say.textContent = 'That is the setup it has now: nothing to change.';
       return;
     }
     go.disabled = true;
     try {
       say.textContent = (await finderAsk('apply', { row: picked })).said;
+      if (finder.t.ask) return finderBox().close();
     } catch (e) {
       say.textContent = e.message;
     }
@@ -213,14 +258,15 @@ function finderResults(run, undo) {
     }
   } }) : null;
   finderFrame(
-    el('p', { role: 'status', text: run.state === 'stopped' ? 'Stopped: the rows done so far are below, and the model was put back as it was.' : run.state === 'failed' ? 'The test stopped part way. The model was put back as it was.' : run.keep ? 'Keep what you have: nothing tried was clearly faster.' : 'Done. The recommended setup is selected.' }),
-    run.best ? null : el('p', { class: 'hint', text: 'Nothing is recommended: what it has now was not measured, so there is nothing to compare with.' }),
+    el('p', { role: 'status', text: run.state === 'stopped' ? 'Stopped: the rows done so far are below, and the model was put back as it was.' : run.state === 'failed' ? 'The test stopped part way. The model was put back as it was.' : run.keep ? 'Keep what you have: nothing tried was clearly faster.' : `Done. Recommended: ${run.rows.find(r => r.id === run.best)?.name || 'the one marked below'}. It is selected below.` }),
+    run.best || run.rows[0]?.state === 'done' ? null : el('p', { class: 'hint', text: 'Nothing is recommended: what it has now was not measured, so there is nothing to compare with.' }),
     run.drift ? el('p', { class: 'hint fault-line', text: 'The PC\'s speed changed during the test (something else was running?): the figures are less certain.' }) : null,
     el('div', { class: 'finder-results', role: 'radiogroup', 'aria-label': 'Setups' }, ...run.rows.map(r => {
       const mark = run.best === r.id ? '★ recommended' : r.state === 'failed' ? '✗ failed' : r.tight ? '⚠ tight' : '';
       const radio = el('input', { type: 'radio', name: 'finder-pick', value: r.id, checked: r.id === picked, disabled: r.state !== 'done', onchange: () => { picked = r.id; } });
       const more = el('details', { class: 'finder-more' }, el('summary', { text: 'more info' }), finderInfo(r, run));
-      return el('div', { class: `finder-result${run.best === r.id ? ' is-best' : ''}` },
+      const band = speedBand(r, run);
+      return el('div', { class: `finder-result${run.best === r.id ? ' is-best' : ''}${band ? ` is-${band}` : ''}` },
         el('label', { class: 'check' }, radio, ' ', el('strong', { text: r.name })),
         el('span', { class: 'finder-fig', text: r.state === 'done' ? `${fNum(r.write)} tok/s writing${r.code ? ` · ${fNum(r.code)} on code` : ''}${r.copy && (r.run.spec || r.run.draft) ? ` · ${fNum(r.copy)} copying` : ''}` : r.state === 'failed' ? `failed: ${r.why}` : r.why }),
         mark ? el('span', { class: 'finder-tag', text: mark }) : null,
@@ -237,7 +283,7 @@ function finderResults(run, undo) {
 app.openFinder = (ref, o = {}) => new Promise(done => {
   const t = finderTarget(ref);
   if (!t) return done();
-  finder.t = { ...t, name: o.name ?? '', pcName: o.pcName ?? '', ask: o.ask === true };
+  finder.t = { ...t, name: o.name ?? '', pcName: o.pcName ?? '', ask: o.ask === true, who: o.who ?? '', staff: o.who ? o.name ?? '' : '' };
   finder.size = 'quick';
   finder.contexts = new Set();
   finder.open = true;

@@ -176,12 +176,21 @@ export function keepWireAlive(socket: { setKeepAlive?: (on: boolean, ms: number)
 
 /** Opens one sealed stream to `r`: its socket, this stream's keys, and any bytes read past the answer. Throws in plain words. */
 export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()?.build ?? ''): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
+  // A PC whose clock is wrong refuses the first try; its answer taught this PC its clock, so once more in its time.
+  return openWireOnce(r, ms, build).catch(async e => {
+    if (!link.clockRefused((e as Error).message)) throw e;
+    await link.learnClock(r.url);
+    return openWireOnce(r, ms, build);
+  });
+}
+
+async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
   if (backupsOnly(r.id)) throw new Error(backupsOnlyWhy(labelOf(r)));
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${labelOf(r)}" was linked before links were encrypted. Link it again.`);
   await onHomeNetwork(r);
   const hostNonce = newNonce();
-  const sealed = link.sealRequest(linkKeys, MAX_DOOR, { nonce: hostNonce.toString('base64url'), build, ...(shareAll() ? { share: 'all' } : {}) });
+  const sealed = link.sealRequest(linkKeys, MAX_DOOR, { nonce: hostNonce.toString('base64url'), build, ...(shareAll() ? { share: 'all' } : {}) }, link.nodeNow(r.url));
   const id = link.requestId(sealed.box);
   const u = new URL(r.url);
   return new Promise((resolve, reject) => {
@@ -189,6 +198,7 @@ export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()
     req.setTimeout(ms, () => req.destroy(new Error(`"${labelOf(r)}" did not answer in ${Math.round(ms / 1000)} seconds.`)));
     req.on('error', e => reject(new Error((e as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? `"${labelOf(r)}" could not be reached (TOMLIN not running there, or sharing off).` : (e as Error).message)));
     req.on('response', res => {
+      link.noteClock(r.url, res.headers.date);
       let text = '';
       res.on('data', c => (text += c));
       res.on('end', () => {

@@ -974,6 +974,13 @@ dialog.finder-dlg { width: min(720px, 96vw); max-height: 92vh; overflow: auto; }
 .finder-result.is-best { border-color: var(--accent); background: var(--accent-soft); }
 .finder-fig { font-size: var(--fs-sm); color: var(--ink-soft); }
 .finder-tag { grid-column: 1 / -1; font-size: var(--fs-sm); font-weight: 600; }
+/* Speed bands: the fastest green, within 30% of it amber, further behind (or failed) red; the recommended one a green border */
+.finder-results .finder-result.is-fastest .finder-fig { color: var(--good); font-weight: 600; }
+.finder-results .finder-result.is-near .finder-fig { color: var(--warn); font-weight: 600; }
+.finder-results .finder-result.is-slow .finder-fig { color: var(--bad); font-weight: 600; }
+.finder-results .finder-result.is-near { border-color: var(--warn); }
+.finder-results .finder-result.is-slow { border-color: var(--bad); }
+.finder-results .finder-result.is-best { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); background: var(--accent-soft); }
 .finder-more { grid-column: 1 / -1; font-size: var(--fs-sm); }
 .finder-info { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 /* Backup when a PC is off: wider, so each model is a PC | Model row. */
@@ -1334,8 +1341,6 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .rail-muted { flex: none; display: grid; place-items: center; color: var(--ink-soft); }
 .rail-staff-item .rail-row .rail-muted { margin-right: 2px; }
 .mute-all { display: inline-grid; place-items: center; min-width: 36px; }
-.mute-all-line { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--ink-soft); white-space: nowrap; }
-.mute-all-line[hidden] { display: none; }
 .mute-now { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .mute-dlg .team-actions { flex-wrap: wrap; }
 .mute-dlg .check { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 4px; }
@@ -2666,8 +2671,27 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .pc-card-part .pc-part-head h3 { margin: 0; }
 .pc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 2px 2px 0; }
 .pc-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
-.pc-free { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.pc-free .pc-free-space { font-size: 12px; text-align: right; }
+/* The models part's buttons share one row; the free-space words sit under them on a row of their own, so long words never push a button down. */
+.pc-free-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.pc-card-part > .pc-free-space { display: block; margin: 6px 0 0; font-size: 12px; }
+.pc-models-body { display: grid; gap: 8px; margin-top: 8px; }
+.pc-models-body[hidden] { display: none; }
+/* This PC is: an admin PC, then (after the bar) a node and a network backup; below them where models and backups are kept. */
+.set-card > .pc-this { margin: 0; border: 0; border-radius: 0; background: none; }
+.pc-roles { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 8px; }
+.pc-role { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-md); }
+.pc-role-name { font-weight: 600; }
+.pc-role-off { opacity: .55; }
+.pc-role-bar { align-self: stretch; width: 1px; min-height: 24px; background: var(--line); }
+.pc-store { display: grid; gap: 10px; margin-top: 12px; }
+.pc-store-row { display: grid; gap: 6px; min-width: 0; }
+.pc-store-off { opacity: .55; }
+.pc-store-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.pc-store-where { overflow-wrap: anywhere; font-size: 12px; }
+.pc-store-line .btn { margin-left: auto; }
+.pc-store-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pc-store-form .field { flex: 1 1 220px; min-width: 0; }
+.pc-store-drives { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #pc-body > .pc-fold { margin-top: 10px; }
 /* A linked PC's log in its window: a day, a word to look for, the lines as plain text (newest last). */
 .pc-log-ask { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
@@ -2796,6 +2820,53 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 /* The PIN window of a linked PC that holds the host PIN: either PIN opens it. */
 .pin-either:not([hidden]) { display: flex; align-items: center; gap: 6px; }
 .pin-either .info-mark { flex: none; cursor: default; }
+
+/* ---- Network: a small menu, one section at a time, long words behind a (?) ---- */
+.net-menu { display: flex; flex-wrap: wrap; gap: 2px 4px; max-width: 820px; margin: 2px 0 6px; padding: 4px 0; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 3; background: var(--bg); }
+.net-tab { padding: 5px 12px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.net-tab:hover { background: var(--track); }
+.net-tab.on { background: var(--track); box-shadow: inset 0 -2px 0 var(--accent); font-weight: 600; }
+.net-sec > .set-part, .net-sec > .net-off { max-width: 820px; }
+.net-off { margin-top: 18px; }
+/* The (?) fold: a short line stays in view, the long words open on request. */
+.net-more { margin: 4px 0 0; }
+.net-more > summary { display: inline-block; cursor: pointer; color: var(--accent); font-size: var(--fs-sm); }
+.net-more[open] > summary { margin-bottom: 4px; }
+.net-more > .hint, .net-more > span.hint { display: block; margin: 0 0 4px; }
+.node-passes .net-more, .node-pass-pc .net-more { margin-left: 22px; }
+.pass-models > summary { color: var(--ink-soft); }
+.node-state { display: block; flex-basis: 100%; }
+/* Three groups of permissions, each with its own small heading. */
+.share-groups { display: grid; gap: 18px; }
+.share-group { display: grid; gap: 6px; }
+.share-group-head { margin: 0; font-size: var(--fs-md); }
+/* The fieldset's own name repeats the page's: kept for a screen reader, not shown. */
+.node-allow > legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.node-at-once-box { display: grid; gap: 6px; }
+/* Add another PC, Test network, the guest buttons: a row of buttons, folds under it. */
+.net-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 14px 0 0; }
+.net-actions > .btn, .net-add > summary { cursor: pointer; }
+.net-add { flex: 1 1 100%; max-width: 820px; }
+.net-add[open] { flex-basis: 100%; }
+.net-add > summary { display: inline-block; list-style: none; }
+.net-add > summary::-webkit-details-marker { display: none; }
+.net-add > .set-part { margin-top: 10px; }
+.net-block { margin: 10px 0; }
+.net-test { padding: 6px 0; max-width: 820px; }
+.pc-test-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.net-pass-form { display: grid; gap: 10px; padding: 8px 0; }
+/* Linked PCs: a small tile each (about a sidebar row); the whole card opens above them. */
+.pc-find { display: flex; flex-wrap: wrap; gap: 8px; }
+.pc-find input { flex: 1 1 200px; min-width: 0; }
+.pc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 8px; }
+.pc-tiles > .hint { grid-column: 1 / -1; }
+.pc-tile { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; min-width: 0; padding: 8px 10px; text-align: left; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.pc-tile:hover, .pc-tile:focus-visible { border-color: var(--accent); }
+.pc-tile > .pc-tile-state, .pc-tile > .pc-tile-tiny { grid-column: 2; }
+.pc-tile-name { min-width: 0; overflow-wrap: anywhere; }
+.pc-detail { border: 1px solid var(--accent); border-radius: 12px; padding: 10px; display: grid; gap: 8px; background: var(--panel); }
+.pc-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+@media (max-width: 520px) { .net-tab { flex: 1 1 100%; text-align: left; } }
 
 /* ---- One look (Nov 2026): a filled shape is a button, a tint is where you are ---- */
 /* Buttons: blue means "press here". The one main action is filled blue; every other button is white with a border, so
@@ -3038,3 +3109,85 @@ details[open] > summary .set-chev { transform: rotate(90deg); }
 .set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px 2px; }
 .set-part > .set-head > h3 { margin: 0; }
 .fast-update { display: inline-flex; align-items: center; gap: 6px; }
+
+/* A narrow window: the chat head, the top bar and the log pushed Quick, Think, Web, Max and Send below the window. The
+   box to write in now stays at the foot of the window while the page scrolls (clip, not hidden: hidden would hold it). */
+@media (max-width: 560px) {
+  #pane-chat { overflow: clip; }
+  #pane-chat .chat-form { position: sticky; bottom: 8px; z-index: 3; }
+}
+
+/* Direct links between PCs (Network): the two PCs to introduce side by side, the copy picker on its own line under a pair. */
+.node-peer-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.node-peer-copy { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.node-peer-copy select { flex: 1 1 220px; min-width: 0; }
+
+.net-spec { font-size: var(--fs-xs); font-weight: normal; color: var(--muted, inherit); cursor: help; }
+
+/* The Cluster page's folds, the model list and the examples (public/clusterextra.js). */
+.cluster-fold { margin: 8px 0; }
+.cluster-fold > summary { cursor: pointer; font-size: var(--fs-xs); font-weight: 600; padding: 6px 0; }
+.cluster-specs { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--fs-xs); }
+.cluster-specs li { padding: 3px 0; }
+.cluster-llm { display: grid; gap: 6px; margin-top: 8px; }
+.cluster-llm-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.cluster-llm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 6px; }
+.cluster-llm-row.on { background: var(--accent-soft); }
+.cluster-llm-pick { flex: 1 1 auto; text-align: left; background: none; border: 0; color: inherit; font: inherit; font-size: var(--fs-xs); padding: 5px 2px; cursor: pointer; }
+.cluster-llm-i { background: none; border: 0; color: inherit; font-size: var(--fs-xs); cursor: pointer; padding: 4px; }
+.cluster-llm-detail { flex-basis: 100%; margin: 0 0 4px; }
+.cluster-ex { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: var(--fs-xs); }
+.cluster-ex h4 { margin: 0 0 2px; font-size: var(--fs-xs); }
+.cluster-ex-pcs { margin: 4px 0; padding-left: 18px; }
+.cluster-ex-line { margin: 3px 0; }
+
+/* Help: the pages in public/help/ shown in a frame. */
+#help .help-frame-body { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.help-frame { display: block; width: 100%; height: calc(100vh - 190px); min-height: 420px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+
+/* Optimize window (finder.js): the staff card while a test runs, the bar, and the right-hand button */
+.finder-right { margin-left: auto; }
+.finder-card { display: flex; align-items: center; gap: 12px; margin: 4px 0 10px; }
+.finder-card-text { display: flex; flex-direction: column; min-width: 0; }
+.finder-bar { width: 100%; height: 12px; }
+
+/* ---- Network map (netmap.js): the admins above, this PC, its nodes below, joined by lines; the Cluster box's look ---- */
+.net-map { display: grid; justify-items: center; gap: 0; max-width: 820px; margin: 4px 0 14px; }
+.net-map-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%; }
+.net-pc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: start; width: min(100%, 360px); padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; text-align: left; font: inherit; color: var(--ink); }
+.net-pc.is-here { border-color: var(--ink); box-shadow: var(--shadow-sm); }
+.net-pc.is-off { border-style: dashed; background: var(--bg); }
+.net-pc .cluster-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); color: var(--ink-soft); }
+.net-pc-text { display: grid; gap: 2px; min-width: 0; }
+.net-pc-text b { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
+.net-pc-text .hint { margin: 0; }
+.net-pc-state { font-size: var(--fs-sm); color: var(--good); }
+.net-pc-state.is-off { color: var(--ink-soft); }
+.net-pc-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.net-pc-add { grid-template-columns: auto 1fr; align-items: center; border-style: dashed; cursor: pointer; color: var(--accent); background: none; }
+.net-pc-add:hover, .net-pc-add:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.net-pc-plus { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; border: 1px dashed currentColor; font-size: var(--fs-xl); line-height: 1; }
+/* The line between rows: a short upright line with its words beside it, ending in an arrow pointing down. */
+.net-link { position: relative; height: 40px; width: 2px; background: var(--ink-soft); margin: 2px 0 8px; }
+.net-link::after { content: ''; position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--ink-soft); border-bottom: 0; }
+.net-link.is-dashed { background: none; border-left: 2px dashed var(--ink-soft); width: 0; }
+.net-link-words { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-soft); }
+
+/* ---- The chat log and its down arrow (chatview.js): scrolled up while an answer is written, it stays put; the arrow jumps back ---- */
+.chat-log-wrap { position: relative; flex: 1; min-height: 160px; display: flex; flex-direction: column; }
+.chat-log-wrap > .chat-log { flex: 1; min-height: 0; }
+.chat-jump { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 3; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); font-size: var(--fs-lg); line-height: 1; box-shadow: var(--shadow); cursor: pointer; }
+.chat-jump:hover, .chat-jump:focus-visible { border-color: var(--accent); color: var(--accent); }
+.chat-jump[hidden] { display: none; }
+/* The web an answer used: one folded line under it, each search and page inside. */
+.web-used { display: block; margin-top: 4px; }
+.web-used > summary { cursor: pointer; color: var(--ink-soft); }
+.web-used ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+/* The words written so far while an answer is still working: a plain wrapper, so the answer looks as before. */
+.msg-words { display: contents; }
+.status-now { display: block; margin-top: 6px; }
+
+/* The top bar: the downloads chip beside the models loaded; the bell and everything after it kept to the right edge. */
+.bar .mute-all { margin-left: auto; }
+.dl-chip { flex: none; white-space: nowrap; font: inherit; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; background: var(--accent-soft); border-color: var(--accent); color: var(--ink); cursor: pointer; }
+.dl-chip[hidden] { display: none; }

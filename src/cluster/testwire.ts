@@ -49,7 +49,7 @@ export async function askEndReason(r: Pick<Remote, 'name' | 'url' | 'token' | 'k
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${r.name}" was linked before links were encrypted.`);
   // A fresh nonce too: an older TOMLIN checks it first, and then refuses the "why" it does not know.
-  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: newNonce().toString('base64url'), target: 'why', stream: nonce });
+  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: newNonce().toString('base64url'), target: 'why', stream: nonce }, link.nodeNow(r.url));
   const id = link.requestId(sealed.box);
   const u = new URL(r.url);
   return new Promise((resolve, reject) => {
@@ -79,12 +79,21 @@ export async function askEndReason(r: Pick<Remote, 'name' | 'url' | 'token' | 'k
 
 /** Opens one test stream to `r`. Throws in plain words (the node's own reason when it refuses). */
 export async function openTestWire(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'>, want: TestWant, ms = 60_000): Promise<TestWire> {
+  // A PC whose clock is wrong refuses the first try; its answer taught this PC its clock, so once more in its time.
+  return openTestWireOnce(r, want, ms).catch(async e => {
+    if (!link.clockRefused((e as Error).message)) throw e;
+    await link.learnClock(r.url);
+    return openTestWireOnce(r, want, ms);
+  });
+}
+
+async function openTestWireOnce(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'>, want: TestWant, ms: number): Promise<TestWire> {
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${r.name}" was linked before links were encrypted. Link it again.`);
   const why = await share.homeNetworkWhy(r.url);
   if (why) throw new Error(`"${r.name}": ${why}`);
   const hostNonce = newNonce();
-  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: hostNonce.toString('base64url'), target: want.target, plain: want.plain, ...(want.build ? { build: want.build } : {}), ...(want.all ? { all: true } : {}), ...(want.minutes ? { minutes: want.minutes } : {}) });
+  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: hostNonce.toString('base64url'), target: want.target, plain: want.plain, ...(want.build ? { build: want.build } : {}), ...(want.all ? { all: true } : {}), ...(want.minutes ? { minutes: want.minutes } : {}) }, link.nodeNow(r.url));
   const id = link.requestId(sealed.box);
   const u = new URL(r.url);
   return new Promise((resolve, reject) => {
@@ -92,6 +101,7 @@ export async function openTestWire(r: Pick<Remote, 'name' | 'url' | 'token' | 'k
     req.setTimeout(ms, () => req.destroy(new Error(`"${r.name}" did not answer in ${Math.round(ms / 1000)} seconds.`)));
     req.on('error', e => reject(new Error((e as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? `"${r.name}" could not be reached (TOMLIN not running there, or sharing off).` : (e as Error).message)));
     req.on('response', res => {
+      link.noteClock(r.url, res.headers.date);
       let text = '';
       res.on('data', c => (text += c));
       res.on('end', () => {

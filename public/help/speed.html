@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speed - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="speed">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-work">Jobs, files and speed</a></li><li aria-current="page">Speed</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-speed">Speed</h1>
+<p class="lead">Tokens a second, Test speed and Find the fastest setup.</p>
+<p>Every answer is timed: tokens written a second, and how fast the prompt was read (a token is about three quarters of a word).</p>
+<p><b>Test speed</b> runs one example prompt (about 150 words) on a person's model, a linked PC's or a model here, and times it; it is under Edit Staff, on This PC, and under Staff on other PCs.</p>
+<p>The left panel shows each person's expected speed ("17 tok/s"): the average of their last answers once there are three, else the test. A person's Speed shows the test as the baseline, the average, and a chart of the recent answers. Only numbers are kept (in <code>speed.json</code>), never what was asked or answered.</p>
+    <p><b>Find the fastest setup</b> (beside Test speed on a model's row, on a linked PC's card, and under Edit staff; offered once after a hire) starts the same model a few different ways and times each with the same example prompts: a smaller card margin, more of a mixture-of-experts model on the card, a guessing model, flash attention, threads, copy-ahead. Quick takes about 5 minutes for a small model, Full longer; the time is shown first. It keeps the model's own context unless you tick other sizes to test. One is recommended only when it is more than 5% faster and leaves 0.5 GB of the card free. Nothing changes until <b>Go with this config</b>; <b>Undo</b> goes back. On a linked PC it runs there, once its owner ticks <b>Allow host to test and change model run settings</b>.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="files-blog.html" rel="prev"><span>&larr; Previous</span><b>Files and the blog writer</b></a><a class="next" href="costs.html" rel="next"><span>Next &rarr;</span><b>Uptime and costs</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="git">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-bridge">Projects and the Bridge</a></li><li aria-current="page">Git</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-git">Git</h1>
+<p class="lead">Git marks, See what changed, and keeping Git itself up to date.</p>
+    <p>Projects in the left panel opens the Bridge (built in, in its own look): every project folder in your working folders, with its local copy (Run local copy, Stop), its git marks, a built-in audit, Hosted live lights for a site you host, Push live (one press sends it to your cPanel, FTPS or SFTP host, off until you turn it on), your saved prompts, and the tokens your AI tools used on it. Start with a hire, in a project's … menu, opens the Send to card here with the words, to send to one of your staff. Its own Help page says what each part does. Used Myia Bridge on its own before? Its About page has Bring in from Myia Bridge.</p>
+    <figure class="help-shot"><img src="../help-bridge.webp" alt="The Bridge's Projects list: garden-notes with No git, bakery-site with Only on this PC, each with Copy prompt and Run local copy" width="1300" height="280" loading="lazy"></figure>
+    <p>Git keeps a saved history of a project, and a copy on GitHub (or another host) is its backup. Each project shows its mark: <b>● Backed up</b>, <b>▲ unsaved</b>, <b>▲ not pushed</b>, <b>▲ Only on this PC</b> or <b>○ No git</b>. Press a mark for the project's git window: what state it is in, <b>See what changed</b> (every changed file since the last save, line by line), and under <b>What to do</b> the exact commands to copy into a terminal (… menu, Open terminal here) to start git, save, link a GitHub copy and push. The Bridge only reads git: it never commits, pushes or changes a folder. The same window has <b>Copies on my other PCs</b> (<a href="backups.html">Backups</a>). About › Git in the Bridge says whether your Git program needs a security update.</p>
+    <figure class="help-shot"><img src="../help-git.webp" alt="bakery-site: git and backups. Git: Only on this PC, one changed file not saved, See what changed, then What to do with git status, git add, git commit, git remote add and git push to copy. Copies on my other PCs: Copy this project to my other PCs" width="1180" height="755" loading="lazy"><figcaption>A project's git window: its state, the commands to copy, and copies on your other PCs.</figcaption></figure>
+<h2 id="b-git">The marks in the Bridge</h2>
+        <p>Git keeps a saved history of a project, and a copy on GitHub (or another host) is its backup. The Bridge only reads git: it never commits, pushes or changes a folder.</p>
+        <dl class="help-dl">
+          <dt><span class="l-up">● Backed up</span></dt><dd>Everything saved is on the backup copy.</dd>
+          <dt><span class="l-unsure">▲ unsaved</span></dt><dd>Files changed since the last save. <b>Commit</b> them, then <b>push</b>.</dd>
+          <dt><span class="l-unsure">▲ not pushed</span></dt><dd>Saved here but not on the backup copy yet. <b>Push</b>.</dd>
+          <dt><span class="l-unsure">▲ Only on this PC</span></dt><dd>No backup copy at all. Make an empty repository on GitHub, then link it and push.</dd>
+          <dt><span class="l-none">○ No git</span></dt><dd>No history and no backup. Fine for scratch folders.</dd>
+        </dl>
+        <p>Click a mark for the exact commands to copy into a terminal (<b>…</b> menu › Open terminal here). The <b>Git</b> count in the bar at the bottom lists every project waiting for a save or push.</p>
+        <p>When files have changed, <b>See what changed</b> in the project's git window shows every changed file since the last save, line by line (green new, red gone), so you can read what an AI changed before you commit. It only reads: nothing is saved or undone.</p>
+<h2 id="b-gitprog">Keeping Git itself up to date</h2>
+        <p>Old versions of the Git program had security holes that a single <code>git clone</code> of a bad repository could set off. <b>About › Git</b> shows your version and warns when it is older than the last security fix this Bridge knows about. To update: <code>winget upgrade --id Git.Git -e</code>, or download it from git-scm.com. Ticking <b>Check online for a newer Git</b> lets the Bridge ask GitHub once a day for the newest version; until you tick it, it asks nothing.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="bridge-projects.html" rel="prev"><span>&larr; Previous</span><b>The Bridge: projects</b></a><a class="next" href="scanning.html" rel="next"><span>Next &rarr;</span><b>Scanning</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

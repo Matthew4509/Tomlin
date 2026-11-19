@@ -944,6 +944,8 @@ poll();
 /** Light formatting for answers: **bold**, *italic*, `code`, code blocks, headings and list lines. Built as elements:
  * nothing the model writes is ever read as HTML. */
 function formatted(text) {
+  // A tool call the model wrote as text (GLM's <tool_call>…</tool_call>, cut off or whole) is not words for the person.
+  text = String(text ?? '').replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g, '').trimEnd();
   const frag = document.createDocumentFragment();
   const inline = (line, into) => {
     let at = 0;
@@ -1173,15 +1175,18 @@ drawLiveStats();
  */
 function statsLine(figures, rest) {
   figures = figures.filter(Boolean);
-  rest = rest.filter(Boolean);
-  if (!figures.length && !rest.length) return null;
+  // Words are joined with dots; a fold (the web sources) goes under the line, on its own.
+  const folds = rest.filter(x => x && typeof x !== 'string');
+  rest = rest.filter(x => x && typeof x === 'string');
+  if (!figures.length && !rest.length && !folds.length) return null;
   return el('span', { class: `speed${rest.length ? '' : ' stats-only'}` },
     figures.length ? el('span', { class: 'live-stats', text: `${figures.join(' · ')}${rest.length ? ' · ' : ''}` }) : null,
-    rest.length ? rest.join(' · ') : null);
+    rest.length ? rest.join(' · ') : null,
+    ...folds);
 }
 
 function speedLine(m) {
-  return statsLine([m.ran, m.perSecond ? `${m.perSecond.toFixed(1)} tokens a second` : ''], [m.sources ? `Read: ${m.sources}` : '', webLine(m.tools), m.note ?? '']);
+  return statsLine([m.ran, m.perSecond ? `${m.perSecond.toFixed(1)} tokens a second` : ''], [m.sources ? `Read: ${m.sources}` : '', ...webLine(m.tools), m.note ?? '']);
 }
 
 /** "Sent from …" on a message that came with Send to…, "Sent to …" under an answer that was handed on (sendto.js). */
@@ -1465,15 +1470,22 @@ maxPick.addEventListener('click', () => {
   api('/api/chat/max', { chatId: app.chatId ?? '', on: maxOn() }).catch(() => undefined);
 });
 
-/** What an answer looked up on the web (Web on), in words for the line under it ('' when nothing). */
+/**
+ * What an answer looked up on the web (Web on) and the other tools it used, for under the answer: the web as one folded
+ * line, "Completed web search: Sources", each search and page inside; the other tools in words. Two items ('' or null when none).
+ */
 function webLine(uses) {
-  if (!Array.isArray(uses) || !uses.length) return '';
-  const one = u => (u.name === 'web_search' ? `searched “${u.input}” (${u.said})` : u.ok ? `read ${u.said}` : `did not read ${u.input} (${u.said})`);
+  if (!Array.isArray(uses) || !uses.length) return ['', ''];
+  const one = u => (u.name === 'web_search' ? `Searched “${u.input}” (${u.said})` : u.ok ? `Read ${u.said}` : `Did not read ${u.input} (${u.said})`);
   const web = uses.filter(u => u.name === 'web_search' || u.name === 'open_page');
   // The newer tools (the screen, the laptop helper, git, notes): each step with how it ended and how long it took.
   const step = u => `${TOOL_WORDS[u.name] ?? u.name} ${u.input} (${u.ok ? '' : 'not done: '}${u.said}${Number.isFinite(u.ms) ? `, ${(u.ms / 1000).toFixed(1)} s` : ''})`;
   const other = uses.filter(u => !web.includes(u));
-  return [web.length ? `Web: ${web.map(one).join('; ')}` : '', other.length ? `Tools: ${other.map(step).join('; ')}` : ''].filter(Boolean).join(' ');
+  const read = web.filter(u => u.name === 'open_page' && u.ok).length;
+  const searched = web.filter(u => u.name === 'web_search').length;
+  const count = [searched ? `${searched} search${searched === 1 ? '' : 'es'}` : '', read ? `${read} page${read === 1 ? '' : 's'} read` : ''].filter(Boolean).join(', ');
+  const fold = web.length ? el('details', { class: 'web-used' }, el('summary', { text: `Completed web search: Sources${count ? ` (${count})` : ''}` }), el('ul', {}, ...web.map(u => el('li', { text: one(u) })))) : null;
+  return [fold, other.length ? `Tools: ${other.map(step).join('; ')}` : ''];
 }
 const TOOL_WORDS = { window_list: 'listed windows:', screen_look: 'looked at', window_focus: 'window:', click: 'click:', press_key: 'keys:', cam_menus: 'read the menus on', cam_window_state: 'read the window on', git_read: 'git:', run_command: 'ran', save_note: 'note:', suggest_finding: 'finding:' };
 
@@ -1855,7 +1867,8 @@ function drawChat(lines, chat) {
   }
   drawLarge(chat?.large ?? null);
   drawDocs(chat?.docs ?? []);
-  log.scrollTop = log.scrollHeight;
+  if (app.chatToEnd) app.chatToEnd();
+  else log.scrollTop = log.scrollHeight;
 }
 
 // ---- Documents in a chat (PLAN F10 G6): add (button or drop), the list above the chat, remove ----

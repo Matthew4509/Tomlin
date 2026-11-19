@@ -44,7 +44,7 @@ test('a model that chats is a chat model on screen, never an LLM', () => {
   // Except where the wording is kept on purpose: Network Setup's two columns "Text LLMs | Image LLMs", and Accept models
   // ("Allows a linked pc to push LLM's to this computer").
   // The Cluster page's first line and its "Choose an LLM" keep it too.
-  const asked = /Text LLMs|Image LLMs|text LLMs \| image LLMs|push LLM's|run LLM's too big for your pc|[Cc]hoose an LLM/g;
+  const asked = /Text LLMs|Image LLMs|text LLMs \| image LLMs|push LLM's|run LLM's too big for your pc|[Cc]hoose an LLM|Backup, model and LLM storage/g;
   const left = list.flatMap(f => readFileSync(f, 'utf8').split('\n').flatMap((line, i) => (/\bLLM('?s)?\b/.test(line.replace(asked, '')) ? [`${f.slice(ROOT.length)}:${i + 1}: ${line.trim().slice(0, 120)}`] : [])));
   assert.deepEqual(left, []);
 });

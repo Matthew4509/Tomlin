@@ -18,6 +18,7 @@ import { cleanLogFind, logAnswer } from '../log.ts';
 import { cleanCpu } from '../nodecpu.ts';
 import { collectPicture, saidOf, type Drawn } from './pictureback.ts';
 import * as wake from '../wake.ts';
+import * as hostpin from '../hostpin.ts';
 import { heldFor, heldWhy, isMember } from '../cluster/members.ts';
 import { cleanClusterHello } from '../cluster/loader.ts';
 import { cardFix } from '../pccards.ts';
@@ -63,10 +64,19 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
   if (WORK_PATHS.has(path) && clusterHeld(r.id)) throw new Error(heldWhy(r.name));
   const keys = link.keysOf(r.key);
   if (!keys) throw Object.assign(new Error(`"${r.name}" was linked before links were encrypted. Link it again: Network, Find PCs on my network, then its setup code.`), { relink: true });
-  const req = link.sealRequest(keys, path, payload);
-  const id = link.requestId(req.box);
   await onHomeNetwork(r);
-  const res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
+  // Stamped in that PC's own time (link.nodeNow); a refusal for the time teaches its clock, and the request goes once more.
+  let req = link.sealRequest(keys, path, payload, link.nodeNow(r.url));
+  let res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
+  link.noteClock(r.url, res.headers.get('date'));
+  if (res.status === 403 || res.status === 401 || res.status === 400) {
+    const first = (await res.clone().json().catch(() => ({}))) as { error?: unknown };
+    if (link.clockRefused(first.error)) {
+      req = link.sealRequest(keys, path, payload, link.nodeNow(r.url));
+      res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
+    }
+  }
+  const id = link.requestId(req.box);
   if ((res.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
     if (!res.body) throw new Error(`"${r.name}" sent nothing back.`);
     return new Response(link.openStream(keys, id, res.body), { status: res.status, headers: { 'content-type': 'text/event-stream' } });
@@ -194,7 +204,9 @@ export async function hello(r: Remote, ms = 4000): Promise<Hello> {
     guest: guestOf(data.guest),
     passAsks: passAsksOf(data.passAsks),
     cluster: cleanClusterHello(data.cluster),
+    addrs: (Array.isArray(data.addrs) ? data.addrs : []).filter((x): x is string => typeof x === 'string' && share.isPrivateAddress(x)).slice(0, 8),
     hostPin: data.hostPin === true,
+    hostKey: hostpin.isKeyId(data.hostKey) ? data.hostKey : '',
     line: data.line && typeof data.line === 'object' ? { running: Math.max(0, Math.floor(Number((data.line as Record<string, unknown>).running) || 0)), waiting: Math.max(0, Math.floor(Number((data.line as Record<string, unknown>).waiting) || 0)) } : null,
   };
   // A "Backups only" PC lends nothing here: no model of it is offered for a hire, a chat, a job or a picture.
@@ -689,7 +701,7 @@ export async function remoteStatus(o: { known?: boolean } = {}) {
       // different files, and update.build this PC's, for "Runs 2.0.48 but different files from this PC (build x there, y here)".
       return { id: r.id, name: r.name, url: r.url, ok: true, role: r.role, expires: h.guest?.expires ?? r.expires ?? null, caps: h.guest?.caps ?? null, line: h.line ?? null, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, drives: h.drives, modelsDrive: h.modelsDrive, cpu: h.cpu ?? null, runner: h.runner, held: h.held, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
     } catch (e) {
-      return { id: r.id, name: r.name, url: r.url, ok: false, role: r.role, expires: r.expires ?? null, passEnd: r.passEnd ?? null, canAsk: r.passEnd?.canAsk === true && !r.askOut, ask: r.askOut ? { state: 'waiting', at: r.askOut.at, reason: '', held: true } : r.passEnd?.ask ?? null, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true, asking: (e as { asking?: boolean }).asking === true };
+      return { id: r.id, name: r.name, url: r.url, ok: false, role: r.role, expires: r.expires ?? null, passEnd: r.passEnd ?? null, canAsk: r.passEnd?.canAsk === true && !r.askOut, ask: r.askOut ? { state: 'waiting', at: r.askOut.at, reason: '', held: true } : r.passEnd?.ask ?? null, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), seenAt: seen.get(r.id)?.at ?? null, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true, asking: (e as { asking?: boolean }).asking === true };
     }
   }));
 }

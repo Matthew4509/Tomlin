@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installing models - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="models">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-models">Models</a></li><li aria-current="page">Installing models</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-models">Installing models</h1>
+<p class="lead">The Models page, what fits this PC, the model files you have and the runners.</p>
+    <p>A model is the software your staff think with: a chat model writes, a picture model draws. Open <b>Settings</b>, <b>Models</b> (the Models page). Search by name or by what it is for, narrow it with the filters on the left (size in billions of parameters, B, or in GB, the kinds of model, and <b>Mixture-of-experts</b> for mixtures of experts), and each row shows its size before you press anything. <b>Size</b> and <b>A to Z</b>, right of the list's heading, order it (press again for the other way round). <b>Download</b> takes the recommended size in one press and turns into the download's progress; a model you have says <b>✓ On this PC</b>. Chat models come from Hugging Face; picture models, helpers (the background remover) and the model runners come from TOMLIN's own list.</p>
+    <figure class="help-shot"><img src="../help-models.webp" alt="The Models page: a search box, Search, All, Not installed and Installed, then models with a Download button or On this PC" width="742" height="640" loading="lazy"><figcaption>The Models page. "File list from …" is the list of Hugging Face models kept on this PC (see <a href="scanning.html">Scanning</a>).</figcaption></figure>
+<h2>What fits this PC</h2>
+    <p>bigger models answer and draw better but need more memory and time. <b>What can my PC run? Work it out</b> lists each model with whether it fits and about how fast it runs. Hire staff shows the memory each model needs, too. Times below were measured on an Intel HD 520 laptop and a 32 GB CPU-only desktop. A token is about three quarters of a word.</p>
+<h2>Model files you already have</h2>
+    <p>chat models are .gguf files: put them in <code>TOMLIN\models\chat</code> in your user folder (Models lists what is found).</p>
+<h2>The runners</h2>
+    <p>The runners are the small programs that load a model and make it write (chat) or draw (pictures); a model on its own is only a file. The ones for the processor and for any graphics chip (Vulkan) come in the zip, nothing to install; the ones for an NVIDIA card (CUDA) are under <b>Model runners</b> on the Models page. There are two: <b>CUDA 12.4</b>, for NVIDIA cards from the GTX 750 on, and <b>CUDA 13.4</b>, with code made for RTX 50 cards (for the RTX 20 and GTX 16 series and newer). TOMLIN starts models on the one that suits the card; the speed finder tries the other too, and a CUDA start that could not use the card is said and moves to Vulkan.</p>
+<p>Next: <a href="model-picks.html">which model to pick</a>, and <a href="copying-models.html">copying models between PCs</a>.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="installing.html" rel="prev"><span>&larr; Previous</span><b>Installing TOMLIN</b></a><a class="next" href="model-picks.html" rel="next"><span>Next &rarr;</span><b>Which model to pick</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

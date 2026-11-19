@@ -285,3 +285,102 @@ test("the host PIN typed in one linked PC's own PIN window is known as the host 
   c.go(10);
   assert.equal(await own.either('246810'), '246810');
 });
+
+// ---- The host key: no typed host PIN; unlocking the host is the admin step ----
+
+test('the host key is random, kept whole, never made or used while the host is locked, and can be reset or turned off', async () => {
+  let saved: unknown = undefined;
+  let open = false;
+  const k = new hp.HostKey(null, async f => void (saved = f), () => open);
+  assert.equal(k.made, false);
+  assert.equal(await k.use(), null, 'a shut lock makes and gives nothing');
+  assert.equal(saved, undefined, 'nothing was written either');
+  open = true;
+  const a = await k.use();
+  assert.ok(a);
+  assert.match(a.secret, /^[A-Za-z0-9_-]{43}$/, '32 random bytes');
+  assert.equal(a.id, hp.keyIdOf(a.secret));
+  assert.match(a.id, /^[0-9a-f]{12}$/);
+  assert.notEqual(a.secret.slice(0, 12), a.id, 'the id gives nothing of the key');
+  assert.equal(hp.cleanHostSecret('password', a.secret), a.secret, 'a PC takes it as a host secret');
+  assert.equal((await k.use())?.secret, a.secret, 'the same key until reset');
+  open = false;
+  assert.equal(k.peek(), null, 'locked again: not used');
+  open = true;
+  // Read again after a restart.
+  const back = new hp.HostKey(saved, async () => undefined, () => true);
+  assert.equal(back.peek()?.secret, a.secret);
+  await k.reset();
+  assert.notEqual(k.peek()?.secret, a.secret);
+  await k.turnOff();
+  assert.equal(k.enabled, false);
+  assert.equal(await k.use(), null);
+  assert.deepEqual(saved, { off: true });
+  assert.equal(new hp.HostKey(saved, async () => undefined).enabled, false, 'off survives a restart');
+  await k.turnOn();
+  assert.equal(k.enabled, true);
+  assert.ok(await k.use());
+  assert.equal(hp.cleanKeyFile({ key: 'short' }), null, 'a damaged file holds no key');
+});
+
+test('a PC takes a host key with its own PIN, lists it as a key, and then opens an update, a delete and a turn-off for that link alone', async () => {
+  const dir = tmp();
+  const c = clock();
+  const lock = { kind: 'pin' as const, ...(await hashSecret('4711')) };
+  const pc = await aPc(dir, c.now, lock);
+  const k = new hp.HostKey(null, async () => undefined);
+  const key = (await k.use())!;
+  // Not without the PC's own PIN, nor with a wrong one.
+  assert.equal((await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: key.id })).status, 403);
+  assert.equal((await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: key.id, appPin: '0000' })).status, 403);
+  assert.equal(pc.pins.get(LINK_A), null);
+  const ok = await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: key.id, appPin: '4711' });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.match(String(ok.json.said), /host key/);
+  assert.equal(pc.pins.keyIdOf(LINK_A), key.id);
+  assert.equal(pc.pins.keyIdOf(LINK_B), '');
+  assert.doesNotMatch(readFileSync(pc.heldFile, 'utf8'), new RegExp(key.secret), 'only a hash is written');
+  assert.deepEqual(pc.pins.list().map(x => [x.name, x.key]), [['Main PC', true]]);
+  for (const doing of [false, true, 'power'] as const) assert.deepEqual(await pc.check(undefined, 'keep-aaaa', doing, { pin: key.secret, link: LINK_A }), { ok: true });
+  // Another link, a wrong key, or the PC's own PIN sent as the key: nothing opens.
+  const other = await pc.check(undefined, 'keep-bbbb', false, { pin: key.secret, link: LINK_B });
+  assert.equal('error' in other && other.status, 403);
+  const bad = await pc.check(undefined, 'keep-aaaa', false, { pin: (await new hp.HostKey(null, async () => undefined).use())!.secret, link: LINK_A });
+  assert.equal('error' in bad && bad.status, 403);
+  const own = await pc.check(undefined, 'keep-aaaa', false, { pin: '4711', link: LINK_A });
+  assert.equal('error' in own && own.status, 403, "the 4-digit app lock PIN is not a host secret and never opens through the host door");
+  // A guest never holds one; the id is only kept for a password-kind key and only as 12 hex.
+  assert.equal((await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: key.id, appPin: '4711' }, LINK_B, true)).status, 403);
+  await pc.door(hp.SET_DOOR, { newPin: '246810', kind: 'pin', keyId: key.id, appPin: '4711' }, LINK_B);
+  assert.equal(pc.pins.keyIdOf(LINK_B), '', 'a typed PIN is never marked a key');
+  await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: 'not hex', appPin: '4711' }, LINK_B);
+  assert.equal(pc.pins.keyIdOf(LINK_B), '');
+  // After a restart it is still there; its owner takes it away and the link asks the PC's own PIN again.
+  const again = await aPc(dir, c.now, lock);
+  assert.equal(again.pins.keyIdOf(LINK_A), key.id);
+  assert.equal(await again.pins.drop(LINK_A), true);
+  const gone = await again.check(undefined, 'keep-aaaa', false, { pin: key.secret, link: LINK_A });
+  assert.equal('error' in gone && gone.status, 403);
+});
+
+test('wrong host keys are counted and stop the link like wrong PINs; a typed host PIN already held still works (migration)', async () => {
+  const dir = tmp();
+  const c = clock();
+  const lock = { kind: 'pin' as const, ...(await hashSecret('4711')) };
+  const pc = await aPc(dir, c.now, lock);
+  // A PC set up with a typed host PIN before keys existed: no key id, still opens.
+  assert.equal((await pc.door(hp.SET_DOOR, { newPin: '246810', appPin: '4711' })).status, 200);
+  assert.equal(pc.pins.keyIdOf(LINK_A), '');
+  assert.deepEqual(pc.pins.list().map(x => x.key), [false]);
+  assert.deepEqual(await pc.check(undefined, 'keep-aaaa', false, { pin: '246810', link: LINK_A }), { ok: true });
+  // The host then gives the key over it with the PC's own PIN, and the typed one stops opening.
+  const key = (await new hp.HostKey(null, async () => undefined).use())!;
+  assert.equal((await pc.door(hp.SET_DOOR, { newPin: key.secret, kind: 'password', keyId: key.id, appPin: '4711' })).status, 200);
+  assert.deepEqual(await pc.check(undefined, 'keep-aaaa', false, { pin: key.secret, link: LINK_A }), { ok: true });
+  const old = await pc.check(undefined, 'keep-aaaa', false, { pin: '246810', link: LINK_A });
+  assert.equal('error' in old && old.status, 403);
+  // Five wrong ones stop that link for 10 minutes, key or not.
+  for (let k = 0; k < 4; k++) await pc.check(undefined, 'keep-aaaa', false, { pin: 'x'.repeat(43), link: LINK_A });
+  const stopped = await pc.check(undefined, 'keep-aaaa', false, { pin: key.secret, link: LINK_A });
+  assert.equal('error' in stopped && stopped.status, 429, 'the wrong ones from before the right one count; this is the sixth try inside the stop');
+});

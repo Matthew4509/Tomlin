@@ -451,7 +451,7 @@ $('#team-get-models').addEventListener('click', () => {
  * After a hire who chats (with a model), one small window: "Start chat now" ('chat'), "Find the fastest setup" ('test',
  * only when their model was never tested; it opens the test, which runs only on its own Start) or "Not now" ('no').
  */
-function askStartChat(hired, offer) {
+function askStartChat(hired, offerAsk) {
   const box = $('#hired-dlg');
   const first = hired.name.split(/\s+/)[0];
   return new Promise(done => {
@@ -463,14 +463,18 @@ function askStartChat(hired, offer) {
       box.close();
       done(pick);
     };
-    const mins = offer?.minutes ? ` (Quick: about ${offer.minutes} minute${offer.minutes === 1 ? '' : 's'})` : '';
+    // The window is up at once. Whether the model was ever tested is asked behind it (the server may have to read the
+    // model first, which took a long time): Optimize and its line appear when the answer comes, if nothing was pressed yet.
+    const note = el('p', { class: 'hint', role: 'status' });
+    const optimize = el('button', { class: 'btn', type: 'button', text: 'Optimize', onclick: () => end('test') });
+    optimize.hidden = true;
     box.replaceChildren(el('div', { class: 'help-body' },
       el('h2', { id: 'hired-title', text: `${hired.name} is hired.` }),
       el('p', { text: `Start a chat with ${first} now?` }),
-      offer ? el('p', { class: 'hint', text: `${first}'s model has not been speed-tested here yet. Find the fastest setup starts it a few ways, times each and recommends one${mins}; it starts only when you press Start the test, and nothing changes until you choose. You can also run it later from Edit staff.` }) : null,
+      note,
       el('div', { class: 'team-actions' },
-        el('button', { class: 'btn primary', type: 'button', text: 'Start chat now', onclick: () => end('chat') }),
-        offer ? el('button', { class: 'btn', type: 'button', text: 'Find the fastest setup', onclick: () => end('test') }) : null,
+        el('button', { class: 'btn primary', type: 'button', text: 'Start chat', onclick: () => end('chat') }),
+        optimize,
         el('button', { class: 'btn', type: 'button', text: 'Not now', onclick: () => end('no') }))));
     box.oncancel = e => {
       e.preventDefault();
@@ -478,6 +482,14 @@ function askStartChat(hired, offer) {
     };
     box.showModal();
     box.querySelector('.btn.primary').focus();
+    Promise.resolve(offerAsk).then(offer => {
+      if (answered || !offer) return;
+      const mins = offer.minutes ? ` (Quick: about ${offer.minutes} minute${offer.minutes === 1 ? '' : 's'})` : '';
+      note.replaceChildren(`${hired.modelName || `${first}'s model`} has not been speed tested yet.`, el('br'), 'You can chat or choose to optimize. ',
+        el('span', { class: 'net-spec', tabindex: '0', role: 'img', 'aria-label': 'About optimizing', text: '(!)',
+          title: `Optimize starts the model a few ways, times each and recommends one${mins}. It starts only when you press Start the test, and nothing changes until you choose. You can also run it later from Edit staff.` }));
+      optimize.hidden = false;
+    }).catch(() => undefined);
   });
 }
 
@@ -487,8 +499,12 @@ app.afterHire = async hired => {
   // longer turns every window's chat to them); a model never through the speed finder also gets "Find the fastest
   // setup", which opens the test (it runs only on its own Start). One with no model opens their profile (below).
   const talks = hired?.kind === 'chat' && !!hired.model;
-  const pick = talks ? await askStartChat(hired, await app.finderOffer?.(hired.model)) : 'no';
-  if (pick === 'test') await app.openFinder?.(hired.model, { name: hired.name });
+  let pick = talks ? await askStartChat(hired, app.finderOffer?.(hired.model)) : 'no';
+  if (pick === 'test') {
+    await app.openFinder?.(hired.model, { name: hired.name, who: `staff:${hired.id}`, ask: true });
+    // "Skip, open chat" (or the test done and closed): the chat with them opens, as Start chat does.
+    pick = 'chat';
+  }
   const turned = pick === 'chat' ? await app.talkTo(`staff:${hired.id}`).catch(() => null) : null;
   // A new artist draws in this window's Images pane (Draw as), asked by this window: the server no longer picks them.
   if (hired?.kind === 'image') await api('/api/settings', { imageAs: hired.id }).catch(() => undefined);

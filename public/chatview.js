@@ -2,6 +2,24 @@
 // Connect then send), Help and the chat's profile photo. Moved out of app.js, whose helpers it uses; loaded right after it.
 'use strict';
 
+// ---- Following the answer: kept at the newest only while the person is there; scrolled up, it stays put ----
+// While an answer is written the log follows it only when it was at the bottom. Scrolled up to read, it stays where it
+// is and the down arrow shows; one press jumps back to the newest and follows again.
+let chatStuck = true;
+const chatJump = $('#chat-jump');
+const chatNearEnd = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+log.addEventListener('scroll', () => {
+  chatStuck = chatNearEnd();
+  chatJump.hidden = chatStuck;
+}, { passive: true });
+/** To the newest, and following again (Send, a chat opened, the arrow). */
+app.chatToEnd = () => {
+  log.scrollTop = log.scrollHeight;
+  chatStuck = true;
+  chatJump.hidden = true;
+};
+chatJump.addEventListener('click', () => app.chatToEnd());
+
 // ---- "This chat is getting large" (PLAN F10 G1): a handoff into a new chat, or Ignore (asked again at 90%) ----
 const large = $('#chat-large');
 function drawLarge(l) {
@@ -142,7 +160,7 @@ function send(message, from = '', agree = false, now = false, scanOk = false, ro
   if (mine) log.append(mine);
   const out = el('div', { class: 'msg assistant' }, typingNote());
   log.append(out);
-  log.scrollTop = log.scrollHeight;
+  app.chatToEnd();
   large.hidden = true;
   return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(scanOk ? { scanOk: true } : {}), ...(room ? { room } : {}), ...(retry ? { retry: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}), ...(maxOn() ? { max: true } : {}) }, out, message, from);
 }
@@ -306,7 +324,7 @@ async function talk(url, body, out, message, from = '') {
   const who = chatUi.open?.who ?? app.chatWho?.();
   const key = hereKey();
   const here = () => hereKey() === key;
-  const scroll = () => { if (out.isConnected) log.scrollTop = log.scrollHeight; };
+  const scroll = () => { if (out.isConnected && chatStuck) log.scrollTop = log.scrollHeight; };
   streams.set(key, { ac, out, inPlace: url === '/api/chat/continue' });
   syncSend();
   const t0 = performance.now();
@@ -319,6 +337,8 @@ async function talk(url, body, out, message, from = '') {
   // stops the working and asks for the answer with what it has worked out so far.
   let thought = null;
   let hurry = null;
+  // The words written so far (the last 'text'), kept on screen under a status.
+  let said = null;
   const withThought = (...rest) => out.replaceChildren(...(thought ? [thought] : []), ...(hurry ? [hurry] : []), ...rest);
   const hurryButton = () => {
     const b = el('button', { class: 'btn quiet answer-now', type: 'button', text: 'Answer now', title: 'Stop working it out and answer with what it has worked out so far' });
@@ -364,7 +384,9 @@ async function talk(url, body, out, message, from = '') {
           if (!first) first = performance.now();
           if (thought) thought.querySelector('summary').textContent = 'Thought first: the answer follows';
           hurry = null;
-          withThought(formatted(data.text));
+          // Kept, so a status while it searches shows under the words already written, not instead of them.
+          said = el('div', { class: 'msg-words' }, formatted(data.text));
+          withThought(said);
           scroll();
         } else if (ev === 'chat' || ev === 'brain') {
           // A new chat's id, known once its first message is in: Stop and Answer now reach this answer by it (a Stop
@@ -380,7 +402,9 @@ async function talk(url, body, out, message, from = '') {
           if (ev === 'brain' && here()) app.onBrain?.(data.ran);
         } else if (ev === 'status') {
           hurry = null;
-          out.replaceChildren(data.text);
+          // What it is doing now (a search, a page) goes under what it has written so far, which stays.
+          if (said) withThought(said, el('span', { class: 'hint status-now', text: data.text }));
+          else out.replaceChildren(data.text);
         } else if (ev === 'permit' && PERMIT_WORDS[data.kind]) {
           // A newer kind (the screen, the laptop helper, git, notes, a click, a key, a command): its own card.
           hurry = null;
@@ -468,7 +492,7 @@ async function talk(url, body, out, message, from = '') {
           }
           if (data.large && here()) drawLarge(data.large);
           const secs = ((performance.now() - t0) / 1000).toFixed(1);
-          const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', webLine(data.tools), data.note]);
+          const stats = statsLine([`First word after ${first ? ((first - t0) / 1000).toFixed(1) : secs} s`, `whole answer ${secs} s`, data.ran, data.perSecond ? `${data.perSecond.toFixed(1)} tokens a second` : ''], [data.sources ? `Read: ${data.sources}` : '', ...webLine(data.tools), data.note]);
           if (stats) out.append(stats);
           if (data.unsaved) out.append(saveAnswerAgain(chatId, message, data.text));
           if (data.findings?.length) out.append(findingsCard(streams.get(key)?.liveId ?? chatId, data.findings));
@@ -797,16 +821,13 @@ function openHelp(part) {
   // A window open over the page would cover it (the ? buttons in windows open Help too).
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   setView('help');
-  const at = part && part !== 'help-title' ? document.getElementById(part) : null;
-  if (at) {
-    at.scrollIntoView({ block: 'start' });
-    // A keyboard goes to the part too: it was left on the "On this page" line pressed, so Tab went on through the list.
-    // After the page's own focus (its title, home.js focusPage), which is queued first.
-    setTimeout(() => {
-      if (!at.hasAttribute('tabindex')) at.setAttribute('tabindex', '-1');
-      at.focus({ preventScroll: true });
-    }, 0);
-  } else $('#help').scrollTop = 0;
+  // Help is a folder of pages (public/help/), shown in a frame: no part keeps the page the person was reading, and an
+  // old section name (data-help="help-images") goes to where that section lives now (help/help.js, topics.js aliases).
+  const frame = $('#help-frame');
+  if (frame) {
+    if (part && part !== 'help-title') frame.src = `help/index.html?go=${encodeURIComponent(part)}`;
+    else if (!frame.getAttribute('src')) frame.src = 'help/index.html';
+  }
 }
 app.openHelp = openHelp;
 document.addEventListener('click', e => {

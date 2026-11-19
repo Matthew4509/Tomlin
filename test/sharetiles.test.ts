@@ -48,6 +48,7 @@ test('each Sharing permission is a tile: an icon, its name, a switch, and a (!) 
     give: ['Let linked PCs pull TOMLIN updates from here', "A linked PC with an older TOMLIN can copy this PC's TOMLIN (its app files only, never your data or models) to update itself. Nothing changes on this PC."],
     lend: ['Allow to be used as part of a cluster', 'This lets another pc use part of the ram, cpu, or vram to run a model.'],
     off: ['Allow host to turn this PC off', "A linked host may shut this PC down, one PC at a time, with this PC's app lock PIN typed on the host. On unless you turn it off. A guest can never do it. It stays off until someone switches it on again."],
+    peer: ['Let PCs my host introduces connect to this PC directly', 'A PC linked to the same host may connect to this PC without the host in the middle, over the home network only, and only the PCs that host names. The other switches here still decide what such a PC may do. Off until you switch it on.'],
   };
   const tiles = part.split(/<div class="share-tile(?: share-tile-wide)?">/).slice(1);
   assert.equal(tiles.length, Object.keys(words).length, 'one tile per tick');

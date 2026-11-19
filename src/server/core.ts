@@ -133,6 +133,8 @@ if (!(await chats.get(store.peek()!.chatId))) await store.saveSettings({ chatId:
 export const runtimes = new Runtimes(join(ROOT, 'runtime'), join(ROOT, 'runtimes.json'), HOME.runtime);
 // Where models are kept (src/modelhome.ts): models/ in the home, or a folder chosen on another drive. Downloads go there.
 export const modelsHome = new ModelsHome(join(HOME.home, 'models-home.txt'), HOME.models);
+// Where other PCs' backups are kept here (src/server/backuphome.ts): backups from other PCs in the home, or a chosen folder.
+export const backupsHome = new ModelsHome(join(HOME.home, 'backups-home.txt'), join(HOME.home, 'backups from other PCs'));
 export const chatModels = new Models(join(modelsHome.dir(), 'chat'), HOME.modelsFile, process.env.TOMLIN_MODELS);
 chatModels.cacheMs = 2000;
 // Models still in this app folder (versions before the home kept them here) and in the copies beside it are lent in place.
@@ -283,16 +285,20 @@ export async function body(req: IncomingMessage, limit = 30 << 20): Promise<Reco
   }
 }
 
-const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon' };
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 
 export async function staticFile(res: ServerResponse, path: string): Promise<void> {
   // The second look (/alt/) was dropped and its files deleted: an old bookmark to it opens the app.
   if (/^\/alt(\/|$)/.test(path)) return void res.writeHead(302, { location: '/', ...SECURITY_HEADERS }).end();
-  const name = path === '/' || path === '' ? 'index.html' : path.replace(/^\/+/, '');
-  if (!/^[\w.-]+$/.test(name)) return json(res, 404, { error: 'Not found.' });
+  // Help is a folder of pages (public/help/); /help goes to its index so the pages' own relative links work.
+  if (path === '/help') return void res.writeHead(302, { location: '/help/', ...SECURITY_HEADERS }).end();
+  const name = path === '/' || path === '' ? 'index.html' : path === '/help/' ? 'help/index.html' : path.replace(/^\/+/, '');
+  if (!/^(help\/)?[\w.-]+$/.test(name)) return json(res, 404, { error: 'Not found.' });
   try {
     const data = await readFile(join(ROOT, 'public', name));
-    res.writeHead(200, { 'content-type': TYPES[extname(name)] ?? 'application/octet-stream', ...SECURITY_HEADERS });
+    // The app shows Help in a frame of its own page, so Help's pages (and only they) may be framed by the same origin.
+    const framed = name.startsWith('help/') ? { 'content-security-policy': SECURITY_HEADERS['content-security-policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'") } : {};
+    res.writeHead(200, { 'content-type': TYPES[extname(name)] ?? 'application/octet-stream', ...SECURITY_HEADERS, ...framed });
     res.end(data);
   } catch {
     json(res, 404, { error: 'Not found.' });

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uptime and costs - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="costs">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-work">Jobs, files and speed</a></li><li aria-current="page">Uptime and costs</li></ol></nav><!--/nav-top-->
+<article>
+<h1 id="help-pc-costs">Uptime and costs</h1>
+<p class="lead">How long a PC has run, tokens, power cost and what an API would charge.</p>
+<p>Press a PC in the left panel (My PC, or a linked PC) for its window: how long TOMLIN has run there and how long the PC has been on, how many of this PC's once-a-minute checks it answered in the last 7 days, and its total tokens (read and written, from every answer its chat models wrote, for anyone; pictures are not counted).</p>
+<p>Give it, if you like, its power draw while a model works (watts) and the price of a kWh in US dollars: then each project's power cost is worked out (watts × working hours ÷ 1,000 × price), beside the same tokens at the Claude Opus 5.5 API's and the ChatGPT API's list prices, with the least of them marked. Only working time counts, never the PC sitting idle.</p>
+<p>Tokens are counted three ways: read new, read from the cache (the start of the chat the model read on the turn before: no work, but an API still bills it at its lower cached price), and written; the API figures price them that way, and say what they would be without caching.</p>
+<p>Each linked PC keeps its own log of the work it did for this PC, per project, and that log is the final tally (read once a minute and when its window opens); a project's Overview shows its tokens and cost over every PC. The prices were checked on the date shown and can be changed there. A linked PC needs 2.0.40 or later for its own log (2.0.39 for uptime and totals).</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="speed.html" rel="prev"><span>&larr; Previous</span><b>Speed</b></a><a class="next" href="bridge-projects.html" rel="next"><span>Next &rarr;</span><b>The Bridge: projects</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

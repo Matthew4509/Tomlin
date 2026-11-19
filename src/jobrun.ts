@@ -35,6 +35,7 @@ import { backupTo, bringBack, claimOn, claimStateOn, copiesOn, copyFrom, moveTo,
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
 import { startPassSync } from './jobrun/passsync.ts';
+import { startPeerSync } from './jobrun/peersync.ts';
 import { hostPinOn } from './jobrun/hostpins.ts';
 import { applyShare, askHost, claimsWaiting, impactOf, lanList, linkedUse, nodeView, projectsCopy, serving, setShare, shareListening, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
@@ -158,6 +159,8 @@ export interface JobDeps {
   hostPinDoor: (p: string, b: Record<string, unknown>, who: { key: string; link: string; name: string; guest: boolean }, pcName: () => string) => Promise<{ status: number; json: Record<string, unknown> }>;
   /** Whether that link (its whole id) gave this PC a host PIN. */
   hostPinHeld: (link: string | undefined) => boolean;
+  /** The short id of the host key that link gave this PC, or empty. */
+  hostKeyHeld: (link: string | undefined) => string;
   /** This PC's owner takes a host PIN away, by the link's id as the page shows it. */
   hostPinDrop: (id: string) => Promise<boolean>;
   /** Unloads every model on this PC (F7 E5: the node gives way). */
@@ -296,8 +299,12 @@ export interface Hello {
   passAsks?: { id: string; name: string; expired: string; text: string; at: string }[];
   /** Which PCs it would borrow from for a big model, and the adapter this PC reached it on (src/cluster/loader.ts); null from an older TOMLIN or a guest link. */
   cluster?: ClusterHello | null;
+  /** Its home-network addresses, as it says them (for a PC introduced to it, src/peerlink.ts); none from an older TOMLIN or a guest link. */
+  addrs?: string[];
   /** It holds this PC's host PIN (src/hostpin.ts); false from one that does not, or from an older TOMLIN. */
   hostPin?: boolean;
+  /** The short id of the host key it holds from this PC (empty for none or a typed PIN, src/hostpin.ts). */
+  hostKey?: string;
 }
 
 /** Something that answers: the local chat model, or a worker PC's. */
@@ -366,6 +373,7 @@ export function createJobs(deps: JobDeps) {
   startNode();
   startLinks();
   startPassSync();
+  startPeerSync();
   startProjectBackups();
   return { get, post, startShare, clusterView: clusterNow, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, brainForRef, widenFar, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canTools, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
 }

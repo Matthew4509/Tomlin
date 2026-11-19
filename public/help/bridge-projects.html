@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Bridge: projects - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="bridge-projects">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-bridge">Projects and the Bridge</a></li><li aria-current="page">The Bridge: projects</li></ol></nav><!--/nav-top-->
+<article>
+<h1>The Bridge: projects</h1>
+<p class="lead">Getting started, each project's buttons and menu, and the window around the list.</p>
+<p>The Bridge is the part of TOMLIN that lists the projects on this PC, starts their local copies, checks them for common faults and keeps an eye on their git backups and live sites. It runs inside TOMLIN, on this PC only. Open it with <b>Projects</b> in TOMLIN's left panel.</p>
+<h2 id="b-start">Getting started</h2>
+        <p>It comes with TOMLIN: nothing to install. <b>TOMLIN</b> at the top of the left panel goes back to chats, staff and jobs; TOMLIN's own left panel has <b>Projects</b> to come back here. TOMLIN's app lock covers these pages too.</p>
+        <p>The first list holds the folders beside TOMLIN's own folder (or, for an installed copy, its workspace). Add the folder that holds your projects on the <b>Folders</b> page, or single projects kept somewhere else. Used Myia Bridge before? <b>About › Bring in from Myia Bridge</b> copies its folders, prompts, private details and lists here.</p>
+<h2 id="b-projects">Projects</h2>
+        <p>Each row shows the tokens your AI tools used on it, when it last changed, and its state, with two buttons and a <b>…</b> menu:</p>
+        <ul>
+          <li><b>Copy prompt</b> gives you a line to paste into the AI you use. <b>…</b> menu › <b>Start with a hire…</b> hands the same line to one of your staff instead: TOMLIN's Send to card opens with it, and nothing goes until you press Send. In an audit, <b>Fix with a hire</b> does the same with its faults, and <b>Review with AI…</b> has <b>Start with a hire</b> beside <b>Copy prompt</b>. A hire answers from the words it is sent: it does not open the project's folder, so for work across a whole project, Copy is still the way to an AI that reads folders (Claude Code, Codex).</li>
+          <li><b>Run local copy</b> starts the project's own dev server (from its <code>.claude/launch.json</code> or <code>project.json</code>) and opens it. <b>Stop</b> ends it.</li>
+          <li><b>…</b> menu › <b>Scan app (audit)</b> runs the built-in audit (about 140 rules: keys, including a key removed from the files that the git history still holds, injection, sign-in and payment gaps, uploads, saving and replies, .htaccess, accessibility, and checks that read the project as a whole: limits, clean-up jobs, the privacy page against the code, release builds). It catches common core faults, not everything. It also finds what publishing the project would give away about you; list your own private details under <b>Audits › Private details</b>. A finding names the detail's label, never the detail. <b>Not a fault…</b> beside a finding sets that one place aside with your reason (it comes back if the line is edited); <b>Import report-back…</b> does the same from a pasted "False flags" table. <b>Review with AI…</b> builds a prompt to copy into any AI for the faults no rule finds (money, access, promises); paste its answer into Import report-back… and its findings go on the project's fault list, each open, fixed or not a fault. Old copies of the app inside the project folder (an "original" or "-fixes" copy, an unpacked release beside its zip, older versions side by side) are left out so a fault is counted once, where the app lives; the audit's notes name each one and why. To scan one anyway, list it under <code>auditInclude</code> in the project's project.json.</li>
+          <li><b>…</b> menu › <b>Hosted live</b> takes the address the project is hosted at: a green, amber or red light shows whether it answers. It is checked when the Bridge starts and then every 5, 10 or 15 minutes (<b>Check every</b> in the Live sites panel, which also shows how long each page took). A site that goes down shows a red message that stays until you close it. The Bridge sends no emails or phone alerts: a site that must not go down unnoticed needs a monitoring service of its own.</li>
+          <li><b>…</b> menu › <b>Push live</b> sends the project to your web host in one press: cPanel (your password is used once to make TOMLIN's own token, then dropped), FTPS or SFTP (with a key TOMLIN makes). It is off until you turn it on in that window. Before anything is sent it checks the files: .env files, git's history, packages, keys and AI working notes never go; a file with a key, a written-out password or one of your private details stops it and names the file and line. Only new and changed files are sent, a copy is kept of every file it replaces, and <b>Go back</b> undoes the last push. <b>Secrets</b> keeps passwords and API keys locked by Windows on this PC: the Local value goes to the local copy, the Live value to one file outside the site's web folder that your code reads with getenv(). On cPanel, <b>Database</b> makes the MySQL database and loads a .sql file. The address it pushes to becomes the project's live address, with its light.</li>
+          <li><b>…</b> menu › <b>Remove from list</b> only takes a project off the list. Its folder and files are never touched. <b>Folders › Removed from the list</b> brings it back.</li>
+          <li><b>…</b> menu › <b>Last audit</b>, <b>Open folder</b>, <b>Open terminal here</b>, <b>Move to top / up / down / bottom</b>, and <b>Hide from display</b>: a hidden project stays on the list but out of view until <b>Show hidden</b> is on.</li>
+        </ul>
+        <p>The bar above the list has <b>Add project</b>, <b>Scan folders</b> (what is new or gone since the last scan), <b>Refresh</b>, <b>List / Tiles</b>, the sort order (Last updated, My order, Most tokens, Name, Running first; in My order you can also drag a row), <b>Stop all</b> (everything the Bridge started; a tick adds other programs holding your projects' ports, each named first), <b>Show hidden</b> and search.</p>
+<h2 id="b-window">The window</h2>
+        <ul>
+          <li><b>Bridge</b> near the top of the left panel takes you home to Projects. Its light shows ● Connected, or Connection lost in red when TOMLIN stops; then <b>Reconnect</b> appears and the page reconnects by itself once TOMLIN answers again.</li>
+          <li><b>This PC</b>: CPU, memory, disk and GPU, uptime, and the AI tokens used this month and in total (<b>Recount</b> counts them again).</li>
+          <li><b>Running</b>: every site that is up. ● started by the Bridge, ◐ another program holds that project's port. Click a name to open it; the square stops it.</li>
+          <li><b>Live sites</b>: every live address with its light and how long it took to answer, worst first, with <b>Check now</b> and <b>Check every</b>.</li>
+          <li>The bar at the bottom: how many projects, how many running, when the tokens were counted, and the <b>Git</b> count (click it for the projects waiting for a save or push).</li>
+          <li>The <b>Orbital</b> theme (About › Theme) shows your running sites as satellites over the Earth: click one to shoot it down (that stops it), ↗ opens it. The other themes are Windows, Light and Dark.</li>
+        </ul>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="costs.html" rel="prev"><span>&larr; Previous</span><b>Uptime and costs</b></a><a class="next" href="git.html" rel="next"><span>Next &rarr;</span><b>Git</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

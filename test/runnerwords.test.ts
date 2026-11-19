@@ -31,6 +31,6 @@ test('every line that names the model runners to a person says what they are', (
   assert.equal(start.split('The model runners ^(the small programs that load a model and make it write or draw^) are missing').length, 3, 'both missing-runner lines');
   assert.match(start, /which the model runners \^\(the small programs that load a model and make it write or draw\^\) need/);
   // Help and the welcome page.
-  assert.match(read('public/index.html'), /<b>The runners<\/b> are the small programs that load a model and make it write \(chat\) or draw \(pictures\); a model on its own is only a file/);
+  assert.match(read('public/help/models.html'), /The runners are the small programs that load a model and make it write \(chat\) or draw \(pictures\); a model on its own is only a file/);
   assert.match(read('Welcome to TOMLIN.html'), /the model runners \(the small programs that load a model and make it write or draw\)/);
 });

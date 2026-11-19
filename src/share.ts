@@ -12,6 +12,7 @@
 // The plain functions are tested in test/share.test.ts.
 import type { Allow } from './carry.ts';
 import type { GuestPass, PassAsk, RenewLength } from './guestpass.ts';
+import type { Intro, PeerTable } from './peerlink.ts';
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
@@ -189,6 +190,15 @@ export interface ShareState {
   passAcks?: Record<string, number>;
   /** This PC as a node: the last generation taken from each host (by its link's keep id). */
   passGens?: Record<string, number>;
+  /** This PC's peers (src/peerlink.ts): the PCs its hosts introduced it to. Never in `paired`: a peer is not a linked PC. */
+  peers?: PeerTable;
+  /** The last generation of peers taken from each host (by its link's keep id). */
+  peerGens?: Record<string, number>;
+  /** This PC as a host: the pairs of linked PCs it introduced to each other (src/jobrun/peersync.ts), live ones only. */
+  intros?: Intro[];
+  /** This PC as a host: the generation of its introductions, up at each change, and the one each linked PC said it holds. */
+  introGen?: number;
+  introAcks?: Record<string, number>;
   /** This PC as a node: requests from guest links whose pass expired, until answered (src/guestpass.ts PassAsk). */
   passAsks?: PassAsk[];
   /** At once (src/slots.ts): answers one chat model writes together for linked PCs, 1 to 4 (1: one at a time). */
