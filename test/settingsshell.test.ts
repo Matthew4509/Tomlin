@@ -90,11 +90,11 @@ test('each opener that waits for the server shows its page only when it is not l
   lateFirst(read('team.js'), 'app.seeAllStaff = async', "app.showAsPage(dlg, 'staff')");
   lateFirst(read('files.js'), "$('#files-open').addEventListener", "app.showAsPage(filesDlg, 'files')");
   lateFirst(read('jobs.js'), 'async function openJobs()', "app.showAsPage(jobsDlg, 'jobs')");
-  // The Staff menu and Hire staff do not wait at all: they show at once and catch up (test/hirestaff.test.ts).
+  // Staff opens All staff, which shows at once from the list already read and catches up (test/hirestaff.test.ts).
   const team = read('team.js');
-  const menu = team.slice(team.indexOf('async function openStaffMenu()'), team.indexOf('app.openStaffMenu = openStaffMenu;'));
-  assert.ok(menu.indexOf("app.showAsPage(dlg, 'staff')") < menu.indexOf("await api('/api/staff')"), 'shown before the server is asked');
-  assert.match(menu, /if \(dlg\.open && teamMode === 'menu'\) drawMenu\(\);/);
+  assert.match(team, /function openStaffMenu\(\) \{\n\s+return app\.seeAllStaff\(\);\n\}/);
+  const all = team.slice(team.indexOf('app.seeAllStaff = async'));
+  assert.ok(all.indexOf("app.showAsPage(dlg, 'staff')") < all.indexOf("await api('/api/staff')"), 'shown before the server is asked');
   // A plan pressed on Home still starts when the person has moved on; only the page stays put.
   assert.match(read('jobs.js'), /app\.planJob = async goal => \{\n[^\n]*\n  await openJobs\(\);/);
 });

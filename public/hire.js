@@ -29,9 +29,9 @@
   // names the staff list gave (src/brains.ts pcLabels).
   const pcName = id => (id ? (homeUi.pcs.some(p => p.id === id) ? app.pcLabel?.(id) : null) ?? d()?.pcs.find(p => p.id === id)?.label ?? homeUi.pcs.find(p => p.id === id)?.name ?? d()?.pcs.find(p => p.id === id)?.name ?? 'A linked PC' : app.pcProfileOf?.('here')?.name || 'My PC');
 
-  /** A fault shows in the Hire staff window, and in Push to node too while that is open over it. */
+  /** A fault shows in the Hire staff window. */
   function fault(text) {
-    for (const box of [$('#hs-fault'), $('#hs-push-fault')]) {
+    for (const box of [$('#hs-fault')]) {
       box.textContent = text ?? '';
       box.hidden = !text;
     }
@@ -74,10 +74,31 @@
     $('#hs-look-btn').setAttribute('aria-expanded', 'false');
   }
 
+  /**
+   * Role is two tiles, Text / coding and Images (a role's `kind`), and the sub-role is a drop-down of the roles of the
+   * tile picked. A tile picked again goes back to the sub-role last picked under it.
+   */
+  const KINDS = [{ id: 'chat', name: 'Text / coding', icon: 'coder' }, { id: 'image', name: 'Images', icon: 'artist' }];
+  const kindOf = r => (r?.kind === 'image' ? 'image' : 'chat');
+  const lastSub = {};
   function drawRoles() {
-    $('#hs-roles').replaceChildren(...d().roles.map(r => el('label', { class: 'pick-card hs-role' },
-      el('input', { type: 'radio', name: 'hs-role', value: r.id, checked: r.id === hs.role, onchange: () => pickRole(r.id) }),
-      el('span', { class: 'role-icon', 'aria-hidden': 'true' }, roleIcon(r.id)), el('span', { text: r.name }))));
+    $('#hs-roles').replaceChildren(...KINDS.filter(k => d().roles.some(r => kindOf(r) === k.id)).map(k => el('label', { class: 'pick-card hs-role' },
+      el('input', { type: 'radio', name: 'hs-kind', value: k.id, checked: k.id === kind(), onchange: () => pickKind(k.id) }),
+      el('span', { class: 'role-icon', 'aria-hidden': 'true' }, roleIcon(k.icon)), el('span', { text: k.name }))));
+    drawSubRoles();
+  }
+  function drawSubRoles() {
+    const sel = $('#hs-subrole');
+    sel.replaceChildren(...d().roles.filter(r => kindOf(r) === kind()).map(r => el('option', { value: r.id, text: r.name, selected: r.id === hs.role })));
+    sel.value = hs.role;
+    sel.disabled = false;
+  }
+  function pickKind(id) {
+    if (id === kind()) return;
+    lastSub[kind()] = hs.role;
+    const keep = d().roles.find(r => r.id === lastSub[id]);
+    pickRole((keep ?? d().roles.find(r => kindOf(r) === id))?.id ?? hs.role);
+    drawSubRoles();
   }
   function pickRole(id) {
     const before = kind();
@@ -113,20 +134,16 @@
 
   function pcCard(id) {
     const p = id ? d().pcs.find(x => x.id === id) : { ok: true, away: false, ...d().here };
-    const n = offered(id).length;
-    const thing = kind() === 'image' ? 'picture model' : 'chat model';
     const state = !id ? 'This PC' : p?.asking ? 'Asking it…' : !p?.ok ? 'Off now' : p.away ? 'Away: its owner is using it' : 'On';
     const was = id ? homeUi.pcMem?.[id] : null;
     const ram = p?.ram || was?.ram, vram = p?.ram ? p.vram : was?.vram;
     const mem = ram ? `${GBs(ram)} RAM${vram ? ` · ${GBs(vram)} graphics memory` : ''}` : id ? 'Memory not known' : '';
-    const count = n ? `${n} ${thing}${n === 1 ? '' : 's'}${id ? ' shared' : ''}` : id ? `Shares no ${thing}s` : `No ${thing}s yet`;
     return el('label', { class: `pick-card hs-pc${p?.asking ? ' hs-wait' : ''}` },
       el('input', { type: 'radio', name: 'hs-pc', value: id, checked: hs.pc === id, onchange: () => pickPc(id) }),
       el('span', { class: 'hs-pc-icon', 'aria-hidden': 'true' }, el('span', { class: 'sdot', 'data-state': !id || (p?.ok && !p.away) ? 'on' : p?.ok || p?.asking ? 'asleep' : 'off' })),
       el('span', { class: 'hs-pc-text' },
         el('strong', { text: pcName(id) }),
-        el('span', { class: 'hint', text: [state, mem].filter(Boolean).join(' · ') })),
-      el('span', { class: 'hs-pc-count', text: count }));
+        el('span', { class: 'hint', text: [state, mem].filter(Boolean).join(' · ') })));
   }
   function pickPc(id) {
     hs.pc = id;
@@ -192,7 +209,6 @@
       // The quick list never replaces one already asked now (a copy that just ended reads the full list again).
       if (net && (!known || !hs.net?.fresh)) hs.net = { ...net, fresh: !known };
       drawAllModels();
-      if (pushDlg.open) drawPush();
     }
   }
 
@@ -210,15 +226,26 @@
     return [...all.values()];
   }
 
-  /** How a model gets to the PC picked: { from, via } (via: through this PC first), or { why } it cannot now. */
+  /**
+   * How a model gets to the PC picked: { from } (this PC sends it, or this PC pulls it), { from, direct } (one linked
+   * PC to another, straight, src/jobrun/peercopy.ts: nothing passes through this PC), or { why } it cannot now.
+   */
   function routeTo(e, target) {
     const here = e.on.find(o => !o.pc);
     const linked = e.on.find(o => o.pc && o.copy) ?? null;
-    if (!target) return linked ? { from: linked } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+    const room = roomWhy(e, target);
+    if (!target) return room ? { why: room } : linked ? { from: linked } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
     const send = hs.net?.pcs.find(p => p.id === target)?.send;
     if (send) return { why: send };
+    if (room) return { why: room };
     if (here) return { from: here };
-    return linked ? { from: linked, via: true } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+    return linked ? { from: linked, direct: true } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+  }
+  /** "Insufficient space" when the PC's models drive (as it last said) has not room for the file and the spare kept free. */
+  function roomWhy(e, target) {
+    const free = target ? hs.net?.pcs.find(p => p.id === target)?.free : hs.net?.free;
+    if (typeof free !== 'number' || !e.bytes || e.bytes + (hs.net?.spare ?? 0) <= free) return '';
+    return `insufficient space on ${pcName(target)}: needs ${GBs(e.bytes)}, ${GBs(free)} free`;
   }
 
   function drawAllModels() {
@@ -229,97 +256,81 @@
     const target = hs.pc;
     const there = new Set(onPc(target).map(choiceKey));
     const q = hs.q.trim().toLowerCase();
-    const list = networkModels().filter(e => !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+    // A model only on PCs that are off is not a card (it cannot be installed now): it is listed under that PC, folded, below.
+    const off = new Set((hs.net?.pcs ?? []).filter(p => p.ok === false).map(p => p.id));
+    const reachable = e => e.on.some(o => !o.pc || !off.has(o.pc));
+    const list = networkModels().filter(e => reachable(e) && !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+    drawOffPcs(off);
     const thing = kind() === 'image' ? 'picture models' : 'chat models';
     block.classList.toggle('hs-wait', !hs.net);
     $('#hs-all-line').textContent = !hs.net ? 'Asking the linked PCs which models they have…'
-      : list.length ? `${kind() === 'image' ? 'Picture models' : 'Chat models'} available from across your network.`
+      : list.length ? 'Choose and pull a model from across your network.'
       : `${pcName(target)} has every ${thing.slice(0, -1)} your linked PCs share${q ? ` that matches "${hs.q.trim()}"` : ''}.`;
+    // The PC that Install puts a model on, as a tile like the left panel's.
+    $('#hs-all-to').replaceChildren(railPc(target), el('span', { class: 'hint hs-all-to-line', text: 'Install puts a model here' }));
     // Blurred stand-ins while the PCs are asked: the page keeps its shape, then the cards come in.
     keepButtons($('#hs-all'), !hs.net ? [1, 2, 3, 4].map(waitCard) : list.map(allCard));
   }
+  /**
+   * Each linked PC that is off, folded: "This node is offline, last reported to have:" and the models it last said it
+   * has (of this role's kind), as a plain list in two columns. Nothing to press: it comes back as cards once it is on.
+   */
+  function drawOffPcs(off) {
+    const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+    const all = networkModels();
+    $('#hs-off-pcs').replaceChildren(...(hs.net?.pcs ?? []).filter(p => off.has(p.id)).map(p => {
+      const names = all.filter(e => e.on.some(o => o.pc === p.id)).map(e => `${e.name}${e.bytes ? ` (${GBs(e.bytes)})` : ''}`).sort((a, b) => a.localeCompare(b));
+      return el('details', { class: 'hs-off-pc' },
+        el('summary', {}, el('strong', { text: pcName(p.id) }), el('span', { class: 'hint', text: ` · Offline${p.seenAt ? `, last seen ${when(p.seenAt)}` : ''}` })),
+        el('p', { class: 'hint', text: names.length ? 'This node is offline, last reported to have:' : 'This node is offline, last reported to have none of these models.' }),
+        names.length ? el('ul', { class: 'hs-off-list' }, ...names.map(n => el('li', { text: n }))) : null);
+    }));
+  }
   const waitCard = () => el('div', { class: 'pick-card hs-model hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'hs-model-text' }, el('strong', { text: 'A model name here' }), el('span', { class: 'hint', text: 'file 0.0 GB · On a PC' })));
 
+  const whereOpen = new Set();
   function allCard(e) {
     const target = hs.pc;
     const where = whereOf(e);
     const route = routeTo(e, target);
     const moving = hs.moving.get(e.key);
-    const btn = el('button', { class: 'btn', type: 'button', 'data-key': e.key, text: route.via ? `Copy to ${pcName(target)} (through this PC)` : `Copy to ${pcName(target)}`, disabled: !!route.why || !!moving, onclick: () => pull(e) });
-    const push = el('button', { class: 'btn', type: 'button', 'data-key': `push:${e.key}`, text: 'Push to node', onclick: () => openPush(e) });
+    const btn = el('button', { class: 'btn', type: 'button', 'data-key': e.key, text: 'Install', title: `Install on ${pcName(target)}`, disabled: !!route.why || !!moving, onclick: () => pull(e) });
+    // Where it is stays behind a "!": hover for it, or press to show it under the size (kept open when the cards redraw).
+    const open = whereOpen.has(e.key);
+    const bang = el('button', { class: 'hs-where', type: 'button', 'data-key': `where:${e.key}`, text: '!', title: `On ${where}`, 'aria-label': `Where it is: on ${where}`, 'aria-expanded': String(open), onclick: () => {
+      if (!whereOpen.delete(e.key)) whereOpen.add(e.key);
+      drawAllModels();
+    } });
     return el('div', { class: 'pick-card hs-model hs-net' },
       el('span', { class: 'hs-model-text' },
         el('strong', { text: e.name }),
-        el('span', { class: 'hint', text: [e.bytes ? `file ${GBs(e.bytes)}` : '', `On ${where}`].filter(Boolean).join(' · ') }),
+        el('span', { class: 'hint' }, e.bytes ? `file ${GBs(e.bytes)} ` : '', bang),
+        open ? el('span', { class: 'hint', text: `On ${where}` }) : null,
         moving ? el('span', { class: 'hint', role: 'status', text: moving.said }) : route.why ? el('span', { class: 'hs-warn', text: `${cap(route.why)}.` }) : null),
-      el('span', { class: 'hs-net-acts' }, btn, push));
+      el('span', { class: 'hs-net-acts' }, btn));
   }
   const cap = t => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
   // Each PC by the name that tells it apart (two linked PCs both called "Worker PC" are not one PC).
   const whereOf = e => e.on.map(o => pcName(o.pc)).filter((n, i, a) => a.indexOf(n) === i).join(', ');
 
-  // ---- Push to node: one model, from the PC it is on (left) to any other PC (tiles on the right) ----
-  const pushDlg = $('#hs-push-dlg');
-  let pushKey = '';
-  function openPush(e) {
-    pushKey = e.key;
-    $('#hs-push-fault').hidden = true;
-    drawPush();
-    pushDlg.showModal();
-  }
-
-  /** A PC as a tile, as Home's left side shows it: its picture, its name, its memory and make, and whether it is on. */
-  function pcTile(pc, ...below) {
+  /**
+   * A PC drawn as the left panel draws it (home.js staffRow): its picture with the activity dot, its name, its memory
+   * ("48 GB / 5 GB VRAM") and make, and the one word (Available, Offline...). Not a button: it only shows the PC picked.
+   */
+  function railPc(pc) {
     const p = pc ? d().pcs.find(x => x.id === pc) : null;
     const net = pc ? hs.net?.pcs.find(x => x.id === pc) : null;
     const on = !pc || (p ? p.ok : net?.ok === true);
-    const state = !pc ? 'This PC' : p?.asking ? 'Asking it…' : !on ? 'Off now' : p?.away ? 'Away: its owner is using it' : 'On';
+    const activity = !on ? 'offline' : p?.away ? 'owner' : 'available';
     const mem = pc ? { ram: p?.ram || homeUi.pcMem?.[pc]?.ram, vram: p?.ram ? p.vram : homeUi.pcMem?.[pc]?.vram } : d().here;
-    const specs = [mem?.ram ? memWords(mem.ram, mem.vram) : '', app.pcProfileOf?.(pc || 'here')?.model || ''].filter(Boolean).join(' · ');
-    const dot = on && !p?.away ? 'on' : p?.asking || p?.away ? 'asleep' : 'off';
-    const pic = app.avatar ? app.avatar(pc ? `pc:${pc}` : 'pc:mine', 'PC') : el('span', { class: 'rail-avatar', text: 'PC' });
-    return el('div', { class: `hs-tile${on ? '' : ' hs-tile-off'}`, 'data-pc': pc || 'here' },
-      el('span', { class: 'hs-tile-pic' }, pic, el('span', { class: 'sdot', 'data-state': dot, 'aria-hidden': 'true' })),
-      el('strong', { class: 'hs-tile-name', text: pcName(pc) }),
-      specs ? el('span', { class: 'hint', text: specs }) : null,
-      el('span', { class: `hs-tile-state${on ? ' on' : ''}`, text: state }),
-      ...below);
-  }
-
-  /** The PCs it is on (from, on the left, each saying whether it can send it now) and every other PC (to, on the right). */
-  function drawPush() {
-    const e = networkModels().find(x => x.key === pushKey);
-    if (!e) {
-      $('#hs-push-line').textContent = 'That model is no longer on your linked PCs.';
-      $('#hs-push-from').replaceChildren();
-      $('#hs-push-list').replaceChildren();
-      $('#hs-push-none').hidden = true;
-      return;
-    }
-    const moving = hs.moving.get(e.key);
-    $('#hs-push-line').textContent = `${e.name}${e.bytes ? ` (file ${GBs(e.bytes)})` : ''}: from ${whereOf(e)} to any other PC.`;
-    const all = ['', ...d().pcs.map(p => p.id)];
-    const has = pc => e.on.some(o => (o.pc ?? '') === pc) || onPc(pc).some(c => choiceKey(c) === e.key);
-    // From: each PC that has it. A PC that cannot send it now says why on its own tile, never on another PC's.
-    $('#hs-push-from').replaceChildren(...all.filter(has).map(pc => {
-      const o = e.on.find(x => (x.pc ?? '') === pc);
-      const why = pc && o && !o.copy ? `${cap(o.why || 'it cannot send it now')}.` : '';
-      return pcTile(pc, why ? el('span', { class: 'hs-warn', text: why }) : el('span', { class: 'hs-state on', text: '✓ Has it' }));
-    }));
-    const to = all.filter(pc => !has(pc));
-    const stuck = !e.on.some(o => !o.pc || o.copy);
-    $('#hs-push-none').hidden = !stuck || !to.length;
-    $('#hs-push-none').textContent = `No PC that has ${e.name} can send it now, so it cannot be pushed until one can.`;
-    keepButtons($('#hs-push-list'), to.length ? to.map(pc => {
-      const route = routeTo(e, pc);
-      const here = !!moving && moving.to === pc;
-      // The target's own reason (off, or it takes no models); a source that cannot send says so on its own tile.
-      const own = pc ? hs.net?.pcs.find(p => p.id === pc)?.send : '';
-      const said = here ? moving.said : own ? `${cap(own)}.` : !route.why && route.via ? `Goes through ${pcName('')}` : '';
-      return pcTile(pc,
-        said ? el('span', { class: own && !here ? 'hs-warn' : 'hint', role: here ? 'status' : null, text: said }) : null,
-        el('button', { class: 'btn', type: 'button', 'data-key': pc || 'here', text: `Push to ${pcName(pc)}`, disabled: !!route.why || !!moving, onclick: () => pull(e, pc) }));
-    }) : [el('p', { class: 'hint', text: `Every PC has ${e.name} already.` })]);
+    const sub = [mem?.ram ? memWords(mem.ram, mem.vram) : pc ? 'Memory not known' : 'This PC', app.pcProfileOf?.(pc || 'here')?.model || ''].filter(Boolean).join(' · ');
+    const mark = activityDot(activity);
+    const pic = app.avatar ? app.avatar(pc ? `pc:${pc}` : 'pc:mine', 'PC', mark) : el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, 'PC', mark);
+    return el('div', { class: 'rail-row hs-rail-pc', 'data-pc': pc || 'here' }, pic,
+      el('span', { class: 'rail-text' },
+        el('span', { class: 'rail-name', text: pcName(pc) }),
+        el('span', { class: 'rail-sub', text: sub }),
+        el('span', { class: `rail-state a-${activity}`, text: ACTIVITY_WORD[activity] })));
   }
 
   /** Buttons drawn again keep the keyboard on the same one. */
@@ -338,28 +349,44 @@
       if (t.state !== 'working') throw new Error(t.said || 'it stopped');
       hs.moving.set(e.key, { ...hs.moving.get(e.key), said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
       if (dlg.open) drawAllModels();
-      if (pushDlg.open) drawPush();
       await new Promise(r => setTimeout(r, 1000));
     }
   }
 
-  /** Copies a model to a PC (the one picked, or one from Push to node): from a linked PC, from this PC, or from a linked PC through this one. */
-  async function pull(e, target = hs.pc) {
+  /** A direct copy from one linked PC to another, followed until it ends (the host only asks how far it is). */
+  async function followDirect(e, from, to, words) {
+    for (;;) {
+      const t = (await api('/api/share', { peerCopy: { from, to, action: 'state' } })).peerCopy?.transfer;
+      if (!t) throw new Error(`${pcName(to)} has no copy under way from ${pcName(from)}`);
+      if (t.state === 'done') return t;
+      if (t.state !== 'working') throw new Error(t.said || 'it stopped');
+      hs.moving.set(e.key, { ...hs.moving.get(e.key), said: `${words}${t.bytes ? `: ${Math.round((t.done / t.bytes) * 100)}%` : '…'}` });
+      if (dlg.open) drawAllModels();
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+
+  /** Copies a model to a PC (the one picked): from a linked PC, from this PC, or from one linked PC straight to another. */
+  async function pull(e) {
+    const target = hs.pc;
     const k = kind();
     const route = routeTo(e, target);
     if (route.why) return;
     hs.moving.set(e.key, { said: 'Starting…', to: target });
     drawAllModels();
-    if (pushDlg.open) drawPush();
     try {
       let local = route.from.pc ? null : route.from.model;
-      if (route.from.pc) {
+      if (route.direct) {
+        // Node to node: the target pulls it from the PC that has it; this PC only gives the order (src/jobrun/peersync.ts copyOrder).
+        await api('/api/share', { peerCopy: { from: route.from.pc, to: target, kind: k, model: route.from.model } });
+        await followDirect(e, route.from.pc, target, `Copying straight from ${route.from.name || pcName(route.from.pc)}`);
+      } else if (route.from.pc) {
         const r = await api('/api/network/copy', { pc: route.from.pc, model: route.from.model, kind: k });
         await follow(e, r.transfer.id, `Copying from ${route.from.name || pcName(route.from.pc)}`);
         await loadNet();
         local = hs.net?.mine.find(m => m.kind === k && keyOf(k, m.id) === e.key)?.id ?? null;
       }
-      if (target) {
+      if (target && !route.direct) {
         if (!local) throw new Error('it came to this PC but is not listed here yet: send it from Models on my other PCs');
         const r = await api('/api/network/send', { pc: target, model: local, kind: k });
         await follow(e, r.transfer.id, `Sending to ${pcName(target)}`);
@@ -374,11 +401,9 @@
         drawModels();
       }
       fault('');
-      if (pushDlg.open) drawPush();
     } catch (err) {
       hs.moving.delete(e.key);
       drawAllModels();
-      if (pushDlg.open) drawPush();
       fault(`${e.name} was not copied to ${pcName(target)}: ${err.message}`);
     }
   }
@@ -391,18 +416,22 @@
   }
 
   function drawAll() {
-    keepCards($('#hs-pcs'), [pcCard(''), ...d().pcs.map(p => pcCard(p.id))]);
+    keepCards($('#hs-pcs'), [pcCard('')]);
+    keepCards($('#hs-net-pcs'), d().pcs.map(p => pcCard(p.id)));
     $('#hs-pcs-block').hidden = !d().pcs.length;
     drawModels();
     drawAllModels();
     drawRoleLine();
     drawSummary();
-    for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === hs.role;
+    for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === kind();
+    if ($('#hs-subrole').value !== hs.role) drawSubRoles();
   }
 
   /** Before the first staff list has come: the window's frame with blurred stand-ins where the roles and models go. */
   function drawWaiting() {
-    $('#hs-roles').replaceChildren(...['Writer', 'Coder', 'Designer', 'Artist'].map(t => el('span', { class: 'pick-card hs-role hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'role-icon' }), el('span', { text: t }))));
+    $('#hs-subrole').replaceChildren(el('option', { text: 'Reading the roles…' }));
+    $('#hs-subrole').disabled = true;
+    $('#hs-roles').replaceChildren(...['Text / coding', 'Images'].map(t => el('span', { class: 'pick-card hs-role hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'role-icon' }), el('span', { text: t }))));
     $('#hs-pcs-block').hidden = true;
     $('#hs-all-block').hidden = true;
     $('#hs-models-title').textContent = 'Choose a model';
@@ -499,6 +528,7 @@
     if (dlg.open) drawAll();
   });
 
+  $('#hs-look-btn').replaceChildren(app.pencilIcon?.() ?? '✎');
   $('#hs-look-btn').addEventListener('click', openLook);
   // The search is inside the form: Enter there only filters, it never presses Hire.
   $('#hs-search').addEventListener('keydown', e => {
@@ -517,6 +547,7 @@
     if (box === $('#hs-name')) nameChanged();
   };
   $('#hs-random').addEventListener('click', () => app.randomName($('#hs-name')));
+  $('#hs-subrole').addEventListener('change', e => pickRole(e.target.value));
   // A name typed: the look follows it (a woman's name, a woman) until a look is chosen by hand.
   $('#hs-name').addEventListener('input', nameChanged);
   // Add new: the Models page (Models: add or remove), as "get a model" does.
@@ -524,8 +555,8 @@
     dlg.close();
     app.openModels(kind() === 'image' ? 'image' : 'chat');
   });
-  // Opened from the Staff menu: back to it (it takes the page over); else back to where Hire staff was opened from.
-  const leave = () => (hs.fromMenu && dlg.classList.contains('as-page') ? app.openStaffMenu() : dlg.close());
+  // Back to where Hire staff was opened from (as a page: Settings, or All staff; else the page under the window).
+  const leave = () => dlg.close();
   $('#hs-cancel').addEventListener('click', leave);
   $('#hs-close').addEventListener('click', leave);
   // See all staff opens the list of everyone (it used to open the person last edited).

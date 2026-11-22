@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expertRunner, hasExpertSplit, lenderRam, EXPERT_RUNNER_DIR } from '../src/jobrun/epload.ts';
+import { rpcBuffer } from '../src/maxplace.ts';
 import { chatArgs } from '../src/llama.ts';
 
 const GIB = 2 ** 30;
@@ -74,4 +75,20 @@ test('expert parallel starts with -b 32 -ub 32 instead of the 2048 prompt chunks
   assert.match(s, /--rpc 127\.0\.0\.1:50073 -lm none/);
   const plain = chatArgs('m.gguf', 8080, 'cuda', 4, false, { ...run, batch: undefined }, true).join(' ');
   assert.match(plain, /-ub 2048/);
+});
+
+test('a lender\'s -ot buffer type is numbered within its own server; -dev names count over the whole --rpc list', () => {
+  // Two lenders with two devices each, as the runner listed them on 22 Nov 2026; its buffer types were
+  // RPC0[...:52042], RPC0[...:52044], RPC1[...:52042], RPC1[...:52044].
+  const listed = [
+    { name: 'CUDA0', what: 'Quadro P2000', total: 5 * GIB, free: 4.2 * GIB },
+    { name: 'RPC0', what: '127.0.0.1:52042', total: 2 * GIB, free: 2 * GIB },
+    { name: 'RPC1', what: '127.0.0.1:52042', total: 16 * GIB, free: 12 * GIB },
+    { name: 'RPC2', what: '127.0.0.1:52044', total: 12 * GIB, free: 11 * GIB },
+    { name: 'RPC3', what: '127.0.0.1:52044', total: 128 * GIB, free: 120 * GIB },
+  ];
+  assert.equal(rpcBuffer(listed, lenderRam(listed, '127.0.0.1:52042', true)!), 'RPC1[127.0.0.1:52042]');
+  assert.equal(lenderRam(listed, '127.0.0.1:52044', true)?.name, 'RPC3', 'the device name stays global');
+  assert.equal(rpcBuffer(listed, lenderRam(listed, '127.0.0.1:52044', true)!), 'RPC1[127.0.0.1:52044]', 'not RPC3[...]');
+  assert.equal(rpcBuffer(listed, listed[3]), 'RPC0[127.0.0.1:52044]');
 });

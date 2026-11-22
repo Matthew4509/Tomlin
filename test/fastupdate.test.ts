@@ -10,7 +10,7 @@ const js = readFileSync(join(ROOT, 'public', 'home.js'), 'utf8');
 const css = readFileSync(join(ROOT, 'public', 'style.css'), 'utf8');
 
 test('the button sits in the heading row of Linked PCs and is hidden until it is needed', () => {
-  assert.match(html, /<div class="set-head">\s*<h3 id="node-linked-title">Linked PCs<\/h3>\s*<button class="btn primary fast-update" type="button" id="node-fast-update" hidden/);
+  assert.match(html, /<div class="set-head">\s*<h3 id="node-linked-title">Linked PCs<\/h3>\s*<span class="net-linked-acts"><button class="btn" type="button" id="net-hw-scan"[^>]*>Scan for hardware changes<\/button>\s*<button class="btn primary fast-update" type="button" id="node-fast-update" hidden/);
   assert.match(css, /\.set-head \{[^}]*justify-content: space-between/);
 });
 
@@ -29,7 +29,7 @@ test('it shows only while some linked PC can be updated now, and does what Updat
 
 test('the left panel has the same Fast update at the right of its Linked PCs heading, hidden until a PC that answers is behind', () => {
   assert.match(html, /<div class="rail-head-row" id="rail-pcs-head">\s*<h2 class="rail-head" id="rail-pcs-title">Linked PCs<\/h2>\s*<button class="btn quiet rail-fast" type="button" id="rail-fast-update" hidden/);
-  assert.match(js, /const behind = homeUi\.pcs\.filter\(p => p\.outdated && p\.activity !== 'offline'\)\.length;/);
+  assert.match(js, /const behind = homeUi\.pcs\.filter\(p => p\.outdated && !p\.updating && p\.activity !== 'offline'\)\.length;/);
   assert.match(js, /railFast\.hidden = !behind;\s*railFast\.onclick = updateAllLinked;/);
   assert.match(css, /\.rail-head-row \{[^}]*justify-content: space-between/);
   assert.match(css, /\.rail-head-row \.rail-fast \{[^}]*font-size: 12px/);

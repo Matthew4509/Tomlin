@@ -31,12 +31,15 @@ import { d, useDeps } from './jobrun/shared.ts';
 import { canKeep, canThink, canTools, canWeb, drawOn, hello, lastHello, pcAsks, lastSaid, linkCount, lostOf, syncUsage, nodeStats, nodeLog, owedNow, owedTaken, pictureDrawer, remoteStatus, sharedName, startLinks } from './jobrun/links.ts';
 import { backupChoices, brainForRef, hireBrain } from './jobrun/who.ts';
 import { laneOfRef, nextLane, planLane, setup, strongestHire } from './jobrun/sizing.ts';
-import { backupTo, bringBack, claimOn, claimStateOn, copiesOn, copyFrom, moveTo, fetchOn, freeOn, keptOn, removeModelOn, powerOffOn, widenFar, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, pullFrom } from './jobrun/copies.ts';
+import { backupTo, bringBack, claimOn, claimStateOn, copiesOn, copyFrom, moveTo, fetchOn, freeOn, keptOn, removeModelOn, powerOffOn, permSetOn, widenFar, network, ownerOn, ownerSetOn, resendCodes, projectsBack, projectsOn, projectsTo, runnerOff, runnerTo, runSetOn, sendTo, tuneOn, startProjectBackups, transfers, updatePc, updatingTo, pullFrom } from './jobrun/copies.ts';
 import { jobView, listJobs, loadJob, loadWaiting, projectCards } from './jobrun/jobfiles.ts';
+import { hardwareScan } from './jobrun/hwscan.ts';
 import { actionBusy, change, finalReview, homeJobs, plan, planQueued, review, runQueued, runRest, step, tests, unplanned } from './jobrun/actions.ts';
 import { startPassSync } from './jobrun/passsync.ts';
 import { startPeerSync } from './jobrun/peersync.ts';
 import { hostPinOn } from './jobrun/hostpins.ts';
+import { driveJobsOn, modelsWhereOn, poolModeOn, storageView } from './jobrun/storage.ts';
+import { downloadLineOn, downloadsView, storeGetOn } from './jobrun/downloads.ts';
 import { applyShare, askHost, claimsWaiting, impactOf, lanList, linkedUse, nodeView, projectsCopy, serving, setShare, shareListening, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
 import { goAway } from './jobrun/giveway.ts';
@@ -109,6 +112,8 @@ export interface JobDeps {
   usageTake: (pc: string, rows: { project: string; tally: Tally; last?: string }[]) => void;
   /** This PC's memory now, told to a manager PC in the worker's hello (for its memory bar). */
   memory: () => unknown;
+  /** Reads this PC's hardware again (Network, Scan for hardware changes): what changed, in words ([] when nothing). */
+  rescanHardware?: () => Promise<string[]>;
   /** This PC's processor (name, physical cores, threads), told to a host in the hello for its Cluster page. */
   cpu?: () => { name: string; cores: number; threads: number };
   /** This PC's meters as the sampler last read them (it reads every second anyway): for a paired PC's chat head. */
@@ -123,6 +128,8 @@ export interface JobDeps {
   removeModel?: (kind: string, id: string) => Promise<{ status: number; body: Record<string, unknown> }>;
   /** Why a model of this PC cannot be deleted now (hidden, loaded, kept by Ollama, not here), or '' when it can: asked before a Move copies anything. */
   removeBlock?: (kind: string, id: string) => Promise<string>;
+  /** Sets which of this PC's drives new models go to, for a linked admin PC (src/server/modelhome.ts chooseModelsDrive). */
+  modelsDrive?: (drive: string) => Promise<{ status: number; body: Record<string, unknown> }>;
   /** When a model last answered or drew here (ms), told to linked PCs for Free up space; null when not recorded. */
   usedAt?: (id: string) => number | null;
   /** Whether picture model `id` fits in the memory free now (counting what the picture model loaded frees). */
@@ -154,7 +161,7 @@ export interface JobDeps {
   /** Checks the app lock PIN (wrong tries are counted there). */
   appPinCheck: (pin: unknown) => Promise<{ ok: true } | { status: number; error: string }>;
   /** This PC's app lock PIN typed on a linked PC sending it an update (audit X2), counted per link (src/server/locks.ts); or the host PIN that link gave (`host`). */
-  updatePinCheck: (pin: unknown, who: string, forDelete?: boolean | 'power' | 'host', host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>;
+  updatePinCheck: (pin: unknown, who: string, forDelete?: boolean | 'power' | 'host' | 'perms', host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>;
   /** The host PIN doors (src/hostpin.ts): a linked host gives this PC its host PIN, or takes it away. */
   hostPinDoor: (p: string, b: Record<string, unknown>, who: { key: string; link: string; name: string; guest: boolean }, pcName: () => string) => Promise<{ status: number; json: Record<string, unknown> }>;
   /** Whether that link (its whole id) gave this PC a host PIN. */
@@ -166,8 +173,11 @@ export interface JobDeps {
   /** Unloads every model on this PC (F7 E5: the node gives way). */
   /** Unloads every model here; `still` is asked before each one (the node may be started again part-way). */
   unloadAll: (still?: () => boolean) => Promise<void>;
-  /** A download a linked main PC asks this node to make itself (/worker/fetch-start, -state, -stop; src/server/hf.ts fetchHere). */
-  fetch: (path: string, b: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> }>;
+  /**
+   * A download a linked main PC asks this node to make itself (/worker/fetch-start, -state, -stop), and this node's
+   * downloads list (/worker/dl-queue, -cancel, -again, -clear); src/server/hf.ts fetchHere. `by`: that PC's name.
+   */
+  fetch: (path: string, b: Record<string, unknown>, by: string) => Promise<{ status: number; json: Record<string, unknown> }>;
   /** The speed finder a linked PC asks for (/worker/tune-*; src/server/finder.ts tuneDoor), and what it says while one runs here. */
   tune?: (action: string, b: Record<string, unknown>, by: string) => Promise<{ status: number; json: Record<string, unknown> }>;
   tuneBusy?: () => string;
@@ -269,6 +279,10 @@ export interface Hello {
   ask: { hours: number; at: string } | null;
   /** What that PC lets linked PCs do there (copy shared models, keep restore points, send models); null from one before 2.0.32. */
   allow: carry.Allow | null;
+  /** Its owner ticked "Allow unencrypted cluster links" there (src/jobrun/plainlinks.ts); false from an older TOMLIN. */
+  plainLinks?: boolean;
+  /** The most characters of a whole chat it takes in one request (src/brains.ts chatCharsFor); 0 from a TOMLIN before 2.1.9 (it takes 230,000). */
+  chatChars?: number;
   /** Started by Start TOMLIN.cmd, so it can start a newer copy by itself (2.0.33 on). */
   restarts: boolean;
   /** When its TOMLIN started, and how long the PC has been on (seconds); null from one before 2.0.39. */
@@ -358,6 +372,8 @@ export interface StepResult extends jobs.Result {
   problems: string[];
   /** The plain cross-file check, as the files would be after saving. */
   warnings: string[];
+  /** A web page read for the step looked like orders for an AI (src/promptscan.ts webGuard): said, and never saved unseen. */
+  risky?: string;
   exists: Record<string, boolean>;
   /** Each step file's fingerprint when the step read it: saving is refused when the file has changed since. */
   base?: Record<string, string>;
@@ -375,7 +391,7 @@ export function createJobs(deps: JobDeps) {
   startPassSync();
   startPeerSync();
   startProjectBackups();
-  return { get, post, startShare, clusterView: clusterNow, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, brainForRef, widenFar, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canTools, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes };
+  return { get, post, startShare, clusterView: clusterNow, loadJob, homeJobs, runQueued, planQueued, listJobs, unplanned, strongestHire, projectInfo: async (id: string) => { const c = await projectCards(id); return 'error' in c ? null : { name: c.name, goal: c.goal, folder: c.folder }; }, changeJob: change, actionBusy, laneOfRef, nextLane: async (id: string, skip = -1) => { const job = await loadJob(id); if (job) return nextLane(job, skip); const c = await projectCards(id); return 'error' in c ? null : planLane(c.team); }, shareView, remoteStatus, linkCount, hireBrain, brainForRef, widenFar, backupChoices, pictureDrawer, drawOn, lastHello, sharedName, nodeStats, nodeLog, hello, linkedUse, impactOf, nodeView, goAway, askHost, pcAsks, applyShare, canKeep, canThink, canTools, canWeb, lostOf, owedNow, owedTaken, syncUsage, lastSaid: (id: string) => lastSaid.get(id) ?? null, servingNow: () => [...serving.values()], shareOn: () => shareState.on, claimsWaiting, resendCodes, updatingTo };
 }
 
 // ---- Routes ----
@@ -391,6 +407,10 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
   if (p === '/api/remotes') return d.json(res, 200, { remotes: await remoteStatus() }), true;
   // known=1: the linked PCs as each said last, at once (Hire staff draws that first, then asks for the full list).
   if (p === '/api/network') return d.json(res, 200, await network(url.searchParams.get('known') === '1')), true;
+  // Every PC's drives with their jobs, and the Model store and Backups pools (src/jobrun/storage.ts).
+  if (p === '/api/network/storage') return d.json(res, 200, await storageView()), true;
+  // Every PC's downloads list (src/jobrun/downloads.ts).
+  if (p === '/api/network/downloads') return d.json(res, 200, await downloadsView()), true;
   if (p === '/api/network/transfers') return d.json(res, 200, { transfers: transfers.view() }), true;
   if (p === '/api/network/backups') return reply(res, await keptOn(url.searchParams.get('pc'))), true;
   if (p === '/api/network/projects') return reply(res, await projectsOn(url.searchParams.get('pc'))), true;
@@ -409,7 +429,7 @@ async function get(p: string, url: URL, res: ServerResponse): Promise<boolean> {
     const facts = await firewall.read(shareState.port, process.execPath);
     return d.json(res, 200, facts ? { ...firewall.judge(facts, shareState.port, process.execPath), port: shareState.port } : { unknown: true, port: shareState.port }), true;
   }
-  if (p === '/api/home/pcs') return d.json(res, 200, { cluster: clusterNow(), pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), backupsOnly: r.backupsOnly === true, inCluster: r.inCluster, heldByCluster: r.heldByCluster, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, newer: r.ok && r.pull && !r.pull.why ? { version: r.version, mine: r.pull.mine, other: r.pull.other } : null, ...home.pcLook(r), ...pcComputer(r) })) }), true;
+  if (p === '/api/home/pcs') return d.json(res, 200, { cluster: clusterNow(), pcs: (await remoteStatus()).map(r => ({ id: r.id, name: r.name, url: r.url, model: r.ok ? r.model : null, picture: r.ok ? r.image?.name ?? null : null, speed: r.ok && r.model ? d.speeds.get(speedKeys.pcKey(r.id, r.model)) : null, ...pcMemory(r), backupsOnly: r.backupsOnly === true, inCluster: r.inCluster, heldByCluster: r.heldByCluster, disk: r.ok ? r.disk ?? null : null, outdated: r.ok && r.update ? { version: r.version, mine: r.update.mine, other: r.update.other } : null, newer: r.ok && r.pull && !r.pull.why ? { version: r.version, mine: r.pull.mine, other: r.pull.other } : null, updating: updatingTo(r.id), ...home.pcLook(r), ...pcComputer(r) })) }), true;
   return false;
 }
 
@@ -448,9 +468,19 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/tune': reply(await tuneOn(b)); return true;
     case '/api/network/model-remove': reply(await removeModelOn(b)); return true;
     case '/api/network/power-off': reply(await powerOffOn(b)); return true;
+    case '/api/network/perm-set': reply(await permSetOn(b)); return true;
     // { action: view | set | check | give | off }: the host PIN, one PIN for the linked PCs (src/jobrun/hostpins.ts).
     case '/api/network/host-pin': reply(await hostPinOn(b)); return true;
     case '/api/network/free': reply(await freeOn(b)); return true;
+    // { pc, drive, jobs }: a drive's jobs here or on a linked PC; { pool, mode }: Spread or Mirror (src/jobrun/storage.ts).
+    case '/api/network/drive-jobs': reply(await driveJobsOn(b)); return true;
+    case '/api/network/models-where': reply(await modelsWhereOn(b)); return true;
+    case '/api/network/pool': reply(await poolModeOn(b)); return true;
+    // Network, Scan for hardware changes: this PC's processor, RAM and cards read again, then each linked PC's (src/jobrun/hwscan.ts).
+    case '/api/network/hardware-scan': reply(await hardwareScan()); return true;
+    // { pc, id, act }: Cancel, Download again or Clear on a PC's downloads list; { repo, rev, name, bytes }: into the Model store.
+    case '/api/network/download-line': reply(await downloadLineOn(b)); return true;
+    case '/api/network/store-get': reply(await storeGetOn(b)); return true;
     // { pc, model? }: a larger context for a linked PC's model, for the web (src/webctx.ts); what happened, in words.
     case '/api/network/web-context': reply({ status: 200, body: (await widenFar(brains.remoteRef(String(b.pc ?? ''), typeof b.model === 'string' ? b.model : null))) ?? { note: 'Nothing to change: the context there is large enough, or that PC or model is not there.' } }); return true;
     case '/api/network/stop': d.json(res, 200, { stopped: transfers.stop(String(b.id ?? '')) }); return true;

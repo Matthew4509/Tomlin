@@ -37,7 +37,12 @@ test('"This PC takes part" is never on by itself', () => {
   const chosen = withHere(c, true, '', true)!;
   assert.deepEqual(cleanCluster(JSON.parse(JSON.stringify(chosen))), chosen);
   assert.equal(withMembers(chosen, ['a'], ['a', 'b']).part, true);
-  assert.equal(without(withMembers(chosen, ['a'], ['a', 'b']), 'a').part, undefined, 'no cluster left: nothing set');
+  // The choice is the owner's, with PCs in the cluster or none: it stays when the last PC goes, and can be made first.
+  assert.equal(without(withMembers(chosen, ['a'], ['a', 'b']), 'a').part, true, 'no cluster left: the choice waits for PCs');
+  const first = withHere({ on: false, members: [] }, true, '', true)!;
+  assert.deepEqual(first, { on: false, members: [], part: true });
+  assert.equal(takesPartChosen(first), true);
+  assert.deepEqual(withHere(first, true), { on: false, members: [] }, 'switched off again before any PC: nothing chosen');
   // Staying out is its own explicit choice and never carries `part`.
   const out = withHere(chosen, false, 'a')!;
   assert.deepEqual(out, { on: true, members: ['a', 'b'], out: true, loader: 'a' });
@@ -46,8 +51,11 @@ test('"This PC takes part" is never on by itself', () => {
 
 test('the page leaves the switch Off with no cluster or no choice, and disables Add for a PC that is off', () => {
   const home = readFileSync(join(ROOT, 'public', 'home.js'), 'utf8');
-  assert.match(home, /const chosenPart = cl\.members\.length > 0 && cl\.part === true && !cl\.out;/);
-  assert.match(home, /checked: chosenPart/);
+  // Off until chosen; it can be chosen before any PC is in the cluster (read top to bottom, it comes first).
+  assert.match(home, /const chosenPart = cl\.part === true && !cl\.out;/);
+  assert.match(home, /checked: chosenPart, 'data-key': 'cluster-part',/);
+  assert.match(home, /Switch it on now to choose that this PC loads the model once you put PCs in the cluster below\./);
+  assert.match(readFileSync(join(ROOT, 'src', 'jobrun', 'linking.ts'), 'utf8'), /if \(empty && b\.takesPart === false\) next = withHere\(next, true\)!;/);
   assert.match(home, /disabled: !!off, title: off \|\| null/);
   assert.match(home, /Off: \$\{p\.seenAt \? `last seen/);
 });

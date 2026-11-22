@@ -2,7 +2,7 @@
 // The first model a hire has is always their first choice.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Staff } from '../src/staff.ts';
@@ -28,25 +28,37 @@ test('"Use it always" from the backup window on a hire with no model makes it th
   assert.equal(after?.fallback, null);
 }));
 
-test('clearing the first choice moves the fallback up rather than leaving a hire with only a second model', () => withStaff(async s => {
+test('no fallback is kept: clearing the first choice leaves none, and asking for a second sets none', () => withStaff(async s => {
   const m = await s.hire('Rosa', 'coder', 'default', 'big.gguf');
-  await s.change(m.id, { fallback: 'small.gguf' });
+  const two = await s.change(m.id, { fallback: 'small.gguf' });
+  assert.equal(two?.model, 'big.gguf');
+  assert.equal(two?.fallback ?? null, null);
   const after = await s.change(m.id, { model: null });
-  assert.equal(after?.model, 'small.gguf');
-  assert.equal(after?.fallback, null);
+  assert.equal(after?.model ?? null, null);
+  assert.equal(after?.fallback ?? null, null);
 }));
 
-test('a hire with a first choice keeps the fallback as the second', () => withStaff(async s => {
-  const m = await s.hire('Rosa', 'coder', 'default', 'big.gguf');
-  const after = await s.change(m.id, { fallback: 'small.gguf' });
-  assert.equal(after?.model, 'big.gguf');
-  assert.equal(after?.fallback, 'small.gguf');
-}));
+test('a fallback saved before is dropped when the staff file is read', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'first-model-'));
+  try {
+    const s = await Staff.load(dir);
+    const m = await s.hire('Rosa', 'coder', 'default', 'big.gguf');
+    const file = join(dir, 'staff.json');
+    const raw = JSON.parse(await readFile(file, 'utf8'));
+    raw.staff.find((x: { id: string }) => x.id === m.id).fallback = 'small.gguf';
+    await writeFile(file, JSON.stringify(raw));
+    const again = (await Staff.load(dir)).get(m.id);
+    assert.equal(again?.model, 'big.gguf');
+    assert.equal(again?.fallback ?? null, null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('a hire whose PC was let go (parked) is not given the fallback as first choice: the model comes back with the PC', () => withStaff(async s => {
   const m = await s.hire('Rosa', 'coder', 'default');
   const parked = [{ pc: 'pc1', model: 'remote:pc1:a', fallback: null, left: null }];
   const after = await s.change(m.id, { parked, fallback: 'small.gguf' });
   assert.equal(after?.model ?? null, null);
-  assert.equal(after?.fallback, 'small.gguf');
+  assert.equal(after?.fallback ?? null, null);
 }));

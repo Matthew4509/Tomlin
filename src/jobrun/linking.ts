@@ -10,10 +10,11 @@ import * as netfacts from '../netfacts.ts';
 import { restored, whenReleased } from '../staff.ts';
 import { d } from './shared.ts';
 import type { Remote } from '../store.ts';
-import { hello, pullOf, seen, sendPassAsk, workerPost } from './links.ts';
+import { answersAt, hello, pullOf, seen, sendPassAsk, workerPost } from './links.ts';
+import * as findagain from '../findagain.ts';
 import * as guestpass from '../guestpass.ts';
 import { setup } from './sizing.ts';
-import { clusterGaps, labelOf, lendersInUse, membersFacts, setBorrow } from './maxhost.ts';
+import { clusterGaps, labelOf, lendersInUse, membersFacts, setBorrow, setPlainLink } from './maxhost.ts';
 import { addWhy, heldFor, withHere, withMembers, withOn, without } from '../cluster/members.ts';
 import { chooseLoader, loaderWhy } from '../cluster/loader.ts';
 import { lanAddresses, lanList, shareState } from './node.ts';
@@ -135,6 +136,33 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     return sendPassAsk(r, text);
   } else if (b.action === 'scan') {
     return { status: 200, body: { found: await scan(Number(b.port) || share.DEFAULT_SHARE.port), own: lanList() } };
+  } else if (b.action === 'find-again') {
+    // A linked PC that stopped answering, perhaps because the router gave it another address: found on the home network
+    // and proved over its own link (src/findagain.ts), then only its address is saved.
+    const r = s.remotes.find(x => x.id === String(b.id ?? ''));
+    if (!r) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+    if (!link.keysOf(r.key)) return { status: 400, body: { error: `"${r.name}" was linked before links were encrypted, so it cannot be found this way. Link it again: Find PCs on my network, then its setup code.` } };
+    if (await hello(r, 4000).then(() => true, () => false)) return { status: 200, body: { ...(await setup()), note: `"${r.name}" answers at its address (${r.url.replace(/^https?:\/\//, '')}): nothing to change.` } };
+    let port = share.DEFAULT_SHARE.port;
+    try {
+      port = Number(new URL(r.url).port) || port;
+    } catch {
+      // A saved address that cannot be read: the usual port.
+    }
+    const found = await scan(port);
+    // Read after the scan: every PC that answered it is now in the ARP table.
+    const order = findagain.rankFound(r, found, findagain.ipForMac(await findagain.readArp(), r.mac));
+    for (const url of order) {
+      if (await share.homeNetworkWhy(url)) continue;
+      if (!(await answersAt(r, url))) continue;
+      const now = (await d.store.settings()).remotes;
+      if (!now.some(x => x.id === r.id)) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+      await d.store.saveSettings({ remotes: now.map(x => (x.id === r.id ? { ...x, url } : x)) });
+      console.log(`"${r.name}" moved from ${r.url} to ${url}: its address is saved.`);
+      await hello((await d.store.settings()).remotes.find(x => x.id === r.id)!, 4000).catch(() => undefined);
+      return { status: 200, body: { ...(await setup()), note: findagain.foundWords(r.name, r.url, url), moved: url } };
+    }
+    return { status: 404, body: { error: findagain.notFoundWords(r.name, found.length) } };
   } else if (b.action === 'answer') {
     // "I need to use the pc, please log out for N hours", from that PC's lock screen: Log out (for those hours) or Not now.
     const r = s.remotes.find(x => x.id === String(b.id ?? ''));
@@ -195,6 +223,12 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const next = setBorrow(s.remotes, String(b.id ?? ''), b.on === true);
     if (!next) return { status: 404, body: { error: 'That PC is no longer linked.' } };
     await d.store.saveSettings({ remotes: next });
+  } else if (b.action === 'plain-link') {
+    // "Unencrypted cluster link": ask that PC to lend over a stream that is not sealed. It takes effect only when that PC's
+    // owner ticked "Allow unencrypted cluster links" there too, and from the next load (a running stream keeps its kind).
+    const next = setPlainLink(s.remotes, String(b.id ?? ''), b.on === true);
+    if (!next) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+    await d.store.saveSettings({ remotes: next });
   } else if (b.action === 'cluster') {
     // The cluster entry (src/cluster/members.ts): `members` rebuilds the set (ids of linked PCs), `on` switches it on or off;
     // either or both. While it is on its members are held for borrowing: their hires are taken off them (asked first, and
@@ -220,7 +254,10 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
       next = set;
     }
     const said: string[] = [];
-    const wantOut = typeof b.takesPart === 'boolean' ? !b.takesPart : next.out === true;
+    // No PC in the cluster yet: "takes part" is only saved (on) or cleared (off); there is nobody to load the model instead.
+    const empty = !next.members.length;
+    if (empty && b.takesPart === false) next = withHere(next, true)!;
+    const wantOut = !empty && (typeof b.takesPart === 'boolean' ? !b.takesPart : next.out === true);
     // Only the owner's own press makes "takes part" a saved choice; nothing else switches it on.
     if (!wantOut && (next.out || b.takesPart === true)) next = withHere(next, true, '', b.takesPart === true)!;
     if (wantOut) {

@@ -32,6 +32,19 @@
 <li><b>Backups from other PCs are kept in</b>: a folder inside TOMLIN's folder, with one folder for each linked PC, or the folder you chose. It can be changed the same way.</li>
 <li>TOMLIN refuses a whole drive, a folder given without its drive, a folder inside its own program, data, backups or models folders, a network path, and a drive formatted as FAT. A folder cannot be changed while backups are being kept in the current one.</li>
 </ul>
+<h2>Drive jobs: Main model storage and Backup storage</h2>
+<p>The Network map is a short overview of your PCs. Under them, an arrow leads to <b>Model backups</b> and <b>Project backups</b>: which PCs keep them and the room left, each with <b>Add</b>. Drives and what they keep are set on the <b>Network Storage</b> page (left panel): two tiles, <b>Main model storage</b> and <b>Backup storage</b>, each with <b>+ Add</b> to pick a drive on any PC:</p>
+<ul>
+<li><b>Main model storage</b>: a copy of models, kept but never loaded from, so a model can be had again without the internet.</li>
+<li><b>Backup storage</b>: restore points and project backups.</li>
+</ul>
+<p>A drive can have both jobs; a drive with no job is not used. A linked PC's drive can be given a job only when its owner has turned on the matching permission: <b>Accept models from linked PCs</b> for Main model storage, <b>Enable backups</b> for Backup storage. The Network Storage page does the same with two tiles and <b>+ Add</b>.</p>
+<p>Each tile is set to <b>Extended</b> or <b>Duplicate</b>:</p>
+<ul>
+<li><b>Extended</b>: each file is kept once, and every drive's room adds up (two 2 TB drives: 4 TB). If a drive fails, what was on it is lost.</li>
+<li><b>Duplicate</b>: two copies of each file, always on two different PCs, so half the room (two 2 TB drives on two PCs: 2 TB). If one PC fails, nothing is lost. Two drives in the same PC do not count: the box warns about it.</li>
+</ul>
+<p>Main model storage starts as Extended and Backup storage as Duplicate. Each file stays a normal, whole file on a normal drive, so a drive taken out can be read on any PC. Main model storage is filled from the Models page (<b>To</b>, <b>Main model storage</b>): each PC downloads its copy into a folder named TOMLIN Model store on its drive (see <a href="models.html">Models</a>, The downloads list). Backups are not put in Backup storage yet.</p>
 <p>Keep 2 to 10 GB free on a node, and remove a model from the main PC's disk only after the question about where else it is held (see <a href="copying-models.html">Copying models between PCs</a>).</p>
 </article>
 <!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="todo.html" rel="prev"><span>&larr; Previous</span><b>To Do</b></a><a class="next" href="adding-pc.html" rel="next"><span>Next &rarr;</span><b>Adding a PC</b></a></nav><!--/nav-bottom-->

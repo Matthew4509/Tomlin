@@ -181,6 +181,9 @@ const TYPE_SIZE: Record<number, [number, number]> = {
   10: [84, 256], 11: [110, 256], 12: [144, 256], 13: [176, 256], 14: [210, 256], 15: [292, 256],
   16: [66, 256], 17: [74, 256], 18: [98, 256], 19: [50, 256], 20: [18, 32], 21: [110, 256], 22: [82, 256], 23: [136, 256],
   24: [1, 1], 25: [2, 1], 26: [4, 1], 27: [8, 1], 28: [8, 1], 29: [56, 256], 30: [2, 1], 34: [54, 256], 35: [66, 256], 39: [17, 32],
+  // NVFP4, Q1_0 and Q2_0 (llama.cpp b11284): Qwen3.8-Flash-Next UD-Q3_K_XL has two Q2_0 tensors, and one unknown type
+  // dropped its whole tensor list, so expert parallel was skipped and the load fell back to the layer split (22 Nov 2026).
+  40: [36, 64], 41: [18, 128], 42: [18, 64],
 };
 
 /**

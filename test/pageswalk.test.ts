@@ -18,7 +18,7 @@ test('a linked PC tile is wide enough for its memory lines, and a long card name
 test('a card that starts with a block (Guest passes, the measured speeds) has room above its words', () => {
   assert.match(css, /\.set-card > \.set-block:first-child \{ padding: 14px 16px; \}/);
   const html = read('index.html');
-  for (const id of ['guest-passes', 'cluster-speed']) {
+  for (const id of ['guest-passes']) {
     const part = html.slice(html.indexOf(`id="${id}"`), html.indexOf('</section>', html.indexOf(`id="${id}"`)));
     assert.match(part, /<div class="set-card">\s*<div class="set-block">/, `${id} starts with a block`);
   }

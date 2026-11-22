@@ -89,7 +89,8 @@ function showChat(r) {
  * server, and this page follows it from where it is now, as if it had asked. Stop works on it as on any answer.
  */
 function followAnswer(chatId) {
-  if (!chatId || streams.has(chatId)) return;
+  // A new chat's answer streams under "new:<who>" until its id comes ('chat' event): it is this window's own, followed already.
+  if (!chatId || streamOf(chatId)) return;
   const out = el('div', { class: 'msg assistant' }, typingNote());
   log.querySelector('.empty')?.remove();
   log.append(out);
@@ -128,7 +129,8 @@ api('/api/chat').then(showChat).catch(() => undefined);
 
 app.chatNote = text => {
   log.querySelector('.empty')?.remove();
-  log.append(el('div', { class: 'msg system', text }));
+  // Said again straight after (Send pressed again while the model loads, Reconnect while that PC is off): one line, counted.
+  sayOnce(log, text, t => el('div', { class: 'msg system', text: t }));
   log.scrollTop = log.scrollHeight;
 };
 
@@ -140,6 +142,8 @@ app.chatNote = text => {
 const streams = new Map();
 /** An answer's place in `streams`: its chat's id, or for a chat not made yet the person it is with (two of those are two chats). */
 const streamKey = (id, who) => id || `new:${who ?? ''}`;
+/** The answer streaming into a chat in this window: by its key, or a new chat's by the id the server gave it since. */
+const streamOf = id => streams.get(id) ?? (id ? [...streams.values()].find(s => s.liveId === id) : undefined);
 const hereKey = () => streamKey(app.chatId ?? '', app.chatWho?.());
 const streamingHere = () => streams.has(hereKey());
 app.liveChat = id => streams.has(id);
@@ -272,10 +276,16 @@ const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200
  * a box that scrolls, the flagged parts marked and what was found in words. True only when "I understand the risks of
  * harm" is ticked and Continue pressed; Continue cannot be pressed before the tick. Cancel (or Escape) is false.
  */
-app.scanWarn = (scan, message) => new Promise(resolve => {
+const SCAN_WORDS = { title: 'This message looks risky', hint: '' };
+app.scanWarn = (scan, message, words = {}) => new Promise(resolve => {
   const dlg = $('#scan-dlg');
   const agree = $('#scan-agree');
   const go = $('#scan-go');
+  // A document has its own heading and words; a message the ones in the page (kept from the first time).
+  const hint = $('#scan-form .hint');
+  if (!SCAN_WORDS.hint) SCAN_WORDS.hint = hint.textContent;
+  $('#scan-title').textContent = words.title ?? SCAN_WORDS.title;
+  hint.textContent = words.hint ?? SCAN_WORDS.hint;
   agree.checked = false;
   go.disabled = true;
   agree.onchange = () => { go.disabled = !agree.checked; };
@@ -439,12 +449,13 @@ async function talk(url, body, out, message, from = '') {
             if (perms?.[kind] === 'auto' && !card.querySelector('.permit-answers button:disabled')) answered('always');
           });
           const threadOn = app.PERMISSION_KINDS?.filter(k => thread[k.kind]).map(k => k.name) ?? [];
+          // Held (the answer read text that looked like orders for an AI): this one use only, nothing kept.
           card.append(
             el('p', { text: doing }),
+            data.held ? heldLine(data.held) : '',
             el('div', { class: 'row permit-answers' },
-              answer('once', 'Allow once', true),
-              answer('thread', 'Auto: this chat only'),
-              answer('always', 'Auto: always'),
+              answer('once', data.held ? 'Allow this once' : 'Allow once', true),
+              ...(data.held ? [] : [answer('thread', 'Auto: this chat only'), answer('always', 'Auto: always')]),
               answer('no', 'Don\'t allow')),
             data.wait ? el('p', { class: 'hint', text: `If nobody answers within ${Math.round(data.wait / 60000)} minutes, it is taken as Don't allow and the answer goes on without it.` }) : '',
             said,
@@ -760,6 +771,9 @@ const PERMIT_WORDS = {
   download: 'wants to download a file',
 };
 
+/** Why a card is shown although the kind is allowed: the answer read text that looked like orders for an AI. */
+const heldLine = why => el('p', { class: 'permit-held', text: `Asked again: ${why}. Allow it only if you asked for this yourself.` });
+
 /**
  * The card for a newer kind. Ask each time (`data.each`): this one action, Allow once or Don't allow, nothing kept.
  * Otherwise: once for this answer, always (Allowed in Settings), or no. A click shows the last look at the window
@@ -779,6 +793,7 @@ function tierCard(data, answerWith) {
   };
   const answer = (a, words, primary) => el('button', { class: primary ? 'btn primary' : 'btn quiet', type: 'button', text: words, onclick: () => answered(a) });
   card.append(el('p', { text: `${data.who} ${PERMIT_WORDS[data.kind]}: ${data.what}.` }));
+  if (data.held) card.append(heldLine(data.held));
   if (data.detail) card.append(el('pre', { class: 'permit-detail', text: String(data.detail) }));
   if (data.image && data.mark) {
     // The picture is the last look at that window; the ring is where the click would land.

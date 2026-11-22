@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readHardware, Sampler } from '../hardware.ts';
+import { hardwareChanges, readHardware, Sampler } from '../hardware.ts';
 import { logConsole, openLog } from '../log.ts';
 import { endBecause, startLastWords } from '../lastwords.ts';
 import { overlaps, systemFolderWhy } from '../workspace.ts';
@@ -15,6 +15,7 @@ import { crashedHere, cudaOrder, Runtimes } from '../runtimes.ts';
 import { hardwareKey, RunnerChecks } from '../runnercheck.ts';
 import { Models } from '../models.ts';
 import { ModelsHome } from '../modelhome.ts';
+import * as driveJobs from '../drivejobs.ts';
 import { Store, type ChatLine, type Settings } from '../store.ts';
 import * as leftovers from '../leftovers.ts';
 import { Staff } from '../staff.ts';
@@ -135,6 +136,8 @@ export const runtimes = new Runtimes(join(ROOT, 'runtime'), join(ROOT, 'runtimes
 export const modelsHome = new ModelsHome(join(HOME.home, 'models-home.txt'), HOME.models);
 // Where other PCs' backups are kept here (src/server/backuphome.ts): backups from other PCs in the home, or a chosen folder.
 export const backupsHome = new ModelsHome(join(HOME.home, 'backups-home.txt'), join(HOME.home, 'backups from other PCs'));
+// The jobs of this PC's drives (Model store, Backups) and, on an admin, how its two pools keep files (src/drivejobs.ts).
+driveJobs.useFiles(join(HOME.home, 'drive-jobs.json'), join(HOME.home, 'drive-pools.json'));
 export const chatModels = new Models(join(modelsHome.dir(), 'chat'), HOME.modelsFile, process.env.TOMLIN_MODELS);
 chatModels.cacheMs = 2000;
 // Models still in this app folder (versions before the home kept them here) and in the copies beside it are lent in place.
@@ -174,6 +177,22 @@ runtimes.order = (engine, device) => {
   const avoid = new Set([...failed, ...Object.keys(runtimes.pins).filter(id => crashedHere(runtimes.pins[id], hardware.gpus, hardware.nvidiaDriver ?? null))]);
   return device === 'cuda' ? cudaOrder(runtimes.pins, engine, hardware.gpus, hardware.nvidiaDriver ?? null, { avoid, first: runnerChecks.keep(hwKey()) }) : runtimes.idsOf(engine, device).filter(id => !failed.has(id));
 };
+/**
+ * Reads this PC's hardware again (a card, RAM or a processor changed since TOMLIN started): the same object is updated
+ * in place, so the sampler, the runner choice and the hello all see it. What changed, in words ([] when nothing).
+ */
+export async function rescanHardware(): Promise<string[]> {
+  const was = { ...hardware, gpus: [...hardware.gpus] };
+  const now = await readHardware();
+  // A busy PC can time PowerShell or nvidia-smi out: a reading that lost every card, or the NVIDIA driver, keeps the
+  // good record (the runner choice, the sampler and the hello read it) rather than wiping it.
+  if ((!now.gpus.length && was.gpus.length) || (was.nvidiaDriver && !now.nvidiaDriver)) {
+    now.gpus = was.gpus;
+    now.nvidiaDriver = was.nvidiaDriver;
+  }
+  Object.assign(hardware, now);
+  return hardwareChanges(was, now);
+}
 export const sampler = new Sampler(hardware);
 sampler.start();
 // Closing the window (or Ctrl+C) ends the model processes too: exit handlers run on these signals.

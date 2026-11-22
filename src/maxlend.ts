@@ -425,6 +425,8 @@ export interface RpcProgram {
   build?: string;
   /** Lend the card AND this PC's RAM and cores together ("all"): one RPC server with both devices (-d CUDA0,CPU). */
   all?: boolean;
+  /** Lend only the RAM and cores, even with a card (the cluster test's one member per CPU socket). */
+  cpuOnly?: boolean;
 }
 
 /**
@@ -443,6 +445,7 @@ export function rpcArgs(port: number, p: RpcProgram, cache: boolean, logicalCore
   // "all": the card and the CPU (RAM and cores) as one lender. With no card the CPU is the only device already.
   const both = p.all === true && p.device !== 'cpu';
   const threads = p.threads > 0 ? p.threads : lendThreads(logicalCores);
+  if (p.cpuOnly === true && p.device !== 'cpu') return ['-H', '127.0.0.1', '-p', String(port), ...(cache ? ['-c'] : []), '-d', 'CPU', '-t', String(threads)];
   return ['-H', '127.0.0.1', '-p', String(port), ...(cache ? ['-c'] : []), ...(both ? ['-d', `${cardDevice(p.device)},CPU`, '-t', String(threads)] : p.device === 'cpu' && p.threads > 0 ? ['-t', String(p.threads)] : [])];
 }
 

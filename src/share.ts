@@ -219,6 +219,12 @@ export interface ShareState {
   allow?: Allow;
   /** Max mode: minutes with nobody using this PC before it lends its card memory (src/maxlend.ts; 5 unless changed). */
   lendIdle?: number;
+  /**
+   * "Allow unencrypted cluster links": a linked PC that asks for it (its own "Unencrypted cluster link" tick for this PC)
+   * borrows over a stream that is not sealed after its sealed opening (src/linkstream.ts plainPipe). Faster, but anything
+   * on the home network could read or change it. Off unless ticked here; both PCs must choose it.
+   */
+  plainLinks?: boolean;
   /** The last update a linked PC pushed here (src/update.ts): to which version, by whom, when; `pulled`: taken from that PC by someone here. */
   updated?: { version: string; by: string; at: string; pulled?: boolean } | null;
   /** The last PC that linked here: shown on the Network page with the new setup code; `dropped`: the oldest link it pushed out (10 at most). */

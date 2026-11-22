@@ -730,6 +730,8 @@ function checkList(r) {
   if (rows.length) box.append(el('ul', { class: 'job-check-list' }, ...rows));
   const meta = [`Written by ${r.worker}`, r.tries > 1 ? `${r.tries} tries (a check failed and the answer went back to be fixed)` : 'first try'];
   box.append(el('p', { class: 'hint', text: `${meta.join(' · ')}.` }));
+  // A web page read for the step looked like orders for an AI (src/promptscan.ts): said first, in the same warning style.
+  if (r.risky) box.append(el('div', { class: 'job-warn', role: 'note' }, el('strong', { text: 'Check before saving: a web page looked risky' }), el('p', { text: r.risky })));
   if (r.warnings?.length) box.append(el('div', { class: 'job-warn', role: 'note' }, el('strong', { text: 'Check before saving: the files would not fit together' }), el('ul', {}, ...r.warnings.map(w => el('li', { text: w }))), el('p', { class: 'hint', text: 'Fix it in the text below, run the step again, or save and fix it in a later step.' })));
   if (r.dropped?.length) box.append(el('p', { class: 'hint', text: `Left out, because this step may not write them: ${r.dropped.join(', ')}.` }));
   return box;

@@ -33,8 +33,31 @@ const answers = (port: number) => new Promise<boolean>(resolve => {
   s.once('error', () => resolve(false));
 });
 
+/**
+ * The PowerShell that keeps process PID on CPU socket NODE (NUMA node): its threads run only on that socket's cores, so
+ * the memory it fills (the weights sent to it) is that socket's own. Windows only; prints "pinned <mask>" or throws.
+ */
+export const pinScript = (pid: number, node: number): string => [
+  'Add-Type -TypeDefinition \'using System;using System.Runtime.InteropServices;public static class TomlinNuma{[DllImport("kernel32.dll")]public static extern bool GetNumaHighestNodeNumber(out uint n);[DllImport("kernel32.dll")]public static extern bool GetNumaNodeProcessorMask(byte n,out ulong m);}\'',
+  '$hi = [uint32]0; [void][TomlinNuma]::GetNumaHighestNodeNumber([ref]$hi)',
+  `if (${node} -gt $hi) { throw "this PC has CPU sockets 0 to $hi only" }`,
+  '$m = [uint64]0',
+  `if (-not [TomlinNuma]::GetNumaNodeProcessorMask(${node}, [ref]$m) -or $m -eq 0) { throw "CPU socket ${node} has no cores here" }`,
+  `(Get-Process -Id ${pid}).ProcessorAffinity = [IntPtr][int64]$m`,
+  '"pinned $m"',
+].join('; ');
+
+const pin = (pid: number, node: number) => new Promise<void>((resolve, reject) => {
+  const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(pinScript(pid, node), 'utf16le').toString('base64')], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  ps.stdout.on('data', b => (out += b));
+  ps.stderr.on('data', b => (out += b));
+  ps.on('error', reject);
+  ps.on('exit', code => (code === 0 && /pinned \d+/.test(out) ? resolve() : reject(new Error(`it could not be kept on CPU socket ${node}: ${out.trim().split(/\r?\n/)[0] || `exit ${code}`}`))));
+});
+
 /** One RPC server of this PC's runner for one test stream, with no weight cache (a test uses no model). */
-async function startRpc(p: maxlend.RpcProgram): Promise<{ port: number; stop: () => void }> {
+async function startRpc(p: maxlend.RpcProgram, node = -1): Promise<{ port: number; stop: () => void }> {
   const port = await freePort();
   const child = spawn(p.exe, maxlend.rpcArgs(port, p, false), { windowsHide: true, cwd: dirname(p.exe), stdio: ['ignore', 'ignore', 'pipe'] });
   leftovers.started(child.pid, p.exe);
@@ -54,6 +77,15 @@ async function startRpc(p: maxlend.RpcProgram): Promise<{ port: number; stop: ()
     if (!gone) child.kill();
   };
   process.once('exit', stop);
+  // Pinned before it answers: no weights have reached it yet, so all of them land in that socket's memory.
+  if (node >= 0 && child.pid) {
+    try {
+      await pin(child.pid, node);
+    } catch (e) {
+      stop();
+      throw e;
+    }
+  }
   for (let t = 0; t < maxlend.RPC_START_MS / 200; t++) {
     if (gone) throw new Error('it stopped as it started');
     if (await answers(port)) return { port, stop };

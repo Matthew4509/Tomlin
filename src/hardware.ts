@@ -205,7 +205,27 @@ const VIDEO_PS = [
 /** What Windows listed at start, kept to read the cards again when nvidia-smi answers late (SmiReader.takeBack). */
 let lastCim = '';
 
-/** Read once at start: the processor, RAM and graphics chips. */
+/**
+ * What changed between two readings of a PC's hardware, in plain words ([] when nothing): the processor, its cores,
+ * the RAM, the graphics chips and the NVIDIA driver. For "Scan for hardware changes" on the Network page.
+ */
+export function hardwareChanges(was: HardwareInfo, now: HardwareInfo): string[] {
+  const gb = (n: number | null) => (n ? `${Math.round(n / 2 ** 30)} GB` : 'no memory of its own');
+  const cards = (h: HardwareInfo) => h.gpus.map(g => `${g.name} (${gb(g.total)})`).sort().join(', ') || 'none';
+  const out: string[] = [];
+  if (was.cpuName !== now.cpuName) out.push(`processor ${was.cpuName} → ${now.cpuName}`);
+  else if (was.cores !== now.cores || was.threads !== now.threads) out.push(`processor ${was.cores} cores, ${was.threads} threads → ${now.cores} cores, ${now.threads} threads`);
+  if (Math.round(was.ram / 2 ** 30) !== Math.round(now.ram / 2 ** 30)) out.push(`RAM ${gb(was.ram)} → ${gb(now.ram)}`);
+  // Windows always lists at least a basic display adapter, so no cards at all means PowerShell and nvidia-smi did not
+  // answer in time (a busy PC), and a driver gone means nvidia-smi did not: not read this time, not taken out.
+  const cardsUnread = !now.gpus.length && was.gpus.length > 0;
+  const driverUnread = cardsUnread || (!!was.nvidiaDriver && !now.nvidiaDriver);
+  if (!cardsUnread && cards(was) !== cards(now)) out.push(`graphics ${cards(was)} → ${cards(now)}`);
+  if (!driverUnread && (was.nvidiaDriver ?? null) !== (now.nvidiaDriver ?? null)) out.push(`NVIDIA driver ${was.nvidiaDriver ?? 'none'} → ${now.nvidiaDriver ?? 'none'}`);
+  return out;
+}
+
+/** Read at start, and again on "Scan for hardware changes": the processor, RAM and graphics chips. */
 export async function readHardware(): Promise<HardwareInfo> {
   const list = cpus();
   const info: HardwareInfo = { cpuName: list[0]?.model.trim() ?? 'Processor', cores: Math.max(1, Math.round(list.length / 2)), threads: list.length, ram: totalmem(), gpus: [] };
@@ -223,7 +243,8 @@ export async function readHardware(): Promise<HardwareInfo> {
   } catch {
     // keep the guesses from os.cpus()
   }
-  lastCim = cim;
+  // A timed-out reading leaves the last good list for the late-answer repair (SmiReader.takeBack).
+  if (cim) lastCim = cim;
   const rows = await smi.rows();
   const caps = rows.length ? await smi.caps() : [];
   const modes = rows.length ? await smi.modes() : [];

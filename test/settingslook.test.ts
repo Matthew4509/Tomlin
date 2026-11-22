@@ -82,7 +82,9 @@ test('one filled button per screen: list Downloads, Manage staff and the later s
   const models = read('models.js');
   assert.doesNotMatch(models, /class: 'btn primary', type: 'button', text: `Download/);
   assert.doesNotMatch(models, /class: 'btn primary', type: 'button', text: r\.zips/);
-  assert.match(read('index.html'), /<button class="btn" type="button" id="sm-manage">Manage staff<\/button>/);
+  // The Hire staff tile: two ordinary buttons, Hire and Manage (the Staff menu between them is gone).
+  assert.match(read('homeview.js'), /tileButton\('Hire', TILE_PLUS, \(\) => \{ asPage\.fromMenu = true; app\.openHire\(\{ page: true, fromMenu: true \}\); \}\),\n\s+tileButton\('Manage', TILE_LIST, \(\) => \{ asPage\.fromMenu = true; app\.seeAllStaff\(\); \}\)/);
+  assert.doesNotMatch(read('index.html'), /id="staff-menu"|id="sm-manage"/);
   const home = read('homeview.js');
   assert.match(home, /const next = steps\.indexOf\(false\);/);
   assert.match(home, /class: `btn\$\{at\+\+ === next \? ' primary' : ''\}`/);

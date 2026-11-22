@@ -20,7 +20,8 @@ export interface ClusterSet {
   /** With `out`: the member that loads the model. Always one of `members`. */
   loader?: string;
   /**
-   * Set when the owner chose "This PC takes part" on (an explicit saved choice). Unset with `out` unset: nothing was chosen
+   * Set when the owner chose "This PC takes part" on (an explicit saved choice), with PCs in the cluster or before any
+   * (read top to bottom, the switch comes first: the choice waits for the PCs). Unset with `out` unset: nothing was chosen
    * yet, which the page shows as Off; a cluster saved that way still runs the old way (this PC loads the model) until the
    * owner chooses, and a choice is never made for them. Never set with `out`.
    */
@@ -40,7 +41,7 @@ export function cleanCluster(raw: unknown): ClusterSet {
   const o = raw && typeof raw === 'object' ? (raw as { on?: unknown; members?: unknown; out?: unknown; loader?: unknown; part?: unknown }) : {};
   const members = [...new Set((Array.isArray(o.members) ? o.members : []).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 64))].slice(0, MAX_MEMBERS);
   const out = o.out === true && typeof o.loader === 'string' && members.includes(o.loader);
-  return { on: o.on === true && members.length > 0, members, ...(out ? { out: true as const, loader: o.loader as string } : o.part === true && members.length > 0 ? { part: true as const } : {}) };
+  return { on: o.on === true && members.length > 0, members, ...(out ? { out: true as const, loader: o.loader as string } : o.part === true ? { part: true as const } : {}) };
 }
 
 /** The set with `ids` as its members: only PCs still linked, kept in the order given; off when it is left empty. */
@@ -67,7 +68,7 @@ export function withHere(c: ClusterSet, takesPart: boolean, loader = '', chosen 
 }
 
 /** Whether the owner chose "This PC takes part" on, as the page shows it: never on by itself (no set, or nothing chosen: Off). */
-export const takesPartChosen = (c: ClusterSet | undefined | null): boolean => !!c && c.members.length > 0 && c.part === true && !c.out;
+export const takesPartChosen = (c: ClusterSet | undefined | null): boolean => !!c && c.part === true && !c.out;
 
 /**
  * Why a PC cannot be added to the cluster now ('' when it can): it is off, asleep or not answering, or its owner logged it

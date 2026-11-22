@@ -461,7 +461,7 @@ test('a backup disk: read from this PC, and cleaned when a hello says it', async
   assert.ok(here && here.total > 0 && here.free >= 0 && here.free <= here.total, 'a folder not made yet reads its nearest parent');
   assert.deepEqual(carry.cleanDisk({ total: 1000.4, free: 250 }), { total: 1000, free: 250 });
   for (const bad of [null, {}, { total: 0, free: 0 }, { total: 10, free: 20 }, { total: 'x', free: 1 }, { total: 10, free: -1 }]) assert.equal(carry.cleanDisk(bad), null);
-  assert.deepEqual(carry.cleanDrives([{ drive: "c:", label: "System", total: 500.2, free: 100 }, { drive: "D:", total: 10, free: 20 }, { drive: "Z", total: 1, free: 1 }, { drive: "E:", total: 0, free: 0 }, null]), [{ drive: "C:", label: "System", total: 500, free: 100 }]);
+  assert.deepEqual(carry.cleanDrives([{ drive: "c:", label: "System", total: 500.2, free: 100 }, { drive: "D:", total: 10, free: 20 }, { drive: "Z", total: 1, free: 1 }, { drive: "E:", total: 0, free: 0 }, null]), [{ drive: "C:", label: "System", total: 500, free: 100, jobs: [] }]);
   assert.deepEqual(carry.cleanDrives("x"), []);
   assert.equal(carry.cleanDrives(Array.from({ length: 12 }, (_, k) => ({ drive: String.fromCharCode(67 + k) + ":", total: 10, free: 5 }))).length, 8);
 });

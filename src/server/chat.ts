@@ -2,14 +2,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { TooLarge, readBody } from '../bodyread.ts';
 import { log } from '../log.ts';
-import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine, wholeSection } from '../docs.ts';
+import { cleanDocName, Docs, docSection, findParts, MAX_DOC_BYTES, MAX_DOCS, readDoc, sourcesLine, wholeSection, wholeText } from '../docs.ts';
 import type { ChatLine } from '../store.ts';
 import { ANSWER_CEILING, ContextFull, CONTINUE_ASK, everyFew, NoPrefill, repeatWatch, streamChat, THINK_SIZES, thinkRoomFit, withContinueAsk, thinkRoomOf, thinksOf, withWorking, type Reading, type ThoughtStop } from '../engine.ts';
 import * as brains from '../brains.ts';
 import { pictureAsk } from '../chatpic.ts';
 import { cleanAnswer, roleOf, isPlain, type StaffMember } from '../staff.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
-import { scanText } from '../promptscan.ts';
+import { excerptOf, guardData, scanText } from '../promptscan.ts';
 import type { ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
@@ -360,13 +360,17 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   // answer. That answer goes and the message stays, so it is in the chat once and the model reads it once.
   const again = (lines: ChatLine[]): ChatLine[] => {
     const last = lines.at(-1);
-    return t.retry && last?.role === 'assistant' && last.failed && lines.at(-2)?.role === 'user' && lines.at(-2)?.content === message ? lines.slice(0, -1) : [...lines, mine];
+    // Asked again: the message is sent this time, so it is no longer marked as never sent (see `fault`).
+    return t.retry && last?.role === 'assistant' && last.failed && lines.at(-2)?.role === 'user' && lines.at(-2)?.content === message ? [...lines.slice(0, -2), { ...lines.at(-2)!, at: now, refused: undefined }] : [...lines, mine];
   };
   if (mode === 'message') await store.changeChat(file, lines => again(lines), mark);
   // A fault that ends a new message's turn before any answer was written: shown now and kept under the message, so a
   // reload still says why there is no answer (never sent to a model). Continue and the handoff leave the chat as it was.
+  // The message itself stays on screen but is marked never sent (`refused`): sent again with every later turn, a message
+  // too large for the context, or one a linked PC refused, would fill the room and push the rest of the chat out
+  // (256k test, 22 Nov 2026: a refused paste of 948,000 characters left the next turn with 1,455 tokens of the chat).
   const fault = async (text: string, more: Record<string, unknown> = {}) => {
-    if (mode === 'message') await store.changeChat(file, lines => [...lines, { role: 'assistant', content: text, at: new Date().toISOString(), failed: true }], mark);
+    if (mode === 'message') await store.changeChat(file, lines => [...lines.map(l => (l.role === 'user' && l.at === now && l.content === message ? { ...l, refused: true } : l)), { role: 'assistant', content: text, at: new Date().toISOString(), failed: true }], mark);
     send('error', { text, ...more });
   };
   // Finding the hire's brain may load their model here (Stop still works while it loads).
@@ -430,7 +434,13 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       send('status', { text: ctxNotes[ctxNotes.length - 1] });
     }
   }
-  const ctx = target ? target.brain.ctx : runOn(runner).ctx;
+  const ctxSet = target ? target.brain.ctx : runOn(runner).ctx;
+  // A linked PC answers: the whole chat crosses in one request, and that PC takes at most so many characters of it (its
+  // hello says how many; a TOMLIN before 2.1.9 takes 230,000 whatever its context). The chat is built to fit that.
+  const linkRef = target && !target.here ? brains.parseRef(target.ref) : null;
+  const linkChars = linkRef?.kind === 'remote' ? jobRoutes.lastHello(linkRef.pc)?.chatChars || brains.TURNS_CHARS : 0;
+  const ctx = linkChars ? memory.linkCtx(ctxSet, linkChars, ANSWER_CEILING) : ctxSet;
+  if (ctx < ctxSet) send('status', { text: `"${target!.pc}" takes ${linkChars.toLocaleString('en-GB')} characters of a chat at once${linkChars === brains.TURNS_CHARS ? ' (it runs an older TOMLIN: update it for more)' : ''}, so this chat is fitted to about ${ctx.toLocaleString('en-GB')} word-pieces of its ${ctxSet.toLocaleString('en-GB')}.` });
   // Documents in this chat (PLAN F10 G6): the parts that match this message (and the one before it), found by code.
   const docs = mode === 'message' ? await docStore.all(openId) : [];
   const asked = `${message} ${[...history].reverse().find(l => l.role === 'user')?.content ?? ''}`;
@@ -557,6 +567,20 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   let webNo = '';
   const permitLate: string[] = [];
   let stalledNote = '';
+  // What a tool gave, read before the model sees it (src/promptscan.ts guardData): text that looks like orders for an AI
+  // is fenced as data, and every tool use after it in this answer is asked on a card (Gate.hold), said under the answer.
+  let heldNote = '';
+  const guard = (source: string, text: string, strip = false): string => {
+    const g = guardData(source, text, strip);
+    if (g.scan) {
+      gate.hold(`text from ${source} looked like it held orders for an AI (${g.scan.reasons.slice(0, 2).join('; ')})`);
+      if (!heldNote) {
+        heldNote = `Text from ${source} looked like it held orders for an AI, so it was marked as data and every tool use after it in this answer was asked first.`;
+        send('status', { text: heldNote });
+      }
+    }
+    return g.text;
+  };
   // Files are offered unless the message only asks for something new to be written and the person has not allowed files
   // (src/filetools.ts wantsFiles): the answer is then written in the chat, with no card for files that are not there.
   const filesOffered = perms.files === 'auto' || threadOk.files === true || wantsFilesFor(message, history, !!info?.project);
@@ -631,12 +655,12 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     const tools = turnWeb || files || turnKit ? {
       defs: [...(turnWeb ? WEB_TOOLS : []), ...(files ? FILE_TOOLS : []), ...(turnKit?.defs ?? [])],
       run: async (n: string, a: string, sig: AbortSignal, round: number) => {
-        if (turnKit?.has(n)) return turnKit.run(n, a, sig);
+        if (turnKit?.has(n)) return guard(`the tool ${n}`, await turnKit.run(n, a, sig));
         if (!files && !turnWeb) return `There is no tool called "${n}".`;
         const toFiles = !!files && (isFileTool(n) || !turnWeb);
         const kind: Kind = toFiles ? 'files' : 'web';
         if (!(await gate.permitted(kind, (toFiles ? fileCallWords(n, a) : callWords(n, a)).replace(/…$/, '')))) return toFiles ? deniedFor(n) : deniedWords(kind);
-        return toFiles ? files!.run(n, a) : turnWeb!.run(n, a, sig, round);
+        return toFiles ? guard('a file', await files!.run(n, a)) : guard('a web page', await turnWeb!.run(n, a, sig, round), true);
       },
       // Web calls in one go run side by side: each site keeps its own pace, so pages on two sites take turns.
       parallel: (n: string) => !isFileTool(n) && !turnKit?.has(n),
@@ -804,7 +828,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
   const used = kit as Kit | null;
-  const note = [stalledNote, looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, ctxNotes.filter(n => !/^Web is on: starting /.test(n)).join(' '), webWhy, webNo, ...permitLate, target?.brain.toolsOff ? `${target.brain.toolsOff}, so it answered from what it knows.` : '', thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : '', used?.note() ?? ''].filter(Boolean).join(' ');
+  const note = [stalledNote, looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, ctxNotes.filter(n => !/^Web is on: starting /.test(n)).join(' '), webWhy, webNo, heldNote, ...permitLate,target?.brain.toolsOff ? `${target.brain.toolsOff}, so it answered from what it knows.` : '', thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : '', used?.note() ?? ''].filter(Boolean).join(' ');
   const tools: ToolUse[] = [...((web as WebTurn | null)?.uses ?? awayTools), ...((used?.uses() ?? []) as ToolUse[])];
   // Findings the model suggested: shown with Save buttons, kept only when one is pressed (src/server/tools.ts).
   const findings = used?.findings() ?? [];
@@ -985,6 +1009,14 @@ export async function addDoc(req: IncomingMessage, res: ServerResponse): Promise
     return json(res, 400, { error: `${name} could not be added: ${(e as Error).message}.` });
   }
   if (!doc.parts.length) return json(res, 400, { error: `${name} has no text to read${doc.kind === 'pdf' ? ': it looks like scanned pages (pictures of text). Use a PDF with real text, or one saved with text recognition (OCR)' : ''}.` });
+  // The file, and its name, read for text that tries to take a model over (src/promptscan.ts), as a pasted message is:
+  // shown first (the flagged parts and a little around them), and added only once he ticks that he understands the
+  // risks, when the page sends it again with x-scan-ok. Read once here, not at every answer.
+  if (header('x-scan-ok') !== '1') {
+    const body = `${name}\n\n${wholeText(doc)}`;
+    const scan = scanText(body, { long: false });
+    if (scan.suspect) return json(res, 200, { scan: excerptOf(body, scan), name, chat: open.id });
+  }
   await docStore.add(open.id, doc);
   const empty = doc.kind === 'pdf' ? doc.pages - new Set(doc.parts.map(p => p.page)).size : 0;
   return json(res, 200, { chat: open.id, docs: await docStore.list(open.id), said: `${name} is in this chat: ${doc.kind === 'pdf' ? `${doc.pages} page${doc.pages === 1 ? '' : 's'}` : `${doc.pages.toLocaleString('en-GB')} lines`}, ${doc.chars.toLocaleString('en-GB')} characters.${empty ? ` ${empty} page${empty === 1 ? ' has' : 's have'} no text (pictures only) and cannot be read.` : ''} Ask about it; each answer is given the parts that match your words, and says which pages.` });

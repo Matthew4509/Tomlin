@@ -61,7 +61,7 @@ globalThis.TOMLIN_HELP = {
     { id: 'bridge-backups', group: 'bridge', title: 'The Bridge: backups', blurb: 'Zips to a drive, and copies on your other PCs.' },
     { id: 'bridge-trouble', group: 'bridge', title: 'The Bridge: privacy and trouble', blurb: 'What leaves this PC, if something goes wrong, and where its data is.' },
 
-    { id: 'colours', group: 'look', title: 'Colours', blurb: 'Follow Windows, Day, Night or Auto; the Bridge\'s themes.' },
+    { id: 'colours', group: 'look', title: 'Theme', blurb: 'Follow Windows, Day, Night or Auto; the Bridge\'s themes.' },
   ],
   // The old single page's section names, and where each is now: a link or a person's habit that uses one still lands.
   aliases: {

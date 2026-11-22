@@ -100,7 +100,7 @@ export async function makePass(b: { label?: unknown; length?: unknown; models?: 
   const scope = b.scope ?? [{ id: nodeId, models: cleanIds(b.models) }];
   if (!scope.length) return { error: 'Pick at least one PC the pass is for.' };
   const label = cleanLabel(b.label);
-  if (!label) return { error: 'Give the pass a name (whose PC it is for).' };
+  if (!label) return { error: 'Give the pass the name of the person it is for.' };
   const length = PASS_LENGTHS.find(x => x === b.length);
   if (!length) return { error: 'Pick 1 day, 1 week or no limit.' };
   const bare = (c: string) => c.replace(/[^A-Z0-9]/g, '');
@@ -131,20 +131,20 @@ export const GUEST_DOORS: readonly string[] = ['/worker/hello', '/worker/stats',
 /**
  * Every other door a linked PC can call today, refused to a guest: pushing an update, a runner or a model, copying
  * models, downloads, backups and restore points, project backups, run settings and tests, Max mode and the cluster,
- * this PC's log, starting or stopping it, the backup owner's doors and the host PIN's (src/hostpin.ts). Listed so the tests can name every door; the
+ * this PC's log, starting or stopping it, changing its permissions (src/permset.ts), the backup owner's doors and the host PIN's (src/hostpin.ts). Listed so the tests can name every door; the
  * refusal does not depend on this list (doorRefusal allows GUEST_DOORS only).
  */
 export const HOST_ONLY_DOORS: readonly string[] = [
   '/worker/ask-answer', '/worker/back', '/worker/owner-set', '/worker/claim', '/worker/claim-state', '/worker/log', '/worker/switch',
-  '/worker/fetch-start', '/worker/fetch-state', '/worker/fetch-stop',
+  '/worker/fetch-start', '/worker/fetch-state', '/worker/fetch-stop', '/worker/dl-queue', '/worker/dl-cancel', '/worker/dl-again', '/worker/dl-clear',
   '/worker/runner-offer', '/worker/runner-put', '/worker/runner-state', '/worker/runner-drop', '/worker/runner-remove',
   '/worker/run-set', '/worker/model-remove', '/worker/ctx-set', '/worker/free',
   '/worker/update-offer', '/worker/update-put', '/worker/update-finish', '/worker/update-drop', '/worker/update-pin',
   '/worker/carry-files', '/worker/carry-get', '/worker/carry-offer', '/worker/carry-put', '/worker/carry-drop', '/worker/carry-sum',
   '/worker/backup-list', '/worker/backup-get', '/worker/backup-put',
   '/worker/git-files', '/worker/git-get', '/worker/git-have', '/worker/git-log', '/worker/git-commit', '/worker/git-put',
-  '/worker/max-open', '/worker/cluster-test', '/worker/passes-put', '/worker/peer-put', '/worker/peer-hello', '/worker/peer-ping', '/worker/peer-copy', '/worker/pass-ask', '/worker/pass-answer', '/worker/power-off',
-  '/worker/host-pin-set', '/worker/host-pin-drop',
+  '/worker/max-open', '/worker/cluster-test', '/worker/passes-put', '/worker/peer-put', '/worker/peer-hello', '/worker/peer-ping', '/worker/peer-copy', '/worker/pass-ask', '/worker/pass-answer', '/worker/power-off', '/worker/perm-set',
+  '/worker/host-pin-set', '/worker/host-pin-drop', '/worker/drive-jobs', '/worker/models-where', '/worker/hardware-rescan',
 ];
 
 export interface Refusal {

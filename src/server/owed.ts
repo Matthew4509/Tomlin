@@ -1,7 +1,7 @@
 // Answers a linked PC still owes this PC's chats (src/outbox.ts): kept in data/owed.json from the moment one is asked
 // for until it is in its chat. Collected at Reconnect (the button under the answer), at every start, and once a minute
 // while any are owed. The node keeps each finished answer until it is collected (three days at most).
-import { cleanOwed, settle, withOwedLine, type Owed } from '../outbox.ts';
+import { cleanOwed, owedExpired, owedExpiredWhy, settle, withOwedLine, type Owed } from '../outbox.ts';
 import { cleanAnswer, isPlain } from '../staff.ts';
 import { takeSuggestion } from '../memory.ts';
 import type { ChatInfo } from '../chats.ts';
@@ -85,6 +85,13 @@ async function collectNow(chatId?: string): Promise<{ got: number; working: numb
     }
     const said = await jobRoutes.owedNow(r, o.rid);
     if (!said) {
+      // Not answering for longer than it keeps a finished answer: given up, said once under it, never asked again.
+      if (owedExpired(o)) {
+        await store.changeChat(file, lines => settle(lines, o.rid, { state: 'gone', why: owedExpiredWhy(o.name) }));
+        await dropOwed(o.rid);
+        out.gone++;
+        continue;
+      }
       if (!out.off.includes(r.name)) out.off.push(r.name);
       continue;
     }

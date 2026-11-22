@@ -97,6 +97,7 @@ export function cleanRunWith(raw: unknown, id: string, list: Listed[], contexts:
   return {
     ctx,
     cache,
+    ...(r.kvRam === true ? { kvRam: true as const } : {}),
     place,
     ...(place === 'layers' ? { moeCpu } : {}),
     ...(r.fitMargin === 256 || r.fitMargin === 512 ? { fitMargin: r.fitMargin } : {}),
@@ -166,6 +167,24 @@ export function runnerSetAsk(b: Record<string, unknown>, list: Listed[], pins: R
   if (no) return { status: 409, error: no };
   return { model, runner: pin as HeldRunner, ...fallback };
 }
+
+/** The context cache types a host may ask for (src/store.ts RunOptions cache). */
+export const CACHE_TYPES = ['f16', 'q8_0', 'q4_0'] as const;
+export type CacheType = (typeof CACHE_TYPES)[number];
+
+/** A host's ask to set how one of this PC's models keeps its context: a cache type, RAM or the card, or both. */
+export function cacheSetAsk(b: Record<string, unknown>, list: Listed[]): { model: Listed; cache?: CacheType; kvRam?: boolean } | { status: number; error: string } {
+  const cache = CACHE_TYPES.find(c => c === b.cache);
+  const kvRam = typeof b.kvRam === 'boolean' ? b.kvRam : undefined;
+  if (typeof b.model !== 'string' || !b.model || (b.cache !== undefined && !cache) || (!cache && kvRam === undefined)) return { status: 400, error: 'Say which model, and f16, q8_0 or q4_0 for its context, or whether it is kept in RAM.' };
+  const model = list.find(m => m.id === b.model);
+  if (!model) return { status: 404, error: `${b.model.slice(0, 120)} is not on this PC (deleted or moved?).` };
+  if (model.id.startsWith(OLLAMA)) return { status: 400, error: `${model.name} is run by Ollama here, so TOMLIN's runners do not run it.` };
+  return { model, ...(cache ? { cache } : {}), ...(kvRam !== undefined ? { kvRam } : {}) };
+}
+
+/** How a model keeps its context, in words: "q8_0 cache in RAM". */
+export const cacheWords = (cache: CacheType, kvRam: boolean) => `${cache} cache ${kvRam ? 'in RAM' : 'on the card'}`;
 
 /** The node's answer when its owner has not ticked it: where to tick it. */
 export const tuneRefused = (pcName: string) => `"${pcName}" does not let linked PCs change how its models run. Its owner can tick "${TUNE_TICK}" there, under Network, Sharing permissions.`;

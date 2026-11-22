@@ -184,9 +184,23 @@ function modelPick(m, key, label, none) {
   const gone = key === 'model' && m.use?.state === 'missing' && m.model ? el('option', { value: m.model, disabled: true, text: m.use.text }) : null;
   const sel = el('select', { 'aria-label': `${label} for ${m.name}`, 'data-pick': key }, el('option', { value: '', text: none }), gone, ...visibleModels(brainChoices(m), m[key]).filter(c => c.id !== gone?.value).map(c => el('option', { value: c.id, text: c.name })));
   sel.value = m[key] ?? '';
-  sel.addEventListener('change', () => teamAct({ action: 'change', id: m.id, [key]: sel.value || null }));
-  return el('label', { class: 'field' }, el('span', { text: label }), sel);
+  sel.addEventListener('change', async () => {
+    // A pick saves at once, with no Save button: it says so beside the list (the page is drawn again after it, so the
+    // word is kept here and shown by the new list), or Fire looked like the only button to press.
+    savedPick = { id: m.id, key, at: Date.now(), ok: false };
+    await teamAct({ action: 'change', id: m.id, [key]: sel.value || null });
+    if (savedPick?.id === m.id && savedPick.key === key && $('#team-fault').hidden) {
+      savedPick.ok = true;
+      if (dlg.open) drawEdit();
+    }
+  });
+  const fresh = savedPick && savedPick.ok && savedPick.id === m.id && savedPick.key === key && Date.now() - savedPick.at < 5000;
+  const note = fresh ? el('span', { class: 'pick-saved', role: 'status', text: 'Saved' }) : null;
+  if (note) setTimeout(() => note.remove(), 5000 - (Date.now() - savedPick.at));
+  return el('label', { class: 'field' }, el('span', { text: label }, note ? ' ' : null, note), sel);
 }
+/** The last model pick that was saved (which hire, which list, when): its "Saved" shows for a few seconds. */
+let savedPick = null;
 
 /** Beside First choice when they cannot answer on it as it is (m.use.pick): what is wrong, in one line. */
 function modelWarning(m) {
@@ -210,11 +224,9 @@ function modelOptions(m) {
   }
   const image = m.kind === 'image';
   const select = (key, label, none) => modelPick(m, key, label, none);
-  // The fallback is kept out of sight; one already set still answers when the first choice cannot, so it shows (to be
-  // seen and cleared) until it is set to No fallback.
+  // One model each: no fallback is kept (src/staff.ts sound()). When it cannot answer, the chat says why and asks.
   box.append(el('div', { class: 'team-pick' },
-    select('model', 'First choice', image ? 'No model picked' : 'None: the model connected here'),
-    m.fallback ? select('fallback', 'Fallback', 'No fallback') : null), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
+    select('model', 'First choice', image ? 'No model picked' : 'None: the model connected here')), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
   if (image) {
     const st = el('select', { 'aria-label': `Preferred style for ${m.name}` }, el('option', { value: '', text: 'Any: as the words ask' }), ...(m.styles ?? []).map(s => el('option', { value: s.id, text: s.name })));
     st.value = m.style ?? '';
@@ -364,45 +376,13 @@ async function useModelOf(m) {
   await api('/api/settings', { pane: 'chat', model: m.model }).catch(() => undefined);
 }
 
-// Staff (Home's Team, New chat's staff button): the Staff menu.
+// Staff (Home's Team, New chat's staff button, the left panel's Hire staff line): All staff, with Hire staff at its top.
+// The Staff menu that came between (a name and Create, Manage staff) is gone: Settings' tile has Hire and Manage instead.
 $('#team-open').addEventListener('click', () => openStaffMenu());
-
-/** The Staff menu's Manage staff tile: how many are hired, and their names. */
-function drawMenu() {
-  const staff = team.data?.staff ?? [];
-  const names = staff.map(s => s.name);
-  $('#sm-count').textContent = !team.data ? 'Reading the staff list…' : !staff.length ? 'Nobody hired yet.'
-    : `${staff.length} hired: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ` and ${names.length - 6} more` : ''}.`;
-}
-
-/** Staff: hire and edit opens this: two tiles, Hire staff (a name, then Create) and Manage staff (See all staff). */
-async function openStaffMenu() {
-  fromMenu = true;
-  teamFault(null);
-  // Shown at once with the list read last: the server asks each linked PC for the staff list, and one that is off
-  // takes 3 seconds to give up on. The names catch up when it answers, if the menu is still on screen.
-  drawMenu();
-  showMode('menu');
-  app.showAsPage(dlg, 'staff');
-  // A made-up name is there from the start (Create takes it, or type another over it).
-  if (!$('#sm-name').value.trim()) app.randomName?.($('#sm-name'));
-  $('#sm-name').focus();
-  try {
-    team.data = await api('/api/staff');
-  } catch (e) {
-    if (dlg.open) teamFault(e.message);
-  }
-  if (dlg.open && teamMode === 'menu') drawMenu();
+function openStaffMenu() {
+  return app.seeAllStaff();
 }
 app.openStaffMenu = openStaffMenu;
-$('#sm-dice').addEventListener('click', () => app.randomName?.($('#sm-name')));
-$('#sm-hire').addEventListener('submit', e => {
-  e.preventDefault();
-  const name = $('#sm-name').value.trim().replace(/\s+/g, ' ');
-  $('#sm-name').value = '';
-  app.openHire({ page: true, name, fromMenu: true });
-});
-$('#sm-manage').addEventListener('click', () => app.seeAllStaff({ fromMenu: true }));
 
 // ---- The right side: one person's Edit Staff (picked with Edit on the left). Hiring is its own window (hire.js) ----
 
@@ -416,16 +396,15 @@ let fromMenu = false;
 let shownId = '';
 function showMode(mode) {
   teamMode = mode;
-  $('#staff-menu').hidden = mode !== 'menu';
   $('#staff-all').hidden = mode !== 'all';
   $('#staff-one').hidden = mode !== 'one';
   $('#team-all').hidden = mode !== 'one';
-  $('#team-hire').hidden = mode === 'menu';
-  $('#team-close').title = fromMenu && mode !== 'menu' ? 'Back to the Staff menu' : '';
+  $('#team-close').title = mode === 'one' ? 'Back to All staff' : '';
   // The title says which page this is (the buttons beside it are all plain, so none looks like the page you are on).
   $('#team-title').textContent = mode === 'all' ? `All staff (${team.data?.staff.length ?? 0})` : mode === 'one' ? 'Edit staff' : 'Staff';
 }
-$('#team-close').addEventListener('click', () => (fromMenu && teamMode !== 'menu' ? openStaffMenu() : dlg.close()));
+// Close on one person goes back to All staff; on All staff it closes (as a page: back to where it was opened from).
+$('#team-close').addEventListener('click', () => (teamMode === 'one' ? app.seeAllStaff() : dlg.close()));
 function staffMode() {
   showMode('one');
   $('#staff-edit').scrollTop = 0;
@@ -730,7 +709,7 @@ function drawHost(said0 = '') {
           el('p', { class: 'hint', text: `Model: ${row?.modelName || 'none picked yet'} · ${row?.text ?? ''}` })),
         el('div', { class: 'profile-actions' }, use))),
     section('Model', el('div', { class: 'team-hire' }, el('label', { class: 'field' }, el('span', { text: 'Default model' }), sel), save), note),
-    section('What the host is for', el('p', { text: `The one you talk to when you are not talking to someone you hired. It has no role or level, runs no job steps and keeps no notebook of its own (it reads the team notebook). How it talks (Standard, Professional, Friend) is in the chat's settings (the gear). Staff are the people you hire: a role, a level, their own model and a fallback, a notebook, and job steps in their role.` })),
+    section('What the host is for', el('p', { text: `The one you talk to when you are not talking to someone you hired. It has no role or level, runs no job steps and keeps no notebook of its own (it reads the team notebook). How it talks (Standard, Professional, Friend) is in the chat's settings (the gear). Staff are the people you hire: a role, a level, their own model, a notebook, and job steps in their role.` })),
     section('Name', rename));
 }
 

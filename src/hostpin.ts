@@ -251,8 +251,8 @@ export class HostPins {
 
 // ---- The check, on the PC that is asked ----
 
-/** What the PIN is asked for: an update (false), a model delete (true), a turn-off, or taking a host PIN. */
-export type Doing = boolean | 'power' | 'host';
+/** What the PIN is asked for: an update (false), a model delete (true), a turn-off, taking a host PIN, or a change of its permissions. */
+export type Doing = boolean | 'power' | 'host' | 'perms';
 export type Checked = { ok: true } | { status: number; error: string };
 
 export interface GateDeps {
@@ -276,6 +276,7 @@ export async function pinGate(g: GateDeps, v: unknown, who: string, doing: Doing
   const lock = g.lock();
   if (!lock) {
     return { status: 409, error: doing === 'power' ? 'has no app lock, so another PC cannot turn it off: set one there (the padlock, top right), then try again'
+      : doing === 'perms' ? 'has no app lock, so another PC cannot change its permissions: set one there (the padlock, top right), then try again'
       : doing === 'host' ? 'has no app lock, so it takes no host PIN: set one there (the padlock, top right), then try again'
       : doing ? 'has no app lock, so it deletes no model for another PC: set one there (the padlock, top right), then try again'
       : 'has no app lock, so it takes no update from another PC: set one there (the padlock, top right), then update it again' };
@@ -284,7 +285,7 @@ export async function pinGate(g: GateDeps, v: unknown, who: string, doing: Doing
   const w = kind === 'password' ? 'password' : 'PIN';
   const wait = g.guard.lockedFor(who) || g.guard.pausedFor();
   if (wait) return { status: 429, error: `had too many wrong ${w}s typed for it: wait ${waitWords(wait)}, then ${doing === false ? 'update it' : 'try'} again` };
-  const what = doing === 'power' ? 'turn it off' : doing === 'host' ? 'take a host PIN' : doing ? 'delete a model' : 'take an update';
+  const what = doing === 'power' ? 'turn it off' : doing === 'host' ? 'take a host PIN' : doing === 'perms' ? 'change its permissions' : doing ? 'delete a model' : 'take an update';
   if (host && host.pin !== undefined) {
     const held = g.pins.get(host.link);
     if (!held) return { status: 403, error: `holds no host PIN from this PC: type its own app lock ${w} instead (the one that opens TOMLIN there)` };

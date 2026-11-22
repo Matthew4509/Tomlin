@@ -69,7 +69,7 @@ test('a nearly full disk comes out of the fold by itself', () => {
 
 test('Hire staff says plainly where the other models are', () => {
   const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
-  assert.match(hire, /available from across your network./);
+  assert.match(hire, /Choose and pull a model from across your network./);
   assert.doesNotMatch(hire, /has not got. Copy one there/);
 });
 

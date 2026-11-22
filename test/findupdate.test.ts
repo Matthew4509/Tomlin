@@ -21,7 +21,7 @@ test('the Settings menu has Manage updates of its own, after This PC, opening Up
   assert.match(page('homeview.js'), /b\.dataset\.setup === 'updates'\) app\.openUpdateInstall\?\.\(\)/);
   assert.match(page('home.js'), /app\.openUpdateInstall = \(\) => \{/);
   // A page of its own, so that menu entry is the one marked there.
-  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];/);
+  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];/);
 });
 
 test('Update this install has Check git, one function for it, and a download followed on its own page', () => {
@@ -60,5 +60,5 @@ test('Help and the README name the new ways in', () => {
   assert.match(help, /<b>Manage updates<\/b>/);
   assert.match(help, /under Settings/);
   assert.match(help, /My PC window/);
-  assert.match(read('README.md'), /\*\*Manage updates\*\* \(under Settings; also Update TOMLIN in the My PC window\)/);
+  assert.match(read('README.md'), /\*\*Manage updates\*\* \(under Settings; also \*\*Manage PC and updates\*\* in the My PC window\)/);
 });

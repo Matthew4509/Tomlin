@@ -244,9 +244,29 @@ export function countLine(q: Queue): string {
   return [q.paused ? 'Paused' : '', running ? `${running} running` : '', waiting ? `${waiting} waiting` : ''].filter(Boolean).join(' · ');
 }
 
-/** True when a fault means the PC was busy or off for now (the item is put back and tried again), not that it failed. */
+/**
+ * True when a fault means the PC was busy or off for now (the item is put back and tried again), not that it failed. A
+ * model that did not load is never "for now", whatever words its runner used: the same file fails the same way again,
+ * so it is said once and left for him, not loaded again by itself every two minutes.
+ */
 export function forNow(error: string): boolean {
+  if (/did not load/i.test(error)) return false;
   return /\bbusy\b|answering something else|drawing something else|still drawing|is drawing|could not be reached|not answering|is off\b|log off|being used by its owner|still loading|is answering now|unloaded before the picture started|lost the connection to/i.test(error);
+}
+
+/** Put back for now (its PC was busy or off): tried again after this long, up to MAX_TRIES times, then it fails. */
+export const AGAIN_MS = 2 * 60_000;
+export const MAX_TRIES = 30;
+
+/**
+ * What an item that ended `out` becomes: put back to run again later when its PC was only busy or off for now and it
+ * has been put back fewer than MAX_TRIES times (its note says the last reason, never a pile of them); otherwise as it
+ * ended. However often its PC stays off, it ends after MAX_TRIES.
+ */
+export function againLater<T extends { state: QState; error?: string }>(out: T, tries: number | undefined, now = Date.now()): T | { state: 'waiting'; note: string; after: number; tries: number } {
+  const n = tries ?? 0;
+  if (out.state !== 'failed' || !out.error || !forNow(out.error) || n >= MAX_TRIES) return out;
+  return { state: 'waiting', note: `${out.error.replace(/\.$/, '')}. Tried again in ${AGAIN_MS / 60_000} minutes.`, after: now + AGAIN_MS, tries: n + 1 };
 }
 
 /** The parts of a chat line the queue reads when a message runs again (src/store.ts ChatLine). */

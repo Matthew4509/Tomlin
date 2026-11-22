@@ -13,3 +13,8 @@ test/scene.test.ts
 *.source.json
 
 .claude/worktrees/
+
+# Output of tools/retest.ts, speedrun.ts and slotspeed.ts run from this folder
+retest-*/
+speedrun-*.jsonl
+slotspeed-*.jsonl

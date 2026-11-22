@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer, connect, type Socket } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { Duplex } from 'node:stream';
-import { FRAME, joinWhenOpen, newNonce, Opener, Sealer, sealedPipe, streamKeys } from '../src/linkstream.ts';
+import { FRAME, joinWhenOpen, newNonce, Opener, plainPipe, Sealer, sealedPipe, streamKeys } from '../src/linkstream.ts';
 
 const linkKeys = randomBytes(64);
 
@@ -144,6 +144,48 @@ test('the runner closing its side while the stream is still opening: the stream 
     await Promise.race([nodeClosed, new Promise((_, no) => setTimeout(() => no(new Error(`${how}: the stream to the other PC was left open`)), 2000))]);
     assert.ok(wire.destroyed, how);
   }
+});
+
+test('an unencrypted cluster link: the bytes go through as they are (readable on the wire), both ways, and one side closing closes the other', async () => {
+  const echo = createServer(s => void s.pipe(s)).listen(0, '127.0.0.1');
+  await new Promise(r => echo.once('listening', r));
+  const rpc = connect((echo.address() as { port: number }).port, '127.0.0.1');
+  await new Promise(r => rpc.once('connect', r));
+  const [hostWire, nodeWire] = await pair();
+  const [runner, local] = await pair();
+  // What crosses the network, as anyone on it would see it.
+  const seen: Buffer[] = [];
+  nodeWire.on('data', c => seen.push(c));
+  const nodeEnded = plainPipe(rpc, nodeWire);
+  // The host's side as Max mode joins it: the node agreed, so the answer said plain.
+  const hostEnded = joinWhenOpen(local, async () => ({ socket: hostWire, keys: streamKeys(linkKeys, newNonce(), newNonce(), 'host'), plain: true }));
+  const sent = randomBytes(2 * FRAME + 7);
+  const back: Buffer[] = [];
+  runner.on('data', c => back.push(c));
+  runner.write(sent);
+  for (let t = 0; Buffer.concat(back).length < sent.length && t < 200; t++) await new Promise(res => setTimeout(res, 20));
+  assert.deepEqual(Buffer.concat(back), sent);
+  assert.ok(Buffer.concat(seen).subarray(0, 64).equals(sent.subarray(0, 64)), 'not sealed: the wire carries the runner\'s own bytes');
+  runner.destroy();
+  assert.equal(await hostEnded, '');
+  assert.equal(await nodeEnded, '');
+  echo.close();
+});
+
+test('a stream whose answer did not say plain stays sealed', async () => {
+  const [hostWire, nodeWire] = await pair();
+  const [runner, local] = await pair();
+  const seen: Buffer[] = [];
+  nodeWire.on('data', c => seen.push(c));
+  const joined = joinWhenOpen(local, async () => ({ socket: hostWire, keys: streamKeys(linkKeys, newNonce(), newNonce(), 'host') }));
+  const sent = Buffer.from('a command the network must not read'.repeat(4));
+  runner.write(sent);
+  for (let t = 0; !Buffer.concat(seen).length && t < 100; t++) await new Promise(res => setTimeout(res, 20));
+  assert.ok(Buffer.concat(seen).length > 0);
+  assert.equal(Buffer.concat(seen).includes(sent.subarray(0, 20)), false, 'sealed: the bytes are not readable on the wire');
+  runner.destroy();
+  nodeWire.destroy();
+  await joined;
 });
 
 test('a stream that could not be opened closes the runner\'s side and says why', async () => {

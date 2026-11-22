@@ -16,6 +16,9 @@ test('all: the RPC server gets the card and the CPU, with threads for the CPU de
   // A PC with no card already lends its CPU: nothing is added, and the card-only default is untouched.
   assert.deepEqual(rpcArgs(5000, { exe: 'x', device: 'cpu', threads: 4, all: true }, false, 12), ['-H', '127.0.0.1', '-p', '5000', '-t', '4']);
   assert.deepEqual(rpcArgs(5000, { exe: 'x', device: 'cuda', threads: 4 }, false, 12), ['-H', '127.0.0.1', '-p', '5000']);
+  // CPU only (the cluster test's second member per socket): the card is left out, with the threads.
+  assert.deepEqual(rpcArgs(5000, { exe: 'x', device: 'cuda', threads: 8, cpuOnly: true }, false, 32), ['-H', '127.0.0.1', '-p', '5000', '-d', 'CPU', '-t', '8']);
+  assert.deepEqual(rpcArgs(5000, { exe: 'x', device: 'vulkan', threads: 0, cpuOnly: true, all: true }, false, 32), ['-H', '127.0.0.1', '-p', '5000', '-d', 'CPU', '-t', '16']);
 });
 
 test('the lending threads: the PC\'s own setting, else half the logical cores, at least 2', () => {

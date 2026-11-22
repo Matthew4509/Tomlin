@@ -115,5 +115,6 @@ export async function getSmaller(b: Record<string, unknown>, offer: SmallerOffer
   if (offer.have) return { status: 409, body: { error: `${offer.file.name} is on this PC already: test it instead.` } };
   const r = await getHf(offer.repo, offer.rev, offer.file.name);
   if (r.status !== 200) return { status: r.status, body: r.json as Record<string, unknown> };
-  return { status: 200, body: { said: `Downloading ${offer.file.name} (${(offer.file.bytes / GB).toFixed(1)} GB). The file in use now is kept. It shows on the Models page as it comes; once it is here, open Find the fastest setup again: it says when the smaller file is on this PC.` } };
+  const waits = Number((r.json as { place?: number }).place) > 0;
+  return { status: 200, body: { said: `${waits ? 'Added to the downloads list' : 'Downloading'} ${offer.file.name} (${(offer.file.bytes / GB).toFixed(1)} GB). The file in use now is kept. It shows on the Models page as it comes; once it is here, open Find the fastest setup again: it says when the smaller file is on this PC.` } };
 }

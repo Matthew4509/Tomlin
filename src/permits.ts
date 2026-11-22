@@ -117,6 +117,8 @@ export interface CardExtra {
   mark?: { x: number; y: number; w: number; h: number };
   /** The exact command, or the diff, in a fixed-width block. */
   detail?: string;
+  /** Asked although it is allowed: the answer read text that looked like orders for an AI (Gate.hold). */
+  held?: string;
 }
 
 export interface GateOpts {
@@ -137,11 +139,34 @@ export class Gate {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly o: GateOpts;
 
+  private heldWhy = '';
+
   constructor(o: GateOpts) {
     this.o = o;
   }
 
+  /**
+   * The answer has read text that looked like orders for an AI (a web page, a file, a tool's result: src/promptscan.ts
+   * guardData). For the rest of this answer every tool use is asked on its own card, Auto and Allowed included, and no
+   * answer is kept: a page cannot use a permission given for the person's own ask. `why` is said on the card.
+   */
+  hold(why: string): void {
+    if (!this.heldWhy) this.heldWhy = why;
+  }
+
+  get held(): string {
+    return this.heldWhy;
+  }
+
+  /** A held answer's card: any yes is for this one use only. */
+  private heldAsk(kind: Kind, what: string, extra?: CardExtra): Promise<boolean> {
+    const p = this.queue.then(async () => (await this.o.ask(kind, what, true, { ...extra, held: this.heldWhy }).catch((): Permit => 'no')) !== 'no');
+    this.queue = p.catch(() => false);
+    return p;
+  }
+
   permitted(kind: Kind, what: string): Promise<boolean> {
+    if (this.heldWhy) return this.heldAsk(kind, what);
     if (this.o.allowed(kind)) return Promise.resolve(true);
     let p = this.said.get(kind);
     if (!p) {
@@ -162,7 +187,8 @@ export class Gate {
    * the answer, and `allowed` is not asked: a kind at this tier is never Auto.
    */
   each(kind: Kind, what: string, extra?: CardExtra): Promise<boolean> {
-    const p = this.queue.then(async () => (await this.o.ask(kind, what, true, extra).catch((): Permit => 'no')) === 'once');
+    if (this.heldWhy) return this.heldAsk(kind, what, extra);
+    const p =this.queue.then(async () => (await this.o.ask(kind, what, true, extra).catch((): Permit => 'no')) === 'once');
     this.queue = p.catch(() => false);
     return p;
   }
@@ -170,6 +196,7 @@ export class Gate {
   /** By the kind's tier: Never is a no, Ask each time a card for this call, Look only a card once an answer, Allowed a yes. */
   byTier(tier: Tier, kind: TierKind, what: string, extra?: CardExtra): Promise<boolean> {
     if (tier === 'never') return Promise.resolve(false);
+    if (this.heldWhy) return this.heldAsk(kind, what, extra);
     if (tier === 'allowed') return Promise.resolve(true);
     return tier === 'each' ? this.each(kind, what, extra) : this.permitted(kind, what);
   }

@@ -358,20 +358,41 @@ function paneEls(name) {
 }
 const panes = { chat: paneEls('chat'), image: paneEls('image') };
 
-function showFault(box, text, detail) {
+/**
+ * A line said at the end of `box` (the chat's notes): the same words again straight after are not added under it, the
+ * line already there counts them ("(said 3 times)"), so a fault pressed or asked again never piles up line on line.
+ * `make` builds the line from its words.
+ */
+function sayOnce(box, text, make) {
+  const last = box.lastElementChild;
+  if (last && last.dataset.said === text) {
+    const n = (Number(last.dataset.times) || 1) + 1;
+    last.dataset.times = String(n);
+    last.textContent = `${text} (said ${n} times)`;
+    return last;
+  }
+  const line = make(text);
+  line.dataset.said = text;
+  box.append(line);
+  return line;
+}
+
+function showFault(box, text, detail, note) {
   if (!text) {
     box.hidden = true;
     box.dataset.sig = '';
     box.replaceChildren();
     return;
   }
-  // Asked every second: drawn again only when it changes, so an opened "What does this mean?" stays open.
-  const sig = `${text}|${detail ?? ''}`;
+  // Asked every second: drawn again only when it changes, so an opened "What does this mean?" stays open. The note is
+  // part of what is drawn, never added after it: added on each poll, it piled up once a second under a failed load.
+  const sig = `${text}|${detail ?? ''}|${note ?? ''}`;
   if (!box.hidden && box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   box.hidden = false;
   box.replaceChildren(el('span', { text }));
   if (detail) box.append(el('details', {}, el('summary', { text: 'What does this mean?' }), el('pre', { text: detail })));
+  if (note) box.append(el('div', { text: note }));
 }
 
 function drawPane(name, v) {
@@ -421,8 +442,7 @@ function drawPane(name, v) {
   }
   // After Disconnect nothing is said, unless the model's program did not end (its memory may still be in use).
   if (v.state === 'disconnected' && v.lastUnload && !v.lastUnload.gone) p.info.append(el('span', { text: 'The model may still be running after Disconnect: its memory may not be free yet.' }));
-  showFault(p.fault, v.state === 'failed' ? v.error : null, v.detail);
-  if (v.state === 'failed' && v.note) p.fault.append(el('div', { text: v.note }));
+  showFault(p.fault, v.state === 'failed' ? v.error : null, v.detail, v.state === 'failed' ? v.note : null);
 }
 
 function threadsHint(name) {
@@ -534,6 +554,10 @@ function drawContext() {
   size.replaceChildren(...sizes.map(n => el('option', { value: String(n), text: `${tokensText(n)} tokens${n === 8192 ? ' (default)' : ''}${m.trained && n > m.trained ? ' (over its training)' : ''}${ps ? ` · ${readTime(n, ps)} to read` : ''}` })));
   size.value = String(m.run.ctx);
   cache.value = m.run.cache;
+  // The context cache in RAM: only where there is a graphics card to free.
+  $('#ctx-kvram').checked = m.run.kvRam === true;
+  // (cards: from the hardware list, known at once; cardList fills only after the runners are asked.)
+  $('#ctx-kvram-row').hidden = !(app.models.cards?.n > 0 || (app.models.cardList ?? []).length);
   // Where it runs (PLAN F8): only where it makes a difference, a card with memory of its own or a mixture-of-experts model.
   const place = $('#ctx-place');
   const ways = [['auto', 'Auto: fill the card, the rest in RAM'], ['card', 'Every layer on the graphics chip'], ...(m.moe ? [['ram', 'The experts (most of this model) in RAM, the rest on the card']] : []), ...(m.run.place === 'layers' ? [['layers', `The experts of the first ${m.run.moeCpu} layers in RAM, the rest on the card`]] : [])];
@@ -589,6 +613,7 @@ async function saveContext() {
       ctx: Number($('#ctx-size').value), cache: $('#ctx-cache').value, place: $('#ctx-place').value, draft: guess === 'mtp' ? '' : guess,
       ...(guess === 'mtp' ? { spec: 'mtp' } : was?.spec === 'mtp' ? { spec: null } : {}),
       // Only what is shown is sent: a hidden choice keeps what was saved.
+      ...(!$('#ctx-kvram-row').hidden ? { kvRam: $('#ctx-kvram').checked } : {}),
       ...(!$('#ctx-cards-row').hidden ? { cards: idsAt($('#ctx-cards').value) } : {}),
       // The Runner (null: Auto). Only when the row is shown: a model held to a runner keeps it otherwise.
       ...(!$('#ctx-runner-row').hidden ? { runner: $('#ctx-runner').value || null } : {}),
@@ -650,7 +675,7 @@ async function reconnect(name) {
   }
   poll();
 }
-for (const id of ['#ctx-size', '#ctx-cache', '#ctx-place', '#ctx-draft', '#ctx-cards', '#ctx-draft-card', '#ctx-runner']) $(id).addEventListener('change', saveContext);
+for (const id of ['#ctx-size', '#ctx-cache', '#ctx-kvram', '#ctx-place', '#ctx-draft', '#ctx-cards', '#ctx-draft-card', '#ctx-runner']) $(id).addEventListener('change', saveContext);
 
 // ---- The Runner a chat model starts on (src/server/faults.ts): Auto, or one card runner this PC pins and has unpacked ----
 
@@ -1859,7 +1884,7 @@ function drawChat(lines, chat) {
   const last = lines.at(-1);
   if (last?.role === 'assistant' && last.cut) log.lastElementChild.append(continueButton());
   // This chat's answer is still coming (it was opened again from Home, or from the list): it carries on at the end.
-  const live = streams.get(streamKey(chat?.id ?? '', chat?.who ?? app.chatWho?.()));
+  const live = streams.get(streamKey(chat?.id ?? '', chat?.who ?? app.chatWho?.())) ?? (chat?.id ? streamOf(chat.id) : undefined);
   if (live?.out) {
     log.querySelector('.empty')?.remove();
     if (live.inPlace && log.lastElementChild) log.lastElementChild.replaceWith(live.out);
@@ -1900,9 +1925,30 @@ async function addDocs(files) {
     app.chatNote(`Reading ${file.name}…`);
     const note = log.lastElementChild;
     try {
-      const res = await fetch('/api/chat/doc', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(file.name), 'x-chat': encodeURIComponent(named.chatId), 'x-who': encodeURIComponent(named.who), ...(named.plain ? { 'x-plain': encodeURIComponent(named.plain) } : {}) }, body: file });
-      const r = await res.json().catch(() => ({ error: `TOMLIN answered ${res.status}.` }));
-      if (!res.ok) throw new Error(r.error);
+      const post = async scanOk => {
+        const res = await fetch('/api/chat/doc', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(file.name), 'x-chat': encodeURIComponent(named.chatId), 'x-who': encodeURIComponent(named.who), ...(named.plain ? { 'x-plain': encodeURIComponent(named.plain) } : {}), ...(scanOk ? { 'x-scan-ok': '1' } : {}) }, body: file });
+        const got = await res.json().catch(() => ({ error: `TOMLIN answered ${res.status}.` }));
+        if (!res.ok) throw new Error(got.error);
+        return got;
+      };
+      let r = await post(false);
+      // The file looks like it tries to take a model over (src/promptscan.ts): the flagged parts are shown, and it is
+      // added only once he ticks that he understands the risks.
+      if (r.scan) {
+        if (r.chat && r.chat !== named.chatId) {
+          named.chatId = r.chat;
+          await app.afterSend?.(r.chat, from);
+        }
+        const ok = await app.scanWarn(r.scan, r.scan.text, {
+          title: `${r.name} looks risky`,
+          hint: 'This file holds text that is often used to trick an AI into doing harm: hiding its orders, reading your files or passwords, sending them out, or running commands. The flagged parts are marked, with a little of the text around each (… marks text left out). Add it only if you trust where it came from.',
+        });
+        if (!ok) {
+          note.textContent = `${file.name} was not added.`;
+          continue;
+        }
+        r = await post(true);
+      }
       note.textContent = r.said;
       if ((app.chatId ?? '') === named.chatId || (!named.chatId && (app.chatId ?? '') === '')) drawDocs(r.docs);
       if (r.chat && r.chat !== named.chatId) {

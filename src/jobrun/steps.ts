@@ -1,5 +1,6 @@
 // One step: sized to its worker, run with checks and retries, saved, and read by the reviewer.
 import { callWords, WEB_ROUNDS, WEB_TOOLS, WebTurn, webWords, type ToolUse } from '../webtools.ts';
+import { webGuard } from '../promptscan.ts';
 import { createHash } from 'node:crypto';
 import { rm, stat } from 'node:fs/promises';
 import * as jobs from '../jobs.ts';
@@ -64,7 +65,7 @@ export async function doStep(job: Job, i: number, send: Send, signal: AbortSigna
   const ids = notes.map(x => x.id);
   const r = await runStep(job, i, send, signal, notes.map(x => x.text), worker => addEvent(job.id, { type: 'step', n: i, title: step.title, role: step.role, worker, notes: ids }), sized.seat);
   if ('error' in r) await addEvent(job.id, { type: 'failed', n: i, role: step.role, error: r.error });
-  else await addEvent(job.id, { type: 'result', n: i, role: step.role, files: r.result.files.map(f => f.path), flags: r.result.problems.length + r.result.warnings.length, worker: r.result.worker, tries: r.result.tries, notes: ids, ...(r.result.web?.length ? { web: webWords(r.result.web) } : {}) });
+  else await addEvent(job.id, { type: 'result', n: i, role: step.role, files: r.result.files.map(f => f.path), flags: r.result.problems.length + r.result.warnings.length + (r.result.risky ? 1 : 0), worker: r.result.worker, tries: r.result.tries, notes: ids, ...(r.result.web?.length ? { web: webWords(r.result.web) } : {}) });
   return r;
 }
 
@@ -161,15 +162,22 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   // Web on for this job: the addresses its person gave (the goal, their notes: jobs.webSeedOf) may be opened, in the
   // room the step's context has left. A model on this PC gets the tools; a linked PC that writes the step runs them itself.
   const web: ToolUse[] = [];
+  // A page that looked like orders for an AI (src/promptscan.ts webGuard): fenced as data, no more web for this step
+  // (a later try included: a step writes files with no card to ask on), and said with the result for him to check.
+  let riskyWeb = '';
   const webAsk = async (): Promise<AskOpts | undefined> => {
-    if (job.web !== true) return undefined;
+    if (job.web !== true || riskyWeb) return undefined;
     const left = Math.max(0, brain.ctx * memory.CHARS_PER_TOKEN - system.length - user.length - b.answer * memory.CHARS_PER_TOKEN);
     const total = Math.max(2000, Math.min(40_000, Math.floor(left * 0.6)));
     const perCall = Math.max(1500, Math.min(10_000, Math.floor(total / 3)));
     const seed = jobs.webSeedOf(job, ownerNotes);
     const turn = new WebTurn(seed, { search: (await d.store.settings()).webSearch ?? { provider: 'duckduckgo' }, perCall, total, onStatus: text => send('stage', { text }) });
     webTurns.push(turn);
-    return { tools: { defs: WEB_TOOLS, run: (n, a, s, r) => turn.run(n, a, s, r), rounds: WEB_ROUNDS, onCall: (n, a) => send('stage', { text: callWords(n, a) }) }, web: { seed, perCall, total } };
+    const run = webGuard((n: string, a: string, s: AbortSignal, r: number) => turn.run(n, a, s, r), why => {
+      riskyWeb = why;
+      send('stage', { text: `A web page looked like it held orders for an AI (${why}): it was marked as data and no more pages are read for this step.` });
+    });
+    return { tools: { defs: WEB_TOOLS, run, rounds: WEB_ROUNDS, onCall: (n, a) => send('stage', { text: callWords(n, a) }) }, web: { seed, perCall, total } };
   };
   const webTurns: WebTurn[] = [];
   let checks: CheckResult[] = [];
@@ -235,7 +243,8 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
   // The files a step with none planned ended up with go on the plan, so saving it (now or by hand later) may write them.
   if (!planned.length && step.files.length) await saveJob(job);
   const warnings = jobs.crossCheck(await webFiles(root, parsed.files));
-  return { result: { ...parsed, raw, checks, problems, warnings, base: Object.fromEntries(step.files.map(f => [f, textHash(texts[f] ?? null)])), exists: Object.fromEntries(step.files.map(f => [f, texts[f] != null])), tries, worker: brain.label, ...(web.length ? { web } : {}) } };
+  const risky = riskyWeb ? `A web page read for this step looked like it held orders for an AI (${riskyWeb}). It was marked as data and the web was stopped there, but check these files before you save them.` : '';
+  return { result: { ...parsed, raw, checks, problems, warnings, base: Object.fromEntries(step.files.map(f => [f, textHash(texts[f] ?? null)])), exists: Object.fromEntries(step.files.map(f => [f, texts[f] != null])), tries, worker: brain.label, ...(web.length ? { web } : {}), ...(risky ? { risky } : {}) } };
 }
 
 /** A file's text as a short fingerprint (null: no file), kept with a step's result to see a change made after it ran. */

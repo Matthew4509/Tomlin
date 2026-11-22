@@ -8,7 +8,7 @@ import * as link from '../link.ts';
 import * as guestpass from '../guestpass.ts';
 import * as carry from '../carry.ts';
 import * as maxlend from '../maxlend.ts';
-import { newNonce, sealedPipe, streamKeys } from '../linkstream.ts';
+import { newNonce, plainPipe, sealedPipe, streamKeys } from '../linkstream.ts';
 import { log } from '../log.ts';
 import { loanEndWords } from '../runnerexit.ts';
 import { d } from './shared.ts';
@@ -114,12 +114,16 @@ export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       return no(503, `"${shareState.name}" started lending, but its RPC server did not answer.`);
     }
     const nodeNonce = newNonce();
-    const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url') });
+    // Unsealed only when the borrower asks for it AND this PC's owner ticked "Allow unencrypted cluster links": the answer
+    // says which, sealed, so the borrower never guesses (an older TOMLIN here sends no `plain`: sealed, as before).
+    const plain = opened.body.plain === true && shareState.plainLinks === true;
+    const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url'), plain });
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: ${MAX_UPGRADE}\r\nconnection: Upgrade\r\nx-link: ${answer}\r\n\r\n`);
     // A borrower that loses power sends no close: keep-alive ends the stream, and the loan ends after SPARE_MS.
     keepWireAlive(socket as Duplex & { setKeepAlive?: (on: boolean, ms: number) => unknown });
     l.track(socket);
-    void sealedPipe(rpc, socket, streamKeys(keys, hostNonce, nodeNonce, 'node'), 'node', { head }).then(ended => {
+    if (opened.body.plain === true) log.info('max', plain ? `The stream from "${who.name}" is NOT encrypted: both PCs chose an unencrypted cluster link.` : `"${who.name}" asked for an unencrypted cluster link; it is sealed, because Allow unencrypted cluster links is not ticked here.`);
+    void (plain ? plainPipe(rpc, socket, head) : sealedPipe(rpc, socket, streamKeys(keys, hostNonce, nodeNonce, 'node'), 'node', { head })).then(ended => {
       l.untrack(socket);
       if (ended) log.info('max', `A stream from "${who.name}" ended: ${ended}`);
     });

@@ -352,7 +352,7 @@ async function cleanupView(pcId: unknown, wanted: { name: string; bytes: number 
 export const thispcGet: Routes = {
   '/api/nodes': async ({ res }) => json(res, 200, await nodesView()),
   '/api/calc': async ({ res }) => json(res, 200, await calcView()),
-  '/api/nodes/others': async ({ res }) => json(res, 200, { cluster: jobRoutes.clusterView(), pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null })) }),
+  '/api/nodes/others': async ({ res }) => json(res, 200, { cluster: jobRoutes.clusterView(), pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null, updating: jobRoutes.updatingTo(r.id) })) }),
   // The meters of the linked PC an open chat's hire works on (the chat head asks every 3 s while it is on screen). The
   // hire's model there is named, so that PC keeps only it loaded, not every model it loaded for this PC.
   '/api/node/stats': async ({ res, url }) => {

@@ -167,6 +167,18 @@ export interface ChatInput {
 }
 
 /** The characters a chat turn may fill (all but the answer), for a context of `ctx` tokens. */
+/**
+ * The context a chat is built for when a linked PC answers it: the context set there, made smaller until the whole chat
+ * (its room, and the standing and project rules added on top, RULES_ON_TOP) fits the most characters that PC takes in one
+ * request (`chars`, src/brains.ts chatCharsFor). So a long chat is folded and cut as usual, never sent and refused.
+ */
+export const RULES_ON_TOP = 6_500;
+export function linkCtx(ctx: number, chars: number, maxAnswer: number): number {
+  let c = Math.max(2048, ctx || 8192);
+  while (c > 2048 && chatRoom(c, maxAnswer) + RULES_ON_TOP > chars) c = Math.max(2048, Math.floor(c * 0.95));
+  return c;
+}
+
 export function chatRoom(ctx: number, maxAnswer: number): number {
   const c = Math.max(2048, ctx || 8192);
   return Math.max(1500, (c - Math.min(maxAnswer, Math.floor(c / 4)) - 64) * CHARS_PER_TOKEN);
@@ -230,8 +242,15 @@ export function buildChat(x: ChatInput): ChatContext {
   const history = x.history.filter(l => !l.refused && !l.failed && l.content.trim());
   const fixed = room - left;
   const sumRoom = Math.min(Math.floor(room / 6), 1500);
+  // The start is chosen with the new message counted as the newest line of the chat, as it will be on the next turn:
+  // counted apart, a long message (a paste) moved the start once on its own turn and again on the next, and each move
+  // was a full re-read (two of about 30 minutes each at 119K on the Z820, measured 22 Nov). What is kept still fits:
+  // the message's size is added to the room as well as to the lines.
+  const sizes = history.map(l => l.content.length + 8);
+  const mine = x.message ? x.message.length + 8 : 0;
+  const at = Math.min(history.length, keptFrom(mine ? [...sizes, mine] : sizes, left - sumRoom + mine));
   // On one of his messages: a chat template may refuse an answer straight after the system message (measured).
-  const start = userFrom(history, keptFrom(history.map(l => l.content.length + 8), left - sumRoom));
+  const start = userFrom(history, at);
   const recent = history.slice(start);
   const older = history.slice(0, start);
   if (older.length) {

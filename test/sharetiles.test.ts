@@ -43,7 +43,7 @@ test('each Sharing permission is a tile: an icon, its name, a switch, and a (!) 
     pull: ['Sharing of models', 'Visible only to computers connected on your network'],
     backup: ['Enable backups', "This is a local git, that backs up host's projects to this node."],
     update: ['Allow host to update TOMLIN remotely', 'This makes it easy to update headless nodes. Requires a pin'],
-    tune: ['Allow host to test and change model run settings', 'This allows changing the model, and setting a guessing model to improve speeds.'],
+    tune: ['Allow host to test and change model run settings', "This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN or the host PIN typed each time. This switch itself can only be changed at this PC."],
     receive: ['Accept models from linked PCs', "Allows a linked pc to push LLM's to this computer."],
     give: ['Let linked PCs pull TOMLIN updates from here', "A linked PC with an older TOMLIN can copy this PC's TOMLIN (its app files only, never your data or models) to update itself. Nothing changes on this PC."],
     lend: ['Allow to be used as part of a cluster', 'This lets another pc use part of the ram, cpu, or vram to run a model.'],

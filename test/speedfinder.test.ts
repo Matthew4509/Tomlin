@@ -184,3 +184,19 @@ test('a PC with both card runners (CUDA and Vulkan): the other runner is tried, 
   assert.ok(!ids(sf.setupsFor({ ...worker(), cards: [], runners: ['cuda', 'vulkan'] }, m, now, 'full')).some(x => x.startsWith('runner-')));
   assert.match(sf.describeRun({ ...BASE, runner: 'vulkan' }), /Vulkan runner/);
 });
+
+test('a mixture-of-experts model with a big context cache tries q8_0 first; a small cache tries it in Full only', () => {
+  // Qwen3.8 on the Z820's 3060 at 262,144: 6 GB of f16 cache. q8_0 wrote 2.32 tok/s at 17k against 1.54 (22 Nov 2026).
+  const pc = { ...worker(), cards: [{ name: 'NVIDIA GeForce RTX 3060', total: 12 * GB, free: 11 * GB }] };
+  const now: sf.NowFacts = { run: { ...BASE, ctx: 262144 }, spilled: true, cardBytes: 3.8 * GB };
+  const big: sf.ModelFacts = { ...A3B, moe: true, layers: 40, expertsPerLayer: 0.5 * GB, rest: 1.5 * GB, ctxBytes: 6 * GB, guesser };
+  const quick = sf.setupsFor(pc, big, now, 'quick');
+  assert.equal(quick.rows[1].id, 'q8', JSON.stringify(ids(quick)));
+  assert.deepEqual(quick.rows[1].run, { ...now.run, cache: 'q8_0' });
+  assert.match(quick.rows[1].why, /6\.0 GB/);
+  const small: sf.ModelFacts = { ...big, ctxBytes: 1.3 * GB };
+  assert.ok(!ids(sf.setupsFor(pc, small, { ...now, run: { ...BASE, ctx: 65536 } }, 'quick')).includes('q8'));
+  assert.ok(ids(sf.setupsFor(pc, small, { ...now, run: { ...BASE, ctx: 65536 } }, 'full')).includes('q8') || sf.setupsFor(pc, small, { ...now, run: { ...BASE, ctx: 65536 } }, 'full').left.some(l => /q8_0/.test(l.name)));
+  // Already q8_0: not tried again.
+  assert.ok(!ids(sf.setupsFor(pc, big, { ...now, run: { ...now.run, cache: 'q8_0' } }, 'full')).includes('q8'));
+});

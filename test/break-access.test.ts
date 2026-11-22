@@ -214,7 +214,7 @@ test('a node\'s link door: a used setup code, a replayed message and a removed l
   assert.equal(opened.status, 200, opened.text);
   cookie = `sm_app=${cookieOf(opened)}`;
   const door = await freePort();
-  const on = await open('POST', '/api/share', { on: true, port: door, pinOn: true, name: 'Made-up node' });
+  const on = await open('POST', '/api/share', { on: true, port: door, pinOn: true, name: 'Made-up node', appPin: PIN });
   assert.equal(on.status, 200, on.text);
   assert.equal(on.json.listening, true, on.text);
   const { code, pin } = on.json as { code: string; pin: string };

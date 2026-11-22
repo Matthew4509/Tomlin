@@ -100,6 +100,13 @@ test('the ask is checked: a 16-byte nonce, echo or rpc, minutes kept between 1 a
   const b = readAsk({ nonce, target: 'rpc', plain: true, build: 'b11284', all: true, minutes: 999 });
   assert.ok(typeof b !== 'string');
   assert.deepEqual([b.target, b.plain, b.build, b.all, b.minutes], ['rpc', true, 'b11284', true, TEST_MAX_MINUTES]);
+  assert.deepEqual([b.threads, b.node, b.cpu], [0, -1, false], 'threads, socket and CPU-only are off unless asked');
+  const s = readAsk({ nonce, target: 'rpc', threads: 8, node: 1, cpu: true });
+  assert.ok(typeof s !== 'string');
+  assert.deepEqual([s.threads, s.node, s.cpu], [8, 1, true]);
+  const bad = readAsk({ nonce, target: 'rpc', threads: 9999, node: -2, cpu: 'yes' });
+  assert.ok(typeof bad !== 'string');
+  assert.deepEqual([bad.threads, bad.node, bad.cpu], [0, -1, false], 'out-of-range settings are dropped, not passed on');
   const c = readAsk({ nonce, build: '../x', plain: 'yes' });
   assert.ok(typeof c !== 'string');
   assert.equal(c.build, '');

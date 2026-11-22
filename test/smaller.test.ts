@@ -43,7 +43,7 @@ test('a model that does not spill gets no smaller-file offer, and the download n
 
 test('wired in: every finished chat-model download writes where it came from; a linked PC passes the press on', () => {
   const hf = readFileSync(join(ROOT, 'src', 'server', 'hf.ts'), 'utf8');
-  assert.match(hf, /state = 'done';\s*\n\s*await keepSource\(m\.name, \{ repo, rev, bytes: m\.bytes/);
+  assert.match(hf, /if \(x\.to === 'models'\) \{\s*\n\s*await keepSource\(x\.name, \{ repo: x\.repo, rev: x\.rev, bytes: x\.bytes/);
   const copies = readFileSync(join(ROOT, 'src', 'jobrun', 'copies.ts'), 'utf8');
   assert.match(copies, /'undo', 'smaller'\]\.includes\(action\)/);
   assert.match(copies, /yes: b\.yes === true/);

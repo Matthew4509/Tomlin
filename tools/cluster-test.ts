@@ -5,8 +5,11 @@
 //   node tools/cluster-test.ts <PC name or id> probe [--count 2000] [--hidden 2560]
 //       a layer-sized frame there and back, sealed as Max mode and then NOT encrypted, through a port on this PC
 //   node tools/cluster-test.ts <PC name or id> rpc [--plain] [--build b11284] [--all] [--port 50071] [--minutes 15]
+//                                                  [--threads N] [--node N] [--cpu]
 //       a port on 127.0.0.1 that is that PC's RPC server (each connection one stream), for llama.cpp's --rpc or
-//       docs/cluster-native/overlap; it stays open for --minutes, or until Ctrl+C
+//       docs/cluster-native/overlap; it stays open for --minutes, or until Ctrl+C. --threads: its CPU threads there;
+//       --node: keep it on that CPU socket (NUMA node) there; --cpu: lend only RAM and cores, not the card. Two runs on
+//       two ports with --node 0 --all and --node 1 --cpu give one member per socket (needs TOMLIN 2.1.5 there).
 //
 // --plain asks for the bytes after the opening NOT to be encrypted: anyone on the home network who can reach the wire
 // could read or change them. Only on a private, wired network.
@@ -79,7 +82,8 @@ async function main(): Promise<void> {
     console.log('Both include one Node relay on each PC; a direct link would save about 0.1 to 0.2 ms more.');
     process.exit(0);
   }
-  const want: TestWant = { target: 'rpc', plain: args.includes('--plain'), build: text('--build', ''), all: args.includes('--all'), minutes: flag('--minutes', 15) };
+  const node = args.includes('--node') ? flag('--node', 0) : undefined;
+  const want: TestWant = { target: 'rpc', plain: args.includes('--plain'), build: text('--build', ''), all: args.includes('--all'), minutes: flag('--minutes', 15), threads: flag('--threads', 0), ...(node !== undefined ? { node } : {}), cpu: args.includes('--cpu') };
   const summed = new Set<string>();
   const { port } = await testBridge(pc, want, flag('--port', 50071), line => console.log(line), n => {
     const line = testSummary(n);

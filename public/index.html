@@ -35,7 +35,7 @@
   <span class="chip serving-chip" id="serving-chip" role="status" hidden></span>
   <button class="btn quiet mute-all" type="button" id="mute-all" aria-label="Mute all"></button>
   <button class="btn quiet padlock" type="button" id="applock-btn" aria-label="App lock" title="App lock: set a PIN for the whole app" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="applock-shackle" d="M8 11V7a4 4 0 0 1 8 0"/></svg></button>
-  <div class="theme-switch" role="radiogroup" aria-label="Colours">
+  <div class="theme-switch" role="radiogroup" aria-label="Theme">
     <button type="button" role="radio" aria-checked="false" data-colours-set="day" aria-label="Day"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7 7 17M17 7l1.7-1.7"/></svg></button>
     <button type="button" role="radio" aria-checked="false" data-colours-set="night" aria-label="Night"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="fill" d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/></svg></button>
     <button type="button" role="radio" aria-checked="false" data-colours-set="auto" aria-label="Auto, by sunrise and sunset"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9.5" cy="12" r="3.2"/><path d="M9.5 5.2v1.6M9.5 17.2v1.6M2.7 12h1.6M4.7 7.2l1.1 1.1M4.7 16.8l1.1-1.1"/><path class="fill" d="M13.5 3.2a8.8 8.8 0 0 1 0 17.6a10.5 10.5 0 0 0 0-17.6z"/></svg></button>
@@ -77,15 +77,17 @@
     <ul class="rail-list rail-links rail-settings-sub" id="rail-settings-sub" aria-label="Settings">
       <li><button class="link" type="button" data-setup="staff" data-about="Add someone to chat, write or draw, or change who you have."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Hire staff</button></li>
       <li><button class="link" type="button" data-setup="models" data-about="Add or remove the AI models on this PC."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Models</button></li>
+      <li><button class="link" type="button" data-setup="thispc" data-about="See this PC's models, memory and use."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC</button></li>
       <li><button class="link" type="button" data-setup="nodes" data-about="Link your other PCs and share their work."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg>Network</button></li>
       <li><button class="link" type="button" data-setup="cluster" data-about="Put linked PCs together for models too big for one PC."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="14" width="7" height="6" rx="1"/><path d="M10 7h4M7 10l3 4M17 10l-3 4"/></svg>Cluster</button></li>
-      <li><button class="link" type="button" data-setup="thispc" data-about="See this PC's models, memory and use."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC</button></li>
+      <li><button class="link" type="button" data-setup="storage" data-about="Choose which drive keeps models and backups."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="6" rx="1.5"/><rect x="3" y="13" width="18" height="6" rx="1.5"/><path d="M7 8h.01M7 16h.01"/></svg>Network Storage</button></li>
+      <li><button class="link" type="button" data-setup="guestpass" data-about="Let someone else's PC use your models for a while."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>Create a guest pass</button></li>
       <li><button class="link" type="button" data-setup="jobs" data-about="Plan big work as small steps, then run them."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Jobs</button></li>
       <li><button class="link" type="button" data-setup="files" data-about="Open your work and write blog posts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>Files and blog writer</button></li>
       <li><button class="link" type="button" data-setup="updates" data-about="Check for a new version and install it."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>Manage updates</button></li>
       <li><button class="link" type="button" data-setup="data" data-about="Back up your data, set a PIN and choose alerts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Data and lock</button></li>
       <li><button class="link" type="button" data-setup="perms" data-about="Choose what a chat&#39;s model may do on its own."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Permissions</button></li>
-      <li><button class="link" type="button" data-setup="colours" data-about="Pick Day, Night or Auto."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.500 0 2-1 2-2s-1-2 0-3 2-1 3-1h2c1.200 0 2-1 2-3a9 9 0 0 0-9-9z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Colours</button></li>
+      <li><button class="link" type="button" data-setup="colours" data-about="Pick Day, Night or Auto."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.500 0 2-1 2-2s-1-2 0-3 2-1 3-1h2c1.200 0 2-1 2-3a9 9 0 0 0-9-9z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Theme</button></li>
     </ul>
   </div>
 </nav>
@@ -238,7 +240,7 @@
         <p class="hint" id="node-scan-line" aria-live="polite"></p>
         <div class="home-list" id="node-found"></div>
       </div>
-      <details class="set-row">
+      <details class="set-row" id="node-addr-box">
         <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></span><span class="set-txt"><b>Not found? Type its address instead</b><span class="set-about">Its address and setup code are shown on that PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
         <div class="set-inside">
           <form id="node-addr-form" class="node-link-form">
@@ -272,8 +274,10 @@
   <section class="set-part" id="node-linked-pcs" aria-labelledby="node-linked-title">
     <div class="set-head">
       <h3 id="node-linked-title">Linked PCs</h3>
-      <button class="btn primary fast-update" type="button" id="node-fast-update" hidden title="Updates every linked PC that is behind this one, asking for the host PIN once when the PCs hold it"></button>
+      <span class="net-linked-acts"><button class="btn" type="button" id="net-hw-scan" title="Reads the processor, RAM and graphics cards of this PC and every linked PC again, and says what changed. TOMLIN otherwise reads them only when it starts.">Scan for hardware changes</button>
+      <button class="btn primary fast-update" type="button" id="node-fast-update" hidden title="Updates every linked PC that is behind this one, asking for the host PIN once when the PCs hold it"></button></span>
     </div>
+    <p class="hint" id="net-head-said" role="status" hidden></p>
     <div class="set-card">
       <div class="set-row">
         <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></span>
@@ -296,6 +300,10 @@
   <div id="node-paired-ask" hidden></div>
   <div id="node-paired"></div>
   <div id="node-host-pins"></div>
+      </div>
+      <div class="set-row">
+        <span class="set-txt"><b>Guest:</b><span class="set-about">Connect to a network as a guest</span></span>
+        <span class="set-side"><button class="btn" type="button" id="net-join-guest" title="Opens Add another PC with its address and code boxes: type the address of the PC that gave you the pass and the guest pass code.">Connect as a guest</button></span>
       </div>
     </div>
   </section>
@@ -354,7 +362,7 @@
           </div>
           <div class="share-tile">
             <div class="share-tile-top"><span class="share-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span><span class="perm-switch"><input type="checkbox" id="allow-tune" data-allow="tune" aria-describedby="allow-tune-tip"><span class="perm-knob"></span></span></div>
-            <div class="share-tile-name"><label for="allow-tune">Allow host to test and change model run settings</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow host to test and change model run settings" aria-describedby="allow-tune-tip">!</button><span class="info-tip" role="tooltip" id="allow-tune-tip">This allows changing the model, and setting a guessing model to improve speeds.</span></span></div>
+            <div class="share-tile-name"><label for="allow-tune">Allow host to test and change model run settings</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow host to test and change model run settings" aria-describedby="allow-tune-tip">!</button><span class="info-tip" role="tooltip" id="allow-tune-tip">This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN or the host PIN typed each time. This switch itself can only be changed at this PC.</span></span></div>
             <p class="hint ok" id="node-run-changes" role="status" hidden></p>
           </div>
           <div class="share-tile">
@@ -379,6 +387,8 @@
             <div class="share-tile-top"><span class="share-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/></svg></span><span class="perm-switch"><input type="checkbox" id="allow-lend" data-allow="lend" aria-describedby="allow-lend-tip"><span class="perm-knob"></span></span></div>
             <div class="share-tile-name"><label for="allow-lend">Allow to be used as part of a cluster</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow to be used as part of a cluster" aria-describedby="allow-lend-tip">!</button><span class="info-tip" role="tooltip" id="allow-lend-tip">This lets another pc use part of the ram, cpu, or vram to run a model.</span></span></div>
             <p class="hint">Only while nobody is using this PC: when Windows is locked, or after <select id="node-lend-idle" aria-label="Minutes with nobody using this PC before it lends"><option value="2" label="2"></option><option value="5" label="5"></option><option value="10" label="10"></option><option value="15" label="15"></option><option value="30" label="30"></option><option value="60" label="60"></option></select> minutes with no key press or mouse move. Using this PC again ends it at once.</p><span class="sr-only" aria-hidden="true">Chosen: <span id="node-lend-idle-text">5</span> minutes.</span><p class="hint ok" id="node-lend-now" role="status" hidden></p>
+            <label class="node-plain"><input type="checkbox" id="node-plain-links" aria-describedby="node-plain-why"> Allow unencrypted cluster links</label>
+            <p class="hint" id="node-plain-why">A linked PC that ticks "Unencrypted cluster link" for this PC then borrows over a link that is not encrypted: faster (each step on the network took about half the time when measured), but anything on your home network could read it or send this PC's model runner commands of its own. Only on a wired home network you trust. Off unless ticked; both PCs must choose it.</p>
           </div>
             </div>
           </div>
@@ -396,7 +406,7 @@
     <h3 id="node-passes-title">Guest passes</h3>
     <div class="set-card">
       <div class="set-block">
-        <div class="net-actions"><button class="btn" type="button" id="node-pass-addnode">Add a node</button><button class="btn primary" type="button" id="node-pass-create" aria-expanded="false" aria-controls="node-pass-new">Create a guest pass</button></div>
+        <div class="net-actions"><button class="btn primary" type="button" id="node-pass-create" aria-expanded="false" aria-controls="node-pass-new">Create a guest pass</button></div>
         <details class="net-more" id="node-pass-about"><summary aria-label="About guest passes">(!)</summary>
         <p class="hint">A guest pass lets another PC use the models you tick, on the PCs you tick (this PC when it is a node, and the nodes linked to it), and pull TOMLIN updates where "Let linked PCs pull TOMLIN updates from here" is on. Nothing else: no copies, backups, settings, runners or cluster. Its staff and chats stay on that PC. Each node keeps its own copy, so a pass works while this PC is off, and ends on its date even on a node this PC cannot reach. The owner of each node can see what a guest runs there.</p>
         <p class="hint" id="node-pass-none">No guest passes yet.</p>
@@ -415,7 +425,7 @@
         <div id="node-pass-sync" role="status"></div>
         <div class="node-pass-made" id="node-pass-made" role="status" hidden></div>
         <div class="net-pass-form" id="node-pass-new" hidden>
-          <label class="field"><span>Name (whose PC it is for)</span><input id="node-pass-label" type="text" maxlength="40" autocomplete="off"></label>
+          <label class="field"><span>Name of person this is for</span><input id="node-pass-label" type="text" maxlength="40" autocomplete="off"></label>
           <label class="field"><span>Length</span><select id="node-pass-length"><option value="day">1 day</option><option value="week" selected>1 week</option><option value="none">No limit</option></select></label>
           <fieldset class="node-pass-pick"><legend>PCs and the models a guest may use on each</legend><div id="node-pass-nodes"></div></fieldset>
           <div class="team-actions"><button class="btn primary" type="button" id="node-pass-make">Make pass</button></div>
@@ -541,28 +551,10 @@
   <div id="cluster-body"></div>
   <section class="set-part" id="cluster-speed" aria-labelledby="cluster-speed-title">
     <h3 id="cluster-speed-title">What our own clusters measured</h3>
-    <div class="set-card">
-      <div class="set-block">
-        <p class="hint">Measured on three of our own PCs over a wired 1 Gb network, in tokens a second while writing (a token is about three quarters of a word). Your PCs will differ.</p>
-        <div class="cluster-table">
-          <table>
-            <thead><tr><th scope="col">Model</th><th scope="col">File</th><th scope="col">PCs</th><th scope="col">With the cluster</th><th scope="col">Without it</th></tr></thead>
-            <tbody>
-              <tr><td>Qwen3.8-Flash-Next Q3 (125B)</td><td>89.5 GB</td><td>48 GB PC and a 128 GB node with a 12 GB card</td><td>1.9</td><td>Does not fit either PC's card, and not this PC's RAM. From an SSD: not measured.</td></tr>
-              <tr><td>Qwen3-Next-80B Q3</td><td>33.2 GB</td><td>48 GB PC and a 24 GB node, both cards</td><td>4.6</td><td>8.7 on the bigger node alone, with its own card.</td></tr>
-              <tr><td>Qwen3-Coder-30B Q4</td><td>17.7 GB</td><td>48 GB PC and the bigger node</td><td>3.7</td><td>2.5 times faster on this PC alone.</td></tr>
-              <tr><td>LFM2.5-8B Q4</td><td>4.8 GB</td><td>48 GB PC and the bigger node's card</td><td>41.1</td><td>39.3 on this PC alone.</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <ul class="hint cluster-notes">
-          <li><b>A cluster makes a big model possible, not fast.</b> The 89.5 GB model ran at 1.9 tokens a second: about a sentence every ten seconds.</li>
-          <li><b>For a model that fits one PC, use that PC.</b> In our three tests of a model that fits one PC, the single PC was faster twice and about the same once; the network between the PCs costs more than the extra card gives.</li>
-          <li><b>Three PCs were not better than two.</b> Adding a third, slower PC gave from less than half to about one and a half times the speed of two, and long loads can fail.</li>
-          <li><b>Against an SSD, we have not measured it.</b> A model bigger than the RAM is read back from the drive as it is used. A drive is much slower than RAM, so we expect the cluster to be faster whenever the whole model fits in the pool's RAM, but that is our expectation, not a test, and we give no figure for it.</li>
-        </ul>
-      </div>
-    </div>
+    <div class="set-card"><div class="set-row">
+      <span class="set-txt"><span class="set-about">Real speeds from our own PCs, each with the hardware it ran on, the single PCs and the clusters side by side. Your PCs will differ.</span></span>
+      <span class="set-side"><button class="btn" type="button" id="cluster-measured-open" aria-haspopup="dialog">See measured cluster examples</button></span>
+    </div></div>
   </section>
 </section>
 <section class="nodes" id="updates-page" data-crumb="Manage updates" aria-labelledby="updates-title">
@@ -591,10 +583,19 @@
             <li>Get tomlin-&lt;version&gt;.zip and its .sig into one folder: from <a id="node-install-releases" target="_blank" rel="noopener noreferrer">TOMLIN's releases on GitHub</a>, or copy both from another PC (a USB stick will do).</li>
             <li id="node-install-hand-zip">Press <b>Update via zip</b>, pick both (hold Ctrl), then <b>Update now</b>.</li>
             <li>Or run <b>TOMLIN-Setup-&lt;version&gt;.exe</b>: it updates this install in place.</li>
-            <li>Linked PCs: <b>Update all linked PCs</b> on <b>Network</b>.</li>
+            <li>Linked PCs: <b>Push updates to network</b>, below.</li>
           </ol>
         </div>
       </details>
+    </div>
+  </section>
+  <section class="set-part" id="upd-network" aria-labelledby="upd-network-title">
+    <h3 id="upd-network-title">Update your linked PCs</h3>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-txt"><b>TOMLIN on linked PCs</b><span class="set-about" id="net-push-line" aria-live="polite">Every linked PC that runs an older TOMLIN than this one is updated from this PC. Each may ask for its PIN.</span></span>
+        <span class="set-side"><button class="btn" type="button" id="net-push-updates">Push updates to network</button></span>
+      </div>
     </div>
   </section>
 </section>
@@ -717,15 +718,37 @@
   <div class="help-body page-body set-page" id="settings-perms-body"></div>
 </section>
 
-<section class="models-page app-page" id="settings-colours" data-crumb="Colours" aria-labelledby="settings-colours-title">
+<section class="models-page app-page" id="storage-page" data-crumb="Network Storage" aria-labelledby="storage-title">
   <div class="home-head">
     <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
-    <h2 id="settings-colours-title">Colours</h2>
+    <h2 id="storage-title">Network Storage</h2>
+  </div>
+  <div class="help-body page-body set-page">
+    <p class="set-lead">Two kinds of storage, each made of drives on your PCs. Press + Add under one to give it a drive.</p>
+    <p class="set-said" id="storage-said" role="status"></p>
+    <div class="storage-tiles" id="storage-tiles"></div>
+    <section class="set-card storage-picker" id="storage-picker" hidden aria-labelledby="storage-picker-title">
+      <div class="storage-picker-top">
+        <h3 class="storage-h" id="storage-picker-title">Add a drive</h3>
+        <span class="storage-picker-tools"><button class="btn quiet" type="button" id="storage-rescan">Look for drives again</button><button class="btn" type="button" id="storage-picker-close">Close</button></span>
+      </div>
+      <div id="storage-picker-list"></div>
+    </section>
+    <h3 class="storage-h">Where each PC runs its models from</h3>
+    <div class="set-card" id="storage-run"></div>
+    <div class="set-card" id="storage-move" hidden></div>
+  </div>
+</section>
+
+<section class="models-page app-page" id="settings-colours" data-crumb="Theme" aria-labelledby="settings-colours-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="settings-colours-title">Theme</h2>
   </div>
   <div class="help-body page-body set-page">
     <p class="set-lead">Kept in this browser. The switch beside Settings at the top picks Day, Night or Auto.</p>
     <fieldset class="colours-pick set-card set-choices" data-colours-pick>
-      <legend class="sr-only">Colours</legend>
+      <legend class="sr-only">Theme</legend>
       <label class="check"><input type="radio" name="colours" value=""> Follow Windows (light or dark, as Windows is set)</label>
       <label class="check"><input type="radio" name="colours" value="day"> Day: light grey and blue</label>
       <label class="check"><input type="radio" name="colours" value="night"> Night: dark grey and soft blue</label>
@@ -786,6 +809,7 @@
             <label class="field"><span>Unload when idle (minutes, 10 unless changed, 0 = never)</span><input class="idle" type="number" min="0" max="1440" step="1"></label>
             <label class="field"><span>Context (what it reads at once)</span><select id="ctx-size"></select></label>
             <label class="field"><span>Memory for the context</span><select id="ctx-cache"><option value="f16">Full size (f16)</option><option value="q8_0">Half (q8_0, almost no loss)</option><option value="q4_0">Quarter (q4_0, some loss)</option></select></label>
+            <label class="check" id="ctx-kvram-row" hidden title="The context cache is kept in RAM, not on the graphics card, so the card keeps its room for the model. Helps a long context on a small card; reading a long prompt can be slower."><input type="checkbox" id="ctx-kvram"> Keep the context in RAM (frees the graphics card for the model)</label>
             <label class="field" id="ctx-place-row" hidden><span>Where it runs on the graphics card</span><select id="ctx-place"></select></label>
             <label class="field" id="ctx-cards-row" hidden><span>Graphics cards it uses</span><select id="ctx-cards" title="Auto spreads the model over every card. A model split over two cards waits for the slower one at every word, so one card alone can be faster: Try it in the speed finder."></select></label>
             <div class="field" id="ctx-runner-row" hidden><label for="ctx-runner">Runner (the llama.cpp build it starts on)</label><select id="ctx-runner" title="Auto picks the build that suits this PC's card. Hold this model to one when another crashed with it: Test now tries it first."></select><div class="row"><button class="btn quiet" type="button" id="ctx-runner-test">Test now</button></div><p class="hint" id="ctx-runner-said" role="status"></p></div>
@@ -1158,11 +1182,12 @@
     <img class="brand-mark applock-mark" src="icon.svg" alt="" width="30" height="30">
     <h1 id="applock-title">Access is restricted.</h1>
     <div class="fault" id="applock-fault" role="alert" hidden></div>
-    <div class="applock-row">
-      <button class="btn primary" type="submit" id="applock-open">Unlock</button>
+    <div class="applock-row applock-pin-row">
       <input id="applock-open-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="current-password" aria-label="PIN" placeholder="PIN" required>
+      <button class="btn primary" type="submit" id="applock-open">Unlock</button>
     </div>
     <div class="lock-pad" id="applock-pad" role="group" aria-label="Number pad" hidden></div>
+    <p class="hint applock-off-note" id="applock-off-note">You can disable pin locks in Settings, Data and lock</p>
     <button class="btn quiet lock-recover-open" type="button" id="applock-recover-open" hidden>Use a recovery code</button>
     <p class="hint" id="applock-about" hidden></p>
     <div class="applock-node" id="applock-node" hidden>
@@ -1228,6 +1253,8 @@
   </form>
 </dialog>
 <dialog id="keep-dlg" class="small-dlg" aria-labelledby="keep-title"></dialog>
+<!-- Downloads: every PC's downloads list, from the top bar's downloads chip (dlchip.js). -->
+<dialog id="dl-dlg" class="small-dlg dl-dlg" aria-labelledby="dl-title"></dialog>
 <dialog id="backup-dlg" class="small-dlg" aria-labelledby="backup-title"></dialog>
 <dialog id="todo-dlg" class="small-dlg" aria-labelledby="todo-dlg-title"></dialog>
 <!-- After Hire staff, for a hire who chats: start a chat with them now, or not now (team.js afterHire). -->
@@ -1472,24 +1499,6 @@
       </div>
     </div>
     <div class="fault" id="team-fault" hidden></div>
-    <!-- The Staff menu (what Staff: hire and edit opens): hire someone new, or manage the staff you have. -->
-    <div class="staff-menu" id="staff-menu" hidden>
-      <form class="staff-tile" id="sm-hire" aria-labelledby="sm-hire-title">
-        <h3 id="sm-hire-title">Hire staff</h3>
-        <div class="sm-name-row">
-          <label class="field"><span>Their name</span><input id="sm-name" type="text" maxlength="30" autocomplete="off" placeholder="Type a name, or roll the dice"></label>
-          <button class="btn quiet sm-dice" type="button" id="sm-dice" title="A random name" aria-label="A random name"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/></svg></button>
-        </div>
-        <p class="hint">Next you pick their role, the PC (or node) they work on, and the model they use.</p>
-        <button class="btn primary" type="submit">Create</button>
-      </form>
-      <section class="staff-tile" aria-labelledby="sm-manage-title">
-        <h3 id="sm-manage-title">Manage staff</h3>
-        <p class="hint" id="sm-count"></p>
-        <p class="hint">See everyone under the PC they work on, then Edit one: their look, role, level, PC and model.</p>
-        <button class="btn" type="button" id="sm-manage">Manage staff</button>
-      </section>
-    </div>
     <!-- See all staff: everyone, under the PC they work on. -->
     <div class="staff-all" id="staff-all" hidden>
       <p class="hint">Everyone you have hired, under the PC they work on. Press <b>Edit</b> to open one person.</p>
@@ -1778,13 +1787,15 @@
         <h3 id="hs-profile-title">Profile</h3>
         <div class="hs-face">
           <img id="hs-pic" class="hs-pic" alt="Their look" width="96" height="96" hidden>
-          <button class="btn quiet" type="button" id="hs-look-btn" aria-expanded="false" aria-controls="hs-look-box" hidden>Change look</button>
+          <button class="btn quiet hs-look-edit" type="button" id="hs-look-btn" aria-expanded="false" aria-controls="hs-look-box" aria-label="Change look" title="Change look" hidden></button>
         </div>
         <div class="hs-name-row">
           <label class="field"><span>Name</span><input id="hs-name" type="text" maxlength="30" required autocomplete="off" placeholder="e.g. Rowan"></label>
           <button class="btn quiet" type="button" id="hs-random" title="Put a random name in the box">Random</button>
         </div>
-        <fieldset class="pick-set"><legend>Role</legend><div class="hs-roles" id="hs-roles"></div></fieldset>
+        <fieldset class="pick-set"><legend><span class="hs-step" aria-hidden="true">1</span>Role</legend><div class="hs-roles" id="hs-roles"></div>
+          <label class="field hs-sub"><span>Sub-role</span><select id="hs-subrole"></select></label>
+        </fieldset>
         <p class="hint" id="hs-role-line"></p>
         <dl class="hs-sum">
           <dt>Computer</dt><dd id="hs-sum-pc"></dd>
@@ -1793,19 +1804,24 @@
       </section>
       <section class="hs-right" aria-label="Their PC and model">
         <div id="hs-pcs-block">
-          <h3>Assign a PC</h3>
+          <h3><span class="hs-step" aria-hidden="true">2</span>Assign a PC</h3>
           <div class="hs-pcs" id="hs-pcs"></div>
+          <h4 class="hs-net-head">Network</h4>
+          <div class="hs-pcs" id="hs-net-pcs"></div>
         </div>
         <div class="hs-models-head">
-          <h3 id="hs-models-title">Choose a model</h3>
+          <h3><span class="hs-step" aria-hidden="true">3</span><span id="hs-models-title">Choose a model</span></h3>
           <p class="hint">Memory needed is an estimate (a chat model with an 8K context).</p>
         </div>
         <div class="hs-tools" id="hs-tools"><input id="hs-search" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off"><button class="btn" type="button" id="hs-add-model">Add new</button></div>
         <div class="hs-models" id="hs-models"></div>
         <div class="hs-all" id="hs-all-block" hidden>
-          <h3 id="hs-all-title">All models</h3>
-          <p class="hint" id="hs-all-line"></p>
+          <div class="hs-all-head">
+            <div><h3 id="hs-all-title">All models</h3><p class="hint" id="hs-all-line"></p></div>
+            <div class="hs-all-to" id="hs-all-to"></div>
+          </div>
           <div class="hs-models" id="hs-all"></div>
+          <div class="hs-off-pcs" id="hs-off-pcs"></div>
         </div>
       </section>
     </div>
@@ -1815,26 +1831,10 @@
   </form>
 </dialog>
 
-<dialog id="hs-push-dlg" aria-labelledby="hs-push-title">
+<dialog id="cluster-measured-dlg" class="pc-dlg cluster-measured-dlg" aria-labelledby="cluster-measured-title">
   <div class="help-body">
-    <div class="dlg-top">
-      <h2 id="hs-push-title">Push to node</h2>
-      <form method="dialog"><button class="btn" type="submit">Close</button></form>
-    </div>
-    <p class="hint" id="hs-push-line"></p>
-    <div class="hs-push-flow">
-      <section class="hs-push-side" aria-labelledby="hs-push-from-title">
-        <h3 id="hs-push-from-title">From</h3>
-        <div class="hs-tiles" id="hs-push-from"></div>
-      </section>
-      <div class="hs-push-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="28" height="28" focusable="false"><path fill="currentColor" d="M4 11h12.2l-4.6-4.6L13 5l7 7-7 7-1.4-1.4 4.6-4.6H4z"/></svg></div>
-      <section class="hs-push-side" aria-labelledby="hs-push-to-title">
-        <h3 id="hs-push-to-title">To</h3>
-        <p class="hs-warn" id="hs-push-none" hidden></p>
-        <div class="hs-tiles hs-push-list" id="hs-push-list"></div>
-      </section>
-    </div>
-    <div class="fault" id="hs-push-fault" role="alert" hidden></div>
+    <div class="dlg-top"><h2 id="cluster-measured-title">Measured cluster examples</h2><form method="dialog"><button class="btn" type="submit">Close</button></form></div>
+    <div id="cluster-measured-body"><p class="hint">Reading the measured runs…</p></div>
   </div>
 </dialog>
 
@@ -1941,7 +1941,7 @@
     <h2 id="upd-title">Updating</h2>
     <ol class="upd-steps" id="upd-steps" aria-label="Steps"></ol>
     <p class="hint" id="upd-line" role="status" aria-live="polite"></p>
-    <p class="applock-keep" id="upd-keep">Keep this window open until it finishes.</p>
+    <p class="hint" id="upd-keep">Safe to close this window: the update carries on. The turning wheel on the PC in the left panel shows it is still going; press that PC to see these steps again.</p>
     <div class="team-actions">
       <button class="btn quiet" type="button" id="upd-stop">Stop</button>
       <button class="btn primary" type="button" id="upd-close" hidden>Close</button>
@@ -2026,5 +2026,6 @@
 <script src="queue.js"></script>
 <script src="todo.js"></script>
 <script src="sitecheck.js"></script>
+<script src="storage.js"></script>
 </body>
 </html>

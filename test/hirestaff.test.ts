@@ -1,5 +1,5 @@
 // Hire staff as a walk found it: slow to open (it waited on every linked PC, 3 s for one that is off), two linked PCs
-// both called "Worker PC", Push to node putting the off PC's reason on the other PCs' rows, buttons squeezing the words
+// both called "Worker PC", buttons squeezing the words
 // in a narrow window, no name on opening, and a look drawn at random whatever the name.
 // Run: node --test test/hirestaff.test.ts
 import { test } from 'node:test';
@@ -90,7 +90,7 @@ test('two PCs both named "Worker PC": the staff list tells them apart, answers a
 test('a node answers its hello without waiting on Windows for its drives (a cold PowerShell took longer than the 3 s given)', () => {
   const node = read('src/jobrun/node.ts');
   const hello = between(node, "if (p === '/worker/hello') {", "if (p === '/worker/stats')");
-  assert.match(hello, /const drives = driveReportNow\(\);/);
+  assert.match(hello, /const drives = driveReportNow\(\)\.map\(x => \(\{ \.\.\.x, jobs: driveJobs\[x\.drive\] \?\? \[\] \}\)\);/);
   assert.doesNotMatch(hello, /await driveReport\(\)/);
   const now = driveReportNow();
   assert.ok(Array.isArray(now), 'given at once, not a promise');
@@ -113,28 +113,17 @@ test('Hire staff shows at once and fills in: no wait on the server before the pa
   assert.match(css, /\.hs-wait-card \{ filter: blur\(3px\);/);
 });
 
-// ---- Push to node ----
+// ---- The PC tile ----
 
-test('Push to node: the PC it is on at the far left, a divider, tiles for the PCs it can go to; a reason stays on its own PC', () => {
-  const html = read('public/index.html');
-  const dlg = between(html, '<dialog id="hs-push-dlg"', '</dialog>');
-  assert.ok(dlg.indexOf('id="hs-push-from"') < dlg.indexOf('class="hs-push-arrow"') && dlg.indexOf('class="hs-push-arrow"') < dlg.indexOf('id="hs-push-list"'), 'from, the divider, to');
-  const css = read('public/style.css');
-  assert.match(css, /\.hs-push-flow \{ display: grid; grid-template-columns: minmax\(180px, 230px\) auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.hs-push-arrow \{[^}]*border-left: 2px solid var\(--line\); border-right: 2px solid var\(--line\);/);
-  assert.match(css, /\.hs-tiles \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(190px, 1fr\)\);/);
-  const draw = between(hire, 'function drawPush() {', '/** Buttons drawn again');
-  // A source that cannot send says so on its own tile (the off PC), never on a target's: the target shows its own state.
-  assert.match(draw, /const why = pc && o && !o\.copy \? `\$\{cap\(o\.why/);
-  assert.doesNotMatch(draw, /route\.why \? `\$\{cap\(route\.why\)\}/, 'the old rows printed the source\'s reason on every target');
-  assert.match(draw, /const own = pc \? hs\.net\?\.pcs\.find\(p => p\.id === pc\)\?\.send : '';/);
-  // Each tile as Home's PC cards: its picture (its photo, else PC), name, RAM / VRAM and make, on or off.
-  const tile = between(hire, 'function pcTile(pc, ...below) {', 'function drawPush()');
-  assert.match(tile, /app\.avatar\(pc \? `pc:\$\{pc\}` : 'pc:mine', 'PC'\)/);
+test('the PC beside All models is drawn as the left panel draws a PC, and every PC by the name that tells it apart', () => {
+  const tile = between(hire, 'function railPc(pc) {', '/** Buttons drawn again');
+  assert.match(tile, /app\.avatar\(pc \? `pc:\$\{pc\}` : 'pc:mine', 'PC', mark\)/);
+  assert.match(tile, /class: 'rail-row hs-rail-pc'/);
+  assert.match(tile, /text: ACTIVITY_WORD\[activity\]/);
   assert.match(tile, /memWords\(mem\.ram, mem\.vram\)/);
-  // Every PC by the name that tells it apart, in the rows' "On …" too.
   assert.match(hire, /const whereOf = e => e\.on\.map\(o => pcName\(o\.pc\)\)/);
   assert.match(hire, /d\(\)\?\.pcs\.find\(p => p\.id === id\)\?\.label/);
+  assert.doesNotMatch(hire, /Push to node|hs-push/);
 });
 
 // ---- A narrow window, the top bar ----
@@ -153,7 +142,6 @@ test('a narrow window: the buttons go under a model\'s words; "No models loaded"
 test('a name is made up on opening; a woman\'s name draws a woman, a man\'s name a man', async () => {
   const open = between(hire, 'app.openHire = async', 'app.hireRedraw');
   assert.match(open, /\$\('#hs-name'\)\.value = name\.trim\(\) \|\| freeName\(\);/);
-  assert.match(read('public/team.js'), /if \(!\$\('#sm-name'\)\.value\.trim\(\)\) app\.randomName\?\.\(\$\('#sm-name'\)\);/);
   // The lists and genderOf, run as the page runs them.
   const names = between(hire, '  const WOMEN = [', '  app.genderOfName = genderOf;');
   const ctx: Record<string, unknown> = {};
@@ -194,4 +182,48 @@ test('a chat whose hire\'s model was deleted says so in its head, with Fix openi
   assert.match(head, /id: 'chat-fix', text: 'Fix'/);
   assert.match(head, /app\.editStaff\?\.\(person\.who\.slice\('staff:'\.length\), \{ pick: true \}\)/);
   assert.match(head, /\$\('#chat-fix'\)\?\.remove\(\);/, 'redrawn without a second button');
+});
+
+test('Hire staff: role is two tiles with a sub-role drop-down, numbered steps, this PC above the Network ones', () => {
+  const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(hire, /name: 'Text \/ coding'/);
+  assert.match(hire, /name: 'Images'/);
+  assert.match(page, /<select id="hs-subrole"><\/select>/);
+  assert.match(page, /<span class="hs-step" aria-hidden="true">1<\/span>Role/);
+  assert.match(page, /<span class="hs-step" aria-hidden="true">2<\/span>Assign a PC/);
+  assert.match(page, /<h3><span class="hs-step" aria-hidden="true">3<\/span><span id="hs-models-title">Choose a model<\/span><\/h3>/);
+  assert.match(page, /<h4 class="hs-net-head">Network<\/h4>/);
+  assert.doesNotMatch(hire, /hs-pc-count/);
+});
+
+test('Hire staff: a copy between two linked PCs goes straight, never through this PC, and a full disk says so', () => {
+  const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(hire, /\(through this PC\)|Goes through/);
+  assert.match(hire, /return linked \? \{ from: linked, direct: true \}/);
+  assert.match(hire, /api\('\/api\/share', \{ peerCopy: \{ from: route\.from\.pc, to: target, kind: k, model: route\.from\.model \} \}\)/);
+  assert.match(hire, /`insufficient space on \$\{pcName\(target\)\}/);
+  assert.match(hire, /text: 'Install', title: `Install on \$\{pcName\(target\)\}`/);
+  assert.match(hire, /\$\('#hs-all-to'\)\.replaceChildren\(railPc\(target\)/);
+});
+
+test('Hire staff: the picture centred with a pencil to change the look, and the bottom bar on the very bottom of the page', () => {
+  const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.match(page, /id="hs-look-btn" aria-expanded="false" aria-controls="hs-look-box" aria-label="Change look" title="Change look" hidden><\/button>/);
+  assert.match(css, /\.hs-face \{ display: flex; justify-content: center;/);
+  assert.match(css, /#setup-page:has\(> dialog#hire-dlg\.as-page\[open\]\) \{ padding-bottom: 0; \}/);
+  assert.match(css, /#hs-pcs-block > h3 \{ margin-bottom: 8px; \}/);
+});
+
+test('Hire staff: a linked PC that is off is folded with a plain two-column list, and its models are not cards', () => {
+  const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.match(hire, /const reachable = e => e\.on\.some\(o => !o\.pc \|\| !off\.has\(o\.pc\)\);/);
+  assert.match(hire, /el\('details', \{ class: 'hs-off-pc' \}/);
+  assert.match(hire, /'This node is offline, last reported to have:'/);
+  assert.match(css, /\.hs-off-list \{ columns: 2;/);
+  // Where a model is sits behind a "!", not spelled out on every card.
+  assert.match(hire, /class: 'hs-where', type: 'button', 'data-key': `where:\$\{e\.key\}`, text: '!', title: `On \$\{where\}`/);
+  assert.doesNotMatch(hire, /`On \$\{where\}`\]\.filter\(Boolean\)/);
 });

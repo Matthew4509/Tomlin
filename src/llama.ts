@@ -14,20 +14,59 @@ export const maxFault = (tail: string) => /\brpc\b|ggml_backend_rpc|failed to co
 /** A loaded model stopped because a PC lending its card for it took it back. */
 export const MAX_STOPPED = 'The model stopped: a PC lending its card for Max mode took it back (someone started using that PC, or it left the network). Press Connect to load it again on the PCs that lend now.';
 
+/**
+ * The runner does not know how the file's numbers are packed (its quant type). llama.cpp b11284 says, for a type id it
+ * has no entry for: "tensor 'x' has invalid ggml type 45. should be in [0, 43)", then "failed to read tensor info"
+ * (checked 20 Nov 2026 with a made-up file). A type it lists but no longer runs (Q4_0_4_4 and the like) has a block size
+ * of 0: "not a multiple of block size". A quant made by another llama.cpp fork (TQ3_0) is one of these, not a damaged file.
+ */
+export const UNKNOWN_TYPE = /invalid ggml type|not a multiple of block size|type \S+ is no longer supported|unknown (tensor|ggml) type/i;
+const UNKNOWN_ARCH = /unknown (model )?architecture|unsupported model|unknown pre-tokenizer/i;
+/**
+ * The model file is not there (its drive unplugged, or the file moved or deleted between the list and the start).
+ * llama.cpp b11284 says "gguf_init_from_file: failed to open GGUF file '<path>' (No such file or directory)" (checked
+ * 21 Nov 2026 with the shipped CPU runner): no other runner would find it either.
+ */
+const MISSING = /failed to open GGUF file/i;
+const DAMAGED = /invalid magic|failed to read|unexpectedly reached end of file|corrupt|not within the file bounds/i;
+
+/** The quant type a file's name ends with ("Model-TQ3_0.gguf" -> "TQ3_0"), or ''. */
+export function quantOfName(name: string): string {
+  const m = /[-_.]((?:UD-)?(?:I?Q\d\w*|TQ\d\w*|F16|BF16|F32|MXFP4\w*))(?:\.gguf)?$/i.exec(name.split(/[\\/]/).pop() ?? '');
+  return m ? m[1] : '';
+}
+
+/**
+ * A fault of the file itself (not there, its kind, its packing, its bytes, or the chat format written inside it): no
+ * other runner on this PC would read it either, so a start on CUDA that ends with one is not tried again on Vulkan and
+ * then the CPU (src/pane.ts). A chat format fault is one only after the start with llama.cpp's plain formats failed the
+ * same way (the pane's second try on that device): the format is read the same on every device.
+ */
+export function fileFault(tail: string): boolean {
+  return !vcrtFault(tail) && !timeUpWords(tail) && !tail.includes(RUNNER_FILE_LINE) && (MISSING.test(tail) || UNKNOWN_TYPE.test(tail) || UNKNOWN_ARCH.test(tail) || DAMAGED.test(tail) || TEMPLATE_FAULT.test(tail));
+}
+
 /** Why a model would not load, in plain words (what went wrong, why, what to do), from llama-server's last lines. */
-export function whyItFailed(tail: string): string {
+export function whyItFailed(tail: string, file = ''): string {
   if (vcrtFault(tail)) return VCRT_HELP;
   const late = timeUpWords(tail);
   if (late) return late;
   if (tail.includes(RUNNER_FILE_LINE)) return RUNNER_FILE_HELP;
   const t = tail.toLowerCase();
-  if (/unknown (model )?architecture|unsupported model|unknown pre-tokenizer/.test(t)) {
+  if (MISSING.test(tail)) return "This model did not load: its file (or its guessing model's file) is not there any more. The drive it is on may have been unplugged, or the file moved or deleted. Plug the drive in again (or put the file back), then load it again.";
+  // Before the damaged-file test: an unknown type ends with "failed to read tensor info", and the file is whole.
+  if (UNKNOWN_TYPE.test(tail)) {
+    const quant = quantOfName(file);
+    const typeNo = /invalid ggml type (\d+)/i.exec(tail)?.[1];
+    return `This model did not load: TOMLIN's model runner (llama.cpp b11284) cannot read the way this file is packed${quant ? ` (${quant})` : typeNo ? ` (type ${typeNo})` : ''}. The file is not damaged: it was made with a newer or different version of llama.cpp than TOMLIN runs, so downloading it again will not help. Pick another copy of this model (a Q2_K, Q3_K, Q4_K or IQ quant), or another model.`;
+  }
+  if (UNKNOWN_ARCH.test(t)) {
     return 'This model did not load: it is a kind of model newer than TOMLIN\'s chat runner (llama.cpp b11284) can read. Pick another model; this one needs a newer runner.';
   }
   if (TEMPLATE_FAULT.test(t)) {
     return 'This model did not load: the chat format written inside the model file is one the model runner cannot read, and its plain formats did not work for it either. Pick another model, or another copy of this one.';
   }
-  if (/invalid magic|failed to read|unexpectedly reached end of file|corrupt|not within the file bounds/.test(t)) {
+  if (DAMAGED.test(t)) {
     return 'This model did not load: the file is incomplete or damaged (often a download that stopped part-way). Download it again, or pick another model.';
   }
   if (maxFault(tail)) return 'This model did not load: a PC lending its card for Max mode stopped answering while it loaded (someone started using it, or it left the network). Load it again: it then uses the PCs that lend now.';
@@ -136,6 +175,11 @@ export interface ChatRun {
   /** Cache type: f16, or q8_0 / q4_0 to fit a longer context in less memory (needs flash attention, so it is turned on). */
   cache: 'f16' | 'q8_0' | 'q4_0';
   /**
+   * The context cache in RAM, not on the card (--no-kv-offload). At a 262,144 context Qwen3.8's cache took 6.0 GB of
+   * the Z820's 3060 (0.8 GB at 32k), so about 5 GB of weights went to the processors and it wrote 3 times slower.
+   */
+  kvRam?: boolean;
+  /**
    * Where the weights go on a graphics device (PLAN F8). 'auto': on a PC with a card of its own, llama.cpp's own fit
    * (on by default; it changes only what is not set) fills the card or cards from their real free memory and puts the
    * rest in RAM, the experts first on a mixture-of-experts model. 'card': every layer on the chip. 'ram': every expert
@@ -213,6 +257,7 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   if (fits && run.fitMargin) args.push('-fitt', String(run.fitMargin));
   if (run.cache !== 'f16') args.push('-fa', 'on', '-ctk', run.cache, '-ctv', run.cache);
   else if (run.fa && device !== 'cpu') args.push('-fa', run.fa);
+  if (run.kvRam && device !== 'cpu') args.push('--no-kv-offload');
   if (!placed && run.place === 'ram' && device !== 'cpu') args.push('--cpu-moe');
   if (!placed && run.place === 'layers' && run.moeCpu && device !== 'cpu') args.push('--n-cpu-moe', String(run.moeCpu));
   const t = run.threads && run.threads > 0 ? run.threads : threads;

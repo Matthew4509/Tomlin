@@ -1,0 +1,27 @@
+{
+  "about": "The Z820 retest on its new CPUs and RAM: every model the Z820 ran before, run on the Z820 itself by tools/retest.ts. kind gpu = fits the 12 GB card; ram = card plus RAM (llama.cpp's own fit); cpu = no card. Each kind has its own thread and NUMA variants (tools/retest.ts VARIANTS) unless a run lists its own. Old figures are the one-CPU Z820 (E5-2640, 64-128 GB), for the before and after.",
+  "runs": [
+    { "name": "Qwen3.5-35B-A3B UD-Q2_K_XL", "file": "Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf", "kind": "cpu", "ctx": 8192, "old": 5.80, "variants": [{ "threads": 0 }, { "threads": 8, "numa": "isolate" }, { "threads": 16, "numa": "distribute" }, { "threads": 32, "numa": "distribute" }] },
+    { "name": "GPT-OSS-20B MXFP4", "file": "gpt-oss-20b-mxfp4.gguf", "kind": "cpu", "ctx": 8192, "think": true, "old": 6.0, "variants": [{ "threads": 0 }, { "threads": 8, "numa": "isolate" }, { "threads": 16, "numa": "distribute" }, { "threads": 32, "numa": "distribute" }] },
+    { "name": "Qwen3-Next-80B-A3B-Instruct UD-Q3_K_XL", "file": "Qwen3-Next-80B-A3B-Instruct-UD-Q3_K_XL.gguf", "kind": "cpu", "ctx": 8192, "old": 3.39, "variants": [{ "threads": 0 }, { "threads": 8, "numa": "isolate" }, { "threads": 16, "numa": "distribute" }, { "threads": 32, "numa": "distribute" }] },
+    { "name": "Qwen3.5-35B-A3B UD-Q2_K_XL", "file": "Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf", "kind": "gpu", "ctx": 8192, "old": 34.06 },
+    { "name": "Qwen3.5-35B-A3B UD-Q2_K_XL", "file": "Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf", "kind": "ram", "ctx": 32768, "old": 32.35 },
+    { "name": "GPT-OSS-20B MXFP4", "file": "gpt-oss-20b-mxfp4.gguf", "kind": "ram", "ctx": 8192, "think": true, "old": 46.07 },
+    { "name": "Qwen3.5-9B Q4_K_M (dense)", "file": "Qwen3.5-9B-Q4_K_M.gguf", "kind": "gpu", "ctx": 8192, "old": 52.54 },
+    { "name": "Qwen3-Next-80B-A3B-Instruct UD-Q3_K_XL", "file": "Qwen3-Next-80B-A3B-Instruct-UD-Q3_K_XL.gguf", "kind": "ram", "ctx": 8192, "old": 8.67 },
+    { "name": "Qwen3-Coder-Next UD-Q2_K_XL", "file": "Qwen3-Coder-Next-UD-Q2_K_XL.gguf", "kind": "ram", "ctx": 8192, "old": 9.58 },
+    { "name": "Qwen3.6-35B-A3B UD-Q4_K_S", "file": "Qwen3.6-35B-A3B-UD-Q4_K_S.gguf", "kind": "ram", "ctx": 8192, "old": 20.60 },
+    { "name": "Qwen3-Coder-30B-A3B UD-Q4_K_XL", "file": "Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf", "kind": "ram", "ctx": 8192, "old": 18.17 },
+    { "name": "GLM-4.7-Flash UD-Q4_K_XL", "file": "GLM-4.7-Flash-UD-Q4_K_XL.gguf", "kind": "ram", "ctx": 8192, "old": 16.71 }
+  ],
+  "later": {
+    "about": "Larger MoE models not tested before, for a later run (node tools/retest.ts --later). The Z820 alone: about 240 GB of RAM seen with slot 3 on CPU 1 out, and the 12 GB card. Check each file name and size against its download page before sending; none is on the Z820 yet.",
+    "runs": [
+      { "name": "Qwen3.8-Flash-Next UD-Q3_K_XL (Z820 alone)", "file": "Qwen3.8-Flash-Next-UD-Q3_K_XL.gguf", "kind": "ram", "ctx": 8192, "old": 1.9, "oldNote": "cluster layer split with the Main PC, 17 Nov" },
+      { "name": "DeepSeek-V4-Flash (Z820 alone)", "file": "DeepSeek-V4-Flash-Q4_K_M.gguf", "kind": "ram", "ctx": 8192, "old": 1.84, "oldNote": "expert parallel with the Main PC, 15 Nov" },
+      { "name": "GPT-OSS-120B MXFP4", "file": "gpt-oss-120b-mxfp4.gguf", "kind": "ram", "ctx": 8192, "think": true },
+      { "name": "Qwen3-235B-A22B UD-Q4_K_XL", "file": "Qwen3-235B-A22B-Instruct-2507-UD-Q4_K_XL.gguf", "kind": "ram", "ctx": 8192 },
+      { "name": "GLM-4.5-Air UD-Q4_K_XL", "file": "GLM-4.5-Air-UD-Q4_K_XL.gguf", "kind": "ram", "ctx": 8192 }
+    ]
+  }
+}

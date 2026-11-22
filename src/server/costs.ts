@@ -149,6 +149,8 @@ async function pcView(id: string, quick = false): Promise<{ status: number; body
       // What code it runs, 7 characters ('' from an older TOMLIN); update.other: the same version with different files.
       build: update.shortBuild(here ? BUILD : h?.build),
       update: why === null ? null : { why, mine: VERSION, build: update.shortBuild(BUILD), other: !!h && update.standing(h, VERSION, BUILD) === 'other' },
+      // An update going there now (or this PC taking one from it): "Updating" and See progress, not Update it again.
+      updating: here ? null : jobRoutes.updatingTo(key),
       pull: pullWhy === null || !h ? null : { why: pullWhy, mine: VERSION, build: update.shortBuild(BUILD), other: !update.newer(h.version, VERSION) },
       // Whether this PC may turn that PC off from its window: it knows how (can), its owner's tick is on (allowed), and it is not asleep or away.
       off: here || !h ? null : { can: Array.isArray(h.can) && h.can.includes('power-off'), allowed: h.allow?.off === true, away: !!h.away },

@@ -9,6 +9,7 @@ import * as modelcopies from '../modelcopies.ts';
 import { assignedTo, staffLines, type Assigned } from '../assigned.ts';
 import * as update from '../update.ts';
 import * as hostpin from '../hostpin.ts';
+import { PERM_CAN, PERM_DOOR } from '../permset.ts';
 import * as guestpass from '../guestpass.ts';
 import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
@@ -93,6 +94,16 @@ export function wireFor(r: Remote): carry.Wire {
 
 export const transfers = new carry.Transfers();
 
+/**
+ * The update going to linked PC `pc` now (Update it, Fast update), or this PC taking one from it (a pull): its id, so
+ * the left panel turns a wheel on that PC's card and its windows say "Updating" with a way back to the steps screen,
+ * not Update it a second time. Null when none is under way.
+ */
+export function updatingTo(pc: string): { id: string; kind: 'update' | 'pull'; what: string } | null {
+  const t = transfers.view().find(x => x.pc === pc && x.state === 'working' && (x.kind === 'update' || x.kind === 'pull'));
+  return t ? { id: t.id, kind: t.kind as 'update' | 'pull', what: t.what } : null;
+}
+
 /** Every linked PC as the copies need it: what it shares and lets this PC do (kept models when it is off). */
 async function netPcs(known = false): Promise<carry.NetPc[]> {
   const s = await d.store.settings();
@@ -121,8 +132,13 @@ export async function network(known = false) {
   const pictures = d.pictureModels();
   const chats = d.chatList();
   return {
+    // Free space where this PC keeps its chat models (null when the disk does not say).
+    free: await carry.freeBytes(d.carry.chatDir).then(n => (Number.isFinite(n) ? n : null)).catch(() => null),
+    spare: carry.SPARE,
     rows: carry.networkList(pcs, { chatFiles: chats.map(m => m.id), pictures: pictures.filter(m => m.installed).map(m => m.id) }),
     pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length,
+      // Free space on the drive its models go to, as its hello said it (null: not known), for "Insufficient space" on a copy.
+      free: carry.modelRoom(pc)?.free ?? null,
       // What tells the PCs apart (shown on hover), and when an off one last answered: both from its last hello.
       specs: specsOf(pc.memory ?? lastHello(pc.id)?.memory), cpu: lastHello(pc.id)?.cpu ?? null, seenAt: lastHello(pc.id)?.at ?? null, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(d.runner.runtimes.idsOf('llama', 'cuda').map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
     mine: [
@@ -272,8 +288,8 @@ export async function copiesOn(b: Record<string, unknown>) {
 }
 
 /**
- * Download to a linked PC (Download, To that PC, on the Models page): that PC downloads the model itself, from the
- * internet, into its own models folder; nothing passes through this PC. Followed here as a transfer (Models on my other PCs
+ * Download to a linked PC (Download, To that PC, on the Models page): that PC adds it to its own downloads list and
+ * downloads it itself, from the internet, into its own models folder; nothing passes through this PC. Followed here as a transfer (Models on my other PCs
  * shows it, with Stop), asking that PC how far it is every 2 seconds.
  */
 export async function fetchOn(b: Record<string, unknown>) {
@@ -294,7 +310,8 @@ export async function fetchOn(b: Record<string, unknown>) {
       if (signal.aborted) throw new Error('Stopped.');
       const s = await w.ask('/worker/fetch-state', ask).catch(() => null);
       if (s) {
-        progress({ done: num(s.got), bytes: num(s.bytes) });
+        // In that PC's downloads list behind others: said, and followed until its turn comes.
+        progress({ done: num(s.got), bytes: num(s.bytes), wait: s.state === 'waiting' ? `waiting its turn in ${r.name}'s downloads list` : '' });
         if (s.state === 'done') return `${what} is on "${r.name}" now, downloaded there. This PC can use it.`;
         if (s.state === 'failed') throw new Error(`"${r.name}": ${String(s.error || 'the download stopped there.')}`);
         if (s.state === 'stopped') throw new Error(`it was stopped on "${r.name}".`);
@@ -364,6 +381,36 @@ export async function removeModelOn(b: Record<string, unknown>) {
     // Its app lock PIN is asked on this page and checked there (a wrong one is counted there, per link).
     if (data?.needPin === true) return { status: 403, body: { error: said || (e as Error).message, needNodePin: true } };
     if (status === 403 && said) return { status: 403, body: { error: said } };
+    return { status: status === 400 || status === 404 ? status : 409, body: { error: (e as Error).message } };
+  }
+}
+
+/**
+ * Changes a linked PC's sharing permissions from here (src/permset.ts): that PC checks its owner's tick "Allow host to test
+ * and change model run settings" and its app lock PIN typed here (`nodePin`), or the host PIN it holds (`hostPin`). One PC,
+ * one change per call; `set` is { lend: true, plainLinks: false, ... }.
+ */
+export async function permSetOn(b: Record<string, unknown>) {
+  const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
+  if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
+  let h: Hello;
+  try {
+    h = await hello(r, 5000);
+  } catch (e) {
+    return { status: 502, body: { error: `"${r.name}" could not be reached (${(e as Error).message}).` } };
+  }
+  if (!Array.isArray(h.can) || !h.can.includes(PERM_CAN)) return { status: 409, body: { error: `"${r.name}" runs a TOMLIN whose permissions cannot be changed from another PC: update it first.` } };
+  if (h.allow?.tune !== true) return { status: 409, body: { error: `"${r.name}" does not let a host change its permissions: its owner ticks "Allow host to test and change model run settings" there (Network, Sharing permissions).` } };
+  try {
+    const sent = await pinTyped(b, holdsHostPin(r), keyIdHeld(r));
+    const a = await wireFor(r).ask(PERM_DOOR, { ...sent, set: b.set });
+    await ownPinTaken(sent, r);
+    return { status: 200, body: { said: String(a.said ?? `"${r.name}" saved its permissions.`), now: a.now ?? null } };
+  } catch (e) {
+    const { status, said, data } = e as { status?: number; said?: string; data?: Record<string, unknown> };
+    // Its app lock PIN is asked on this page and checked there (a wrong one is counted there, per link).
+    if (data?.needPin === true) return { status: 403, body: { error: said || (e as Error).message, needNodePin: true } };
+    if (said && status) return { status, body: { error: said } };
     return { status: status === 400 || status === 404 ? status : 409, body: { error: (e as Error).message } };
   }
 }
@@ -448,9 +495,18 @@ export async function runSetOn(b: Record<string, unknown>) {
   const pc = (await netPcs()).find(x => x.id === r.id)!;
   const why = runset.tuneWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
+  // How a model keeps its context there (cache type, RAM or card): only for a PC that says it can (2.1.10), so an older
+  // one is never sent an ask it would read as a guessing model.
+  const cacheAsk = b.cache !== undefined || typeof b.kvRam === 'boolean';
+  if (cacheAsk && !runset.CACHE_TYPES.some(c => c === b.cache) && typeof b.kvRam !== 'boolean') return { status: 400, body: { error: 'Say f16, q8_0 or q4_0 for its context, or whether it is kept in RAM.' } };
+  if (cacheAsk && !pc.can.includes('cache-set')) return { status: 409, body: { error: `"${pc.name}" runs an older TOMLIN that cannot change its context cache from here: update it there first.` } };
   try {
+    if (cacheAsk) {
+      const a = await wireFor(r).ask('/worker/run-set', { model: String(b.model ?? ''), ...(runset.CACHE_TYPES.some(c => c === b.cache) ? { cache: b.cache } : {}), ...(typeof b.kvRam === 'boolean' ? { kvRam: b.kvRam } : {}) });
+      return { status: 200, body: { said: String(a.said ?? 'Saved there.'), letGo: a.letGo === true } };
+    }
     // A runner (the crash notice's "Use this runner") or a guessing model: only ids cross, that PC checks them.
-    const a = await wireFor(r).ask('/worker/run-set', typeof b.runner === 'string' || typeof b.fallback === 'boolean' ? { model: String(b.model ?? ''), ...(typeof b.runner === 'string' ? { runner: b.runner.slice(0, 40) } : {}), ...(typeof b.fallback === 'boolean' ? { fallback: b.fallback } : {}) } : { model: String(b.model ?? ''), draft: String(b.draft ?? '') });
+    const a = await wireFor(r).ask('/worker/run-set', typeof b.runner === 'string' || typeof b.fallback === 'boolean' ?{ model: String(b.model ?? ''), ...(typeof b.runner === 'string' ? { runner: b.runner.slice(0, 40) } : {}), ...(typeof b.fallback === 'boolean' ? { fallback: b.fallback } : {}) } : { model: String(b.model ?? ''), draft: String(b.draft ?? '') });
     return { status: 200, body: { said: String(a.said ?? 'Saved there.'), letGo: a.letGo === true } };
   } catch (e) {
     const { status, said } = e as { status?: number; said?: string };

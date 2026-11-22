@@ -17,6 +17,8 @@ import type { SharedModel } from './nodestaff.ts';
 import type { RunnerHello } from './runnerpush.ts';
 import * as git from './gitstore.ts';
 import { writeAtomic } from './atomic.ts';
+import { cleanJobList, type Job } from './drivejobs.ts';
+import { drives, theirDriveHint } from './modelhome.ts';
 
 // ---- What linked PCs may do here ----
 
@@ -327,15 +329,15 @@ export function modelRoom(pc: { disk?: { total: number; free: number } | null; d
   return pc.disk ? { drive: '', label: '', total: pc.disk.total, free: pc.disk.free } : null;
 }
 
-export function cleanDrives(v: unknown): { drive: string; label: string; total: number; free: number }[] {
+export function cleanDrives(v: unknown): { drive: string; label: string; total: number; free: number; jobs: Job[] }[] {
   if (!Array.isArray(v)) return [];
-  const out: { drive: string; label: string; total: number; free: number }[] = [];
+  const out: { drive: string; label: string; total: number; free: number; jobs: Job[] }[] = [];
   for (const x of v) {
     const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
     const drive = String(o.drive ?? '').toUpperCase();
     const total = Number(o.total), free = Number(o.free);
     if (!/^[A-Z]:$/.test(drive) || !Number.isFinite(total) || !Number.isFinite(free) || total <= 0 || free < 0 || free > total) continue;
-    out.push({ drive, label: String(o.label ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 32), total: Math.round(total), free: Math.round(free) });
+    out.push({ drive, label: String(o.label ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 32), total: Math.round(total), free: Math.round(free), jobs: cleanJobList(o.jobs) });
     if (out.length === 8) break;
   }
   return out;
@@ -570,8 +572,10 @@ export function nodeSide(d: NodeDeps) {
         // A file already whole says so (all its bytes), so the sender skips it instead of sending it again.
         const at = await Promise.all(got.files.map(async f => ((await sizeOf(f.path)) === f.bytes ? f.bytes : sizeOf(partOf(f.path)))));
         const need = got.files.reduce((n, f, k) => n + f.bytes - Math.min(at[k], f.bytes), 0);
-        const why = roomWhy(need, await room(dirname(got.files[0].path)), `"${d.pcName()}"`);
-        if (why) return no(507, why);
+        const dir = dirname(got.files[0].path);
+        const why = roomWhy(need, await room(dir), `"${d.pcName()}"`);
+        // A drive of this PC with room is named, for its owner to pick under Storage (never picked from the other PC).
+        if (why) return no(507, `${why}${theirDriveHint(need, dir, await drives().catch(() => []))}`);
         return { status: 200, json: { have: false, at } };
       }
       case '/worker/carry-put': {
@@ -1056,7 +1060,7 @@ export interface Transfer {
   state: 'working' | 'done' | 'stopped' | 'failed';
   /** An update: the step it is on (comparing the files, sending them, starting the new version there, checking it answers); a runner: downloading it here first, or sending it. */
   stage?: 'compare' | 'send' | 'start' | 'check' | 'get';
-  /** An update only: what that PC is busy with while the new version waits to start there. */
+  /** An update: what that PC is busy with while the new version waits to start there; a fetch: that it waits in that PC's downloads list. */
   wait?: string;
   /** Not begun yet: AT_ONCE others are running, and this one takes its turn after them. */
   queued?: boolean;
@@ -1143,7 +1147,8 @@ export class Transfers {
 
   /** Starts one (returns at once); refused while that linked PC has one running. */
   start(t: Pick<Transfer, 'kind' | 'what' | 'pc' | 'pcName'>, run: (progress: (p: Partial<Pick<Transfer, 'done' | 'bytes' | 'stage' | 'wait'>>) => void, signal: AbortSignal) => Promise<string>): Transfer | { error: string } {
-    const busy = this.list.find(x => x.pc === t.pc && x.state === 'working');
+    // A download that PC makes itself waits in its own downloads list: more than one may be followed at once.
+    const busy = this.list.find(x => x.pc === t.pc && x.state === 'working' && !(t.kind === 'fetch' && x.kind === 'fetch'));
     if (busy) return { error: `"${t.pcName}" is busy with "${busy.what}" now. Wait for it, or stop it, then try again.` };
     const job: Transfer = { ...t, id: `t${++this.n}`, done: 0, bytes: 0, state: 'working', said: '', started: Date.now(), ended: null };
     const ac = new AbortController();

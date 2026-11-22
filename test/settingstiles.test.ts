@@ -26,9 +26,9 @@ test('the left panel has no TOMLIN - HOME or Settings line; only the submenu is 
   assert.match(html, /id="settings-open"/);
 });
 
-test('eleven lines in the order drawn: Cluster after Network, Permissions after Data and lock, Colours at the very end', () => {
-  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'Network', 'Cluster', 'This PC', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Permissions', 'Colours']);
-  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'nodes', 'cluster', 'thispc', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
+test('thirteen lines in the order drawn: Hire staff, Models, This PC; then Network, Cluster, Network Storage; Create a guest pass; Theme at the very end', () => {
+  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'This PC', 'Network', 'Cluster', 'Network Storage', 'Create a guest pass', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Permissions', 'Theme']);
+  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'thispc', 'nodes', 'cluster', 'storage', 'guestpass', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
 });
 
 test('each has one short sentence', () => {
@@ -79,11 +79,33 @@ test('Settings opens the tiles; what was on its long page has pages of its own',
 });
 
 test('the two new pages behave like the other Settings pages', () => {
-  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'\];/);
+  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'\];/);
   assert.match(read('home.js'), /data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours'/);
   const css = read('style.css');
   assert.match(css, /\.shell:not\(\[data-view="data"\]\) > #settings-data/);
   assert.match(css, /\.shell:not\(\[data-view="colours"\]\) > #settings-colours/);
+});
+
+test('Storage is a Settings page too: in the menu after Models, shown alone, the menu kept beside it', () => {
+  const home = read('home.js');
+  assert.match(home, /storage: '#storage-page'/);
+  const css = read('style.css');
+  assert.match(css, /\.shell:not\(\[data-view="storage"\]\) > #storage-page/);
+  assert.match(read('homeview.js'), /b\.dataset\.setup === 'storage'\) app\.openStorage/);
+  const page = read('storage.js');
+  assert.match(page, /app\.openStorage = /);
+  // Where this PC runs its models from is the same choice as Where models are kept; a drive's jobs are the Network page's.
+  assert.match(page, /'\/api\/models\/where', \{ dir: `\$\{pick\.value\}\\\\TOMLIN models` \}/);
+  assert.match(page, /'\/api\/network\/drive-jobs', \{ pc, drive, jobs \}/);
+  // Two tiles, each with Duplicate or Extended and + Add; Select in the picker gives the drive the tile's job.
+  assert.match(page, /\{ job: 'store', name: 'Main model storage'/);
+  assert.match(page, /\{ job: 'backups', name: 'Backup storage'/);
+  assert.match(page, /\{ mode: 'mirror', name: 'Duplicate'/);
+  assert.match(page, /\{ mode: 'spread', name: 'Extended'/);
+  assert.match(page, /'\+ Add'/);
+  assert.match(page, /if \(await setJob\(p\.id, d\.drive, t\.job, true\)\) openPicker\(''\);/);
+  assert.doesNotMatch(read('index.html'), /id="storage-add-form"/);
+  assert.match(read('index.html'), /<script src="storage\.js"><\/script>/);
 });
 
 test('Manage updates is a page of its own: pressing it goes there and marks it, whatever is on This PC', () => {
@@ -115,4 +137,37 @@ test('links to what moved go to its new place, and no words send anyone to "Set 
   const words = html.replace(/<!--[\s\S]*?-->/g, '');
   assert.doesNotMatch(words, /<b>Set up<\/b>|Set up menu|Set up, /);
   assert.doesNotMatch(words, /aria-label="Set up"/);
+});
+
+test('Guest passes has no Add a node; the map\'s + Add a node opens Linked PCs, Add another PC', () => {
+  assert.doesNotMatch(html, /id="node-pass-addnode"/);
+  assert.match(read('netmap.js'), /onclick: \(\) => app\.addNode\?\.\(\) \}/);
+  assert.match(read('home.js'), /app\.addNode = \(\) => \{\s+netSection\('linked'\);\s+\$\('#net-add'\)\.open = true;/);
+});
+
+test('the bottom of Linked PCs: Guest, Connect to a network as a guest, which opens the address and code boxes', () => {
+  const linked = html.slice(html.indexOf('id="node-linked-pcs"'), html.indexOf('</section>', html.indexOf('id="node-linked-pcs"')));
+  assert.match(linked, /<b>Guest:<\/b><span class="set-about">Connect to a network as a guest<\/span>/);
+  assert.ok(linked.lastIndexOf('id="net-join-guest"') > linked.indexOf('id="node-update-all"'), 'at the bottom');
+  assert.match(read('home.js'), /\$\('#net-join-guest'\)\.addEventListener\('click', \(\) => \{\s+app\.addNode\(\);\s+\$\('#node-addr-box'\)\.open = true;/);
+});
+
+test('a guest pass\'s models: chat on the left, pictures on the right, with the one-model-per-PC advice', () => {
+  const home = read('home.js');
+  assert.match(home, /\.\.\.passModelCols\(p, ticked\)\)\)\)/);
+  assert.match(home, /col\('Chat', p\.models\.filter\(m => m\.kind !== 'image'\)\), col\('Pictures', p\.models\.filter\(m => m\.kind === 'image'\)\)/);
+  assert.match(home, /'\(!\) With several people on the network, share one model per PC:/);
+  assert.match(read('style.css'), /\.node-pass-cols \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+});
+
+test('a guest pass names each PC as the left panel does, with its specs, so two "Worker PC"s are told apart', () => {
+  const home = read('home.js');
+  assert.match(home, /el\('b', \{ text: p\.self \? `This PC \(\$\{app\.pcLabel\('here'\)\}\)` : app\.pcLabel\?\.\(p\.id\) \|\| p\.name \}\), el\('span', \{ class: 'hint', text: passPcSpecs\(p\) \}\)/);
+  assert.match(home, /const bits = \[p\.self \? '' : pcTwinWords\(\)\[p\.id\] \?\? '', mem\?\.ram \? memWords\(mem\.ram, mem\.vram\) : '', pcMake\(p\.self \? 'here' : p\.id\)\]/);
+  assert.match(home, /const fsig = JSON\.stringify\(pcs\.map\(p => \[p\.id, p\.name, passPcSpecs\(p\),/);
+});
+
+test('Create a guest pass opens Network on Guest passes with the new-pass form open', () => {
+  const view = read('homeview.js');
+  assert.match(view, /else if \(b\.dataset\.setup === 'guestpass'\) \{\s+\/\/[^\n]*\s+openNodes\(\);\s+app\.netSection\('guests'\);\s+if \(\$\('#node-pass-new'\)\.hidden\) \$\('#node-pass-create'\)\.click\(\);/);
 });

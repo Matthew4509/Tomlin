@@ -24,7 +24,7 @@ const src = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
 const opt = (build: string): Option => ({ build, device: 'cuda', pin: `cuda12-${build}`, have: true, tested: true });
 const host = [opt('b11284')];
-const z820 = (o: Partial<GatePc> = {}): GatePc => ({ id: 'e2c4ba37', name: 'Z820', hello: { can: ['max', 'turns'], allow: { lend: true } }, options: [opt('b11284')], ...o });
+const z820 = (o: Partial<GatePc> = {}): GatePc => ({ id: '5c3e9a01', name: 'Z820', hello: { can: ['max', 'turns'], allow: { lend: true } }, options: [opt('b11284')], ...o });
 
 test('one rule tells Max mode from Cluster, and the automatic borrowing uses the same one', () => {
   assert.equal(fitsOnePc({ need: 20 * GB, card: 8 * GB, ram: 24 * GB }), true);
@@ -204,7 +204,7 @@ test('the greyed reasons, in the order a person meets them, each naming the PC',
   assert.deepEqual(clash.names, []);
   // One off, one on and matching: Max runs with the one that is on.
   const ok = maxGate({ pcs: [z820({ id: 'b', name: 'HP 800', hello: null }), z820()], linked: 2, host });
-  assert.deepEqual(ok, { why: '', names: ['Z820'], ids: ['e2c4ba37'], build: 'b11284' });
+  assert.deepEqual(ok, { why: '', names: ['Z820'], ids: ['5c3e9a01'], build: 'b11284' });
   // This PC has no runner it can use safely.
   assert.match(maxGate({ pcs: [z820()], linked: 1, host: [] }).why, /^This PC has no llama\.cpp runner it can use safely/);
 });

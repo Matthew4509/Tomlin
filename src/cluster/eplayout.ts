@@ -61,6 +61,8 @@ export interface EpLender extends EpPc {
   /** Its --rpc address, and the runner's device that is its RAM ("RPC1", its "what" the address). */
   endpoint: string;
   ram: Listed;
+  /** Its RAM's buffer type for -ot ("RPC1[address]": numbered within its own server, src/maxplace.ts rpcBuffer). */
+  buffer?: string;
   /** A lower RAM cap learned when it stopped answering before (src/jobrun/lendcaps.ts). */
   capRam?: number | null;
   /** Its runner has the expert-skip patch (0001): it takes ":skip"; a stock lender gets the zero expert. */
@@ -171,7 +173,7 @@ export function planEp(m: EpModel, host: EpHost, lenders: EpLender[], net: NetFa
   tables.forEach((t, k) => {
     const i = best!.at[k];
     tableAt[t.name] = pcs[i].name;
-    if (i > 0) override.push(`${escape(t.name)}=${lenders[i - 1].ram.name}[${lenders[i - 1].ram.what}]`);
+    if (i > 0) override.push(`${escape(t.name)}=${lenders[i - 1].buffer ?? `${lenders[i - 1].ram.name}[${lenders[i - 1].ram.what}]`}`);
   });
   // Every lender stays named: the runner's RPC device names follow the whole --rpc list, as it was listed.
   const usedLenders = lenders;

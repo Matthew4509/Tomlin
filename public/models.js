@@ -277,6 +277,8 @@ function filterText() {
 
 const jobFor = (repo, name) => (mp.job && mp.job.repo === repo && mp.job.name === name ? mp.job : null);
 const busyNow = () => mp.job?.state === 'downloading';
+/** In this PC's downloads list behind the one running (src/dlqueue.ts): it starts by itself when its turn comes. */
+const pendingNow = (repo, name) => (mp.job?.pending ?? []).some(x => x.repo === repo && x.name === name);
 
 /** What sits where a size's Download button was: the button, its progress (with Stop), or "On this PC". */
 function sizeAction(repo, rev, m, primary) {
@@ -293,12 +295,12 @@ function sizeHere(repo, rev, m, primary) {
       el('span', { class: 'dl-text', text: `Downloading ${pc}% of ${MP_GB(j.bytes)}` }),
       el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: mpStop }));
   }
+  if (pendingNow(repo, m.name)) return el('span', { class: 'hint mp-have', text: 'Pending in the downloads list: it starts when the one before it is done.' });
   const failed = j && (j.state === 'failed' || j.state === 'stopped');
   const btn = el('button', {
     class: `btn${primary && m.fits !== 'no' ? ' primary' : ''}`, type: 'button',
     text: failed ? `Download again · ${MP_GB(m.bytes)}` : `Download ${MP_GB(m.bytes)}`,
-    title: busyNow() ? `Wait for ${mp.job.name} to finish downloading, or stop it.` : `Downloads ${m.name} (${MP_GB(m.bytes)}) from Hugging Face into TOMLIN's models folder. Each file is checked before it is kept.`,
-    disabled: busyNow(),
+    title: busyNow() ? `Adds ${m.name} (${MP_GB(m.bytes)}) to the downloads list: it starts by itself when ${mp.job.name} is done.` : `Downloads ${m.name} (${MP_GB(m.bytes)}) from Hugging Face into TOMLIN's models folder. Each file is checked before it is kept.`,
     onclick: e => mpGet(repo, rev, m.name, e.currentTarget),
   });
   return failed ? el('div', { class: 'dl-now' }, btn, el('span', { class: j.state === 'failed' ? 'fault-line' : 'hint', text: j.state === 'failed' ? `It failed: ${j.error}` : 'Stopped. Download it again to carry on from where it stopped.' })) : btn;
@@ -310,6 +312,7 @@ const TO_WHY = { off: ' (off)', backups: ' (backups only)', old: ' (update it fi
 /** The PC a row downloads to: picked on it, else the PC picked under Fits; '' (This PC) unless that PC can take it now. */
 function toOf(key) {
   const v = mp.to.get(key) ?? (fitPc() ? mp.fitOn : '');
+  if (v === 'store') return mp.store ? 'store' : '';
   return v && (mp.net ?? []).some(p => p.id === v && !p.fetchCode) ? v : '';
 }
 /** A linked PC's name in the To list (with its address when two share a name). */
@@ -321,10 +324,13 @@ function toName(id) {
 /** The To list under a Download: This PC, then each linked PC (one that cannot take a download now is listed, not pickable, with why). */
 function toPick(key) {
   const pcs = mp.net ?? [];
-  if (!pcs.length) return null;
+  // The Model store (Network page): kept there, never loaded from, on its drive with the most room or twice (Mirror).
+  const store = mp.store && key.startsWith('hf|') ? el('option', { value: 'store', text: `Main model storage (${mp.store === 'mirror' ? 'Duplicate' : 'Extended'})` }) : null;
+  if (!pcs.length && !store) return null;
   const sel = el('select', { 'aria-label': 'Download to', onchange: e => { mp.to.set(key, e.target.value); mpDraw(); } },
     el('option', { value: '', text: 'This PC' }),
-    ...pcs.map(p => el('option', { value: p.id, disabled: !!p.fetchCode, text: `${toName(p.id)}${TO_WHY[p.fetchCode] ?? ''}`, title: p.fetch || '' })));
+    ...pcs.map(p => el('option', { value: p.id, disabled: !!p.fetchCode, text: `${toName(p.id)}${TO_WHY[p.fetchCode] ?? ''}`, title: p.fetch || '' })),
+    store);
   sel.value = toOf(key);
   return el('label', { class: 'mp-to' }, el('span', { text: 'To' }), sel);
 }
@@ -334,6 +340,7 @@ function withTo(key, here, ask, bytes, primary) {
   if (!pick) return here;
   const to = toOf(key);
   if (!to) return el('div', { class: 'mp-get' }, here, pick);
+  if (to === 'store') return el('div', { class: 'mp-get' }, storeBtn(ask, bytes, primary), pick);
   const name = toName(to);
   const btn = el('button', {
     class: `btn${primary ? ' primary' : ''}`, type: 'button', text: `Download ${MP_GB(bytes)} to ${name}`,
@@ -352,6 +359,26 @@ function withTo(key, here, ask, bytes, primary) {
     },
   });
   return el('div', { class: 'mp-get' }, btn, pick);
+}
+
+/** Keep in the Model store: each PC with a store drive downloads its copy itself; the downloads list shows how far. */
+function storeBtn(ask, bytes, primary) {
+  return el('button', {
+    class: `btn${primary ? ' primary' : ''}`, type: 'button', text: `Keep ${MP_GB(bytes)} in Main model storage`,
+    title: mp.store === 'mirror' ? 'Two copies, on two different PCs: each PC downloads its copy itself. The downloads button in the top bar shows how far each one is.' : 'One copy, on the Main model storage drive with the most room: that PC downloads it itself. The downloads button in the top bar shows how far it is.',
+    onclick: async e => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      b.textContent = 'Adding…';
+      try {
+        const r = await api('/api/network/store-get', { repo: ask.repo, rev: ask.rev, name: ask.name, bytes });
+        b.replaceWith(el('span', { class: 'hint', text: r.said }));
+        app.refreshDownloads?.();
+      } catch (error) {
+        b.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+      }
+    },
+  });
 }
 
 // ---- Model runners: the NVIDIA (CUDA) one downloaded here, or sent to a linked PC with an NVIDIA card ----
@@ -529,7 +556,7 @@ function mpJobCard() {
   const pc = j.bytes ? Math.floor((j.got / j.bytes) * 100) : 0;
   if (j.state === 'downloading') {
     box.replaceChildren(
-      el('span', { class: 'dl-text', text: `Downloading ${j.name}: ${pc}% of ${MP_GB(j.bytes)}` }),
+      el('span', { class: 'dl-text', text: `Downloading ${j.name}: ${pc}% of ${MP_GB(j.bytes)}${j.waiting ? ` · ${j.waiting} more in the downloads list` : ''}` }),
       el('div', { class: 'dl-track', 'aria-hidden': 'true' }, el('span', { class: 'dl-fill' })),
       el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: mpStop }));
     box.querySelector('.dl-fill').style.width = `${pc}%`;
@@ -549,6 +576,7 @@ async function mpGet(repo, rev, name, btn) {
   }
   try {
     mpSetJob(await api('/api/chatmodels/get', { repo, rev, name }));
+    app.refreshDownloads?.();
   } catch (e) {
     // Not enough room: Free up space opens with the numbers (the error carries `room`).
     const free = e.data?.room ? app.cleanupButton(e.data.room) : null;
@@ -941,6 +969,12 @@ async function mpLoad() {
   // The To list asks each linked PC how it is (a PC that is off takes a few seconds): drawn again once it answers.
   api('/api/network').then(v => {
     mp.net = v.pcs ?? [];
+    mpDraw();
+  }).catch(() => undefined);
+  // The Model store as one more place in the To list, once it has a drive ('spread' or 'mirror').
+  api('/api/network/storage').then(v => {
+    const pool = (v.pools ?? []).find(p => p.job === 'store');
+    mp.store = pool?.drives?.length ? pool.mode : '';
     mpDraw();
   }).catch(() => undefined);
   // A picture-model download running: asked again each second while the page is open.

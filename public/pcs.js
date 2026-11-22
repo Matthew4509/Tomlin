@@ -813,7 +813,14 @@
     // ---- Ahead of this PC (a newer version, or the same one with different files): Update this PC from it, or why not ----
     const ahead = !v.here && !older && !v.fault && v.pull;
     let go = null;
-    if (ahead && !v.pull.why) {
+    // An update going there now (or this PC taking one from it): See progress opens its steps again, never a second one.
+    if (v.updating) {
+      go = el('button', { class: 'btn primary', type: 'button', text: 'See progress', title: `Updating to ${v.updating.what} now` });
+      go.addEventListener('click', () => {
+        dlg.close();
+        app.showUpdate?.(v.updating.id);
+      });
+    } else if (ahead && !v.pull.why) {
       go = el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(v, false).button });
       go.addEventListener('click', async () => {
         go.disabled = true;
@@ -831,7 +838,7 @@
         }
       });
     }
-    if (older && !v.update.why) {
+    if (older && !v.update.why && !v.updating) {
       go = el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(v, true).button });
       go.addEventListener('click', async () => {
         go.disabled = true;
@@ -903,7 +910,9 @@
           offBtn.disabled = false;
         });
       }
-      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, upBtn, offBtn ?? '', offAsk);
+      // Not answering: perhaps the router gave it another address. Found again over its own link (home.js, src/findagain.ts).
+      const findBtn = !on && typeof app.findAgainButton === 'function' ? app.findAgainButton({ id: v.id, name: title }, say, () => load(v.id)) : null;
+      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, findBtn ?? '', upBtn, offBtn ?? '', offAsk);
     }
 
     // ---- The strip: TOMLIN, tokens, time worked, power cost ----

@@ -41,19 +41,22 @@ export interface SharedModel {
   /** A chat model: its Guessing model there ('' = none), and the ones that PC could use (src/runset.ts). An older node sends neither. */
   draft?: string;
   guessers?: string[];
+  /** A chat model: how it keeps its context there (cache type, and in RAM rather than on the card). An older node sends neither. */
+  cache?: 'f16' | 'q8_0' | 'q4_0';
+  kvRam?: boolean;
   /** The hires on that PC who work on it, and as what (first choice, backup), so a linked PC's delete can say so. An older node sends none. */
   assigned?: { name: string; as: string[]; spare: boolean }[];
 }
 
 /** What a node tells linked PCs: every model on it (nothing to tick), chat models first, each list in its own order. */
-export function sharedList(o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean; usedAt?: (id: string) => number | null; assigned?: (id: string) => { name: string; as: string[]; spare: boolean }[]; runOf?: (id: string) => { draft: string; guessers: string[] } }): SharedModel[] {
+export function sharedList(o: { models: { id: string; name: string; bytes: number; kind?: 'chat' | 'image' }[]; ctxOf: (id: string) => number; loaded: (id: string) => boolean; busy: (id: string) => boolean; hidden?: (id: string) => boolean; usedAt?: (id: string) => number | null; assigned?: (id: string) => { name: string; as: string[]; spare: boolean }[]; runOf?: (id: string) => { draft: string; guessers: string[]; cache?: 'f16' | 'q8_0' | 'q4_0'; kvRam?: boolean } }): SharedModel[] {
   const kindOf = (m: { kind?: 'chat' | 'image' }) => m.kind ?? 'chat';
   return [...o.models.filter(m => kindOf(m) === 'chat'), ...o.models.filter(m => kindOf(m) === 'image')].map(m => {
     const loaded = o.loaded(m.id);
     const kind = kindOf(m);
     const run = kind === 'chat' ? o.runOf?.(m.id) : undefined;
     const assigned = o.assigned?.(m.id) ?? [];
-    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}), ...(o.usedAt?.(m.id) ? { usedAt: o.usedAt(m.id)! } : {}), ...(run ? { draft: run.draft, guessers: run.guessers } : {}), ...(o.assigned ? { assigned } : {}) };
+    return { id: m.id, name: m.name, kind, bytes: m.bytes, ctx: kind === 'image' ? 0 : o.ctxOf(m.id), loaded, busy: loaded && o.busy(m.id), ...(o.hidden?.(m.id) ? { hidden: true } : {}), ...(o.usedAt?.(m.id) ? { usedAt: o.usedAt(m.id)! } : {}), ...(run ? { draft: run.draft, guessers: run.guessers, ...(run.cache ? { cache: run.cache, kvRam: run.kvRam === true } : {}) } : {}), ...(o.assigned ? { assigned } : {}) };
   });
 }
 
@@ -79,7 +82,8 @@ export function cleanShared(raw: unknown): SharedModel[] {
     const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
     const kind = x.kind === 'image' ? 'image' : 'chat';
     const run = kind === 'chat' && Array.isArray(x.guessers) ? { draft: modelId(x.draft), guessers: x.guessers.map(modelId).filter(Boolean).slice(0, 40) } : {};
-    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}), ...(n(x.usedAt) ? { usedAt: n(x.usedAt) } : {}), ...run, ...(Array.isArray(x.assigned) ? { assigned: cleanAssigned(x.assigned) } : {}) });
+    const keeps = kind === 'chat' && (x.cache === 'f16' || x.cache === 'q8_0' || x.cache === 'q4_0') ? { cache: x.cache as 'f16' | 'q8_0' | 'q4_0', kvRam: x.kvRam === true } : {};
+    out.push({ id, name: text(x.name, 80) || id, kind, bytes: n(x.bytes), ctx: kind === 'image' ? 0 : n(x.ctx) || 8192, loaded: x.loaded === true, busy: x.busy === true, ...(x.hidden === true ? { hidden: true } : {}), ...(n(x.usedAt) ? { usedAt: n(x.usedAt) } : {}), ...run, ...keeps, ...(Array.isArray(x.assigned) ? { assigned: cleanAssigned(x.assigned) } : {}) });
   }
   return out;
 }

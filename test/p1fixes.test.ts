@@ -78,7 +78,7 @@ test('a linked PC\'s hello never waits on a drive reading', () => {
   assert.ok(Array.isArray(now));
   assert.ok(Date.now() - t0 < 200, 'answered at once');
   const node = read('src/jobrun/node.ts');
-  assert.match(node, /const drives = driveReportNow\(\);/);
+  assert.match(node, /const drives = driveReportNow\(\)\.map\(/);
   assert.doesNotMatch(node, /await driveReport\(\)/);
   assert.match(read('src/modelhome.ts'), /return \(drivesReading \?\?= readDrives\(\)/);
 });

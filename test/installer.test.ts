@@ -250,6 +250,17 @@ test('every release and every pushed update carries the installer, the program\'
   assert.ok(ico.readUInt16LE(4) >= 4, 'several sizes');
 });
 
+test('a copy of the source from GitHub: the installer says which parts are missing and asks before it downloads them (no answer is No)', () => {
+  const cmd = readFileSync(join(rootPath, 'Install TOMLIN.cmd'), 'utf8');
+  for (const f of ['node_modules\\@img\\sharp-win32-x64\\lib', 'runtime\\llama-cpu\\llama-server.exe', 'runtime\\sd-cpu\\sd-server.exe']) assert.ok(cmd.includes(`if not exist "${f}"`), f);
+  assert.match(cmd, /set \/p "SM_YES=[^"]*\[y\/N\] "/, 'asked, No by default');
+  assert.match(cmd, /if \/i "%SM_YES%"=="y" goto get_parts\r\nif \/i "%SM_YES%"=="yes" goto get_parts\r\ngoto parts_declined/, 'only y or yes downloads');
+  const declined = cmd.slice(cmd.indexOf(':parts_declined'), cmd.indexOf(':no_npm'));
+  assert.match(declined, /exit \/b 1/);
+  assert.doesNotMatch(declined, /call npm|%SM_NODE%|goto (get_|ready|run|console)/, 'No downloads and installs nothing');
+  assert.ok(cmd.indexOf('goto parts_declined') < cmd.indexOf('tools\\setup.cs'), 'asked before the setup starts');
+});
+
 const onWindows = process.platform === 'win32';
 // A port nobody listens on: the installer will not install while anything answers on TOMLIN's port (a fixed 8787 fails
 // whenever another copy or program on the PC had it).

@@ -87,12 +87,17 @@ function drawNetTransfers(list) {
       ? (t.stage === 'check' ? `Sent. Checking the copy on "${t.pcName}" byte for byte: ${netSize(t.done)} of ${netSize(t.bytes)}. Nothing is removed from this PC until it matches.` : `Sent ${netSize(t.done)} of ${netSize(t.bytes)}. This PC keeps its copy until the one on "${t.pcName}" is checked.`)
       : null;
     // Waiting its turn: a few run at a time (src/carry.ts Transfers.AT_ONCE), the rest start as those finish.
-    const queued = working && t.queued ? 'Waiting its turn: it starts when one of the others finishes.' : null;
+    const queued = working && t.queued ? 'Waiting its turn: it starts when one of the others finishes.' : working && t.kind === 'fetch' && t.wait ? `Pending: ${t.wait}.` : null;
     const line = (queued ?? sent ?? runner ?? moveLine ?? (working ? (t.bytes ? `${netSize(t.done)} of ${netSize(t.bytes)}` : 'Starting…') : t.state === 'done' ? t.said : `${t.state === 'stopped' ? 'Stopped' : 'Did not finish'}: ${t.said}`)) + netEta(t);
+    // Waiting on the other PC (comparing, starting, checking, unpacking): the bar can sit full or empty for a minute, so a
+    // turning wheel shows it is still at work.
+    const waitingThere = working && !queued && (!t.bytes || t.done >= t.bytes);
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: verb(t) })),
+      // An update or pull going: its steps screen again (it may have been closed).
+      working && (t.kind === 'update' || t.kind === 'pull') ? el('button', { class: 'btn quiet', type: 'button', text: 'See progress', onclick: () => { netDlg.close(); app.openUpdate(t); } }) : null,
       working ? el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: () => netDo('/api/network/stop', { id: t.id }) }) : null,
-      el('div', { class: 'progress' }, working ? el('div', { class: 'p-track' }, fill) : null, el('div', { class: 'p-text', role: t.state === 'failed' ? 'alert' : null, text: line })));
+      el('div', { class: 'progress' }, working ? el('div', { class: 'p-track' }, fill) : null, el('div', { class: 'p-text', role: t.state === 'failed' ? 'alert' : null }, waitingThere ? el('span', { class: 'net-spin', 'aria-hidden': 'true' }) : null, line)));
   }), ...(safe ? [safe] : []));
 }
 
@@ -306,6 +311,16 @@ function updBar(frac) {
  * Opens the screen for an update just started. It reads how it goes every half second; the steps on screen move on
  * at most one each 0.7 s, so a fast step is still seen, and never past where the update really is.
  */
+/**
+ * The steps screen again for an update under way (`id`, as a PC's `updating` gives it): from the PC's card in the left
+ * panel, See progress on Network and in its window. Read fresh, so it opens where the update is now.
+ */
+app.showUpdate = async id => {
+  const t = (await api('/api/network/transfers').catch(() => ({ transfers: [] }))).transfers.find(x => x.id === id);
+  if (t) app.openUpdate(t);
+  else app.refreshPcs?.();
+};
+
 app.openUpdate = transfer => {
   let t = transfer;
   let shown = 0;
@@ -329,6 +344,9 @@ app.openUpdate = transfer => {
   $('#upd-close').onclick = () => updDlg.close();
   drawUpd(t, shown);
   if (!updDlg.open) updDlg.showModal();
+  // The PC's card turns its wheel at once (and stops when the window is closed on an update that has ended).
+  app.refreshPcs?.();
+  updDlg.addEventListener('close', () => app.refreshPcs?.(), { once: true });
   updTimer = setInterval(async () => {
     if (!updDlg.open) return void clearInterval(updTimer);
     try {

@@ -3,7 +3,7 @@
 // overrides. And the fit rule (src/cluster/engine.ts borrowRule): a model that fits this PC well alone is not split.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lendsCard, maxLent, maxLoad, maxPcs, setBorrow, type HelloLook } from '../src/jobrun/maxhost.ts';
+import { lendsCard, maxLent, maxLoad, maxPcs, setBorrow, setPlainLink, type HelloLook } from '../src/jobrun/maxhost.ts';
 import { borrowRule } from '../src/cluster/engine.ts';
 import type { Remote } from '../src/store.ts';
 
@@ -53,6 +53,11 @@ test('the opt-out is set and cleared on that PC only, the old tick goes, and an 
   const old = { ...b, borrowMax: true } as Remote;
   assert.deepEqual(setBorrow([a, old], 'bbbb2222', false)!.map(r => r.noBorrow === true), [false, true]);
   assert.equal('borrowMax' in setBorrow([a, old], 'bbbb2222', false)![1], false);
+  // Unencrypted cluster link: saved only on the PC named, off by taking the field away, and refused for a PC not linked.
+  const on = setPlainLink([a, b], 'aaaa1111', true)!;
+  assert.deepEqual(on.map(r => r.plainLink === true), [true, false]);
+  assert.equal('plainLink' in setPlainLink(on, 'aaaa1111', false)![0], false);
+  assert.equal(setPlainLink([a], 'nope', true), null);
   assert.deepEqual(setBorrow([a, c], 'cccc3333', true)!.map(r => 'noBorrow' in r), [false, false]);
   assert.equal(setBorrow([a, b], 'nope', true), null);
 });

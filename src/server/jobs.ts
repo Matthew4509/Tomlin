@@ -9,7 +9,7 @@ import { createJobs } from '../jobrun.ts';
 import * as keep from '../keep.ts';
 import * as carry from '../carry.ts';
 import { pinWhy } from '../runtimes.ts';
-import { BUILD, GB, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, lastUsed, byModel, byStaff, hardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir, backupsHome } from './core.ts';
+import { BUILD, GB, HOME, ROOT, SECURITY_HEADERS, restartInto, STARTED_AT, VERSION, body, chatModels, hidden, lastUsed, byModel, byStaff, hardware, rescanHardware, json, ledger, meter, notebooks, notifier, runtimes, sampler, speeds, staff, startupOf, store, uptime, workspaceDir, backupsHome } from './core.ts';
 import { scope } from '../meter.ts';
 import { appLock, appLockOn, appPinCheck, hostPinDoor, hostPinDrop, hostKeyHeld, hostPinHeld, recoveryHashes, sameAsLock, updatePinCheck, whenCodesChange } from './locks.ts';
 import { chat, chatCardBytes, chatList, chatPlace, connectChat, contextBytes, fit, images, loadShapes, main, rpcBuilds, rpcProgram, runOf, runOn, runnerFor, runnerOptions, runnerUsed, runners } from './panes.ts';
@@ -68,6 +68,7 @@ export function startJobs(): void {
       runnerUsed.set(p ?? main(), Date.now());
     },
     memory: () => memoryNow(),
+    rescanHardware: () => rescanHardware(),
     cpu: () => cpuHere(),
     meter: () => meter.view(),
     startedAt: STARTED_AT,
@@ -89,6 +90,7 @@ export function startJobs(): void {
     isHidden: id => hidden.has(id),
     removeModel: async (kind, id) => (await import('./thispc.ts')).deleteModelHere(kind, id),
     removeBlock: async (kind, id) => (await import('./thispc.ts')).removeBlock(kind, id),
+    modelsDrive: async drive => (await import('./modelhome.ts')).chooseModelsDrive(drive),
     usedAt: id => lastUsed.get(id),
     pictureFit: id => images.list().find(m => m.id === id)?.fit.level ?? 'ok',
     pictureRoom: id => images.cardRoom(id, chatCardBytes()),

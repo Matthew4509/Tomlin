@@ -23,6 +23,7 @@ import { borrowRule, type AloneFacts } from '../cluster/engine.ts';
 import { hasCluster, type ClusterSet } from '../cluster/members.ts';
 import { loaderGaps, type ClusterHello, type LoaderFacts } from '../cluster/loader.ts';
 import { pcLabels } from '../brains.ts';
+import { plainNow } from './plainlinks.ts';
 
 /** TOMLIN_MAX when it only switches Max mode on ("1", "on", "true", "yes") or is empty: it names no PC. */
 const namesNone = (said: string) => !said.trim() || /^(1|on|true|yes)$/i.test(said.trim());
@@ -106,6 +107,16 @@ export const labelOf = (r: Remote): string => {
   return pcLabels(linked.some(x => x.id === r.id) ? linked : [r])[r.id] ?? r.name;
 };
 
+/** `remotes` with linked PC `id`'s "Unencrypted cluster link" ticked (on) or not; null when no such PC is linked. */
+export function setPlainLink(remotes: Remote[], id: string, on: boolean): Remote[] | null {
+  if (!remotes.some(r => r.id === id)) return null;
+  return remotes.map(r => {
+    if (r.id !== id) return r;
+    const { plainLink: _was, ...rest } = r;
+    return on ? { ...rest, plainLink: true } : rest;
+  });
+}
+
 /** `remotes` with linked PC `id` borrowed from again (on) or set to "Don't borrow from it" (off); null when no such PC is linked. */
 export function setBorrow(remotes: Remote[], id: string, on: boolean): Remote[] | null {
   if (!remotes.some(r => r.id === id)) return null;
@@ -175,7 +186,7 @@ export function keepWireAlive(socket: { setKeepAlive?: (on: boolean, ms: number)
 }
 
 /** Opens one sealed stream to `r`: its socket, this stream's keys, and any bytes read past the answer. Throws in plain words. */
-export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()?.build ?? ''): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
+export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()?.build ?? ''): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer; plain: boolean }> {
   // A PC whose clock is wrong refuses the first try; its answer taught this PC its clock, so once more in its time.
   return openWireOnce(r, ms, build).catch(async e => {
     if (!link.clockRefused((e as Error).message)) throw e;
@@ -184,13 +195,13 @@ export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()
   });
 }
 
-async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer }> {
+async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer; plain: boolean }> {
   if (backupsOnly(r.id)) throw new Error(backupsOnlyWhy(labelOf(r)));
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${labelOf(r)}" was linked before links were encrypted. Link it again.`);
   await onHomeNetwork(r);
   const hostNonce = newNonce();
-  const sealed = link.sealRequest(linkKeys, MAX_DOOR, { nonce: hostNonce.toString('base64url'), build, ...(shareAll() ? { share: 'all' } : {}) }, link.nodeNow(r.url));
+  const sealed = link.sealRequest(linkKeys, MAX_DOOR, { nonce: hostNonce.toString('base64url'), build, ...(shareAll() ? { share: 'all' } : {}), ...(r.plainLink === true ? { plain: true } : {}) }, link.nodeNow(r.url));
   const id = link.requestId(sealed.box);
   const u = new URL(r.url);
   return new Promise((resolve, reject) => {
@@ -213,10 +224,14 @@ async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ soc
     });
     req.on('upgrade', (res, socket, head) => {
       try {
-        const said = link.openAnswer(linkKeys, id, 0, res.headers['x-link']) as { nonce?: unknown };
+        const said = link.openAnswer(linkKeys, id, 0, res.headers['x-link']) as { nonce?: unknown; plain?: unknown };
         const nodeNonce = Buffer.from(String(said.nonce ?? ''), 'base64url');
+        // Unsealed only when this PC asked AND that PC agreed in its sealed answer; anything else stays sealed.
+        const plain = r.plainLink === true && said.plain === true;
+        if (plain) plainNow.add(r.id);
+        else plainNow.delete(r.id);
         keepWireAlive(socket);
-        resolve({ socket, keys: streamKeys(linkKeys, hostNonce, nodeNonce, 'host'), head });
+        resolve({ socket, keys: streamKeys(linkKeys, hostNonce, nodeNonce, 'host'), head, plain });
       } catch (e) {
         socket.destroy();
         reject(e);
@@ -357,8 +372,11 @@ export async function rpcFor(pcs = maxPcs(), host: Option[] = d.runner?.options?
       continue;
     }
     try {
-      const { socket } = await openWire(r, OPEN_MS, mine);
+      const { socket, plain } = await openWire(r, OPEN_MS, mine);
       socket.destroy();
+      // Said with the load, so a speed read from it is never taken for a sealed one.
+      if (plain) notes.push(`Max mode: the link to "${labelOf(r)}" is NOT encrypted (both PCs chose an unencrypted cluster link): faster on the network, readable on the home network.`);
+      else if (r.plainLink === true) notes.push(`Max mode: "${labelOf(r)}" did not allow an unencrypted cluster link, so its link is sealed as usual.`);
       endpoints.push(`127.0.0.1:${await portFor(r)}`);
       lent.push(labelOf(r));
       ids.push(r.id);

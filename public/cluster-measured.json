@@ -1,0 +1,102 @@
+{
+  "about": "Speeds really measured on our own PCs, grouped by the hardware they ran on. Copied from benchmarks/results.csv, benchmarks/readme-chart.csv, docs/LLM-TEST-LIST.md and docs/cluster-native/*. Nothing estimated. 'tool' is 'app' (real chats in TOMLIN) or 'test run' (llama-bench through the cluster test door: no encryption, one short run). Tokens a second while writing. The big PC changed during the tests (64 GB and one CPU, then 128 GB, then two CPUs and 256 GB), so each of its stages is its own setup.",
+  "network": "Every multi-PC setup: wired 1 Gb network.",
+  "pcs": {
+    "z240": { "name": "HP Z240", "cpu": "Intel Core i7-6700K, 4 cores", "ram": "48 GB", "card": "Quadro P2000, 5 GB" },
+    "hp800": { "name": "HP 800 G1", "cpu": "not recorded", "ram": "24 GB", "card": "Quadro K1200, 4 GB" },
+    "z820a": { "name": "HP Z820 (until 15 Nov)", "cpu": "one 6-core Xeon E5-2640", "ram": "64 GB", "card": "RTX 3060, 12 GB" },
+    "z820b": { "name": "HP Z820 (16 to 20 Nov)", "cpu": "one 6-core Xeon E5-2640", "ram": "128 GB", "card": "RTX 3060, 12 GB" },
+    "z820c": { "name": "HP Z820 (from 21 Nov)", "cpu": "two 8-core Xeon E5-2670", "ram": "256 GB", "card": "RTX 3060, 12 GB" }
+  },
+  "setups": [
+    {
+      "id": "z240-alone", "title": "One PC: HP Z240", "pcs": ["z240"],
+      "results": [
+        { "model": "LFM2.5-8B-A1B Q4", "file": "4.8 GB", "how": "alone", "tool": "app", "tokS": 39.3, "date": "2026-11-03", "answers": 3 },
+        { "model": "Qwen3.6-35B-A3B Q2", "file": "11 GB", "how": "alone", "tool": "app", "tokS": 11.5, "date": "2026-11-03", "answers": 3 },
+        { "model": "Qwen3-Coder-30B-A3B Q4", "file": "17.7 GB", "how": "alone", "tool": "app", "tokS": 9.4, "date": "2026-11-17", "answers": 4 },
+        { "model": "Qwen3-Next-80B-A3B Q3", "file": "33 GB", "how": "alone", "tool": "app", "tokS": 10.9, "date": "2026-11-03", "answers": 3 }
+      ]
+    },
+    {
+      "id": "hp800-alone", "title": "One PC: HP 800 G1", "pcs": ["hp800"],
+      "results": [
+        { "model": "LFM2.5-8B-A1B Q4", "file": "4.8 GB", "how": "alone", "tool": "app", "tokS": 19.2, "date": "2026-11-03", "answers": 3 }
+      ]
+    },
+    {
+      "id": "z820a-alone", "title": "One PC: HP Z820 with 64 GB", "pcs": ["z820a"],
+      "results": [
+        { "model": "Qwen3.5-35B-A3B Q2", "file": "11 GB", "how": "alone, CPU only", "tool": "app", "tokS": 5.8, "date": "2026-11-10", "answers": 13 },
+        { "model": "Qwen3.5-35B-A3B Q2", "file": "11 GB", "how": "alone, with its RTX 3060", "tool": "app", "tokS": 34.06, "date": "2026-11-10", "answers": 59 },
+        { "model": "Qwen3-Coder-30B-A3B Q4", "file": "17.7 GB", "how": "alone", "tool": "app", "tokS": 18.17, "date": "2026-11-12", "answers": 1, "note": "one answer only" },
+        { "model": "Qwen3-Next-80B-A3B Q3", "file": "33 GB", "how": "alone, CPU only", "tool": "app", "tokS": 3.39, "date": "2026-11-10", "answers": 6 },
+        { "model": "Qwen3-Next-80B-A3B Q3", "file": "33 GB", "how": "alone, with its RTX 3060", "tool": "app", "tokS": 8.67, "date": "2026-11-10", "answers": 14 }
+      ]
+    },
+    {
+      "id": "z820c-alone", "title": "One PC: HP Z820 with 256 GB and two CPUs", "pcs": ["z820c"],
+      "results": [
+        { "model": "Qwen3-Coder-30B-A3B Q4", "file": "17.7 GB", "how": "alone", "tool": "app", "tokS": 19.36, "date": "2026-11-21", "answers": 60 },
+        { "model": "Qwen3-Next-80B-A3B Q3", "file": "33 GB", "how": "alone, with its RTX 3060", "tool": "app", "tokS": 9.61, "date": "2026-11-21", "answers": 16, "note": "a newer runner too" },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "89.5 GB", "how": "alone", "tool": "app", "tokS": 7.2, "date": "2026-11-21", "answers": 10 },
+        { "model": "DeepSeek-V4-Flash Q4", "file": "155 GB", "how": "alone", "tool": "app", "tokS": 2.0, "date": "2026-11-21", "answers": 3, "note": "it thought for minutes before each answer" },
+        { "model": "Qwen3.5-397B IQ4_XS", "file": "190 GB", "how": "alone", "tool": "app", "tokS": 1.9, "date": "2026-11-21", "answers": 6 },
+        { "model": "GLM-5.3 IQ2_M", "file": "239 GB", "how": "alone", "tool": "app", "tokS": 0.67, "date": "2026-11-21", "answers": 1, "note": "one answer" }
+      ]
+    },
+    {
+      "id": "z240-hp800", "title": "Two PCs: HP Z240 and HP 800 G1", "pcs": ["z240", "hp800"],
+      "results": [
+        { "model": "LFM2.5-8B-A1B Q4", "file": "4.8 GB", "how": "Max mode", "tool": "app", "tokS": 31, "date": "2026-11-03", "answers": 3, "note": "faster than the HP 800 G1 alone (19.2), slower than the HP Z240 alone (39.3)" },
+        { "model": "Qwen3.6-35B-A3B Q2", "file": "11 GB", "how": "Max mode", "tool": "app", "tokS": 7.1, "date": "2026-11-03", "answers": 3 },
+        { "model": "Qwen3.6-35B-A3B Q2", "file": "11 GB", "how": "Max mode, best split found", "tool": "app", "tokS": 10.8, "date": "2026-11-03", "answers": 3, "note": "the HP Z240 alone gave 11.5" },
+        { "model": "Qwen3-Next-80B-A3B Q3", "file": "33 GB", "how": "Max mode", "tool": "app", "tokS": 4.6, "date": "2026-11-03", "answers": 3, "note": "the HP Z240 alone gave 10.9" }
+      ]
+    },
+    {
+      "id": "z240-z820a", "title": "Two PCs: HP Z240 and HP Z820 with 64 GB", "pcs": ["z240", "z820a"],
+      "results": [
+        { "model": "LFM2.5-8B-A1B Q4", "file": "4.8 GB", "how": "Max mode, the Z820's RTX 3060 lent", "tool": "app", "tokS": 41.1, "date": "2026-11-12", "answers": 3, "note": "about the same as the HP Z240 alone (39.3, on 3 Nov)" },
+        { "model": "Qwen3.5-35B-A3B Q2", "file": "11 GB", "how": "Max mode, the Z820's RTX 3060 lent", "tool": "app", "tokS": 5.7, "date": "2026-11-12", "answers": 3, "note": "reading the prompt went from 101 to 403 tokens a second; writing stayed slow" },
+        { "model": "Qwen3.6-35B-A3B Q2", "file": "11 GB", "how": "Max mode, the Z820's RTX 3060 lent", "tool": "app", "tokS": 5.9, "date": "2026-11-12", "answers": 3 },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "83 GiB", "how": "cluster, layer split", "tool": "test run", "tokS": 1.69, "date": "2026-11-14", "answers": 1 },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "83 GiB", "how": "cluster, experts split", "tool": "test run", "tokS": 2.45, "date": "2026-11-15", "answers": 1, "note": "too big for either PC alone at this stage" },
+        { "model": "DeepSeek-V4-Flash Q2", "file": "90 GiB", "how": "cluster, layer split", "tool": "test run", "tokS": 1.16, "date": "2026-11-14", "answers": 1 },
+        { "model": "DeepSeek-V4-Flash Q2", "file": "90 GiB", "how": "cluster, experts split", "tool": "test run", "tokS": 1.84, "date": "2026-11-15", "answers": 1 },
+        { "model": "DeepSeek-V4-Flash Q2", "file": "90 GiB", "how": "cluster, experts split", "tool": "app", "tokS": 1.41, "date": "2026-11-15", "answers": 3, "note": "ready after 1,128 s; later answers 1.01 and 1.40" }
+      ]
+    },
+    {
+      "id": "z240-z820b", "title": "Two PCs: HP Z240 and HP Z820 with 128 GB", "pcs": ["z240", "z820b"],
+      "results": [
+        { "model": "Qwen3-Coder-30B-A3B Q4", "file": "17.7 GB", "how": "Max mode, experts split", "tool": "app", "tokS": 3.7, "date": "2026-11-17", "answers": 5, "note": "the HP Z240 alone gave 9.4; TOMLIN's own check then turned Max mode off for this model" },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "89.5 GB", "how": "cluster, layer split", "tool": "app", "tokS": 1.9, "date": "2026-11-17", "answers": 30 }
+      ]
+    },
+    {
+      "id": "z240-z820c", "title": "Two PCs: HP Z240 and HP Z820 with 256 GB and two CPUs", "pcs": ["z240", "z820c"],
+      "results": [
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "89.5 GB", "how": "cluster, experts split, encrypted link (the app's default)", "tool": "app", "tokS": 2.85, "date": "2026-11-22", "answers": 8, "note": "the HP Z820 alone now gave 7.20: at this stage it fits the model by itself" },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "89.5 GB", "how": "cluster, experts split, link not encrypted", "tool": "app", "tokS": 3.36, "date": "2026-11-22", "answers": 10, "note": "a test setting, not the app's default" },
+        { "model": "Qwen3.8-Flash-Next Q3", "file": "89.5 GB", "how": "cluster, experts split, best", "tool": "test run", "tokS": 4.14, "date": "2026-11-22", "answers": 1 }
+      ]
+    },
+    {
+      "id": "three", "title": "Three PCs: HP Z240, HP Z820 with 64 GB and HP 800 G1", "pcs": ["z240", "z820a", "hp800"],
+      "results": [
+        { "model": "LFM2.5-8B-A1B Q4", "file": "4.8 GB", "how": "Max mode", "tool": "app", "tokS": 17.2, "date": "2026-11-12", "answers": 3, "note": "two PCs gave 41.1" },
+        { "model": "Qwen3.6-35B-A3B Q2", "file": "11 GB", "how": "Max mode", "tool": "app", "tokS": 9.3, "date": "2026-11-12", "answers": 3, "note": "two PCs gave 5.9" },
+        { "model": "a dense 24B model (file not recorded)", "file": "not recorded", "how": "three cards", "tool": "test run", "tokS": 8.69, "date": "2026-11-14", "answers": 1, "note": "two cards gave 12.15" },
+        { "model": "DeepSeek-V4-Flash Q2", "file": "90 GiB", "how": "Max mode", "tool": "app", "tokS": null, "date": "2026-11-15", "answers": 0, "note": "failed twice while loading (at 846 s and 1,138 s)" }
+      ]
+    }
+  ],
+  "findings": [
+    "A cluster makes a big model possible, not fast. With the HP Z820 at 64 GB, the 83 GiB Qwen3.8-Flash-Next fitted neither PC, and two PCs together ran it at 1.69 to 2.45 tokens a second.",
+    "Once one PC can hold the model, it is faster alone. With 256 GB the HP Z820 ran the same model alone at 7.20, against 2.85 to 4.14 in the cluster.",
+    "For a model that fits one PC, use that PC, with one exception seen: lending a fast card made reading a long prompt about four times faster, while writing stayed slower.",
+    "Three PCs were not better than two: from less than half to about one and a half times the speed of two, and long loads failed.",
+    "A model bigger than the RAM, read from an SSD instead: not measured, so no figure."
+  ]
+}

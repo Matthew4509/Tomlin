@@ -26,6 +26,11 @@ export interface ConnectRequest {
   /** Plain words for why it failed, from the runner's last lines. */
   why: (tail: string) => string;
   /**
+   * A fault of the file itself (unknown packing, unknown kind of model, damaged bytes), from the runner's last lines: no
+   * other device would read the file either, so the next one is not tried (src/llama.ts fileFault).
+   */
+  fileFault?: (tail: string) => boolean;
+  /**
    * Once a start answers: why it must count as failed all the same ('' when it is fine), from its lines about the
    * devices (a card runner that put the model on the CPU), so the next device is tried and the reason is said.
    */
@@ -47,6 +52,7 @@ export interface PaneFault {
 }
 
 const DEVICE_NAME: Record<Device, string> ={ cpu: 'the CPU', vulkan: 'the graphics chip (Vulkan)', cuda: 'the NVIDIA card (CUDA)' };
+const upFirst = (s: string) => `${s[0].toUpperCase()}${s.slice(1)}`;
 const ramUsed = () => totalmem() - freemem();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -147,7 +153,10 @@ export class Pane {
     const startedAt = Date.now();
     this.worker.track = req.plan ? new LoadTrack(req.plan, startedAt) : null;
     this.set({ state: 'loading', model: req.model, modelName: req.modelName, loadStartedAt: startedAt, expectedSeconds: req.plan ? this.worker.track!.view(startedAt).firstSeconds : req.expectedSeconds });
-    const notes: string[] = req.note ? [req.note] : [];
+    // The devices that could not run it, each run of them with the same reason said once ("CUDA and Vulkan could not run
+    // it (…), so it runs on the CPU"): the reason's first sentence only, so its advice is never repeated per device.
+    const fell: { devices: Device[]; said: string; next: Device }[] = [];
+    const noteNow = () => [...(req.note ? [req.note] : []), ...fell.map(f => `${upFirst(f.devices.map(d => DEVICE_NAME[d]).join(' and '))} could not run it (${f.said}), so it runs on ${DEVICE_NAME[f.next]}.`)].join(' ') || null;
     for (let i = 0; i < req.devices.length; i++) {
       const device = req.devices[i];
       let spec: LaunchSpec | null = req.build(device);
@@ -183,7 +192,7 @@ export class Pane {
           noCard = req.started?.(device, this.worker.facts) ?? '';
           if (!noCard) {
             this.connectedRam = ramUsed();
-            this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: notes.join(' ') || null });
+            this.set({ state: 'connected', pid: this.worker.pid, loadSeconds: seconds, stage: null, note: noteNow() });
             return this.view;
           }
           tail = noCard;
@@ -192,12 +201,18 @@ export class Pane {
         }
       }
       const why = noCard ? `${noCard[0].toUpperCase()}${noCard.slice(1)}.` : req.why(tail);
-      if (i < req.devices.length - 1 && !this.worker.timedOut) {
-        const said = noCard || why.replace(/^This model did not load: /, '').replace(/\.$/, '');
-        notes.push(`${DEVICE_NAME[device][0].toUpperCase()}${DEVICE_NAME[device].slice(1)} could not run it (${said}), so it runs on ${DEVICE_NAME[req.devices[i + 1]]}.`);
+      // The file itself is at fault: CUDA, then Vulkan, then the CPU would each fail the same way (and a 100 GB file
+      // read three times takes many minutes), so the first such fault is the answer.
+      const fileAtFault = !noCard && !!req.fileFault?.(tail);
+      if (i < req.devices.length - 1 && !this.worker.timedOut && !fileAtFault) {
+        const said = noCard || why.replace(/^This model did not load: /, '').split(/(?<=\.)\s+/)[0].replace(/\.$/, '');
+        const last = fell.at(-1);
+        if (last && last.said === said) last.devices.push(device);
+        else fell.push({ devices: [device], said, next: req.devices[i + 1] });
+        fell.at(-1)!.next = req.devices[i + 1];
         continue;
       }
-      this.set({ state: 'failed', error: why, detail: tail, stage: null, pid: null, note: notes.join(' ') || null });
+      this.set({ state: 'failed', error: why, detail: tail, stage: null, pid: null, note: noteNow() });
       if (this.name === 'chat' && !maxFault(tail)) this.fault('load', this.view, tail, why);
       return this.view;
     }

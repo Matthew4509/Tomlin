@@ -813,13 +813,14 @@ export const teamPost: Routes = {
     return json(res, r.status, r.body);
   },
   '/api/staff/backup': async ({ res, b }) => {
-    // "Backup when a PC is off": once, until the first choice answers again, or always (it becomes the fallback).
+    // "Backup when a PC is off": once, until the first choice answers again, or always (it becomes their first choice:
+    // no standing fallback is kept).
     const m = staff.get(String(b.id ?? ''));
     if (!m) return json(res, 404, { error: 'That person is no longer on the team.' });
     const ref = String(b.ref ?? '');
     if (!(await jobRoutes.backupChoices(m)).choices.some(c => c.ref === ref)) return json(res, 400, { error: 'That backup cannot answer now (the PC went off, or the model no longer fits). Pick another.' });
     const how = b.for === 'always' ? 'always' : b.for === 'back' ? 'back' : 'once';
-    await staff.change(m.id, how === 'always' ? { fallback: ref, cover: null } : { cover: { ref, once: how === 'once' } });
+    await staff.change(m.id, how === 'always' ? { model: ref, cover: null } : { cover: { ref, once: how === 'once' } });
     return json(res, 200, { ok: true, staff: staff.get(m.id) });
   },
   '/api/speed/live': async ({ res }) => json(res, 200, { live: speedLive ? { ...speedLive, seconds: Math.round((Date.now() - speedLive.startedAt) / 1000) } : null }),

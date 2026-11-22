@@ -349,7 +349,8 @@ async function runSteps(id: string, review: boolean, send: Send, signal: AbortSi
         return { kind: 'stopped', n: i, reason: r.error, needs: false, saved };
       }
       const result = r.result;
-      const blockers = [...result.problems, ...result.warnings];
+      // A step that read a risky web page is never saved unseen (src/promptscan.ts webGuard).
+      const blockers = [...result.problems, ...result.warnings, ...(result.risky ? [result.risky] : [])];
       if (review && !blockers.length) {
         const rv = await reviewStep(job, i, result.files, [], send, signal);
         if ('error' in rv) {
@@ -577,7 +578,7 @@ export async function homeJobs(staff: home.Person[]) {
     if (job.hidden) continue;
     all.push(job);
     const w = await loadWaiting(job.id);
-    const waiting: home.Waiting | null = w ? { n: w.n, at: w.at, worker: w.result.worker, files: w.result.files.map(f => f.path), flags: (w.result.problems?.length ?? 0) + (w.result.warnings?.length ?? 0) + (w.result.review?.ok === false ? w.result.review.problems.length : 0) } : null;
+    const waiting: home.Waiting | null = w ? { n: w.n, at: w.at, worker: w.result.worker, files: w.result.files.map(f => f.path), flags: (w.result.problems?.length ?? 0) + (w.result.warnings?.length ?? 0) + (w.result.risky ? 1 : 0) + (w.result.review?.ok === false ? w.result.review.problems.length : 0) } : null;
     const hasReport = await stat(join(root, 'jobs', job.id, 'review.md')).then(s => s.isFile(), () => false);
     const item = home.jobItem(job, waiting, hasReport, running?.jobId === job.id, staff);
     if (item) items.push(item);

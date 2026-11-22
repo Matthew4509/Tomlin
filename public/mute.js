@@ -175,7 +175,7 @@ app.openColours = () => showSettingsPage('colours', '#settings-colours');
 $('#settings-open').addEventListener('click', () => openSettings());
 
 /**
- * Breadcrumb on a Settings page ("Settings > Colours"): every section marked data-crumb gets one at its top. Settings is
+ * Breadcrumb on a Settings page ("Settings > Theme"): every section marked data-crumb gets one at its top. Settings is
  * a button that goes up one level, to the tiles; the page's own name is plain text and marked as the current page.
  */
 for (const page of document.querySelectorAll('[data-crumb]')) {

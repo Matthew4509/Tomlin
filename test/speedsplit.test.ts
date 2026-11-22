@@ -96,8 +96,8 @@ test('when the model needs the 24 GB HP 800, it lends at most 55% of its free RA
 
 test('a lender that stalled is given less next time: the learned cap holds in the split', () => {
   // The Z820 stalled holding 55 GB: about 41 GB from now on.
-  const caps = learn({}, 'e2c4ba37', 55 * GB, 'did not answer for 30 seconds', Date.parse('2026-11-14T21:22:00Z'));
-  const cap = capOf(caps, 'e2c4ba37', Date.parse('2026-11-15T09:00:00Z'))!;
+  const caps = learn({}, '5c3e9a01', 55 * GB, 'did not answer for 30 seconds', Date.parse('2026-11-14T21:22:00Z'));
+  const cap = capOf(caps, '5c3e9a01', Date.parse('2026-11-15T09:00:00Z'))!;
   assert.equal(cap, Math.floor(55 * GB * LEARN_SHARE));
   const p = made(planLayers(DEEPSEEK, LISTED, [{ ...z820, capRam: cap }, hp], host));
   assert.ok(on(p, 'RPC1') * per(DEEPSEEK) <= cap, 'within the learned cap');

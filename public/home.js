@@ -92,7 +92,7 @@ function setView(view) {
 app.showPanes = () => setView('chat');
 
 /** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
-const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', help: '#help' };
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', storage: '#storage-page', help: '#help' };
 /** Off for the first view at start: the page opens where it was, focus left alone. */
 let pageFocus = false;
 /**
@@ -133,7 +133,7 @@ const crumbName = view => (view === 'chat' ? 'Chat' : view === 'staff' ? 'Staff'
 // ---- Settings' pages: Staff, Jobs and Files open as pages beside the Settings menu, not as windows over it ----
 
 /** The pages the Settings menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];
+const SETUP_VIEWS = ['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings', fromMenu: false };
@@ -328,7 +328,7 @@ const staffActivity = s => (s.activity === 'available' && s.state === 'asleep' ?
  * A person in the left panel. With `level` (a hire): "Name | Level", the software under it, and a third line only when
  * they are working or muted (how they are otherwise is the dot's shape on their icon, and the tooltip).
  */
-function staffRow({ key, name, avatar, sub, level, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true, flag }) {
+function staffRow({ key, name, avatar, sub, level, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true, flag, updating }) {
   // Muted (right-click the row, or Mute all): a bell with a line and "Muted until …", a grey dot in place of the number.
   const muted = mutable ? app.mutedBy?.([key]) : null;
   const bits = app.muteBits?.(muted, count) ?? { icon: null, count: count ? el('span', { class: 'rail-count', text: String(count) }) : null };
@@ -338,7 +338,9 @@ function staffRow({ key, name, avatar, sub, level, state, stateText, activity, a
     app.avatar ? app.avatar(key, avatar, mark) : el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, avatar, mark),
     el('span', { class: 'rail-text' },
       // flag: a yellow (!) at the right of the name line, with its words (a linked PC behind this one).
-      flag ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'rail-flag', role: 'img', 'aria-label': flag, title: flag, text: '!' }))
+      // updating: in its place a turning wheel while an update goes there (or comes here from it), with its words.
+      updating ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'net-spin rail-spin', role: 'img', 'aria-label': updating, title: updating }))
+      : flag ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'rail-flag', role: 'img', 'aria-label': flag, title: flag, text: '!' }))
         : el('span', { class: 'rail-name' }, name, level ? el('span', { class: 'rail-level', text: ` | ${level}` }) : null),
       el('span', { class: 'rail-sub', text: sub }),
       level && !busy && !muted ? null : el('span', { class: `rail-state ${activity ? `a-${activity}` : `s-${busy ? 'on' : state}`}`, text: [busy && level ? 'Working' : word, app.mutedWords?.(muted)].filter(Boolean).join(' · ') })),
@@ -437,7 +439,10 @@ function drawRail() {
     const old = p.outdated ? (p.outdated.other ? `Runs ${p.outdated.version} but different files from this PC: press to update "${p.name}"` : `This PC runs ${p.outdated.mine}; "${p.name}" runs ${p.outdated.version}: press to update "${p.name}"`)
       : p.newer ? (p.newer.other ? `Runs ${p.newer.version} with different files from this PC: press to update this PC to it` : `This PC runs ${p.newer.mine}; "${p.name}" runs ${p.newer.version}: press to update this PC to ${p.newer.version}`) : '';
     const full = p.activity !== 'offline' ? fullWords(p.ramUsed, p.ram, `on "${p.name}"`) : '';
-    const flag = [old, full].filter(Boolean).join('\n');
+    // An update going there now (or this PC taking one from it): a turning wheel, not the yellow (!), and pressing the
+    // card opens the update's steps again (they run on the server, so its window may have been closed).
+    const upd = p.updating ? (p.updating.kind === 'pull' ? `Updating this PC to ${p.updating.what} from "${p.name}": press to see how it goes` : `Updating "${p.name}" to ${p.updating.what}: press to see how it goes`) : '';
+    const flag = [upd ? '' : old, full].filter(Boolean).join('\n');
     const mem = homeUi.pcMem[p.id];
     // A "Backups only" PC: no staff work there, so its card says what it keeps instead of what it has loaded.
     const sub = p.backupsOnly ? [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), 'Backups only', p.disk ? diskWords(p.disk) : '']
@@ -446,8 +451,9 @@ function drawRail() {
     const held = p.heldByCluster === true;
     desks.push({ id: p.id, name: at ? `${name} (${at})` : name, activity: p.activity, backupsOnly: p.backupsOnly, held, row: staffRow({
       key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: held && p.activity !== 'offline' ? 'In the cluster: held for big models, no staff' : p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: held && p.activity !== 'offline' ? 'In the cluster' : p.word ?? (asleep ? 'Asleep' : undefined),
-      title: `${flag ? `${flag}
-` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => app.openPc?.(p.id), mutable: false, flag: flag || undefined,
+      title: upd ? `${[upd, full].filter(Boolean).join('\n')}
+${p.name} at ${p.url}` : `${flag ? `${flag}
+` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => (p.updating ? app.showUpdate?.(p.updating.id) : app.openPc?.(p.id)), mutable: false, flag: flag || undefined, updating: upd || undefined,
     }) });
   }
   const card = x => {
@@ -472,7 +478,7 @@ function drawRail() {
   keepFocus($('#rail-mypc'), [card(desks[0])]);
   $('#rail-pcs-head').hidden = desks.length < 2;
   // Fast update at the right of the Linked PCs heading, only while a linked PC that answers is behind this one.
-  const behind = homeUi.pcs.filter(p => p.outdated && p.activity !== 'offline').length;
+  const behind = homeUi.pcs.filter(p => p.outdated && !p.updating && p.activity !== 'offline').length;
   const railFast = $('#rail-fast-update');
   railFast.hidden = !behind;
   railFast.onclick = updateAllLinked;
@@ -649,15 +655,16 @@ function drawCluster(pcs, cl) {
   const loaderName = cl.out ? cl.loaderName ?? 'a node' : '';
   const host = el('div', { class: `cluster-pc cluster-host${cl.out ? ' cluster-host-out' : ''}`, 'data-pc': 'here' },
     el('span', { class: 'cluster-mark' }, clusterIcon(ICON_PC, 20)),
-    el('b', {}, app.pcLabel('here'), el('span', { class: 'cluster-tag', text: 'This PC' }), cl.out ? null : el('span', { class: 'cluster-tag cluster-loads', text: 'Loads the model' })),
-    el('span', { class: 'hint', text: 'This PC' }));
+    el('b', {}, app.pcLabel('here'), el('span', { class: 'cluster-tag', text: 'This PC' }), cl.out || !cl.members.length ? null : el('span', { class: 'cluster-tag cluster-loads', text: 'Loads the model' })),
+    here.ram ? el('span', { class: 'hint', text: memWords(here.ram, here.vram) }) : null);
   const joins = el('div', { class: `cluster-link${cl.out ? ' cluster-link-out' : ''}` }, el('span', { class: 'cluster-link-words', text: cl.out
     ? 'This PC connects to the cluster and sends the chat'
     : cl.part === true ? 'This PC takes part: the model loads here' : cl.members.length ? 'Not chosen yet: the model loads on this PC as it always has' : 'No cluster yet' }));
   // "This PC takes part": on is the old way; off is refused by the server, with why, when no member can load the model now.
-  // Never on by itself: with no cluster nothing is set, and a cluster nobody chose for shows Off (the server keeps the old way running until they choose).
-  const chosenPart = cl.members.length > 0 && cl.part === true && !cl.out;
-  const part = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: chosenPart, disabled: !cl.members.length, 'data-key': 'cluster-part', 'aria-label': 'This PC takes part', onchange: async e => {
+  // Never on by itself: nothing chosen shows Off (the server keeps the old way running until they choose). It can be chosen
+  // before any PC is in the cluster: read top to bottom, this switch comes first, and the choice waits for the PCs.
+  const chosenPart = cl.part === true && !cl.out;
+  const part = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: chosenPart, 'data-key': 'cluster-part', 'aria-label': 'This PC takes part', onchange: async e => {
     const want = e.target.checked;
     e.target.disabled = true;
     if (!(await changeCluster({ takesPart: want }, ask))) e.target.checked = !want;
@@ -667,7 +674,7 @@ function drawCluster(pcs, cl) {
     el('span', { class: 'set-tile' }, clusterIcon(ICON_PC, 18)),
     el('span', { class: 'set-txt' }, el('b', { text: 'This PC takes part' }), el('span', { class: 'set-about', text: cl.out
       ? `Off: this PC only connects to the cluster and sends the chat, as text. "${loaderName}" loads the model from its own disk and borrows the other PCs' cards and RAM itself, so this PC's card, processor and network link carry none of the model. Switch it on to load the model here again.`
-      : !cl.members.length ? 'Not set: there is no cluster yet. Nothing is chosen until you put PCs in the cluster and decide here.'
+      : !cl.members.length ? (chosenPart ? 'On: when you put PCs in the cluster, the model loads on this PC, which keeps a share of it on its own card and RAM and sends each other PC its part.' : 'Off: you have not chosen yet, and there is no cluster yet. Switch it on now to choose that this PC loads the model once you put PCs in the cluster below.')
       : cl.part !== true ? 'Off: you have not chosen yet. Until you do, the model loads on this PC as it always has, and nothing here changes by itself. Switch it on to choose that this PC takes part; switch it on and then off to choose that another PC loads the model.'
       : 'On: the model loads on this PC, which keeps a share of it on its own card and RAM and sends each other PC its part over this PC\'s network link. Switch it off to only connect, for example from a laptop on Wi-Fi: the strongest wired PC in the cluster then loads the model, if it can (it needs links of its own to the other PCs, made on it).' })),
     el('span', { class: 'set-side' }, part)));
@@ -728,13 +735,29 @@ function drawCluster(pcs, cl) {
   // the models on the loader's own disk (it never takes a model over this PC's link).
   const many = !cl.out && !!ex;
   if (many && !ex.hasNet()) ex.ask(() => { if (homeUi.view === 'cluster') drawCluster(homeUi.others ?? [], homeUi.cluster ?? cl); });
-  const picker = many ? ex.picker((app.models?.chat ?? []).filter(m => m.installed !== false), homeUi.clusterLlm, r => { homeUi.clusterLlm = r.key; }) : null;
+  const pickedLine = el('p', { class: 'cluster-picked', 'data-key': 'cluster-picked' });
+  const showPicked = r => pickedLine.replaceChildren(el('span', { class: 'hint', text: 'Model: ' }), el('b', { text: r?.name ?? 'none picked yet' }));
+  const picker = many ? ex.picker((app.models?.chat ?? []).filter(m => m.installed !== false), homeUi.clusterLlm, r => { homeUi.clusterLlm = r.key; showPicked(r); }) : null;
+  showPicked(picker?.current());
   const pick = many ? null : el('select', { id: 'cluster-llm', 'data-key': 'cluster-llm', 'aria-label': 'Choose an LLM' }, ...llms.map(m => el('option', { value: m.id, text: String(m.name).split(' · ')[0] })));
   if (pick && llms.some(m => m.id === homeUi.clusterLlm)) pick.value = homeUi.clusterLlm;
   pick?.addEventListener('change', () => { homeUi.clusterLlm = pick.value; });
   const who = el('input', { id: 'cluster-name', 'data-key': 'cluster-name', type: 'text', maxlength: '30', value: homeUi.clusterName ?? spare, 'aria-label': 'Name of the new staff member' });
   who.addEventListener('input', () => { homeUi.clusterName = who.value; });
+  // Staff: one already hired on this PC for chat (not a picture role, not working on a linked PC), or Add staff.
+  const chatStaff = (team.data?.staff ?? homeUi.data?.staff ?? []).filter(x => !['designer', 'artist'].includes(x.role) && !String(x.model ?? '').startsWith('remote:'));
+  const whoPick = el('select', { id: 'cluster-who', 'data-key': 'cluster-who', 'aria-label': 'Who chats with this model', title: 'Someone you have hired takes the model picked above as theirs; Add staff hires someone new with it.' },
+    el('option', { value: '', text: 'Add staff' }), ...chatStaff.map(x => el('option', { value: x.id, text: x.name })));
+  if (chatStaff.some(x => x.id === homeUi.clusterWho)) whoPick.value = homeUi.clusterWho;
+  const whoNew = () => { who.hidden = !!whoPick.value; };
+  whoPick.addEventListener('change', () => { homeUi.clusterWho = whoPick.value; whoNew(); });
+  whoNew();
   const hireAndTalk = async model => {
+    if (whoPick.value) {
+      team.data = await api('/api/staff', { action: 'change', id: whoPick.value, model });
+      await app.talkTo(`staff:${whoPick.value}`);
+      return;
+    }
     team.data = await api('/api/staff', { action: 'hire', name: who.value.trim() || spare, role: 'default', model });
     const hired = team.data.staff.at(-1);
     homeUi.clusterName = undefined;
@@ -769,12 +792,13 @@ function drawCluster(pcs, cl) {
     el('span', { class: 'set-txt' }, el('b', { text: 'Choose an LLM' }), el('span', { class: 'set-about', text: cl.out
       ? (llms.length ? `The models on "${loaderName}", which loads the model for the cluster. Start chat hires someone with that model under the name shown and opens their chat: "${loaderName}" answers, borrowing from the other PCs in the cluster when the model is too big for it alone, and only the chat's words cross this PC's link.` : cl.loaderNoModel || `No chat model is on "${loaderName}" yet.`)
       : many
-        ? 'Any model from anywhere. One on a linked PC is copied here and one not installed is downloaded, with its progress shown, and then the chat starts under the name shown (change it if you like). A model too big for this PC borrows from the cluster when the cluster is on.'
+        ? 'Choose a model from your network.'
         : llms.length
           ? 'Start chat hires someone with that chat model under the name shown (change it if you like) and opens their chat. A model too big for this PC borrows from the cluster when the cluster is on.'
           : 'No chat model is on this PC yet: add one under Models first.' }),
-      many ? picker.node : null),
-    el('span', { class: 'set-side' }, ...(many || llms.length ? [pick, who, startBtn].filter(Boolean) : [el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-models', text: 'Models', onclick: () => app.openModels?.() })]))));
+      many ? picker.node : null,
+      many ? el('div', { class: 'cluster-go' }, pickedLine, el('div', { class: 'cluster-go-row' }, el('label', { class: 'cluster-go-who' }, el('span', { class: 'hint', text: 'Staff' }), whoPick), who, startBtn)) : null),
+    el('span', { class: 'set-side' }, ...(many ? [] : llms.length ? [pick, whoPick, who, startBtn].filter(Boolean) : [el('button', { class: 'btn primary', type: 'button', 'data-key': 'cluster-models', text: 'Models', onclick: () => app.openModels?.() })]))));
   // Shutdown turns the cluster's nodes off, asking each in turn (each asks its own PIN). Never this PC.
   const offAll = members.length ? el('p', { class: 'hint cluster-off' }, el('button', { class: 'btn', type: 'button', 'data-key': 'cluster-off', title: 'Turns each node of the cluster off, one at a time, asking each one for its app lock PIN. This PC stays on.', onclick: async e => {
     const btn = e.currentTarget;
@@ -812,6 +836,7 @@ function drawCluster(pcs, cl) {
           : 'Put at least one PC in the cluster, then switch it on. With no cluster, any linked PC that allows it is borrowed from.' })),
       el('span', { class: 'set-side' }, on))),
     partRow,
+    clusterPlainRow(members, ask),
     specs,
     el('div', { class: 'cluster-cols' },
       // This PC above the cluster's box, joined to it: it connects to the cluster, it is not one of its nodes.
@@ -819,9 +844,54 @@ function drawCluster(pcs, cl) {
         zone(true, 'The cluster', cl.out ? 'Its nodes, strongest first. The one marked "Loads the model" starts it from its own disk and borrows from the others.' : 'Its nodes, strongest first. They lend their card and RAM to this PC, which loads the model.', [members.length ? el('ul', { class: 'cluster-list' }, ...members.map((p, k) => tile(p, true, k))) : el('p', { class: 'hint cluster-empty', text: 'Drag a PC here, or press Add on its tile.' })])),
       zone(false, 'Available', 'Linked PCs not in the cluster: they work as usual. Strongest first.', [others.length ? el('ul', { class: 'cluster-list' }, ...others.map(p => tile(p, false, -1))) : el('p', { class: 'hint cluster-empty', text: usable.length ? 'Every linked PC is in the cluster.' : 'No linked PC yet: link one under Network first.' })])),
     start,
-    app.clusterExtra ? app.clusterExtra.examples() : null,
     gaps || three || offAll ? el('div', { class: 'cluster-under' }, ...[gaps, three, offAll].filter(Boolean)) : null,
   ]);
+}
+
+/**
+ * The Cluster page's "Encrypted links": one switch for every PC in the cluster. Off asks for an unencrypted link to each
+ * (this PC's side, /api/remotes plain-link) and allows it on that PC too (its "Allow unencrypted cluster links", set from
+ * here with its owner's "Allow host to test and change model run settings" tick and its PIN or this PC's key, as the
+ * permissions fold does); a PC that cannot be set from here says what its owner ticks there. On seals them all again.
+ * Only the borrowing of cards and RAM goes unencrypted; every other link (chats, updates, PINs, copies) stays sealed.
+ */
+function clusterPlainRow(members, ask) {
+  if (!members.length) return null;
+  const plainAll = members.every(p => p.plainLink === true);
+  const stateOf = p => (p.plainLink !== true ? 'encrypted' : p.plainNow ? 'NOT encrypted now' : p.plainOk ? 'not encrypted from the next load' : `still encrypted: "${p.name}" has not allowed it there`);
+  const sw = el('label', { class: 'set-sw' }, el('input', { type: 'checkbox', role: 'switch', checked: !plainAll, 'data-key': 'cluster-encrypt', 'aria-label': 'Encrypted links', onchange: async e => {
+    const encrypt = e.target.checked;
+    if (!encrypt && !confirm('Turn off encryption for the cluster?\n\nFaster (about 18% in our test), but anything on your home network could read the model\'s traffic between these PCs, or change it. Only on a wired network you trust. Chats, updates and PINs stay encrypted.')) {
+      e.target.checked = true;
+      return;
+    }
+    e.target.disabled = true;
+    const notes = [];
+    for (const p of members) {
+      try {
+        await api('/api/remotes', { action: 'plain-link', id: p.id, on: !encrypt });
+        if (encrypt || p.plainOk === true) continue;
+        // The other half, on that PC: its own "Allow unencrypted cluster links", set from here when its owner allows it.
+        if (!p.ok || !p.can?.includes('perm-set') || p.allow?.tune !== true) {
+          notes.push(`"${p.name}": tick "Allow unencrypted cluster links" on it (Network, Sharing permissions), or tick "Allow host to test and change model run settings" there so it can be set from here.`);
+          continue;
+        }
+        const r = await permSetWithPin(p, { plainLinks: true });
+        if (r === null) notes.push(`"${p.name}": its PIN was not typed, so it stays encrypted.`);
+      } catch (err) {
+        notes.push(`"${p.name}": ${err.message}`);
+      }
+    }
+    sayHere(ask, encrypt ? 'The cluster\'s links are encrypted again from the next load.' : `Encryption off from the next load (unload and load the model).${notes.length ? ` ${notes.join(' ')}` : ''}`);
+    e.target.disabled = false;
+    refreshOthers();
+  } }), el('i', { 'aria-hidden': 'true' }));
+  return el('div', { class: 'set-card cluster-plain' }, el('div', { class: 'set-row' },
+    el('span', { class: 'set-tile' }, clusterIcon(ICON_PC, 18)),
+    el('span', { class: 'set-txt' }, el('b', { text: 'Encrypted links' }),
+      el('span', { class: 'set-about', text: plainAll ? 'Off: the model\'s traffic between the PCs is not encrypted (faster; only on a network you trust). Switch it on to seal it again.' : 'On: the model\'s traffic between the PCs is encrypted. Switch it off for speed on a wired network you trust (both PCs are set from here).' }),
+      el('span', { class: 'set-about', text: members.map(p => `"${p.name}": ${stateOf(p)}`).join(' · ') })),
+    el('span', { class: 'set-side' }, sw)));
 }
 
 /** A speech bubble: the chat button on each Staff overview card. */
@@ -1501,22 +1571,47 @@ function drawGuestPasses(sh) {
       : p.sync === 'old' ? `cannot hold passes: it ${p.said}`
       : p.sync === 'refused' ? `is behind: it ${p.said}`
       : `is behind: ${p.said}`;
-    $('#node-pass-sync').replaceChildren(...(own && sync.length ? sync.map(p => el('p', { class: `hint${p.sync === 'latest' ? ' ok' : ''}`, text: `${p.name} ${words(p)}.` })) : []));
+    $('#node-pass-sync').replaceChildren(...(own && sync.length ? sync.map(p => el('p', { class: `hint${p.sync === 'latest' ? ' ok' : ''}`, text: `${app.pcLabel(p.id)} ${words(p)}.` })) : []));
   }
   // The PCs and their model ticks, drawn again only when the PCs or their models change, so a tick is not lost to the
   // 3-second refresh.
-  const fsig = JSON.stringify(pcs.map(p => [p.id, p.name, p.models.map(m => [m.id, m.name])]));
+  const fsig = JSON.stringify(pcs.map(p => [p.id, p.name, passPcSpecs(p), p.models.map(m => [m.id, m.name])]));
   if (fsig !== homeUi.drawn.passModels) {
     homeUi.drawn.passModels = fsig;
     const ticked = new Set([...document.querySelectorAll('#node-pass-nodes input:checked')].map(t => t.value));
     const openPcs = new Set([...document.querySelectorAll('#node-pass-nodes details[open]')].map(d => d.dataset.pc));
     $('#node-pass-make').disabled = !pcs.length;
     $('#node-pass-nodes').replaceChildren(...(pcs.length ? pcs.map(p => el('div', { class: 'node-pass-pc' },
-      el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `pc:${p.id}`, 'data-pc': p.id, checked: ticked.has(`pc:${p.id}`) }), ` ${p.self ? `This PC (${p.name})` : p.name}`),
+      el('label', { class: 'check node-pass-pcname' }, el('input', { type: 'checkbox', value: `pc:${p.id}`, 'data-pc': p.id, checked: ticked.has(`pc:${p.id}`) }), ' ', el('b', { text: p.self ? `This PC (${app.pcLabel('here')})` : app.pcLabel?.(p.id) || p.name }), el('span', { class: 'hint', text: passPcSpecs(p) })),
       // The models are one press away: a PC with many would otherwise list them all, again, for every pass.
-      el('details', { class: 'net-more node-pass-models', 'data-pc': p.id, open: openPcs.has(p.id) || p.models.some(m => ticked.has(`m:${p.id}:${m.id}`)) }, el('summary', { text: `Models (${p.models.length})` }), ...(p.models.length ? p.models.map(m => el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `m:${p.id}:${m.id}`, 'data-pc-model': p.id, 'data-model': m.id, checked: ticked.has(`m:${p.id}:${m.id}`) }), ` ${m.name}${m.kind === 'image' ? ' (pictures)' : ''}`)) : [el('p', { class: 'hint', text: p.self ? 'No models on this PC yet.' : 'No models there yet, or it has not answered since it was linked.' })]))))
+      el('details', { class: 'net-more node-pass-models', 'data-pc': p.id, open: openPcs.has(p.id) || p.models.some(m => ticked.has(`m:${p.id}:${m.id}`)) }, el('summary', { text: `Models (${p.models.length})` }), ...passModelCols(p, ticked))))
       : [el('p', { class: 'hint', text: 'Turn on "Enable this PC as a node", or link a node under Find other PCs, to make a guest pass for it.' })]));
   }
+}
+
+/**
+ * What tells a PC on the guest pass form apart, as the left panel says it: its computer name or address when two share
+ * a name, its RAM and card memory, and its make and model ("256 GB / 12 GB VRAM · HP Z820").
+ */
+function passPcSpecs(p) {
+  const hw = app.status?.hardware;
+  const mem = p.self ? (hw?.ram?.total ? { ram: hw.ram.total, vram: hw.gpu && !hw.gpu.shared ? hw.gpu.total : 0 } : null) : homeUi.pcMem?.[p.id];
+  const bits = [p.self ? '' : pcTwinWords()[p.id] ?? '', mem?.ram ? memWords(mem.ram, mem.vram) : '', pcMake(p.self ? 'here' : p.id)].filter(Boolean);
+  return bits.length ? ` · ${bits.join(' · ')}` : '';
+}
+
+/**
+ * One PC's models on the guest pass form: chat models in the left column, picture models in the right, each a tick, with
+ * the advice for a shared network above them (each model loaded takes its own memory on that PC).
+ */
+function passModelCols(p, ticked) {
+  if (!p.models.length) return [el('p', { class: 'hint', text: p.self ? 'No models on this PC yet.' : 'No models there yet, or it has not answered since it was linked.' })];
+  const tick = m => el('label', { class: 'check' }, el('input', { type: 'checkbox', value: `m:${p.id}:${m.id}`, 'data-pc-model': p.id, 'data-model': m.id, checked: ticked.has(`m:${p.id}:${m.id}`) }), ` ${m.name}`);
+  const col = (title, list) => el('div', { class: 'node-pass-col' }, el('b', { text: title }), ...(list.length ? list.map(tick) : [el('span', { class: 'hint', text: 'None' })]));
+  return [
+    el('p', { class: 'hint node-pass-warn', text: '(!) With several people on the network, share one model per PC: each model in use takes its own memory there, so two at once can slow or stop both.' }),
+    el('div', { class: 'node-pass-cols' }, col('Chat', p.models.filter(m => m.kind !== 'image')), col('Pictures', p.models.filter(m => m.kind === 'image'))),
+  ];
 }
 
 /** A pass just made: its code, shown this once, with Copy and Done. */
@@ -1585,12 +1680,22 @@ $('#node-test-net').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
-// Guests: two buttons. Add a node opens the Add another PC fold; Create a guest pass opens its form.
-$('#node-pass-addnode').addEventListener('click', () => {
+// "+ Add a node" on the Network map: Linked PCs, with the Add another PC fold open (it was a button under Guest passes,
+// where it did not belong).
+app.addNode = () => {
   netSection('linked');
   $('#net-add').open = true;
   $('#net-add').scrollIntoView({ block: 'start' });
+};
+// Linked PCs, Guest: connect to someone else's network with the guest pass they gave you: Add another PC, its address
+// and code boxes open (the same link as a node's, with the guest pass code in the code box).
+$('#net-join-guest').addEventListener('click', () => {
+  app.addNode();
+  $('#node-addr-box').open = true;
+  $('#node-addr-box').scrollIntoView({ block: 'nearest' });
+  $('#node-addr').focus();
 });
+// Guest passes: Create a guest pass opens its form.
 $('#node-pass-create').addEventListener('click', e => {
   const form = $('#node-pass-new');
   form.hidden = !form.hidden;
@@ -1608,7 +1713,7 @@ $('#node-pass-make').addEventListener('click', async () => {
     id: t.dataset.pc,
     models: [...document.querySelectorAll('#node-pass-nodes input[data-pc-model]:checked')].filter(m => m.dataset.pcModel === t.dataset.pc).map(m => m.dataset.model),
   }));
-  if (!label) return void (said.textContent = 'Give the pass a name first (whose PC it is for).');
+  if (!label) return void (said.textContent = 'Give the pass the name of the person it is for first.');
   if (!nodes.length) return void (said.textContent = 'Tick at least one PC the pass is for.');
   if (!nodes.some(n => n.models.length)) return void (said.textContent = 'Tick at least one model the guest may use.');
   said.textContent = '';
@@ -1644,6 +1749,7 @@ function drawNodeAllow(sh) {
     all.checked = a.pull && a.backup && a.update && a.tune && a.receive && a.give && a.lend;
     all.indeterminate = !all.checked && (a.pull || a.backup || a.update || a.tune || a.receive || a.give || a.lend);
     if (sh.lend) lendIdleShown(sh.lend.idle);
+    $('#node-plain-links').checked = sh.plainLinks === true;
   }
   // Lending (Cluster or Max mode): whom this PC lends its card memory to now, or how the last loan ended.
   const lend = sh.lend;
@@ -1653,8 +1759,10 @@ function drawNodeAllow(sh) {
   // Run settings a linked PC changed here since TOMLIN started (newest first).
   const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   const changes = (sh.runChanges ?? []).slice(0, 3);
-  $('#node-run-changes').hidden = !changes.length;
-  $('#node-run-changes').textContent = changes.map(c => `Guessing model for ${c.name} set to ${c.draftName || 'none'} by "${c.by}" on ${when(c.at)}.`).join(' ');
+  // And the permissions a linked host changed here (src/permset.ts), so this PC's owner sees what was changed and by whom.
+  const perms = (sh.permChanges ?? []).slice(0, 3);
+  $('#node-run-changes').hidden = !changes.length && !perms.length;
+  $('#node-run-changes').textContent = [...perms.map(c => `${c.said.replace(/\.$/, '')} on ${when(c.at)}.`), ...changes.map(c => `Guessing model for ${c.name} set to ${c.draftName || 'none'} by "${c.by}" on ${when(c.at)}.`)].join(' ');
   $('#node-restarts').hidden = sh.restarts !== false;
   const up = sh.updated;
   $('#node-updated').hidden = !up;
@@ -1703,6 +1811,14 @@ function lendIdleShown(minutes) {
 $('#node-lend-idle').addEventListener('change', e => {
   lendIdleShown(e.target.value);
   nodeShare({ lendIdle: Number(e.target.value) });
+});
+// Allow unencrypted cluster links: asked once more before it goes on, as it opens this PC's model runner to the home network.
+$('#node-plain-links').addEventListener('change', e => {
+  if (e.target.checked && !confirm('Allow unencrypted cluster links?\n\nA linked PC that asks for it borrows this PC\'s card and RAM over a link that is not encrypted. Anything on your home network could then read it, or send this PC\'s model runner commands of its own.\n\nOnly on a wired home network you trust.')) {
+    e.target.checked = false;
+    return;
+  }
+  nodeShare({ plainLinks: e.target.checked });
 });
 
 /** "Models other PCs can use": every model on this PC, in two columns (nothing to tick: linked PCs may use them all). */
@@ -1867,6 +1983,71 @@ async function powerOffWithPin(pc, held) {
       if (nodePin === null) return null;
     }
   }
+}
+
+// ---- That PC's permissions, changed from here (src/permset.ts): its owner's tick "Allow host to test and change model run
+// settings" there, and its PIN (or the host PIN) typed here for each change. Never that tick itself. ----
+
+/** The switches, in the order and words of that PC's own Network page (src/permset.ts PERM_KEYS, PERM_WORDS). */
+const PERM_TICKS = [
+  ['lend', 'Allow to be used as part of a cluster'],
+  ['plainLinks', 'Allow unencrypted cluster links'],
+  ['update', 'Allow host to update TOMLIN remotely'],
+  ['off', 'Allow host to turn this PC off'],
+  ['backup', 'Enable backups'],
+  ['receive', 'Accept models from linked PCs'],
+  ['give', 'Let linked PCs pull TOMLIN updates from here'],
+  ['pull', 'Sharing of models'],
+];
+/** The PCs whose permissions fold is open: it stays open while Network draws the cards again. */
+const permOpen = new Set();
+
+/** One change to linked PC `pc`'s permissions, its PIN asked here (and again after a wrong one). Null on Cancel. */
+async function permSetWithPin(pc, set) {
+  let nodePin;
+  for (;;) {
+    try {
+      return await api('/api/network/perm-set', nodePin === undefined ? { pc: pc.id, set } : { pc: pc.id, set, nodePin });
+    } catch (e) {
+      if (!e.data?.needNodePin) throw e;
+      nodePin = await askAppPin(nodePin !== undefined ? e.message : '', pc.name, { button: 'Change it', about: `To change "${pc.name}"'s permissions, enter either your host PIN, or the PIN of that PC.` });
+      if (nodePin === null) return null;
+    }
+  }
+}
+
+/** "Permissions on <PC>": its switches, as it said last, each changed there with a PIN; or why they cannot be. */
+function permsPart(p) {
+  if (!p.ok || !p.can?.includes('perm-set')) return null;
+  const fold = el('details', { class: 'net-more node-perms' }, el('summary', { text: `Permissions on "${p.name}"` }));
+  fold.open = permOpen.has(p.id);
+  fold.addEventListener('toggle', () => (fold.open ? permOpen.add(p.id) : permOpen.delete(p.id)));
+  if (p.allow?.tune !== true) {
+    fold.append(el('p', { class: 'hint', text: `To change these from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network, Sharing permissions). That one switch is only ever changed at that PC.` }));
+    return fold;
+  }
+  const said = el('p', { class: 'hint', role: 'status' });
+  const now = k => (k === 'plainLinks' ? p.plainOk === true : p.allow?.[k] === true);
+  fold.append(el('p', { class: 'hint', text: 'Each change needs the host PIN or that PC\'s own PIN (none is asked when that PC holds this PC\'s host key), and is said on that PC\'s screen and in its log.' }),
+    ...PERM_TICKS.map(([k, words]) => el('label', { class: 'node-role' }, el('input', { type: 'checkbox', checked: now(k), 'data-key': `perm:${p.id}:${k}`, onchange: async e => {
+      const on = e.target.checked;
+      if (k === 'plainLinks' && on && !confirm(`Allow unencrypted cluster links on "${p.name}"?\n\nA PC that asks for it borrows "${p.name}"'s card and RAM over a link that is not encrypted. Anything on your home network could then read it, or send its model runner commands of its own.\n\nOnly on a wired home network you trust.`)) {
+        e.target.checked = false;
+        return;
+      }
+      e.target.disabled = true;
+      try {
+        const r = await permSetWithPin(p, { [k]: on });
+        if (!r) e.target.checked = !on;
+        said.textContent = r ? r.said : 'Not changed (no PIN given).';
+      } catch (err) {
+        e.target.checked = !on;
+        said.textContent = err.message;
+      }
+      e.target.disabled = false;
+      refreshOthers();
+    } }), ` ${words}`)), said);
+  return fold;
 }
 
 /** Whether this PC may offer to turn linked PC `p` off: it answers, runs a TOMLIN that can, and its owner's tick is on. */
@@ -2225,6 +2406,31 @@ app.updateInstallBack = () => {
   updateHome = null;
 };
 
+/**
+ * "Find it on my network", for a linked PC that is not answering: the home network is scanned and the PC is asked over
+ * its own link at each TOMLIN found, so only that PC can be taken; its new address is saved (src/findagain.ts). `say`
+ * shows the outcome; `done` redraws. Also on the PC window (pcs.js).
+ */
+function findAgainButton(p, say, done) {
+  const b = el('button', { class: 'btn primary', type: 'button', text: 'Find it on my network', 'data-key': `find-again:${p.id}`, title: `Looks for "${p.name}" on your home network, in case the router gave it another address, and connects to it again there. No setup code is needed: only that PC can answer on its link.` });
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    b.textContent = 'Looking…';
+    say(`Looking for "${p.name}" on your home network. This takes a few seconds.`, false);
+    try {
+      const r = await api('/api/remotes', { action: 'find-again', id: p.id });
+      say(r.note ?? `"${p.name}" was found.`, false);
+    } catch (err) {
+      say(err.message, true);
+    }
+    b.disabled = false;
+    b.textContent = 'Find it on my network';
+    done?.();
+  });
+  return b;
+}
+app.findAgainButton = findAgainButton;
+
 /** What a linked PC is, from what it last reported: shown on hover of the (!) beside its name. */
 function pcSpecs(p) {
   const total = bar => bar.segments.reduce((n, s) => n + s.bytes, 0);
@@ -2251,6 +2457,11 @@ function drawOthers(pcs) {
     const inLine = p.ok && p.line && (p.line.running || p.line.waiting) ? ` Line there: ${p.line.running} running, ${p.line.waiting} waiting.` : '';
     const state = guestEnd ?? (away ? `Logged off since ${away}: "I need to log off for now"` : p.ok ? `${p.backupsOnly ? 'Keeps backups' : p.model ? `On: ${p.model}` : 'Asleep: no model loaded'}${asGuest}${inLine}` : p.relink || p.answered ? `Not linked any more: ${p.error} Find it again above, then Link again.` : 'Off: not answering');
     const back = away ? el('button', { class: 'btn primary', type: 'button', text: 'Start it again', 'data-key': `back:${p.id}` }) : null;
+    // Off: perhaps the router gave it another address. Found on the home network over its own link (src/findagain.ts).
+    const findAgain = !p.ok && !p.relink && !p.answered && !guestEnd ? findAgainButton(p, msg => sayHere($('#node-others-ask'), msg), () => {
+      refreshOthers();
+      refreshPcs();
+    }) : null;
     back?.addEventListener('click', async () => {
       back.disabled = true;
       const go = confirm => api('/api/remotes', { action: 'back', id: p.id, confirm });
@@ -2297,6 +2508,25 @@ function drawOthers(pcs) {
       refreshOthers();
     } }), " Don't borrow from it");
     borrow.title = 'Ticked: chat models loaded on this PC never use the card and RAM of that PC. Unticked (the usual): a model too big for this PC alone borrows them whenever that PC allows it.';
+    // Unencrypted cluster link: asked for here, and only used when that PC's owner allows it there too.
+    const plain = el('label', { class: 'node-role' }, el('input', { type: 'checkbox', checked: p.plainLink === true, disabled: p.backupsOnly === true || p.noBorrow === true, 'data-key': `plain-link:${p.id}`, onchange: async e => {
+      const on = e.target.checked;
+      if (on && !confirm(`Use an unencrypted cluster link with "${p.name}"?\n\nFaster: each step on the network took about half the time when measured (1.3 against 2.8 ms). But anything on your home network could read what goes between the PCs, or send "${p.name}"'s model runner commands of its own.\n\nOnly on a wired home network you trust. "${p.name}" must allow it too, and it applies from the next load.`)) {
+        e.target.checked = false;
+        return;
+      }
+      e.target.disabled = true;
+      const box = $('#node-others-ask');
+      try {
+        await api('/api/remotes', { action: 'plain-link', id: p.id, on });
+        sayHere(box, on ? `From the next load, the link to "${p.name}" is not encrypted${p.plainOk ? '' : ` once its owner ticks Allow unencrypted cluster links there; until then it stays sealed`}.` : `The link to "${p.name}" is encrypted again from the next load.`);
+      } catch (err) {
+        sayHere(box, `Unencrypted cluster link was not changed: ${err.message}`);
+      }
+      refreshOthers();
+    } }), ' Unencrypted cluster link');
+    plain.title = 'Ticked, and allowed on that PC too: Max mode and the cluster borrow over a link that is not encrypted. Faster on the network; anything on the home network could read or change it.';
+    const plainLine = !p.ok || p.plainLink !== true ? null : el('span', { class: 'hint', role: 'status', text: p.plainNow ? 'Link: NOT encrypted now (both PCs chose it).' : p.plainOk ? 'Link: unencrypted from the next load (both PCs chose it).' : `Link: sealed. "${p.name}" has not ticked Allow unencrypted cluster links.` });
     const lendLine = !p.ok || p.backupsOnly ? null : el('span', { class: 'hint', text: p.heldByCluster ? 'In the cluster, which is on: held for models too big for this PC. No staff, chats or pictures go to it until the cluster is switched off (Cluster, above).' : lends
       ? (p.noBorrow ? "Cluster: it allows this PC to borrow its card and RAM, but Don't borrow from it is ticked here." : 'Cluster: it allows this PC to borrow its card and RAM for models too big for this PC alone. Nothing to tick here.')
       : 'Cluster: not allowed there. To borrow its card and RAM, tick Allow to be used as part of a cluster on that PC (Network, Sharing and cluster permissions).' });
@@ -2313,7 +2543,11 @@ function drawOthers(pcs) {
       el('span', { class: 'hint node-state', text: state }),
       // Behind this PC (a lower version, or the same one with different files): "Update it" sends this PC's TOMLIN there
       // (it starts the new version by itself), or why not.
-      p.ok && p.update ? el('div', { class: 'node-update' },
+      // An update going there now (or coming here from it): said, with its steps screen, in place of Update it.
+      p.updating ? el('div', { class: 'node-update' },
+        el('span', { class: 'hint', role: 'status' }, el('span', { class: 'net-spin', 'aria-hidden': 'true' }), p.updating.kind === 'pull' ? `Updating this PC to ${p.updating.what} from it now.` : `Updating to ${p.updating.what} now.`),
+        el('button', { class: 'btn', type: 'button', text: 'See progress', 'data-key': `updating:${p.id}`, onclick: () => app.showUpdate?.(p.updating.id) })) : null,
+      p.ok && p.update && !p.updating ? el('div', { class: 'node-update' },
         el('span', { class: 'hint', text: `${pcVersionWords(p, true).line}.${p.update.why ? ` ${p.update.why.charAt(0).toUpperCase()}${p.update.why.slice(1)}.` : ''}` }),
         p.update.why ? null : el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(p, true).button, 'data-key': `update:${p.id}`, onclick: async e => {
           e.target.disabled = true;
@@ -2331,7 +2565,7 @@ function drawOthers(pcs) {
         } })) : null,
       // Ahead of this PC (a newer version, or the same one with different files): "Update this PC from it" takes its
       // TOMLIN here (no PIN there: nothing changes on that PC), or why not.
-      p.ok && p.pull ? el('div', { class: 'node-update' },
+      p.ok && p.pull && !p.updating ? el('div', { class: 'node-update' },
         el('span', { class: 'hint', text: `${pcVersionWords(p, false).line}.${p.pull.why ? ` ${p.pull.why.charAt(0).toUpperCase()}${p.pull.why.slice(1)}.` : ''}` }),
         p.pull.why ? null : el('button', { class: 'btn primary', type: 'button', text: pcVersionWords(p, false).button, 'data-key': `pull:${p.id}`, onclick: async e => {
           e.target.disabled = true;
@@ -2365,8 +2599,10 @@ It shuts down about 15 seconds after it answers, and stays off until someone swi
         } }) : el('span', { class: 'hint', text: p.allow?.off === true ? '' : `Turning it off from here is not allowed there: its owner ticks "Allow host to turn this PC off" (Network, sharing permissions).` })) : null,
       mem ? memLine(p.memory.ram.bar, 'Memory (RAM)') : null,
       mem && p.memory.gpu ? memLine(p.memory.gpu.bar, `Graphics card (${p.memory.gpu.name.replace(/^NVIDIA\s+(GeForce\s+)?/i, '')})`) : null,
-      el('div', { class: 'node-role-row' }, role, borrow, disk),
+      el('div', { class: 'node-role-row' }, role, borrow, plain, disk),
       lendLine,
+      plainLine,
+      permsPart(p),
       p.backupsOnly ? el('span', { class: 'hint', text: 'Keeps backups only: no staff, chats, jobs or pictures run here, and no model is copied to it. First in line for project backups.' }) : null,
       p.ok && !mem ? el('span', { class: 'hint', text: `Its memory is not reported: that PC runs TOMLIN ${p.version || 'older than 2.0.16'}. Update it to see its memory here.` }) : null,
       // The models it lets this PC use by name (hire staff on them here).
@@ -2379,6 +2615,7 @@ It shuts down about 15 seconds after it answers, and stays off until someone swi
             el('ul', {}, ...list.map(m => {
               const bit = m.busy ? (m.kind === 'image' ? 'busy: drawing for someone now' : 'busy: answering someone now') : m.loaded ? 'loaded' : '';
               return el('li', {}, `${m.name}${bit ? ` (${bit})` : ''}`, m.kind !== 'image' && m.guessers?.length ? guessPick(p, m) : null,
+                m.kind !== 'image' && m.cache && p.can?.includes('cache-set') && p.allow?.tune ? cachePick(p, m) : null,
                 m.kind !== 'image' && p.can?.includes('tune') ? el('div', { class: 'guess-pick' }, app.finderButton(`remote:${p.id}:${m.id}`, { name: m.name, pcName: p.name, link: true })) : null);
             })))),
           p.models.some(m => m.guessers?.length) && !p.allow?.tune ? el('span', { class: 'hint', text: `To pick a Guessing model from here, "${p.name}" ticks "Allow host to test and change model run settings" there first (Network, Sharing permissions).` }) : null,
@@ -2388,7 +2625,7 @@ It shuts down about 15 seconds after it answers, and stays off until someone swi
       p.ok && p.model && !away && !p.backupsOnly ? el('span', { class: 'hint' }, p.speed?.expect ? `Speed: ${app.speedWords(p.speed.expect)} (${p.speed.basis === 'answers' ? `the average of ${p.speed.average.n} answers` : 'tested'}) · ` : 'Speed: not measured yet · ', app.speedLink(`remote:${p.id}`, msg => sayHere($('#node-others-ask'), msg), refreshOthers)) : null,
       // Lets go of the models it loaded for linked PCs now (not after its idle minutes), so another can load there. It never
       // cuts one answering or drawing, nor one its own owner loaded; it needs the owner's tick, and says why not in its words.
-      el('div', { class: 'team-actions' }, back, p.ok && !away && !p.backupsOnly && p.can?.includes('tune') && (p.model || p.image?.model || p.models?.some(m => m.loaded)) ? el('button', { class: 'btn', type: 'button', text: 'Free its memory', 'data-key': `free:${p.id}`, title: `Lets "${p.name}" unload the models it loaded for linked PCs, now, so another model can load there. One answering or drawing is left to finish.`, onclick: async e => {
+      el('div', { class: 'team-actions' }, back, findAgain, p.ok && !away && !p.backupsOnly && p.can?.includes('tune') && (p.model || p.image?.model || p.models?.some(m => m.loaded)) ? el('button', { class: 'btn', type: 'button', text: 'Free its memory', 'data-key': `free:${p.id}`, title: `Lets "${p.name}" unload the models it loaded for linked PCs, now, so another model can load there. One answering or drawing is left to finish.`, onclick: async e => {
         const box = $('#node-others-ask');
         e.target.disabled = true;
         try {
@@ -2480,6 +2717,34 @@ function guessPick(p, m) {
     refreshOthers();
   });
   return el('label', { class: 'guess-pick' }, 'Guessing model', sel);
+}
+
+/**
+ * A linked PC's chat model: how it keeps its context there, the cache type and RAM or the card (kept in that PC's own
+ * settings, behind its owner's tick). A long context on a small card can push the model's weights off the card: the
+ * cache in RAM, or a smaller one, gives them back.
+ */
+function cachePick(p, m) {
+  const box = $('#node-others-ask');
+  const send = async (body, undo) => {
+    sel.disabled = ram.disabled = true;
+    try {
+      sayHere(box, (await api('/api/network/run-set', { pc: p.id, model: m.id, ...body })).said);
+    } catch (err) {
+      undo();
+      sayHere(box, err.message);
+    }
+    sel.disabled = ram.disabled = false;
+    refreshOthers();
+  };
+  const sel = el('select', { 'data-key': `cache:${p.id}:${m.id}`, 'aria-label': `Memory for the context of ${m.name} on ${p.name}` },
+    ...[['f16', 'Full size (f16)'], ['q8_0', 'Half (q8_0, almost no loss)'], ['q4_0', 'Quarter (q4_0, some loss)']].map(([v, t]) => el('option', { value: v, text: t, selected: v === m.cache })));
+  sel.addEventListener('change', () => send({ cache: sel.value }, () => (sel.value = m.cache)));
+  const ram = el('input', { type: 'checkbox', 'data-key': `kvram:${p.id}:${m.id}`, checked: m.kvRam === true });
+  ram.addEventListener('change', () => send({ kvRam: ram.checked }, () => (ram.checked = m.kvRam === true)));
+  return el('div', { class: 'guess-pick' },
+    el('label', {}, 'Memory for the context', sel),
+    el('label', { class: 'check', title: 'The context cache is kept in RAM there, not on its graphics card, so the card keeps its room for the model. Reading a long prompt can be slower.' }, ram, ' Keep the context in RAM'));
 }
 
 async function refreshNodes() {
@@ -2776,13 +3041,13 @@ let updateAllFaults = '';
  * behind this one and can be updated now, read fresh, the host PIN asked once and a PC without it asking its own.
  */
 async function updateAllLinked() {
-  const buttons = ['#node-update-all', '#node-fast-update', '#rail-fast-update'].map(q => $(q)).filter(Boolean);
+  const buttons = ['#node-update-all', '#node-fast-update', '#rail-fast-update', '#net-push-updates'].map(q => $(q)).filter(Boolean);
   for (const x of buttons) x.disabled = true;
   updateAllFaults = '';
   const failed = [];
   let can = [];
   try {
-    can = ((await api('/api/nodes/others')).pcs ?? []).filter(p => p.ok && p.update && !p.update.why);
+    can = ((await api('/api/nodes/others')).pcs ?? []).filter(p => p.ok && p.update && !p.update.why && !p.updating);
   } catch (err) {
     failed.push(err.message);
   }
@@ -2811,15 +3076,38 @@ async function updateAllLinked() {
   updateAllFaults = failed.length ? `Not started on ${failed.join(' ')}` : '';
   const line = $('#node-update-all-line');
   if (line) line.textContent = updateAllFaults;
+  // On Manage updates too, under Push updates to network: what could not start, or nothing when all did.
+  if (updateAllFaults && $('#net-push-line')) $('#net-push-line').textContent = updateAllFaults;
   // The updates under way show in Models on my other PCs, each with its own line.
   if (failed.length < Math.max(can.length, 1)) app.openNet?.();
   for (const x of buttons) x.disabled = false;
   refreshOthers();
 }
 
+// The top of the Network page: Scan for hardware changes (this PC and every linked PC read their hardware again,
+// src/jobrun/hwscan.ts). Manage updates: Push updates to network (the same run as Update all linked PCs).
+$('#net-hw-scan').addEventListener('click', async e => {
+  const b = e.currentTarget;
+  const said = $('#net-head-said');
+  b.disabled = true;
+  said.hidden = false;
+  said.textContent = 'Reading the hardware of this PC and each linked PC…';
+  try {
+    const r = await api('/api/network/hardware-scan', {});
+    said.textContent = r.said;
+    // This PC's new figures come with the next status (every second); the linked PCs' are read again now.
+    refreshOthers();
+  } catch (err) {
+    said.textContent = err.message;
+  }
+  b.disabled = false;
+});
+$('#net-push-updates').addEventListener('click', () => updateAllLinked());
+
 /** The linked PCs this one can update now (behind it, and nothing stopping it), on the Update all button. */
 function drawUpdateAll(pcs) {
-  const can = pcs.filter(p => p.ok && p.update && !p.update.why);
+  // One already being updated is not counted: it shows "Updating" on its card, with See progress.
+  const can = pcs.filter(p => p.ok && p.update && !p.update.why && !p.updating);
   const stuck = pcs.filter(p => p.ok && p.update?.why);
   const off = pcs.filter(p => !p.ok).length;
   const b = $('#node-update-all');
@@ -2827,6 +3115,8 @@ function drawUpdateAll(pcs) {
   const fast = $('#node-fast-update');
   b.disabled = !can.length;
   b.textContent = can.length ? `Update all linked PCs (${can.length})` : 'Update all linked PCs';
+  const push = $('#net-push-updates');
+  if (push) push.textContent = can.length ? `Push updates to network (${can.length})` : 'Push updates to network';
   if (fast) {
     fast.hidden = !can.length;
     fast.replaceChildren(clusterIcon(ICON_BOLT), `Fast update (${can.length})`);

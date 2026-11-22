@@ -209,3 +209,29 @@ test('a chat over the context: llama.cpp\'s refusal becomes ContextFull with its
   assert.equal(less.room, Math.floor(one.room * 0.7));
   assert.ok(less.used <= less.room && less.used < one.used);
 });
+
+test('past full, a long paste and the question after it keep the same start: one re-read, not two', () => {
+  // The 22 Nov 256K run, made small: a chat past full, then a paste of about a sixth of the room, its short answer, and
+  // a one-line question. The start chosen on the paste's turn is the start on the question's turn (the prompt's top is
+  // the same, so llama.cpp reads only what is new). Before, the paste was counted apart from the chat on its own turn
+  // and inside it on the next, and the start moved on both: two full re-reads.
+  const ctx = 32768;
+  const build = (history: ChatLine[], message: string) => buildChat({ ctx, maxAnswer: ANSWER_CEILING, card: '', team: null, own: null, name: 'Qwen', history, message });
+  const room = build([], 'x').room;
+  const paste = (n: number) => `Here is the next part, ${n}.\n` + 'Section text with a procedure code and a date.\n'.repeat(Math.floor(room / 6 / 48));
+  let tried = 0;
+  let cut = 0;
+  for (let n = 30; n < 140; n++) {
+    const before = chat(n);
+    const p = paste(n);
+    const one = build(before, p);
+    if (one.fill <= 100) continue;
+    tried++;
+    const after = [...before, line('user', p), line('assistant', 'The code is ZX-1234.')];
+    const two = build(after, 'Question. What is the code? Answer in one sentence.');
+    assert.ok(two.used <= two.room && one.used <= one.room, `chat of ${n}: what is sent fits`);
+    if (one.parts.find(x => x.key === 'summary')?.state === 'cut') cut++;
+    assert.equal(front(two.turns), front(one.turns), `chat of ${n}: the question's turn starts where the paste's did`);
+  }
+  assert.ok(tried > 50 && cut > 50, `${tried} chats past full, ${cut} cut`);
+});

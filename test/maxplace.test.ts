@@ -88,7 +88,9 @@ test('a bigger model is spread over the lenders by the room each has, each lende
   assert.ok(p.split[0] > p.split[2] * 3 && p.split[2] > 0);
   assert.equal(p.override.length, 2);
   assert.match(p.override[0], /=RPC1\[127\.0\.0\.1:5001\]$/);
-  assert.match(p.override[1], /=RPC3\[127\.0\.0\.1:5002\]$/);
+  // Device RPC3 for -dev, but buffer type RPC1[its address] for -ot: llama.cpp numbers buffer types within each server
+  // (22 Nov 2026: "RPC3[...]" stopped the runner at once with "unknown buffer type").
+  assert.match(p.override[1], /=RPC1\[127\.0\.0\.1:5002\]$/);
   // The layers a rule names are the ones llama.cpp gives that lender's card: the first n, then the next m.
   const first = p.split[0];
   assert.ok(p.override[0].startsWith('blk\\.(0|1|'));

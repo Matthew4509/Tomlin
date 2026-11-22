@@ -2,7 +2,7 @@
 // instead. Send the last message to someone else who is online (the Send to window, to read it first), or pick another
 // model for them: PC | Model rows (same model first; a smaller one answers as an intern, drafts only), filtered by All,
 // Fits this PC, Fits a chosen PC, Fits their level. The message is sent again once a backup is picked: just this time,
-// until their PC is back (the default), or always (it becomes their fallback).
+// until their PC is back (the default), or always (it becomes their first choice).
 'use strict';
 
 const backupDlg = $('#backup-dlg');

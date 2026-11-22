@@ -182,7 +182,36 @@ export function sealedPipe(plain: Duplex, wire: Duplex, keys: { send: Buffer; re
  * gave up) gets the new stream closed at once, never held open by its heartbeats (the other PC would go on lending to
  * nobody). Resolves with why it ended, as sealedPipe; rejects when the stream could not be opened (`plain` is closed).
  */
-export async function joinWhenOpen(plain: Duplex, open: () => Promise<{ socket: Duplex; keys: { send: Buffer; read: Buffer }; head?: Buffer }>, side: Side = 'host'): Promise<string> {
+/**
+ * The runner's connection and the wire joined as they are, NOT sealed: only when both PCs chose it ("Unencrypted cluster
+ * link" on the borrowing PC, "Allow unencrypted cluster links" on the lending one), after a sealed opening. Anything on the
+ * home network can then read and change the bytes, the RPC commands included. About half the time a step takes on the
+ * network (22 Nov 2026: a layer there and back 1.33 ms against 2.82 sealed). Either side ending ends both. Resolves ''
+ * when one side simply closed.
+ */
+export function plainPipe(plain: Duplex, wire: Duplex, head?: Buffer): Promise<string> {
+  for (const s of [plain, wire]) (s as Duplex & { setNoDelay?: (on?: boolean) => unknown }).setNoDelay?.(true);
+  return new Promise(resolve => {
+    let over = false;
+    const end = (why = '') => {
+      if (over) return;
+      over = true;
+      plain.destroy();
+      wire.destroy();
+      resolve(why);
+    };
+    for (const s of [plain, wire]) {
+      s.on('close', () => end());
+      s.on('end', () => end());
+      s.on('error', () => end());
+    }
+    if (head?.length) plain.write(head);
+    wire.pipe(plain);
+    plain.pipe(wire);
+  });
+}
+
+export async function joinWhenOpen(plain: Duplex, open: () => Promise<{ socket: Duplex; keys: { send: Buffer; read: Buffer }; head?: Buffer; plain?: boolean }>, side: Side = 'host'): Promise<string> {
   plain.pause();
   let gone = false;
   const goneNow = () => void (gone = true);
@@ -203,5 +232,6 @@ export async function joinWhenOpen(plain: Duplex, open: () => Promise<{ socket: 
     return 'the runner closed its side before the stream opened';
   }
   plain.resume();
+  if (wire.plain === true) return plainPipe(plain, wire.socket, wire.head);
   return sealedPipe(plain, wire.socket, wire.keys, side, { head: wire.head });
 }

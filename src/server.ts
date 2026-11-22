@@ -26,7 +26,7 @@ import { addDoc, chatGet, chatPost } from './server/chat.ts';
 import { picturesGet, picturesPost } from './server/pictures.ts';
 import { previewFile, projectPost, workGet, workPost } from './server/work.ts';
 import { teamGet, teamPost } from './server/team.ts';
-import { hfGet, hfPost } from './server/hf.ts';
+import { hfGet, hfPost, resumeDownloads } from './server/hf.ts';
 import { modelHomeGet, modelHomePost } from './server/modelhome.ts';
 import { backupHomeGet, backupHomePost } from './server/backuphome.ts';
 import { noticesGet, noticesPost, tellChat } from './server/notices.ts';
@@ -209,6 +209,8 @@ const started = () => {
     }).catch(() => undefined);
   }
   // What could fill a drive is kept within bounds, and a nearly full drive is said (src/diskcare.ts lists each cleanup).
+  // The downloads list carries on where it was (src/dlqueue.ts): the one that was running starts again from its .part.
+  resumeDownloads();
   startDiskCare({ data: HOME.data, models: () => [modelsHome.dir(), HOME.models], get keptRoot() { return backupsHome.dir(); }, runtimes, notifier, mutes });
   // Sharing this PC as a worker is off unless its owner turned it on in Jobs.
   void jobRoutes.startShare().catch(error => console.error(`Sharing as a worker could not start: ${(error as Error).message}`));

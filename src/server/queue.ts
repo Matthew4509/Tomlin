@@ -26,9 +26,6 @@ const FILE = join(HOME.data, 'queue.json');
 let now: Queue = Q.EMPTY;
 /** The items running now: Stop or Cancel reaches each through its controller (the reason says which). */
 const live = new Map<string, { ac: AbortController; why: 'cancel' | 'stop' | null; stage: string; step?: number; steps?: number; eta?: number | null; since: number }>();
-/** Put back for now (its PC was busy or off): tried again after this long, up to MAX_TRIES times. */
-const AGAIN_MS = 2 * 60_000;
-const MAX_TRIES = 30;
 
 async function change(fn: (q: Queue) => void): Promise<Queue> {
   now = await updateData<Queue>(FILE, Q.EMPTY, raw => {
@@ -140,9 +137,7 @@ async function run(id: string): Promise<void> {
   // Stop (pause) puts it back to run again on Resume; Cancel ends it; busy or off for now: tried again in a while.
   if (state.why === 'stop') out = { state: 'waiting', note: 'Stopped: it runs again when you press Resume.' };
   else if (state.why === 'cancel') out = { state: 'cancelled' };
-  else if (out.state === 'failed' && out.error && Q.forNow(out.error) && (it.tries ?? 0) < MAX_TRIES) {
-    out = { state: 'waiting', note: `${out.error.replace(/\.$/, '')}. Tried again in ${AGAIN_MS / 60_000} minutes.`, after: Date.now() + AGAIN_MS, tries: (it.tries ?? 0) + 1 };
-  }
+  else out = Q.againLater(out, it.tries);
   const ended = Q.isFinished(out as QItem) ? new Date().toISOString() : undefined;
   await change(q => {
     const y = find(q, id);

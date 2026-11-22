@@ -71,7 +71,7 @@ test('the pencil on their picture opens the Look in a pop-up of its own, closed 
 test('Help, the Models page hint and the README name the new layout, not the tabs', () => {
   assert.doesNotMatch(read('public/models.js'), /then PC settings/);
   assert.doesNotMatch(read('README.md'), /Look, Staff settings and PC settings tabs/);
-  assert.ok(read('README.md').includes('Edit staff is one page (2.0.65; it had three tabs)'));
+  assert.ok(read('README.md').includes('Edit staff is one page: who they are'));
 });
 
 test('the Role list shows each role\'s icon on the right of its row, with a line between the chat and the picture roles', () => {

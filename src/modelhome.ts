@@ -347,9 +347,23 @@ export async function freeOn(dir: string): Promise<number> {
  * where to choose it. Empty when none has.
  */
 export function otherDriveHint(need: number, here: string, all: Drive[]): string {
+  const d = roomyDrive(need, here, all);
+  return d ? ` Or keep your models on another drive: ${d.drive}${d.label ? ` (${d.label})` : ''} has ${gb(d.free)} free. Choose it under Network Storage (or Models, Import models, Where models are kept).` : '';
+}
+
+/** The drive other than `here`'s with the most room for `need` and the spare, never one formatted FAT (no file over 4 GB). */
+function roomyDrive(need: number, here: string, all: Drive[]): Drive | undefined {
   const at = driveOf(here);
-  const d = all.filter(x => x.drive !== at && x.free >= need + SPARE).sort((a, b) => b.free - a.free)[0];
-  return d ? ` Or keep your models on another drive: ${d.drive}${d.label ? ` (${d.label})` : ''} has ${gb(d.free)} free. Choose it under Models, Import models, Where models are kept.` : '';
+  return all.filter(x => x.drive !== at && x.free >= need + SPARE && !/^fat(32|16|12)?$/i.test(x.fs)).sort((a, b) => b.free - a.free)[0];
+}
+
+/**
+ * The same, said by a PC that was sent a model it has no room for, to the PC that sent it: that PC's owner picks the
+ * drive here (nothing is changed from the other PC).
+ */
+export function theirDriveHint(need: number, here: string, all: Drive[]): string {
+  const d = roomyDrive(need, here, all);
+  return d ? ` It has ${gb(d.free)} free on ${d.drive}${d.label ? ` (${d.label})` : ''}: pick its ${d.drive} under Network Storage, Where each PC runs its models from (on the PC that sent it, or on this one), then send it again.` : '';
 }
 
 /** The models on this PC, by the drive each is on: for the list split C:, D:, USB. */

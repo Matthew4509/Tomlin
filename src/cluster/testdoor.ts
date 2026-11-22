@@ -39,6 +39,12 @@ export interface TestAsk {
   all: boolean;
   minutes: number;
   nonce: Buffer;
+  /** The RPC server's CPU threads (0: its default). */
+  threads: number;
+  /** The CPU socket (NUMA node) to keep it on, or -1 for none. */
+  node: number;
+  /** Lend only the RAM and cores, not the card. */
+  cpu: boolean;
 }
 
 /** How long a stream's end reason is kept for the linked PC to ask, and the most kept at once. */
@@ -68,7 +74,11 @@ export function readAsk(body: Record<string, unknown>): TestAsk | string {
   const build = typeof body.build === 'string' && /^b\d{3,6}$/.test(body.build) ? body.build : '';
   const asked = Number(body.minutes);
   const minutes = Number.isFinite(asked) && asked > 0 ? Math.min(TEST_MAX_MINUTES, Math.max(1, Math.round(asked))) : TEST_MINUTES;
-  return { target, plain: body.plain === true, build, all: body.all === true, minutes, nonce };
+  const t = Number(body.threads);
+  const threads = Number.isInteger(t) && t >= 1 && t <= 256 ? t : 0;
+  const n = Number(body.node);
+  const node = body.node !== undefined && Number.isInteger(n) && n >= 0 && n <= 7 ? n : -1;
+  return { target, plain: body.plain === true, build, all: body.all === true, minutes, nonce, threads, node, cpu: body.cpu === true };
 }
 
 /** Whether an Upgrade is for this door (the worker's upgrade handler sends the rest to Max mode). */
@@ -87,7 +97,8 @@ export interface DoorDeps {
   program: (build: string) => maxlend.RpcProgram | null;
   builds: () => string[];
   /** Starts an RPC server for one test stream (127.0.0.1 only) and says how to stop it. */
-  startRpc: (p: maxlend.RpcProgram) => Promise<{ port: number; stop: () => void }>;
+  /** `node`: the CPU socket to keep it on (-1: none). */
+  startRpc: (p: maxlend.RpcProgram, node: number) => Promise<{ port: number; stop: () => void }>;
   say: (line: string) => void;
 }
 
@@ -164,7 +175,7 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       if (!program) return no(409, `"${st.name}" does not have the ${ask.build ? `llama.cpp ${ask.build}` : 'llama.cpp'} runner unpacked (it has ${deps.builds().join(' or ') || 'none'}).`);
       let started: { port: number; stop: () => void };
       try {
-        started = await deps.startRpc({ ...program, all: ask.all });
+        started = await deps.startRpc({ ...program, all: ask.all, ...(ask.threads ? { threads: ask.threads } : {}), ...(ask.cpu ? { cpuOnly: true } : {}) }, ask.node);
       } catch (e) {
         return no(409, `"${st.name}" could not start its RPC server: ${(e as Error).message}.`);
       }
@@ -181,7 +192,7 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
     const nodeNonce = newNonce();
     const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url'), plain: ask.plain, target: ask.target, minutes: ask.minutes });
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: ${CLUSTER_TEST_UPGRADE}\r\nconnection: Upgrade\r\nx-link: ${answer}\r\n\r\n`);
-    deps.say(`Cluster test for "${who.name}": ${ask.target === 'rpc' ? `this PC's RPC server (${ask.all ? 'card, RAM and cores' : 'card'})` : 'an echo'}, ${ask.plain ? 'NOT encrypted' : 'sealed'}, ${ask.minutes} minutes at most.`);
+    deps.say(`Cluster test for "${who.name}": ${ask.target === 'rpc' ? `this PC's RPC server (${ask.cpu ? 'RAM and cores' : ask.all ? 'card, RAM and cores' : 'card'}${ask.threads ? `, ${ask.threads} threads` : ''}${ask.node >= 0 ? `, CPU socket ${ask.node}` : ''})` : 'an echo'}, ${ask.plain ? 'NOT encrypted' : 'sealed'}, ${ask.minutes} minutes at most.`);
 
     let ended = '';
     // Which end closed first, for an end with no other reason (a sealed pipe ending destroys both at once after).

@@ -285,6 +285,22 @@ export function cleanOwed(raw: unknown): Owed[] {
   });
 }
 
+/**
+ * How long an owed answer is asked for while its PC does not answer: the node keeps a finished answer KEEP_MS, so a
+ * day more than that after it was asked, it cannot be there any more. Without an end, a PC that never came back was
+ * asked once a minute for ever, and the chat said "still working on it" for ever.
+ */
+export const OWED_GIVE_UP_MS = KEEP_MS + 24 * 3600_000;
+
+/** An owed answer whose PC has not answered for so long that the answer cannot be collected any more. */
+export function owedExpired(o: Pick<Owed, 'at'>, now = Date.now()): boolean {
+  const at = Date.parse(o.at);
+  return Number.isFinite(at) && now - at > OWED_GIVE_UP_MS;
+}
+
+/** Why an owed answer was given up (owedExpired), as the note under it says. */
+export const owedExpiredWhy = (name: string) => `${name || 'That PC'} did not answer for over ${Math.round(OWED_GIVE_UP_MS / (24 * 3600_000))} days, and it keeps a finished answer for ${Math.round(KEEP_MS / (24 * 3600_000))} days only, so this answer cannot be collected any more. Send your message again.`;
+
 /** The line that stands in a chat for an answer still owed: the words so far (or none), and who is writing it. */
 export function owedLine(o: Owed, text = ''): ChatLine {
   return { role: 'assistant', content: text, at: o.at || new Date().toISOString(), ran: o.ran, waiting: { rid: o.rid, pc: o.pc, name: o.name } };

@@ -75,6 +75,11 @@ const WORKING = 512 * MB;
 const DRAFT_WORKING = 0.3 * GB;
 /** A guessing model's cache over this is given q8_0 (its own only; the big model's cache is left alone). */
 const BIG_DRAFT_CACHE = 0.25 * GB;
+/**
+ * A context cache this big (f16) is worth halving even on a mixture-of-experts model: the card room it frees takes more of
+ * the model. Measured on the Z820's 3060, Qwen3.8 at 262,144 (6 GB of cache): q8_0 wrote 2.32 tok/s at 17k against 1.54.
+ */
+const BIG_CACHE = 2 * GB;
 const family = (name: string) => name.toLowerCase().split('-')[0];
 const gbText = (n: number) => `${(Math.round((n / GB) * 10) / 10).toFixed(1)} GB`;
 
@@ -176,6 +181,7 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
     if (!r.draft && r.spec !== 'ngram') add(quick, { id: 'ngram', name: 'Copy-ahead', why: 'Guesses from words already in the chat: helps when an answer repeats them (edits, quotes). No second model.', run: { ...r, spec: 'ngram' } });
   };
   const sweepN = firstSweep(pc, m, now);
+  const q8Moe = (bytes: number): Setup => ({ id: 'q8', name: 'Smaller context cache (q8_0)', why: `The context cache takes about ${(bytes / GB).toFixed(1)} GB of card memory at this context: q8_0 halves it, so more of the model fits on the card. Answers stay as good (q4_0 is never tried).`, run: q8Run(r) });
   const sweep = (step: number, quick: boolean) => {
     const n = sweepN - 2 * step;
     if (sweepN && n >= 1) add(quick, { id: `layers-${n}`, name: `The experts of ${n} layers in RAM, the rest on the card`, why: 'More of the model on the card, worked out from its sizes and the card\'s free memory.', run: { ...r, place: 'layers', moeCpu: n }, sweep: step });
@@ -193,6 +199,9 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
     // A mixture-of-experts model with experts left in RAM (section 2b): the card filled first, then the guessing model
     // beside it on the card (k expert layers pushed back to RAM to make room) or in RAM.
     const k = draftLayers(m);
+    // A big context cache first: halving it frees more card room than anything else here.
+    const bigCache = r.cache === 'f16' && m.ctxBytes >= BIG_CACHE;
+    if (bigCache) add(true, q8Moe(m.ctxBytes));
     margin(true, 512);
     sweep(0, true);
     if (guesser) add(true, { id: 'draft-card', name: `Guessing model ${guesser.name} on the card`, why: `It takes card room of its own: the experts of ${k} more layers go to RAM to make room.`, run: draftRun({ place: 'layers', moeCpu: Math.min(m.layers, sweepN + k) }), follows: 'sweep', plus: k });
@@ -202,6 +211,7 @@ export function setupsFor(pc: PcFacts, m: ModelFacts, now: NowFacts, size: 'quic
     threadRows(!guesser, false);
     sweep(2, false);
     if (r.place !== 'ram') add(false, { id: 'experts-ram', name: 'Every expert in RAM, the rest on the card', why: 'Frees the card for the rest; sometimes as fast.', run: { ...r, place: 'ram' } });
+    if (r.cache === 'f16' && !bigCache) add(false, q8Moe(m.ctxBytes));
     fa(false, 'on');
     ngram(false);
     threadRows(false, true);

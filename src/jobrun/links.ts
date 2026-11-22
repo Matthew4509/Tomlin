@@ -24,6 +24,7 @@ import { cleanClusterHello } from '../cluster/loader.ts';
 import { cardFix } from '../pccards.ts';
 import { cleanSpeed } from '../speedtest.ts';
 import { d, sleep } from './shared.ts';
+import { plainNow } from './plainlinks.ts';
 import type { Brain, Hello } from '../jobrun.ts';
 
 /** A node's "running since" and how long that PC has been on, as it said (2.0.39 on). */
@@ -143,17 +144,35 @@ export function pcAsks(): { pc: string; name: string; hours: number; at: string 
   return [...seen.entries()].filter(([, h]) => h.ask && !h.away).map(([pc, h]) => ({ pc, name: h.name, hours: h.ask!.hours, at: h.ask!.at }));
 }
 
+/**
+ * Whether this linked PC answers at another address over its own sealed link (src/findagain.ts): only the same PC holds
+ * that link's keys, so another PC there cannot pass. Nothing is saved and nothing of what it says is kept.
+ */
+export async function answersAt(r: Remote, url: string, ms = 4000): Promise<boolean> {
+  try {
+    const res = await linkFetch({ ...r, url }, '/worker/hello', {}, AbortSignal.timeout(ms));
+    if (!res.ok) return false;
+    const data = (await res.json().catch(() => null)) as unknown;
+    return !!data && typeof data === 'object';
+  } catch {
+    return false;
+  }
+}
+
 /** Called after each hello a linked PC answered (src/jobrun/passsync.ts: its guest passes go when it is behind). */
 export const helloHooks: ((r: Remote, h: Hello) => void)[] = [];
 
 export async function hello(r: Remote, ms = 4000): Promise<Hello> {
   let res: Response;
+  const signal = AbortSignal.timeout(ms);
   try {
-    res = await linkFetch(r, '/worker/hello', {}, AbortSignal.timeout(ms));
+    res = await linkFetch(r, '/worker/hello', {}, signal);
   } catch (e) {
-    // Not answering: what it said before no longer counts as "on" (its staff show as off).
-    seen.delete(r.id);
-    throw e;
+    // Out of time: the PC may be on and busy (a long chat, a disk waking), so what it said is kept until a check with
+    // more time says otherwise (checkSlow). Not answering at all, or refused: it no longer counts as "on".
+    if (!signal.aborted) seen.delete(r.id);
+    else if (ms < SLOW_MS) checkSlow(r);
+    throw Object.assign(e instanceof Error ? e : new Error(String(e)), { timedOut: signal.aborted });
   }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
@@ -189,6 +208,9 @@ export async function hello(r: Remote, ms = 4000): Promise<Hello> {
     away: typeof data.away === 'string' && !Number.isNaN(Date.parse(data.away)) ? data.away : null,
     ask: askOf(data.ask),
     allow: data.allow && typeof data.allow === 'object' ? carry.cleanAllow(data.allow) : null,
+    // Kept, so this PC's card says when that PC allows an unencrypted link (it was dropped here before 2.1.8: always "sealed").
+    plainLinks: data.plainLinks === true,
+    chatChars: Number.isSafeInteger(data.chatChars) && (data.chatChars as number) > 0 ? (data.chatChars as number) : 0,
     restarts: data.restarts === true,
     up: upOf(data.up),
     meter: meterOf(data.meter),
@@ -671,14 +693,41 @@ function helloShared(r: Remote): Promise<Hello> {
   if (now) return now;
   const p = hello(r, 3000).then(h => {
     missed.delete(r.id);
+    slowAt.delete(r.id);
     return h;
   }, (e: unknown) => {
-    missed.set(r.id, Date.now());
+    // Out of time is not "off": hello() has asked again with more time, which decides.
+    if (!timedOut(e)) missed.set(r.id, Date.now());
     throw e;
   }).finally(() => asking.delete(r.id));
   asking.set(r.id, p);
   return p;
 }
+
+const timedOut = (e: unknown) => (e as { timedOut?: boolean } | null)?.timedOut === true;
+/** A check with this long, after a 3 s one ran out of time: a PC that answers within it is on, only slow. */
+export const SLOW_MS = 30_000;
+const slowAsking = new Map<string, Promise<void>>();
+/** When each PC last answered only the longer check (shown as "slow to answer" until it answers in time again). */
+const slowAt = new Map<string, number>();
+/**
+ * After a 3 s hello ran out of time: one more with 30 s, in the background. Answered: the PC is on (what it said is
+ * kept, marked slow). Not answered then either: it is off, and what it said before no longer counts.
+ */
+function checkSlow(r: Remote): void {
+  if (slowAsking.has(r.id)) return;
+  const p = hello(r, SLOW_MS).then(() => {
+    missed.delete(r.id);
+    slowAt.set(r.id, Date.now());
+  }, () => {
+    seen.delete(r.id);
+    slowAt.delete(r.id);
+    missed.set(r.id, Date.now());
+  }).finally(() => slowAsking.delete(r.id));
+  slowAsking.set(r.id, p);
+}
+/** Whether a PC is on but slow now: it last answered only the longer check, or is being asked with it now. */
+export const isSlow = (id: string) => slowAsking.has(id) || slowAt.has(id);
 
 /**
  * Each linked PC as it is now: asked (a hello each, 3 s at most for one that is off). `known`: from what each said last
@@ -695,13 +744,24 @@ export async function remoteStatus(o: { known?: boolean } = {}) {
         const off = (missed.get(r.id) ?? 0) > (was?.at ?? 0);
         throw Object.assign(new Error(off ? `"${r.name}" did not answer` : `"${r.name}" has not answered yet`), { asking: !off });
       }
-      const h = was ?? await helloShared(r);
+      let h: Hello & { at?: number };
+      try {
+        h = was ?? await helloShared(r);
+      } catch (e) {
+        // Out of time but it answered before (and a check with more time is under way): on, as it said last, and slow.
+        // Never answered yet: "asking", not off, until that longer check says.
+        const last = seen.get(r.id);
+        if (!timedOut(e)) throw e;
+        if (!last) throw Object.assign(new Error(`"${r.name}" is slow to answer: asked again with more time`), { asking: true });
+        h = last;
+      }
+      const slow = isSlow(r.id);
       const behind = update.updateWhy({ name: r.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, d.version, d.build());
       // build: the 7 characters shown beside its version ('' from an older TOMLIN); update.other: the same version with
       // different files, and update.build this PC's, for "Runs 2.0.48 but different files from this PC (build x there, y here)".
-      return { id: r.id, name: r.name, url: r.url, ok: true, role: r.role, expires: h.guest?.expires ?? r.expires ?? null, caps: h.guest?.caps ?? null, line: h.line ?? null, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, drives: h.drives, modelsDrive: h.modelsDrive, cpu: h.cpu ?? null, runner: h.runner, held: h.held, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
+      return { id: r.id, name: r.name, url: r.url, ok: true, slow, role: r.role, expires: h.guest?.expires ?? r.expires ?? null, caps: h.guest?.caps ?? null, line: h.line ?? null, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, drives: h.drives, modelsDrive: h.modelsDrive, cpu: h.cpu ?? null, runner: h.runner, held: h.held, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, plainLink: r.plainLink === true, plainOk: h.plainLinks === true, plainNow: plainNow.has(r.id), inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
     } catch (e) {
-      return { id: r.id, name: r.name, url: r.url, ok: false, role: r.role, expires: r.expires ?? null, passEnd: r.passEnd ?? null, canAsk: r.passEnd?.canAsk === true && !r.askOut, ask: r.askOut ? { state: 'waiting', at: r.askOut.at, reason: '', held: true } : r.passEnd?.ask ?? null, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), seenAt: seen.get(r.id)?.at ?? null, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true, asking: (e as { asking?: boolean }).asking === true };
+      return { id: r.id, name: r.name, url: r.url, ok: false, role: r.role, expires: r.expires ?? null, passEnd: r.passEnd ?? null, canAsk: r.passEnd?.canAsk === true && !r.askOut, ask: r.askOut ? { state: 'waiting', at: r.askOut.at, reason: '', held: true } : r.passEnd?.ask ?? null, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, plainLink: r.plainLink === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), seenAt: seen.get(r.id)?.at ?? null, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true, asking: (e as { asking?: boolean }).asking === true };
     }
   }));
 }

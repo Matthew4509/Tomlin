@@ -2,6 +2,7 @@
 // node for (its admins) sit above it, this PC in the middle, the PCs it connects to (its nodes) below, then "Add a node".
 // Each box's buttons open the part of the page that does the work (the role tabs and their sections stay as they were),
 // so nothing here changes a setting by itself except "Set as node" / "Stop being a node", which is the This PC switch.
+// A short overview only: drives and what they keep are on the Storage page (public/storage.js), not on these boxes.
 'use strict';
 
 /** RAM, card memory and cores in one line, as the Cluster boxes say them. */
@@ -69,12 +70,16 @@ function drawNetMap() {
       })],
     });
   });
-  const add = el('button', { class: 'net-pc net-pc-add', type: 'button', onclick: () => $('#node-pass-addnode').click() },
+  const add = el('button', { class: 'net-pc net-pc-add', type: 'button', onclick: () => app.addNode?.() },
     el('span', { class: 'net-pc-plus', 'aria-hidden': 'true', text: '+' }), el('b', { text: 'Add a node' }));
+
+  // Under the PCs: where their files are kept, two half tiles (the Storage page's two storages), each with Add.
+  netStoresFresh();
+  const stores = netStoreTiles();
 
   const anyUp = pcs.some(p => p.ok);
   // Drawn again only when something shown changed (the left panel redraws every few seconds).
-  const sig = JSON.stringify([admins, [...using], isNode, nodes.length, mine, pcs.map(p => [p.id, p.ok, p.text, p.model, p.away, p.name])]);
+  const sig = JSON.stringify([admins, [...using], isNode, nodes.length, mine, pcs.map(p => [p.id, p.ok, p.text, p.model, p.away, p.name]), netStores.at]);
   if (sig === box.dataset.sig) return;
   box.dataset.sig = sig;
   box.replaceChildren(...[
@@ -82,6 +87,39 @@ function drawNetMap() {
     top.length ? netMapLink(using.size ? 'uses this PC' : 'can use this PC', !using.size) : null,
     el('div', { class: 'net-map-row' }, here),
     netMapLink(pcs.length ? 'connects to' : 'add a PC to connect to', !anyUp),
-    el('div', { class: 'net-map-row' }, ...below, add)].filter(Boolean));
+    el('div', { class: 'net-map-row' }, ...below, add),
+    netMapLink('keeps its files in', !stores.some(s => s.n)),
+    el('div', { class: 'net-map-row net-stores' }, ...stores.map(s => s.box))].filter(Boolean));
 }
+
+// ---- Where the files are kept: the two storages as two half tiles (read from src/jobrun/storage.ts) ----
+
+/** The storages as last read, read again every 30 s at most (it asks every linked PC, so not each redraw). */
+const netStores = { at: 0, pools: null, asking: false };
+function netStoresFresh() {
+  if (netStores.asking || Date.now() - netStores.at < 30_000) return;
+  netStores.asking = true;
+  api('/api/network/storage').then(v => { netStores.pools = v.pools ?? []; }, () => undefined)
+    .finally(() => { netStores.asking = false; netStores.at = Date.now(); drawNetMap(); });
+}
+/** The map's names for the two storages (the Storage page's Main model storage and Backup storage). */
+const NET_STORES = [{ job: 'store', name: 'Model backups' }, { job: 'backups', name: 'Project backups' }];
+const netGb = n => (n >= 2 ** 40 ? `${Math.round((n / 2 ** 40) * 10) / 10} TB` : `${Math.round(n / 2 ** 30)} GB`);
+function netStoreTiles() {
+  return NET_STORES.map(t => {
+    const v = netStores.pools?.find(p => p.job === t.job);
+    const n = v?.drives?.length ?? 0;
+    const where = v ? (n ? [...new Set(v.drives.map(d => (d.pc === 'here' ? 'This PC' : app.pcLabel?.(d.pc) || d.pcName)))].join(', ') : 'No drive yet') : 'Reading…';
+    const line = v && n ? `${v.mode === 'mirror' ? 'Duplicate' : 'Extended'} · ${n} drive${n === 1 ? '' : 's'} · ${netGb(v.free)} free` : '';
+    const box = el('div', { class: `net-pc net-store${n ? '' : ' is-off'}` },
+      el('span', { class: 'cluster-mark' }, clusterIcon(ICON_DRIVE, 20)),
+      el('div', { class: 'net-pc-text' },
+        el('b', { text: t.name }),
+        el('span', { class: 'hint', text: where }),
+        line ? el('span', { class: 'net-pc-state', text: line }) : null),
+      el('div', { class: 'net-pc-actions' }, netMapBtn('Add', () => app.openStorage?.({ add: t.job }), !n)));
+    return { n, box };
+  });
+}
+const ICON_DRIVE = 'M3 5h18v6H3zM3 13h18v6H3z';
 app.drawNetMap = drawNetMap;

@@ -135,3 +135,31 @@ test('a tensor list is read into layers, experts, output and big tables', () => 
   assert.deepEqual(parts.tables, [{ name: 'per_layer_token_embd.weight', bytes: GIB }]);
   assert.equal(partsFrom([{ name: 'blk.0.attn_q.weight', dims: [4, 4], type: 0 }]), null, 'a dense model has no expert parts');
 });
+
+test('the tensor list of a model with Q2_0 tensors is read (Qwen3.8-Flash-Next UD-Q3_K_XL has two): one unknown type dropped the whole list', () => {
+  const parts = partsFrom([
+    { name: 'token_embd.weight', dims: [2560, 248320], type: 23 },
+    { name: 'per_layer_token_embd.weight', dims: [160, 320001536], type: 20 },
+    { name: 'blk.0.attn_q.weight', dims: [2560, 4096], type: 42 },
+    { name: 'blk.0.ffn_up_exps.weight', dims: [2560, 512, 512], type: 18 },
+    { name: 'blk.1.attn_q.weight', dims: [2560, 4096], type: 41 },
+    { name: 'blk.1.ffn_up_exps.weight', dims: [2560, 512, 512], type: 40 },
+  ]);
+  assert.ok(parts, 'read, not null');
+  assert.equal(parts.layerRest[0], (2560 * 4096 / 64) * 18, 'Q2_0: 18 bytes a block of 64');
+  assert.equal(parts.layerRest[1], (2560 * 4096 / 128) * 18, 'Q1_0: 18 bytes a block of 128');
+  assert.equal(parts.tables[0].name, 'per_layer_token_embd.weight');
+});
+
+test('with two lenders, the n-gram table on the second goes to its own buffer type (RPC1[address]), not its global device name', () => {
+  const hp = (o: Partial<EpLender> = {}): EpLender => ({ name: 'Small PC', endpoint: '127.0.0.1:50072', ram: { name: 'RPC1', what: '127.0.0.1:50072', total: 16 * GIB, free: 12 * GIB }, buffer: 'RPC1[127.0.0.1:50072]', ramFree: 12 * GIB, ramTotal: 16 * GIB, ramSpeed: 3e9, ...o });
+  const big = z820({ ram: { name: 'RPC3', what: '127.0.0.1:50073', total: 64 * GIB, free: 58 * GIB }, buffer: 'RPC1[127.0.0.1:50073]' });
+  const got = planEp(QWEN38, z240(), [hp(), big]);
+  assert.ok(!('why' in got), 'why' in got ? got.why : '');
+  if ('why' in got) return;
+  const rule = got.override.find(x => x.startsWith('per_layer_token_embd'));
+  if (rule) assert.equal(rule, 'per_layer_token_embd\\.weight=RPC1[127.0.0.1:50073]');
+  assert.ok(!got.override.some(x => /=RPC3\[/.test(x)), got.override.join(' '));
+  // -dev and the expert split keep the global names.
+  assert.ok(got.dev.includes('RPC3'));
+});

@@ -1,5 +1,6 @@
-// Chat models from Hugging Face: search, sizes, one download at a time; and models in another folder.
-import { statSync } from 'node:fs';
+// Chat models from Hugging Face: search, sizes, the downloads list (one at a time, in order: src/dlqueue.ts); and models
+// in another folder.
+import { readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { totalmem } from 'node:os';
@@ -9,21 +10,59 @@ import { capsPass, cleanKinds } from '../capabilities.ts';
 import { GB, HOME, type Routes, chatModels, hfList, json, modelsHome } from './core.ts';
 import { SPARE, drives, freeOn, otherDriveHint } from '../modelhome.ts';
 import { writeAtomic } from '../atomic.ts';
+import { randomBytes } from 'node:crypto';
+import * as DQ from '../dlqueue.ts';
+import { jobsHere } from '../drivejobs.ts';
 import { isNetworkPath, NETWORK_WHY } from '../workspace.ts';
 import { cardFit, fitsRoom } from '../calc.ts';
 import { cardMem, chatCards, fit, images, loadShapes } from './panes.ts';
 
 // ---- Chat models from Hugging Face (a node chooses and downloads its own; nobody else can) ----
 
-let hfJob: { repo: string; name: string; state: 'downloading' | 'done' | 'failed' | 'stopped'; got: number; bytes: number; error: string; ac: AbortController } | null = null;
 /** A look-up's fault in plain words (a time limit ran out, or Hugging Face's own message). */
 const hfSaid = (error: unknown) => ((error as Error).name === 'TimeoutError' ? 'Hugging Face took too long to answer. Check the internet connection, then try again.' : (error as Error).message);
 
-/** A Get being looked up (before hfJob exists). */
+// ---- The downloads list (src/dlqueue.ts), kept in data/download-queue.json ----
+
+const QFILE = join(HOME.data, 'download-queue.json');
+let dlList: DQ.DlItem[] | null = null;
+/** The one running now, with its Stop and why it was stopped. */
+let dlRun: { id: string; ac: AbortController; why: 'stop' | 'cancel' | null } | null = null;
+function dlNow(): DQ.DlItem[] {
+  if (!dlList) {
+    try {
+      dlList = DQ.afterRestart(DQ.cleanList(JSON.parse(readFileSync(QFILE, 'utf8'))));
+    } catch {
+      dlList = [];
+    }
+  }
+  return dlList;
+}
+function dlSet(list: DQ.DlItem[]): void {
+  dlList = DQ.trimmed(list);
+  void writeAtomic(QFILE, JSON.stringify(dlList, null, 2)).catch(e => console.error(`The downloads list was not saved: ${(e as Error).message}`));
+}
+const dlItem = (id: string) => dlNow().find(x => x.id === id);
+
+/** A Get being looked up (before it is in the list). */
 let hfStarting = false;
-/** A chat model is downloading now (the folder models are kept in is not changed meanwhile). */
-export const hfBusy = () => hfStarting || hfJob?.state === 'downloading';
-const hfView = () => (hfJob ? { repo: hfJob.repo, name: hfJob.name, state: hfJob.state, got: hfJob.got, bytes: hfJob.bytes, error: hfJob.error } : null);
+/** A chat model is downloading into the models folder now, or waits to (that folder is not changed meanwhile). */
+export const hfBusy = () => hfStarting || dlNow().some(x => (x.state === 'running' || x.state === 'waiting') && x.to === 'models');
+/**
+ * The download the Models page follows, as it always had it: the one running into the models folder, else the last one
+ * that ended there; with how many wait in the list.
+ */
+const hfView = () => {
+  const mine = dlNow().filter(x => x.to === 'models');
+  const j = mine.find(x => x.state === 'running') ?? DQ.shown(mine).find(x => x.state !== 'waiting' && x.state !== 'cancelled');
+  const waiting = dlNow().filter(x => x.state === 'waiting').length;
+  // The ones in line for the models folder: their Download buttons say Pending.
+  const pending = mine.filter(x => x.state === 'waiting').map(x => ({ repo: x.repo, name: x.name }));
+  if (!j) return waiting ? { repo: '', name: '', state: 'waiting', got: 0, bytes: 0, error: '', waiting, pending } : null;
+  return { repo: j.repo, name: j.name, state: j.state === 'running' ? 'downloading' : j.state, got: j.got, bytes: j.bytes, error: j.error, waiting, pending };
+};
+/** This PC's downloads list, as the downloads window shows it. */
+export const dlLines = () => DQ.shown(dlNow());
 
 /**
  * Whether a model file this size could run on this PC at all (not "now": other programs and loaded models come and go):
@@ -85,49 +124,99 @@ async function keepSource(name: string, s: ModelSource): Promise<void> {
   await writeAtomic(SOURCES, JSON.stringify({ ...(await modelSources()), [name]: s }, null, 2));
 }
 
-function startHf(repo: string, rev: string, m: { name: string; bytes: number; files: { path: string; bytes: number; sha256: string }[] }): void {
-  const job = { repo, name: m.name, state: 'downloading' as const, got: 0, bytes: m.bytes, error: '', ac: new AbortController() };
-  hfJob = job;
+/** Where one of a download's files is written: the models folder, or the Model store folder on its drive. */
+const dlTarget = (x: DQ.DlItem, path: string) => (x.to === 'store' ? join(`${x.drive}\\`, DQ.STORE_FOLDER, path) : chatModels.target(path));
+
+/** Starts the next one waiting, when none runs; each one that ends starts the next. */
+function dlPump(): void {
+  const next = DQ.nextUp(dlNow());
+  if (!next) return;
+  const ac = new AbortController();
+  const run = { id: next.id, ac, why: null as 'stop' | 'cancel' | null };
+  dlRun = run;
+  dlSet(dlNow().map(x => (x.id === next.id ? { ...x, state: 'running' as const, error: '' } : x)));
   void (async () => {
+    const x = dlItem(next.id)!;
     let before = 0;
+    let state: DQ.DlState = 'done';
+    let error = '';
     try {
-      for (const f of m.files) {
-        await fetchChecked(hfUrl(repo, rev, f.path), chatModels.target(f.path), f.bytes, f.sha256, pr => { job.got = before + pr.got; }, job.ac.signal);
+      for (const f of x.files) {
+        await fetchChecked(hfUrl(x.repo, x.rev, f.path), dlTarget(x, f.path), f.bytes, f.sha256, pr => { x.got = before + pr.got; }, ac.signal);
         before += f.bytes;
-        job.got = before;
+        x.got = before;
       }
-      (job as { state: string }).state = 'done';
-      await keepSource(m.name, { repo, rev, bytes: m.bytes, at: new Date().toISOString() }).catch(e => console.error(`Where ${m.name} came from was not written down: ${(e as Error).message}`));
-      chatModels.forget();
-      void loadShapes().catch(() => undefined);
-    } catch (error) {
-      (job as { state: string }).state = job.ac.signal.aborted ? 'stopped' : 'failed';
-      job.error = job.ac.signal.aborted ? '' : (error as Error).message;
+      if (x.to === 'models') {
+        await keepSource(x.name, { repo: x.repo, rev: x.rev, bytes: x.bytes, at: new Date().toISOString() }).catch(e => console.error(`Where ${x.name} came from was not written down: ${(e as Error).message}`));
+        chatModels.forget();
+        void loadShapes().catch(() => undefined);
+      }
+    } catch (e) {
+      state = ac.signal.aborted ? (run.why === 'cancel' ? 'cancelled' : 'stopped') : 'failed';
+      error = ac.signal.aborted ? '' : (e as Error).message;
     }
+    if (dlRun === run) dlRun = null;
+    dlSet(dlNow().map(y => (y.id === x.id ? { ...y, state, error, got: x.got, ended: new Date().toISOString() } : y)));
+    dlPump();
   })();
 }
 
+/** Carries on with the list at start: the one that was running when TOMLIN stopped starts again from its .part. */
+export function resumeDownloads(): void {
+  dlPump();
+}
+
+/** Cancel: one waiting is taken out of the list; the one running is stopped and taken out (the next one starts). */
+export function cancelDl(id: string): boolean {
+  const c = DQ.cancelled(dlNow(), id, new Date().toISOString());
+  if (!c.found) return false;
+  if (c.stopRunning && dlRun?.id === id) {
+    dlRun.why = 'cancel';
+    dlRun.ac.abort();
+  } else dlSet(c.list);
+  return true;
+}
+/** Download again: a stopped, failed or cancelled one goes back to the end of the line. */
+export function againDl(id: string): void {
+  dlSet(DQ.again(dlNow(), id));
+  dlPump();
+}
+export function clearDl(): void {
+  dlSet(DQ.cleared(dlNow()));
+}
+
 /**
- * Starts one chat model's download (Download on the Models page, or a linked main PC's Download to this PC): refused
- * while another runs, and when the drive has not got room for it.
+ * Adds one chat model to this PC's downloads list (Download on the Models page, a linked main PC's Download to that PC,
+ * or the Model store filled from the Network page). It starts at once when nothing else runs, else waits its turn.
+ * Refused when it is in the list already, and when its drive has not got room for it and for the ones before it.
  */
-export async function getHf(repo: string, rev: string, name: string): Promise<{ status: number; json: unknown }> {
-  if (hfJob?.state === 'downloading') return { status: 409, json: { error: `${hfJob.name} is still downloading. Wait for it, or stop it.` } };
-  // Taken before the look-up (a second or two): a second Get pressed meanwhile is told to wait, never started beside it.
-  if (hfStarting) return { status: 409, json: { error: 'A download is starting. Wait a moment, then try again.' } };
+export async function getHf(repo: string, rev: string, name: string, place: { to?: DQ.DlTo; drive?: string; by?: string } = {}): Promise<{ status: number; json: unknown }> {
+  const to: DQ.DlTo = place.to === 'store' ? 'store' : 'models';
+  const drive = to === 'store' ? String(place.drive ?? '').toUpperCase() : '';
+  if (to === 'store' && !(jobsHere()[drive] ?? []).includes('store')) return { status: 400, json: { error: `Drive ${drive || '?'} is not part of Main model storage on this PC. Add it under Network Storage first.` } };
+  const already = DQ.sameOpen(dlNow(), { repo, name, to, drive });
+  if (already) return { status: 409, json: { error: `${name} is in the downloads list already (${DQ.dlWords(already)}).` } };
+  // Taken before the look-up (a second or two): a second Get pressed meanwhile is told to wait, never added beside it.
+  if (hfStarting) return { status: 409, json: { error: 'A download is being added. Wait a moment, then try again.' } };
   hfStarting = true;
   try {
     const found = await lookUpHf(`https://huggingface.co/${repo}/tree/${rev}`);
     const m = found.models.find(x => x.name === name);
     if (!m) return { status: 404, json: { error: 'That model is not at that link any more. Look the link up again.' } };
     // The folder models are kept in is on a drive that is not there now (a USB drive unplugged): said, not tried.
-    const gone = modelsHome.missing();
+    const gone = to === 'models' ? modelsHome.missing() : '';
     if (gone) return { status: 400, json: { error: `Your models are kept in ${gone}, and that folder is not there now. Plug its drive in, or choose another folder (Models, Import models, Where models are kept), then try again.` } };
-    const free = m.files.length ? await freeOn(dirname(chatModels.target(m.files[0].path))) : Infinity;
-    // SPARE (2 GB) is left free on the drive after it, as every other writer keeps.
-    if (m.bytes + SPARE > free) return { status: 507, json: { error: `Not enough free disk space: ${m.name} needs ${(m.bytes / GB).toFixed(1)} GB, and the drive has ${(free / GB).toFixed(1)} GB free. Free some space (or delete a model you no longer use), then try again.${otherDriveHint(m.bytes, chatModels.own, await drives().catch(() => []))}`, room: { name: m.name, bytes: m.bytes, free } } };
-    startHf(found.repo, found.rev, m);
-    return { status: 200, json: hfView() };
+    const free = to === 'store' ? await freeOn(`${drive}\\`) : m.files.length ? await freeOn(dirname(chatModels.target(m.files[0].path))) : Infinity;
+    const before = DQ.stillToCome(dlNow(), to, drive);
+    // SPARE (2 GB) is left free on the drive after it, as every other writer keeps; the ones before it in line count.
+    if (m.bytes + before + SPARE > free) {
+      const ahead = before ? `, and the downloads before it in the list need ${(before / GB).toFixed(1)} GB of that` : '';
+      return { status: 507, json: { error: `Not enough free disk space: ${m.name} needs ${(m.bytes / GB).toFixed(1)} GB, and ${to === 'store' ? `drive ${drive}` : 'the drive'} has ${(free / GB).toFixed(1)} GB free${ahead}. Free some space (or delete a model you no longer use), then try again.${to === 'models' ? otherDriveHint(m.bytes, chatModels.own, await drives().catch(() => [])) : ''}`, room: { name: m.name, bytes: m.bytes, free } } };
+    }
+    const item: DQ.DlItem = { id: `d${Date.now().toString(36)}${randomBytes(3).toString('hex')}`, repo: found.repo, rev: found.rev, name: m.name, bytes: m.bytes, files: m.files.map(f => ({ path: f.path, bytes: f.bytes, sha256: f.sha256 })), to, drive, state: 'waiting', got: 0, error: '', added: new Date().toISOString(), by: place.by || 'This PC' };
+    dlSet([...dlNow(), item]);
+    dlPump();
+    return { status: 200, json: { ...hfView(), id: item.id, place: DQ.placeOf(dlNow(), item.id) } };
   } catch (error) {
     return { status: 400, json: { error: hfSaid(error) } };
   } finally {
@@ -141,12 +230,23 @@ export async function getHf(repo: string, rev: string, name: string): Promise<{ 
  * this PC. /worker/fetch-start starts it, /worker/fetch-state says how far it is, /worker/fetch-stop stops it. No tick
  * is needed (since 2.0.56); the node's door refuses it while someone there is using that PC (src/jobrun/node.ts).
  */
-export async function fetchHere(p: string, b: Record<string, unknown>): Promise<{ status: number; json: Record<string, unknown> }> {
+export async function fetchHere(p: string, b: Record<string, unknown>, by = 'A linked PC'): Promise<{ status: number; json: Record<string, unknown> }> {
+  // The downloads list, for the PC that shows every PC's list, with its Cancel, Download again and Clear.
+  if (p === '/worker/dl-queue') return { status: 200, json: { lines: dlLines() } };
+  if (p === '/worker/dl-cancel') return cancelDl(String(b.id ?? '')) ? { status: 200, json: { lines: dlLines() } } : { status: 404, json: { error: 'That download is not in the list there any more.' } };
+  if (p === '/worker/dl-again') return againDl(String(b.id ?? '')), { status: 200, json: { lines: dlLines() } };
+  if (p === '/worker/dl-clear') return clearDl(), { status: 200, json: { lines: dlLines() } };
   const image = b.kind === 'image';
   const id = String(b.id ?? '');
   const repo = String(b.repo ?? '');
   const name = String(b.name ?? '');
-  const mine = () => !!hfJob && hfJob.repo === repo && hfJob.name === name;
+  const to: DQ.DlTo = b.to === 'store' ? 'store' : 'models';
+  const drive = to === 'store' ? String(b.drive ?? '').toUpperCase() : '';
+  /** This model's line to this place: the one not finished, else the newest. */
+  const mine = () => {
+    const all = DQ.shown(dlNow()).filter(x => x.repo === repo && x.name === name && x.to === to && x.drive === drive);
+    return all.find(x => x.state === 'running' || x.state === 'waiting') ?? all[0];
+  };
   const state = (): Record<string, unknown> => {
     if (image) {
       const m = images.registry.get(id);
@@ -155,13 +255,19 @@ export async function fetchHere(p: string, b: Record<string, unknown>): Promise<
       if (!dl) return { state: 'none' };
       return { state: dl.error ? (/^Stopped\./.test(dl.error) ? 'stopped' : 'failed') : dl.done ? 'done' : 'downloading', got: dl.got, bytes: dl.bytes, error: dl.error ?? '' };
     }
-    if (!mine()) return { state: 'none' };
-    return { state: hfJob!.state, got: hfJob!.got, bytes: hfJob!.bytes, error: hfJob!.error };
+    const x = mine();
+    if (!x) return { state: 'none' };
+    // Said as it always was ('downloading', and 'stopped' for one taken out), with 'waiting' for one in line.
+    const st = x.state === 'running' ? 'downloading' : x.state === 'cancelled' ? 'stopped' : x.state;
+    return { state: st, got: x.got, bytes: x.bytes, error: x.error, id: x.id, place: DQ.placeOf(dlNow(), x.id) };
   };
   if (p === '/worker/fetch-state') return { status: 200, json: state() };
   if (p === '/worker/fetch-stop') {
     if (image) images.registry.stop(id);
-    else if (mine()) hfJob!.ac.abort();
+    else {
+      const x = mine();
+      if (x && (x.state === 'running' || x.state === 'waiting')) cancelDl(x.id);
+    }
     return { status: 200, json: state() };
   }
   if (image) {
@@ -173,7 +279,7 @@ export async function fetchHere(p: string, b: Record<string, unknown>): Promise<
     }
   }
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !name) return { status: 400, json: { error: 'that is not a Hugging Face model this PC can download.' } };
-  const r = await getHf(repo, String(b.rev ?? 'main'), name);
+  const r = await getHf(repo, String(b.rev ?? 'main'), name, { to, drive, by });
   return { status: r.status, json: r.status === 200 ? state() : (r.json as Record<string, unknown>) };
 }
 
@@ -182,6 +288,7 @@ export async function fetchHere(p: string, b: Record<string, unknown>): Promise<
 /** GET requests answered here, by path. */
 export const hfGet: Routes = {
   '/api/chatmodels/get': async ({ res }) => json(res, 200, hfView()),
+  '/api/download-queue': async ({ res }) => json(res, 200, { lines: dlLines() }),
   '/api/hflist': async ({ res }) => json(res, 200, await hfList.status()),
 };
 
@@ -329,7 +436,15 @@ export const hfPost: Routes = {
     return json(res, r.status, r.json);
   },
   '/api/chatmodels/stop': async ({ res }) => {
-    hfJob?.ac.abort();
+    // Stop on the Models page: the one running into the models folder stops (Download again carries on); the next starts.
+    const x = dlNow().find(y => y.state === 'running' && y.to === 'models');
+    if (x && dlRun?.id === x.id) {
+      dlRun.why = 'stop';
+      dlRun.ac.abort();
+    }
     return json(res, 200, hfView());
   },
+  '/api/download-queue/cancel': async ({ res, b }) => (cancelDl(String(b.id ?? '')) ? json(res, 200, { lines: dlLines() }) : json(res, 404, { error: 'That download is not in the list any more.' })),
+  '/api/download-queue/again': async ({ res, b }) => (againDl(String(b.id ?? '')), json(res, 200, { lines: dlLines() })),
+  '/api/download-queue/clear': async ({ res }) => (clearDl(), json(res, 200, { lines: dlLines() })),
 };

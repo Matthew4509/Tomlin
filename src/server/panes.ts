@@ -14,7 +14,7 @@ import type { Gpu } from '../hardware.ts';
 import { buildFits, ccFromName, crashedHere, cudaOrder, type Device, type GpuFacts, firstStartNote, missingCardRunner, pinOfRunner, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName, tccNote, testedHere } from '../runtimes.ts';
 import type { Option } from '../runnermatch.ts';
 import { noCardStart } from '../runnerpush.ts';
-import { chatArgs, TEMPLATE_FAULT, whyItFailed, type ChatRun } from '../llama.ts';
+import { chatArgs, fileFault, TEMPLATE_FAULT, whyItFailed, type ChatRun } from '../llama.ts';
 import { startSeconds } from '../loadlimit.ts';
 import { FIT_KEEP_WITH_LENDERS } from '../layersplit.ts';
 import { Pane } from '../pane.ts';
@@ -817,6 +817,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     asked !== 'cpu' ? tccNote(hardware.gpus, !!cudaPin, 'chat') : '',
     cudaPin && !cudaStarted.has(cudaPin) ? firstStartNote(runtimes.pins[cudaPin], run.cards?.length ? gpusFor(run) : hardware.gpus) : '',
     run.ctx !== DEFAULT_RUN.ctx || run.cache !== 'f16' ? `Context ${run.ctx.toLocaleString()} tokens${run.cache !== 'f16' ? `, ${run.cache} cache` : ''}.` : '',
+    run.kvRam && asked !== 'cpu' ? 'Context cache in RAM: the graphics card keeps its room for the model.' : '',
     asked === 'cpu' ? '' : run.place === 'ram' ? 'Expert weights in RAM, the rest on the graphics card.' : run.place === 'layers' ? `The experts of the first ${run.moeCpu} layers in RAM, the rest on the graphics card.` : run.place === 'card' ? 'Every layer on the graphics chip.' : chatCards().length ? `Auto: llama.cpp fills ${chatCards().length > 1 ? `the ${chatCards().length} graphics cards` : 'the graphics card'} and puts what does not fit in RAM.` : '',
     beside.length ? `Loaded beside ${runnersOf.namesOf(beside)}.` : '',
     draftName ? `Guessing model: ${draftName} (it guesses the next few words, this model checks them; the answer is this model's own).` : '',
@@ -885,7 +886,8 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     build: device => ({ ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit }),
     // A start that failed with the expert placement (or expert parallel) is tried again on the stock runner with llama.cpp's own layer split.
     retry: (device, tail) => (ep ? log.info('max', `${name}: the expert parallel start failed, so ${maxPath ? 'it is started again on this PC alone (Max mode never uses the layer split)' : 'llama.cpp\'s own layer split is tried'}. The runner's last words: ${tail.replace(/s+/g, ' ').trim().slice(-1500) || '(none)'}`) : undefined, TEMPLATE_FAULT.test(tail) ? { ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, true, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : started.maxPlace ? { ...chatExe(device, held, run, want), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, maxPath ? (maxAlone(runner, name), { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: undefined }) : { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: max?.endpoints, fitMargin: FIT_KEEP_WITH_LENDERS }), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : null),
-    why: whyItFailed,
+    why: tail => whyItFailed(tail, entry.file),
+    fileFault,
     // A card start that put the model on the CPU counts as failed (Max mode's lent cards aside): the next device is
     // tried, and Auto skips that runner from now on.
     started: (device, facts) => {

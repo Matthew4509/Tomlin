@@ -49,6 +49,16 @@ export function lenderRamCap(free: number, total: number, keep = LEND_AIM_KEEP, 
 }
 
 /** One line of `llama-server --rpc ... --list-devices`: "  RPC1: 127.0.0.1:50871 (49072 MiB, 36099 MiB free)". */
+/**
+ * The buffer type llama.cpp gives RPC device `dev` for -ot: its number among its own server's devices, then that
+ * server's address ("RPC1[127.0.0.1:50073]"). The device names that -dev and LLAMA_EXPERT_SPLIT take count up over the
+ * whole --rpc list instead, so with two lenders the second one's RAM is device RPC3 but buffer type RPC1[its address].
+ */
+export function rpcBuffer(listed: Listed[], dev: Pick<Listed, 'name' | 'what'>): string {
+  const own = listed.filter(x => /^RPC\d+$/.test(x.name) && x.what === dev.what);
+  return `RPC${Math.max(0, own.findIndex(x => x.name === dev.name))}[${dev.what}]`;
+}
+
 export interface Listed {
   /** The device name, "CUDA0", "RPC1", "CPU". */
   name: string;
@@ -225,7 +235,8 @@ export function planExperts(m: ModelBytes, listed: Listed[], lenders: Lender[], 
       const n = rpcDevs.filter(x => x.what === l.endpoint).length;
       h.layerDev = `RPC${next}`;
       if (n >= 2) {
-        h.experts = `RPC${next + n - 1}[${l.endpoint}]`;
+        // The buffer type counts within this lender's own devices (rpcBuffer); -dev counts over all of them.
+        h.experts = `RPC${n - 1}[${l.endpoint}]`;
         h.extraDev = [`RPC${next + n - 1}`];
       }
       next += n;

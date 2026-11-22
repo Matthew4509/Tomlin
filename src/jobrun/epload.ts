@@ -9,7 +9,7 @@ import { freemem, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { quantFamily, tensorParts } from '../gguf.ts';
 import { findServer, type ChatRun } from '../llama.ts';
-import { listWith, parseListed, type Listed } from '../maxplace.ts';
+import { listWith, parseListed, rpcBuffer, type Listed } from '../maxplace.ts';
 import { planEp, type EpLayout, type EpLender } from '../cluster/eplayout.ts';
 import { forHello, speedFor, speedNow } from '../speedtest.ts';
 import { lendCaps } from './lendcaps.ts';
@@ -96,7 +96,7 @@ export async function maxExperts(o: { runtimeDir: string | string[]; path: strin
   for (const l of given) {
     const ram = lenderRam(listed, l.endpoint, l.hasCard);
     if (!ram) return skip(`"${l.name}"'s RAM is not in the runner's device list`);
-    lenders.push({ name: l.name, endpoint: l.endpoint, ram, ramFree: ram.free, ramTotal: ram.total, ramSpeed: l.speed?.ram ?? 0, ...(l.capRam ? { capRam: l.capRam } : {}) });
+    lenders.push({ name: l.name, endpoint: l.endpoint, ram, buffer: rpcBuffer(listed, ram), ramFree: ram.free, ramTotal: ram.total, ramSpeed: l.speed?.ram ?? 0, ...(l.capRam ? { capRam: l.capRam } : {}) });
   }
   const layout = planEp(
     { name: o.name, parts, experts: o.experts, used: o.used, hidden: HIDDEN, kv: o.cache },

@@ -16,6 +16,12 @@ export interface TestWant {
   build?: string;
   all?: boolean;
   minutes?: number;
+  /** The CPU threads the RPC server uses there (0 or none: its own default). */
+  threads?: number;
+  /** Keep the RPC server on this CPU socket (NUMA node) there, so its weights sit in that socket's memory. */
+  node?: number;
+  /** Lend only that PC's RAM and cores (no card): one member per socket needs one without the card. */
+  cpu?: boolean;
 }
 
 export interface TestWire {
@@ -93,7 +99,7 @@ async function openTestWireOnce(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'
   const why = await share.homeNetworkWhy(r.url);
   if (why) throw new Error(`"${r.name}": ${why}`);
   const hostNonce = newNonce();
-  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: hostNonce.toString('base64url'), target: want.target, plain: want.plain, ...(want.build ? { build: want.build } : {}), ...(want.all ? { all: true } : {}), ...(want.minutes ? { minutes: want.minutes } : {}) }, link.nodeNow(r.url));
+  const sealed = link.sealRequest(linkKeys, CLUSTER_TEST_DOOR, { nonce: hostNonce.toString('base64url'), target: want.target, plain: want.plain, ...(want.build ? { build: want.build } : {}), ...(want.all ? { all: true } : {}), ...(want.minutes ? { minutes: want.minutes } : {}), ...(want.threads ? { threads: want.threads } : {}), ...(want.node !== undefined ? { node: want.node } : {}), ...(want.cpu ? { cpu: true } : {}) }, link.nodeNow(r.url));
   const id = link.requestId(sealed.box);
   const u = new URL(r.url);
   return new Promise((resolve, reject) => {

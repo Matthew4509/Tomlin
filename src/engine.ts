@@ -62,10 +62,22 @@ export interface ChatStyle {
 export type Thinks = 'switch' | 'always' | 'never';
 /** GLM 4.5 to 4.9 and GLM 5 and later, from the file name ("GLM-4.7-Flash-UD-Q4_K_XL.gguf"). GLM-4 and 4.1 do not think. */
 const isGlmHybrid = (model: string): boolean => /(?<![a-z0-9])glm[-_ ]?(?:4[.-][5-9](?![a-z0-9])|[5-9](?:\.\d|[-_. ]))/i.test(model);
+/**
+ * GLM 5 and later ("GLM-5.3-UD-IQ2_M"). GLM-5.3's template has no off switch: it always opens the working and takes only
+ * reasoning_effort (low or high; anything else, enable_thinking included, is Max, which ran 10 minutes an answer).
+ */
+const isGlm5 = (model: string): boolean => /(?<![a-z0-9])glm[-_ ]?[5-9](?:\.\d|[-_. ])/i.test(model);
+/**
+ * DeepSeek V3.1 and later (V4-Flash included) are hybrid: their template thinks only when enable_thinking (or thinking)
+ * is true, but llama-server sets enable_thinking true unless told, so without the switch they always thought.
+ */
+const isDeepSeekHybrid = (model: string): boolean => /deepseek[-_ ]?v(?:3[.-][1-9]|[4-9])(?![0-9])/i.test(model);
 export function thinksOf(model: string): Thinks {
-  // GLM 4.5 and later (4.7-Flash included) are hybrid: they think first by default and take enable_thinking to stop.
+  // GLM 5 and later cannot be stopped (see isGlm5): filed with the always-thinkers, so the working always has room.
+  if (isGlm5(model)) return 'always';
+  // GLM 4.5 to 4.9 (4.7-Flash included) are hybrid: they think first by default and take enable_thinking to stop.
   // Filed as "never" they got no room for the working, and once it was cut at its limit nothing asked for the answer.
-  if (isGlmHybrid(model)) return 'switch';
+  if (isGlmHybrid(model) || isDeepSeekHybrid(model)) return 'switch';
   if (/qwen3/i.test(model)) return /instruct-2507/i.test(model) ? 'never' : /thinking/i.test(model) ? 'always' : 'switch';
   // gpt-oss reasons before every answer and has no off switch (only reasoning_effort): filed with the always-thinkers,
   // so it is given the working's room whatever was chosen.
@@ -80,7 +92,11 @@ export function thinksOf(model: string): Thinks {
 export function chatStyle(model: string, think = false): ChatStyle {
   if (/qwen3/i.test(model) && think && thinksOf(model) === 'switch') return { sampling: { temperature: 0.6, top_p: 0.95, top_k: 20, presence_penalty: 1.5, chat_template_kwargs: { enable_thinking: true } }, systemInFirstMessage: false };
   if (/qwen3/i.test(model)) return { sampling: { temperature: 0.7, top_p: 0.8, presence_penalty: 1.5, chat_template_kwargs: { enable_thinking: false } }, systemInFirstMessage: false };
+  // GLM 5 and later: the least working on Quick, and high (not the template's Max) on Think. enable_thinking is kept for a
+  // GLM 5 whose template does take it.
+  if (isGlm5(model)) return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5, chat_template_kwargs: { enable_thinking: think, reasoning_effort: think ? 'high' : 'low' } }, systemInFirstMessage: false };
   if (isGlmHybrid(model)) return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5, chat_template_kwargs: { enable_thinking: think } }, systemInFirstMessage: false };
+  if (isDeepSeekHybrid(model)) return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5, chat_template_kwargs: { enable_thinking: think, thinking: think } }, systemInFirstMessage: false };
   if (/gemma/i.test(model)) return { sampling: { temperature: 0.8, top_p: 0.95, presence_penalty: 0.5 }, systemInFirstMessage: true };
   if (/mistral|ministral|nemo/i.test(model)) return { sampling: { temperature: 0.7, top_p: 0.95, presence_penalty: 0.5, stop: ['[INST]', '</s>'] }, systemInFirstMessage: false };
   return { sampling: { temperature: 0.7, top_p: 0.9, presence_penalty: 0.5 }, systemInFirstMessage: false };
@@ -171,7 +187,7 @@ export const thinkSizeWords = (room: number): string => `${Math.round(room / 102
  * second time with no one watching, up to the whole room again, and the answer asked for never came.
  */
 export function finalStyle(model: string, style: ChatStyle): ChatStyle {
-  if (!/gpt-oss/i.test(model)) return style;
+  if (!/gpt-oss/i.test(model) && !isGlm5(model)) return style;
   return { ...style, sampling: { ...style.sampling, chat_template_kwargs: { ...(style.sampling.chat_template_kwargs as object | undefined), reasoning_effort: 'low' } } };
 }
 

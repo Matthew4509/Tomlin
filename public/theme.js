@@ -130,7 +130,7 @@
       b.setAttribute('aria-checked', String(id === v));
       b.title = id === 'auto'
         ? `Auto: day from sunrise to sunset, night after. ${today()}${v === 'auto' ? ` ${now === 'day' ? 'Day' : 'Night'} now.` : ''}`
-        : `${WORD[id]}${id === v ? ' (picked)' : ''}${v ? '' : `. Now as Windows is set (${now === 'day' ? 'Day' : 'Night'}): Settings, Colours`}`;
+        : `${WORD[id]}${id === v ? ' (picked)' : ''}${v ? '' : `. Now as Windows is set (${now === 'day' ? 'Day' : 'Night'}): Settings, Theme`}`;
     }
     for (const box of document.querySelectorAll('[data-colours-pick]')) {
       for (const r of box.querySelectorAll('input[type="radio"]')) r.checked = r.value === v;

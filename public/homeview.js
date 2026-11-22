@@ -259,6 +259,10 @@ greet();
 refresh();
 refreshPcs();
 setInterval(refresh, 3000);
+// An update starting or ending (network.js) draws the PCs again at once; while one goes, every 3 seconds, so the
+// turning wheel on that PC's card stops soon after it is done.
+app.refreshPcs = refreshPcs;
+setInterval(() => { if (homeUi.pcs?.some(p => p.updating)) refreshPcs(); }, 3000);
 // The queue (queue.js) asks for Home to be drawn again at once after a change.
 app.refreshHome = refresh;
 // Paired PCs are asked again now and then, so a PC that went off (and its staff) shows as off.
@@ -290,11 +294,20 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     else if (b.dataset.setup === 'data') app.openDataLock?.();
     else if (b.dataset.setup === 'perms') app.openPermissions?.();
     else if (b.dataset.setup === 'colours') app.openColours?.();
+    else if (b.dataset.setup === 'storage') app.openStorage?.();
+    else if (b.dataset.setup === 'guestpass') {
+      // Network, Guest passes, with the new-pass form open (Create guest pass pressed for you) and its name box ready.
+      openNodes();
+      app.netSection('guests');
+      if ($('#node-pass-new').hidden) $('#node-pass-create').click();
+      $('#guest-passes').scrollIntoView({ block: 'start' });
+    }
     else app.openPcs();
   });
 }
 // Settings' tiles are the submenu's own lines, so the two always match: a tile does what its line does.
-// Models is the one tile with two buttons on its right, not one press: See installed (This PC) and Add new (the Models page).
+// Two tiles have two buttons on their right, not one press: Hire staff (Hire, Manage: All staff) and Models (See
+// installed: This PC, Add new: the Models page).
 const TILE_PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z';
 const TILE_LIST = 'M4 6h2v2H4zM9 6h11v2H9zM4 11h2v2H4zM9 11h11v2H9zM4 16h2v2H4zM9 16h11v2H9z';
 const tileButton = (text, path, onclick) => el('button', { class: 'btn tile-act', type: 'button', onclick }, text, svgIcon(path, 16));
@@ -302,6 +315,12 @@ $('#settings-tiles').replaceChildren(...[...document.querySelectorAll('#rail-set
   const icon = el('span', { class: 'settings-tile-icon' }, b.querySelector('svg').cloneNode(true));
   const name = el('strong', { text: b.textContent.trim() });
   const about = el('span', { class: 'hint', text: b.dataset.about });
+  if (b.dataset.setup === 'staff') {
+    return el('div', { class: 'settings-tile settings-tile-two' }, icon, name, about,
+      el('div', { class: 'tile-acts' },
+        tileButton('Hire', TILE_PLUS, () => { asPage.fromMenu = true; app.openHire({ page: true, fromMenu: true }); }),
+        tileButton('Manage', TILE_LIST, () => { asPage.fromMenu = true; app.seeAllStaff(); })));
+  }
   if (b.dataset.setup === 'models') {
     return el('div', { class: 'settings-tile settings-tile-two' }, icon, name, about,
       el('div', { class: 'tile-acts' }, tileButton('See installed', TILE_LIST, () => openThisPc()), tileButton('Add new', TILE_PLUS, () => app.openModels())));

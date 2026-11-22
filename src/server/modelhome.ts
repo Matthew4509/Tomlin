@@ -116,6 +116,54 @@ async function view() {
   };
 }
 
+/**
+ * Keep models in `dir` from now on (null or '': the usual folder again): downloads and copies from linked PCs go there,
+ * the models already here stay where they are and are still used, until Move. Asked by this PC's page, and by a linked
+ * admin PC for a headless node (src/jobrun/node.ts /worker/models-where, which sends only a drive's TOMLIN models folder).
+ */
+export async function chooseModelsHome(want: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (moving()) return { status: 409, body: { error: 'Models are being moved now. Wait for that to finish, or stop it, then try again.' } };
+  if (downloading()) return { status: 409, body: { error: 'A model is downloading now. Wait for it, or stop it, then choose the folder.' } };
+  if (want === null || want === '') {
+    modelsHome.set(null);
+    apply();
+    return { status: 200, body: { ...(await view()), said: `Models are kept in the usual folder again: ${modelsHome.usual}.` } };
+  }
+  const dir = String(want).trim().replace(/^"|"$/g, '');
+  // A network folder: models are run from it, and another PC could change them there.
+  if (isNetworkPath(dir)) return { status: 400, body: { error: `For the models, ${NETWORK_WHY}.` } };
+  if (wholeDrive(dir)) return { status: 400, body: { error: `${dir} is a whole drive. Name a folder on it for the models (for example ${dir.replace(/[\\/]+$/, '')}\\TOMLIN models), then try again.` } };
+  if (!isAbsolute(dir)) return { status: 400, body: { error: 'Type the whole path of the folder, starting with its drive (for example D:\\TOMLIN models).' } };
+  // The app folder is replaced by an update, and the data folder is backed up whole: models go in neither.
+  if (overlaps(dir, [ROOT, HOME.data, HOME.backups])) return { status: 400, body: { error: 'Models cannot be kept inside TOMLIN\'s own program, data or backups folder (or in a folder that holds one of them). Pick another folder.' } };
+  const other = chatModels.other();
+  if (other && resolve(other).toLowerCase() === resolve(dir).toLowerCase()) return { status: 400, body: { error: `${dir} is already connected as another program's models folder (Connect). Pick a folder of TOMLIN's own, for example ${driveOf(dir)}\\TOMLIN models.` } };
+  forgetDrives();
+  const on = (await drives()).find(d => d.drive === driveOf(dir));
+  if (on && /^fat(32|16|12)?$/i.test(on.fs)) return { status: 400, body: { error: `${on.drive} is formatted as ${on.fs}, which cannot hold a file bigger than 4 GB, and most models are bigger. Use a drive formatted as exFAT or NTFS (a USB drive can be formatted again in File Explorer; that erases it).` } };
+  try {
+    await mkdir(dir, { recursive: true });
+    const probe = join(dir, '.tomlin-write-test');
+    await writeFile(probe, 'x');
+    await rm(probe, { force: true });
+  } catch (e) {
+    return { status: 400, body: { error: `TOMLIN cannot write in ${dir} (${((e as Error).message || '').split('\n')[0].slice(0, 160)}). Check the drive is plugged in and not read-only, then try again.` } };
+  }
+  modelsHome.set(dir);
+  apply();
+  const v = await view();
+  return { status: 200, body: { ...v, said: `Models are kept in ${dir} from now on: new downloads and copies from linked PCs go there.${v.toMove.files ? ' The models already on this PC stay where they are and are still used; press Move to bring them here.' : ''}` } };
+}
+
+/**
+ * A linked admin PC picks one of this PC's drives for new models: its "TOMLIN models" folder, or the usual folder when
+ * the usual folder is on that drive. Only a drive letter crosses, so no other folder can be named from another PC.
+ */
+export async function chooseModelsDrive(drive: string): Promise<{ status: number; body: Record<string, unknown> }> {
+  const usual = driveOf(modelsHome.usual) === drive;
+  return chooseModelsHome(usual ? null : `${drive}\\TOMLIN models`);
+}
+
 /** GET requests answered here, by path. */
 export const modelHomeGet: Routes = {
   '/api/models/where': async ({ res }) => json(res, 200, await view()),
@@ -126,37 +174,8 @@ export const modelHomePost: Routes = {
   // {dir}: keep models in that folder from now on (downloads go there; the models already here stay where they are
   // and are still used, until Move). {dir: null}: the usual folder again.
   '/api/models/where': async ({ res, b }) => {
-    if (moving()) return json(res, 409, { error: 'Models are being moved now. Wait for that to finish, or stop it, then try again.' });
-    if (downloading()) return json(res, 409, { error: 'A model is downloading now. Wait for it, or stop it, then choose the folder.' });
-    if (b.dir === null || b.dir === '') {
-      modelsHome.set(null);
-      apply();
-      return json(res, 200, { ...(await view()), said: `Models are kept in the usual folder again: ${modelsHome.usual}.` });
-    }
-    const dir = String(b.dir).trim().replace(/^"|"$/g, '');
-    // A network folder: models are run from it, and another PC could change them there.
-    if (isNetworkPath(dir)) return json(res, 400, { error: `For the models, ${NETWORK_WHY}.` });
-    if (wholeDrive(dir)) return json(res, 400, { error: `${dir} is a whole drive. Name a folder on it for the models (for example ${dir.replace(/[\\/]+$/, '')}\\TOMLIN models), then try again.` });
-    if (!isAbsolute(dir)) return json(res, 400, { error: 'Type the whole path of the folder, starting with its drive (for example D:\\TOMLIN models).' });
-    // The app folder is replaced by an update, and the data folder is backed up whole: models go in neither.
-    if (overlaps(dir, [ROOT, HOME.data, HOME.backups])) return json(res, 400, { error: 'Models cannot be kept inside TOMLIN\'s own program, data or backups folder (or in a folder that holds one of them). Pick another folder.' });
-    const other = chatModels.other();
-    if (other && resolve(other).toLowerCase() === resolve(dir).toLowerCase()) return json(res, 400, { error: `${dir} is already connected as another program's models folder (Connect). Pick a folder of TOMLIN's own, for example ${driveOf(dir)}\\TOMLIN models.` });
-    forgetDrives();
-    const on = (await drives()).find(d => d.drive === driveOf(dir));
-    if (on && /^fat(32|16|12)?$/i.test(on.fs)) return json(res, 400, { error: `${on.drive} is formatted as ${on.fs}, which cannot hold a file bigger than 4 GB, and most models are bigger. Use a drive formatted as exFAT or NTFS (a USB drive can be formatted again in File Explorer; that erases it).` });
-    try {
-      await mkdir(dir, { recursive: true });
-      const probe = join(dir, '.tomlin-write-test');
-      await writeFile(probe, 'x');
-      await rm(probe, { force: true });
-    } catch (e) {
-      return json(res, 400, { error: `TOMLIN cannot write in ${dir} (${((e as Error).message || '').split('\n')[0].slice(0, 160)}). Check the drive is plugged in and not read-only, then try again.` });
-    }
-    modelsHome.set(dir);
-    apply();
-    const v = await view();
-    return json(res, 200, { ...v, said: `Models are kept in ${dir} from now on: new downloads go there.${v.toMove.files ? ' The models already on this PC stay where they are and are still used; press Move to bring them here.' : ''}` });
+    const a = await chooseModelsHome(b.dir);
+    return json(res, a.status, a.body);
   },
   // Moves the models still in a folder used before into the chosen one. A loaded model is left where it is and named.
   '/api/models/move': async ({ res }) => {
@@ -198,6 +217,12 @@ export const modelHomePost: Routes = {
     } finally {
       ssdStarting = false;
     }
+  },
+  // The Storage page's Look again: this PC's drives read afresh (a drive plugged in since), then the same view.
+  '/api/storage/drives': async ({ res }) => {
+    forgetDrives();
+    await drives().catch(() => []);
+    return json(res, 200, await view());
   },
   '/api/models/move/stop': async ({ res }) => {
     if (moving()) move?.ac.abort();

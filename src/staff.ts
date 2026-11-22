@@ -456,6 +456,10 @@ function sound(m: StaffMember): StaffMember {
   if (typeof out.name !== 'string' || !out.name.trim()) out.name = out.id;
   if (out.group !== undefined && !Array.isArray(out.group)) out.group = [];
   for (const k of ['model', 'fallback', 'active'] as const) if (out[k] !== undefined && typeof out[k] !== 'string') out[k] = null;
+  // No standing fallback any more: a second model that answered on its own hid that the first choice could not (a
+  // deleted model answered by another, as the same hire). One saved before is dropped; a first choice that cannot
+  // answer is said, and the chat asks what to use instead (public/backup.js).
+  if (out.fallback) out.fallback = null;
   return out;
 }
 
@@ -525,8 +529,20 @@ export class Staff {
     if (typeof change.name === 'string' && change.name.trim()) m.name = change.name.trim().replace(/\s+/g, ' ').slice(0, 30);
     if (change.role !== undefined) m.role = roleOf(change.role).id;
     if (change.level !== undefined) m.level = levelOf(change.level).id;
+    const modelWas = m.model ?? null;
     if (change.model !== undefined) m.model = typeof change.model === 'string' && change.model ? change.model : null;
-    if (change.fallback !== undefined) m.fallback = typeof change.fallback === 'string' && change.fallback ? change.fallback : null;
+    // A new first choice ends a switch to another of their models (a linked PC's, or a Wake on that one): the switch
+    // won over the first choice, so a model picked in Team went unused until "Back to the default" (the chat still
+    // answered as if the old, deleted model were theirs).
+    if (change.model !== undefined && change.active === undefined && (m.model ?? null) !== modelWas) m.active = null;
+    // A fallback is no longer kept (see sound()). One given to a hire with no model at all is their model (P1-5);
+    // otherwise asking for one sets none.
+    if (change.fallback !== undefined) {
+      const f = typeof change.fallback === 'string' && change.fallback ? change.fallback : null;
+      const parked = change.parked !== undefined ? parkedOnly(change.parked) : m.parked;
+      if (f && !m.model && change.model === undefined && !parked?.length) m.model = f;
+      m.fallback = null;
+    }
     if (change.parked !== undefined) m.parked = parkedOnly(change.parked);
     if (change.style !== undefined) m.style = change.style === 'cartoon' || change.style === 'photo' || change.style === 'icon' ? change.style : null;
     if (change.group !== undefined) m.group = Array.isArray(change.group) ? [...new Set(change.group.filter((x): x is string => typeof x === 'string' && !!x && !x.startsWith('remote:')))].slice(0, 12) : [];

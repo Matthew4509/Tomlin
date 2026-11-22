@@ -29,7 +29,7 @@
 <h2>The Cluster page</h2>
 <p>Network, <b>Cluster</b> (Open the cluster page) puts linked PCs together for models too big for this PC and switches them on or off as one: drag nodes into the cluster, choose a model and press <b>Start chat</b>. It also shows what our own clusters measured, on three PCs over a wired 1 Gb network, in tokens a second while writing:</p>
 <ul>
-<li>A cluster makes a big model possible, not fast: the 89.5 GB Qwen3.8-Flash-Next ran at 1.9 tokens a second, about a sentence every ten seconds.</li>
+<li>A cluster makes a big model possible, not fast: the 89.5 GB Qwen3.8-Flash-Next ran at 1.9 tokens a second on two PCs, about a sentence every ten seconds. Once one PC had the RAM to hold it alone, that PC was faster. <b>See measured cluster examples</b> on the Cluster page lists every measured run with the hardware it ran on.</li>
 <li>For a model that fits one PC, use that PC. In three tests the single PC was faster twice and about the same once; the network between the PCs costs more than the extra card gives.</li>
 <li>Three PCs were not better than two: a third, slower PC gave from less than half to about one and a half times the speed of two, and long loads can fail.</li>
 <li>Against an SSD it is not measured: a model bigger than the RAM is read back from the drive as it is used, and a drive is much slower than RAM. We expect the cluster to be faster whenever the whole model fits in the pool's RAM, but that is an expectation, not a test.</li>

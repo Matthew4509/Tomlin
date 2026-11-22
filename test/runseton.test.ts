@@ -102,6 +102,30 @@ test('two PCs: the host sets a linked PC\'s Guessing model only with the node\'s
     assert.equal(none.status, 200, JSON.stringify(none.body));
     assert.equal((await runThere(A3B)).draft, undefined);
 
+    // How it keeps its context (2.1.10): the cache type and RAM or the card, the rest of its setup kept. The host sees both.
+    assert.ok(first.can.includes('cache-set'), JSON.stringify(first.can));
+    assert.equal(first.models.find((m: any) => m.id === A3B).cache, 'f16');
+    assert.equal(first.models.find((m: any) => m.id === A3B).kvRam, false);
+    const q8 = await host.post('/api/network/run-set', { pc, model: A3B, cache: 'q8_0' });
+    assert.equal(q8.status, 200, JSON.stringify(q8.body));
+    assert.match(q8.body.said, /q8_0 cache on the card/);
+    // A smaller cache turns flash attention on in the runner, so "off" is not kept with it.
+    assert.deepEqual(await runThere(A3B), { ctx: 16384, cache: 'q8_0', place: 'layers', moeCpu: 30 });
+    const ram = await host.post('/api/network/run-set', { pc, model: A3B, kvRam: true });
+    assert.equal(ram.status, 200, JSON.stringify(ram.body));
+    assert.match(ram.body.said, /q8_0 cache in RAM/);
+    assert.deepEqual(await runThere(A3B), { ctx: 16384, cache: 'q8_0', kvRam: true, place: 'layers', moeCpu: 30 });
+    await until('the host to see the cache in RAM', async () => (m => m?.cache === 'q8_0' && m?.kvRam === true)((await seen())?.models.find((m: any) => m.id === A3B)), 30_000);
+    // Refused, left alone: a cache type it does not know, a flag list, nothing to set.
+    for (const b of [{ model: A3B, cache: 'q2_k' }, { model: A3B, cache: '--no-kv-offload' }, { model: A3B, cache: 'q8_0;-ngl 0', kvRam: 'yes' }]) {
+      const r = await host.post('/api/network/run-set', { pc, ...b });
+      assert.equal(r.status, 400, `${JSON.stringify(b)}: ${JSON.stringify(r.body)}`);
+    }
+    assert.equal((await host.post('/api/network/run-set', { pc, model: 'Nope-7B.gguf', cache: 'f16' })).status, 404);
+    const back = await host.post('/api/network/run-set', { pc, model: A3B, cache: 'f16', kvRam: false });
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    assert.deepEqual(await runThere(A3B), { ctx: 16384, cache: 'f16', place: 'layers', moeCpu: 30 });
+
     // Someone at the node presses "I need to use the pc": refused, said in plain words.
     const away = await node.post('/api/share', { away: true, appPin: NODE_PIN });
     assert.equal(away.status, 200, JSON.stringify(away.body));

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chatStyle, everyFew, plainStyle, streamChat, thinkingLoops, thinkingText, thinkRoomFit, thinkRoomOf, THINK_ROOM, THINK_SIZES, thinksOf, withWorking } from '../src/engine.ts';
+import { chatStyle, everyFew, finalStyle, plainStyle, streamChat, thinkingLoops, thinkingText, thinkRoomFit, thinkRoomOf, THINK_ROOM, THINK_SIZES, thinksOf, withWorking } from '../src/engine.ts';
 import { readFileSync } from 'node:fs';
 
 test('the working has a default room and bigger sizes to expand to; anything else is the default', () => {
@@ -64,7 +64,18 @@ test('which models think: Qwen 3 and 3.5 when asked, reasoning models always, th
   // GLM 4.5 and later think by default and can be switched off; GLM-4 and 4.1 do not think.
   assert.equal(thinksOf('GLM-4.7-Flash-UD-Q4_K_XL.gguf'), 'switch');
   assert.equal(thinksOf('GLM-4.5-Air-Q4_K_M.gguf'), 'switch');
-  assert.equal(thinksOf('GLM-5.3-Flash-Q2_K.gguf'), 'switch');
+  // GLM 5 and later have no off switch (only reasoning_effort): always, low on Quick, high on Think, low for the final ask.
+  assert.equal(thinksOf('GLM-5.3-Flash-Q2_K.gguf'), 'always');
+  assert.equal(thinksOf('GLM-5.3-UD-IQ2_M-00001-of-00006.gguf'), 'always');
+  assert.deepEqual(chatStyle('GLM-5.3-UD-IQ2_M.gguf').sampling.chat_template_kwargs, { enable_thinking: false, reasoning_effort: 'low' });
+  assert.deepEqual(chatStyle('GLM-5.3-UD-IQ2_M.gguf', true).sampling.chat_template_kwargs, { enable_thinking: true, reasoning_effort: 'high' });
+  assert.deepEqual(finalStyle('GLM-5.3-UD-IQ2_M.gguf', chatStyle('GLM-5.3-UD-IQ2_M.gguf', true)).sampling.chat_template_kwargs, { enable_thinking: true, reasoning_effort: 'low' });
+  // DeepSeek V3.1 and later switch with enable_thinking (and thinking); R1 and V3 are unchanged.
+  assert.equal(thinksOf('DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf'), 'switch');
+  assert.equal(thinksOf('DeepSeek-V3.1-Terminus-Q2_K.gguf'), 'switch');
+  assert.equal(thinksOf('DeepSeek-V3-0324-Q2_K.gguf'), 'never');
+  assert.deepEqual(chatStyle('DeepSeek-V4-Flash-0731-UD-Q2_K_XL.gguf').sampling.chat_template_kwargs, { enable_thinking: false, thinking: false });
+  assert.deepEqual(chatStyle('remote:abc:DeepSeek-V4-Flash-0731-UD-Q2_K_XL.gguf', true).sampling.chat_template_kwargs, { enable_thinking: true, thinking: true });
   assert.equal(thinksOf('GLM-4-9B-0414-Q4_K_M.gguf'), 'never');
   assert.equal(thinksOf('GLM-4.1V-9B-Q4_K_M.gguf'), 'never');
   assert.equal(thinksOf('glm-4-5-air-Q4_K_M.gguf'), 'switch', 'a dashed version number');

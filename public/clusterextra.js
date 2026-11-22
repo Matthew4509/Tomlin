@@ -1,5 +1,5 @@
-// The Cluster page's extras (public/home.js draws the page): the "Choose an LLM" list that offers any chat model from anywhere
-// (this PC, the linked PCs, Hugging Face) and brings it here when it is picked, and the "See real examples from clusters" fold,
+// The Cluster page's extras (public/home.js draws the page): the "Choose an LLM" list of the chat models already on your PCs
+// (this PC and the linked PCs; one on a linked PC is copied here when picked; new models are added under Models), and the "See real examples from clusters" fold,
 // which shows only runs that were really measured (public/cluster-examples.json).
 
 (() => {
@@ -39,27 +39,21 @@
         for (const o of row.on) r.remotes.push({ pc: o.pc, name: o.pcName, model: o.model, copy: o.copy, why: o.why });
       });
     }
+    // Only models already on a PC: new ones are added under Models (download, import, a copy), not from this list.
     const list = [...out.values()];
-    if (typeof POPULAR !== 'undefined') {
-      for (const p of POPULAR) {
-        if (list.some(x => flat(x.name).includes(flat(p.name)))) continue;
-        list.push({ key: `hf:${p.repo}`, name: p.name, where: [], here: null, remotes: [], hf: p, bytes: 0, about: p.about });
-      }
-    }
     for (const r of list) r.where = [r.here ? 'this PC' : '', ...r.remotes.map(o => o.name)].filter(Boolean);
-    // On this PC first, then on a linked PC, then to download; each by name.
-    const rank = r => (r.here ? 0 : r.remotes.length ? 1 : 2);
+    // On this PC first, then on a linked PC; each by name.
+    const rank = r => (r.here ? 0 : 1);
     return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }
 
-  /** The words under a model's name: where it is, or that it is not installed. */
-  const noteOf = r => (r.here ? 'on this PC' : r.remotes.length ? `on ${r.remotes.map(o => o.name).join(', ')}: copied here when picked` : 'not installed: downloaded from Hugging Face when picked');
+  /** The short words beside a model's name: on this PC, or copied on demand (which PC it comes from is behind its (!)). */
+  const noteOf = r => (r.here ? 'on this PC' : 'Copied on demand');
   /** What the (!) says about one row: the size, where it is, how it comes, and why it might not. */
   const detailOf = r => [
     r.bytes ? `File size ${GB(r.bytes)}.` : '',
     r.here ? 'It is on this PC: the chat starts at once.' : '',
     !r.here && r.remotes.length ? (r.remotes.some(o => o.copy) ? `It is copied from "${r.remotes.find(o => o.copy).name}" to this PC first (the progress shows here), then the chat starts.` : `No PC that has it can send it now: ${r.remotes.map(o => `"${o.name}": ${o.why || 'cannot send'}`).join('; ')}.`) : '',
-    r.hf ? `${r.hf.about} It is downloaded from huggingface.co/${r.hf.repo} in its recommended size into this PC's models folder; each file is checked before it is kept.` : '',
   ].filter(Boolean).join(' ');
 
   const say = text => {
@@ -87,7 +81,7 @@
 
   /**
    * Makes the picked model available on this PC and returns its id here: at once when it is here, else copied from the
-   * linked PC that has it (/api/network/copy), else downloaded (/api/chatmodels/get). Throws with the reason.
+   * linked PC that has it (/api/network/copy). Throws with the reason.
    */
   async function bringHere(r) {
     if (r.here) return r.here;
@@ -100,21 +94,7 @@
       if (!id) throw new Error('it came to this PC but is not listed yet: look in Models');
       return id;
     }
-    const { sizes } = await api('/api/chatmodels/sizes', { repos: [r.hf.repo] });
-    const s = sizes?.[0];
-    if (!s || s.error || !s.models?.length) throw new Error(s?.error || 'its sizes could not be read on Hugging Face');
-    const u = s.models.find(m => m.name === s.usual) ?? s.models[0];
-    let job = await api('/api/chatmodels/get', { repo: r.hf.repo, rev: s.rev, name: u.name });
-    while (job?.state === 'downloading') {
-      say(`Downloading ${u.name}: ${job.bytes ? `${Math.floor((job.got / job.bytes) * 100)}% of ${GB(job.bytes)}` : '…'}`);
-      await wait(1000);
-      job = await api('/api/chatmodels/get');
-    }
-    if (job?.state !== 'done') throw new Error(job?.error || 'the download did not finish');
-    app.models = await api('/api/models').catch(() => app.models);
-    const id = (app.models?.chat ?? []).find(m => m.installed !== false && flat(keyOf(m.id)).includes(flat(u.name)))?.id;
-    if (!id) throw new Error('it downloaded but is not listed yet: look in Models');
-    return id;
+    throw new Error('it is not on any of your PCs: add it under Models first');
   }
 
   /**
@@ -168,7 +148,7 @@
   /** "See real examples from clusters": loads the data file the first time it is opened. */
   function examples() {
     const body = el('div', { class: 'cluster-ex-body' }, el('p', { class: 'hint', text: 'Reading the examples…' }));
-    const d = fold('examples', 'See real examples from clusters', body);
+    const d = fold('examples', 'The full test records (layouts, settings, caveats)', body);
     const load = async () => {
       try {
         const got = await (await fetch('cluster-examples.json')).json();
@@ -183,6 +163,47 @@
     if (d.open) { loaded = true; load(); }
     return d;
   }
+
+  // ---- "See measured cluster examples": a pop-up, one block per hardware setup (its PCs first, then what was measured
+  // on them), single PCs and clusters side by side; then what it shows, and the full test records folded (public/cluster-measured.json).
+  const dateWords = iso => new Date(`${iso}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  function setupBlock(s, pcs) {
+    const hw = el('table', { class: 'cluster-hw' },
+      el('thead', {}, el('tr', {}, ...['PC', 'Processor', 'RAM', 'Graphics card'].map(t => el('th', { scope: 'col', text: t })))),
+      el('tbody', {}, ...s.pcs.map(id => pcs[id]).map(p => el('tr', {}, el('th', { scope: 'row', text: p.name }), el('td', { text: p.cpu }), el('td', { text: p.ram }), el('td', { text: p.card })))));
+    const res = el('table', { class: 'cluster-res' },
+      el('thead', {}, el('tr', {}, ...['Model', 'File', 'How it ran', 'Tokens a second', 'Measured'].map(t => el('th', { scope: 'col', text: t })))),
+      el('tbody', {}, ...s.results.map(r => el('tr', {},
+        el('td', {}, r.model, r.note ? el('span', { class: 'hint cluster-res-note', text: r.note }) : null),
+        el('td', { text: r.file }),
+        el('td', { text: r.how }),
+        el('td', { class: 'cluster-res-n', text: r.tokS == null ? 'failed' : String(r.tokS) }),
+        el('td', { class: 'hint', text: `${dateWords(r.date)} · ${r.tool === 'app' ? 'in the app' : 'test run'}${r.answers ? ` · ${r.answers} ${r.tool === 'app' ? `answer${r.answers === 1 ? '' : 's'}` : `run${r.answers === 1 ? '' : 's'}`}` : ''}` })))));
+    return el('section', { class: 'cluster-setup', 'aria-label': s.title },
+      el('h3', { text: s.title }),
+      el('div', { class: 'cluster-table' }, hw),
+      el('div', { class: 'cluster-table' }, res));
+  }
+  let measured = null;
+  async function openMeasured() {
+    const dlg = $('#cluster-measured-dlg');
+    const body = $('#cluster-measured-body');
+    if (!dlg.open) dlg.showModal();
+    if (measured) return;
+    try {
+      const d = await (await fetch('cluster-measured.json')).json();
+      measured = d;
+      body.replaceChildren(
+        el('p', { class: 'hint', text: `Tokens a second while writing (a token is about three quarters of a word). "In the app" is real chats in TOMLIN; a test run is one short benchmark with the link not encrypted. ${d.network} Your PCs will differ.` }),
+        ...d.setups.map(s => setupBlock(s, d.pcs)),
+        el('h3', { text: 'What it shows' }),
+        el('ul', { class: 'hint cluster-notes' }, ...d.findings.map(t => el('li', { text: t }))),
+        examples());
+    } catch (e) {
+      body.replaceChildren(el('p', { class: 'hint', text: `The measured runs could not be read: ${e.message}` }));
+    }
+  }
+  $('#cluster-measured-open')?.addEventListener('click', openMeasured);
 
   app.clusterExtra = { picker, ask, bringHere, say, fold, examples, busy: () => st.busy, setBusy: b => { st.busy = b; }, hasNet: () => !!st.net && Date.now() - st.at < 30_000 };
 })();

@@ -67,6 +67,8 @@ export interface Settings {
 export interface RunOptions {
   ctx: number;
   cache: 'f16' | 'q8_0' | 'q4_0';
+  /** The context cache in RAM, not on the card (--no-kv-offload): the card keeps its room for the weights. */
+  kvRam?: true;
   /** Where the weights go on a graphics device (src/llama.ts ChatRun). Settings saved before kept cpuMoe: true = 'ram'. */
   place: 'auto' | 'card' | 'ram' | 'layers';
   /** With place 'layers': the experts of the first N layers in RAM, the rest on the card. */
@@ -143,6 +145,12 @@ export interface Remote {
    * TOMLIN_MAX, when it names PCs, overrides. (2.0.89 and before saved `borrowMax`, a tick needed as well: now ignored.)
    */
   noBorrow?: boolean;
+  /**
+   * "Unencrypted cluster link" (Max mode and the cluster): borrow from this PC over a stream that is not sealed after its
+   * sealed opening, when that PC's own "Allow unencrypted cluster links" is ticked too (src/jobrun/maxhost.ts). Faster on
+   * the network; anything on the home network could read or change it. Off unless ticked here.
+   */
+  plainLink?: boolean;
   /** 'guest': this PC is linked there with a guest pass (that PC said so in its hello). Absent: as its admin. */
   role?: 'guest';
   /** When the guest pass there ends, as that PC said (null: no end). */

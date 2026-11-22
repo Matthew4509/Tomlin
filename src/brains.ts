@@ -173,8 +173,19 @@ export function flatten(turns: { role: string; content: string }[]): { system: s
 }
 
 /** Cleans the turns a manager PC sends to a worker: roles known, lengths capped, the system line first only. */
-export function cleanTurns(raw: unknown): { role: 'system' | 'user' | 'assistant'; content: string }[] | null {
-  if (!Array.isArray(raw) || !raw.length || raw.length > 200) return null;
+/**
+ * The most characters of a whole chat a linked PC takes in one request: what a TOMLIN before 2.1.9 took whatever its
+ * context (230,000, about 51,000 word-pieces of English), else 4 characters for each word-piece of the largest context it
+ * runs a chat model with (a host builds a chat at about 3 a word-piece, src/memory.ts CHARS_PER_TOKEN, so it always fits).
+ * 256k test, 22 Nov 2026: a 262,144 context on the Z820 was refused past about 51,000.
+ */
+export const TURNS_CHARS = 230_000;
+export const chatCharsFor = (ctx: number) => Math.max(TURNS_CHARS, Math.floor((Number(ctx) || 0) * 4));
+/** The most turns in one chat request (a long chat at a big context has many short messages). */
+export const MAX_TURNS = 1000;
+
+export function cleanTurns(raw: unknown, maxChars = TURNS_CHARS): { role: 'system' | 'user' | 'assistant'; content: string }[] | null {
+  if (!Array.isArray(raw) || !raw.length || raw.length > MAX_TURNS) return null;
   const out: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
   let total = 0;
   for (const [i, t] of raw.entries()) {
@@ -182,7 +193,7 @@ export function cleanTurns(raw: unknown): { role: 'system' | 'user' | 'assistant
     const content = String((t as Record<string, unknown>)?.content ?? '');
     if (role !== 'user' && role !== 'assistant' && !(role === 'system' && i === 0)) return null;
     total += content.length;
-    if (total > 230_000) return null;
+    if (total > maxChars) return null;
     out.push({ role, content });
   }
   return out.at(-1)?.role === 'user' ? out : null;

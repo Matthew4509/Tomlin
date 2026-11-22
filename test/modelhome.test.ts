@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ModelsHome, SPARE, byDrive, driveOf, drivesFrom, filesToMove, lettersFrom, moveModels, moveSaid, otherDriveHint, sameDrives, wholeDrive, type Drive } from '../src/modelhome.ts';
+import { ModelsHome, SPARE, byDrive, driveOf, drivesFrom, filesToMove, lettersFrom, moveModels, moveSaid, otherDriveHint, sameDrives, theirDriveHint, wholeDrive, type Drive } from '../src/modelhome.ts';
 import { Models } from '../src/models.ts';
 import { Registry } from '../src/registry.ts';
 
@@ -102,9 +102,20 @@ test('a full drive names another drive that has room, and none when none has', (
   const said = otherDriveHint(12 * GB, 'C:\\Users\\me\\TOMLIN\\models\\chat', all);
   assert.match(said, /keep your models on another drive: D: \(New Volume\) has 1600\.0 GB free/);
   assert.match(said, /Where models are kept/);
-  assert.equal(otherDriveHint(12 * GB, 'D:\\models', all), ' Or keep your models on another drive: E: has 30.0 GB free. Choose it under Models, Import models, Where models are kept.');
+  assert.equal(otherDriveHint(12 * GB, 'D:\\models', all), ' Or keep your models on another drive: E: has 30.0 GB free. Choose it under Network Storage (or Models, Import models, Where models are kept).');
   assert.equal(otherDriveHint(5000 * GB, 'C:\\models', all), '', 'no drive has that much room');
   assert.equal(otherDriveHint(1 * GB, 'C:\\models', []), '');
+});
+
+test('a PC sent a model it has no room for names its own drive with room, for its owner to pick under Network Storage; never a FAT drive', () => {
+  const all: Drive[] = [
+    { drive: 'C:', label: '', removable: false, fs: 'NTFS', free: 15 * GB, total: 238 * GB },
+    { drive: 'D:', label: 'Data', removable: false, fs: 'NTFS', free: 900 * GB, total: 1000 * GB },
+    { drive: 'F:', label: '', removable: true, fs: 'FAT32', free: 3000 * GB, total: 3000 * GB },
+  ];
+  assert.equal(theirDriveHint(83 * GB, 'C:\\Users\\pc\\TOMLIN\\models\\chat', all), ' It has 900.0 GB free on D: (Data): pick its D: under Network Storage, Where each PC runs its models from (on the PC that sent it, or on this one), then send it again.');
+  assert.equal(theirDriveHint(83 * GB, 'D:\\TOMLIN models\\chat', all), '', 'C: is too small and F: is FAT32');
+  assert.doesNotMatch(otherDriveHint(83 * GB, 'C:\\models', all), /F:/);
 });
 
 test('the models on this PC are listed by the drive each is on', () => {
