@@ -8,10 +8,10 @@ import * as share from '../share.ts';
 import * as link from '../link.ts';
 import { newNonce, sealedPipe, streamKeys } from '../linkstream.ts';
 import type { Remote } from '../store.ts';
-import { CLUSTER_TEST_DOOR, CLUSTER_TEST_UPGRADE } from './testdoor.ts';
+import { CLUSTER_TEST_DOOR, CLUSTER_TEST_UPGRADE, lasted } from './testdoor.ts';
 
 export interface TestWant {
-  target: 'echo' | 'rpc';
+  target: 'echo' | 'rpc' | 'dllama';
   plain: boolean;
   build?: string;
   all?: boolean;
@@ -136,6 +136,18 @@ async function openTestWireOnce(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'
   });
 }
 
+const mb = (n: number) => `${(n / 2 ** 20).toFixed(1)} MB`;
+
+/** A wire's error as said in a stream's end: what the network did, the system's code, and how far the stream got. */
+export function wireWords(e: NodeJS.ErrnoException, ms: number, inBytes: number, outBytes: number): string {
+  const what = e.code === 'ECONNRESET' ? 'the network connection to the linked PC was reset (it dropped, or that PC closed it hard)'
+    : e.code === 'ETIMEDOUT' ? 'the network connection to the linked PC timed out (nothing came back: it dropped, or that PC stopped answering)'
+    : e.code === 'EPIPE' ? 'the network connection to the linked PC was already closed when this PC wrote to it'
+    : e.code === 'ENETUNREACH' || e.code === 'EHOSTUNREACH' ? 'the linked PC could no longer be reached on the network'
+    : `the network connection to the linked PC failed: ${e.message}`;
+  return `${what} (${e.code ?? 'no code'}), after ${lasted(ms)}, ${mb(inBytes)} in and ${mb(outBytes)} out`;
+}
+
 /** Why a stream ended, as this PC can tell: the wire's own trouble, this side closing, or the node's reason asked. */
 async function whyEnded(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'>, nonce: string, why: string, localFirst: boolean): Promise<{ reason: string; byNode: boolean }> {
   if (why) return { reason: why, byNode: false };
@@ -143,7 +155,8 @@ async function whyEnded(r: Pick<Remote, 'name' | 'url' | 'token' | 'key'>, nonce
   try {
     const said = await askEndReason(r, nonce);
     if (said === null) return { reason: NO_REASON, byNode: true };
-    return { reason: said ? `"${r.name}" ended it: ${said}` : `"${r.name}" closed it and kept no reason`, byNode: !!said };
+    // No reason there means it has not ended there: its end is still open, so the connection was lost between the PCs.
+    return { reason: said ? `"${r.name}" ended it: ${said}` : `the connection was lost between the PCs: "${r.name}" did not close it (its end of the stream was still open)`, byNode: !!said };
   } catch (e) {
     return { reason: `could not ask "${r.name}" why: ${(e as Error).message}`, byNode: false };
   }
@@ -189,6 +202,11 @@ export async function testBridge(r: Pick<Remote, 'name' | 'url' | 'token' | 'key
         local.pipe(w.socket);
         w.socket.pipe(local);
         local.resume();
+        // The wire's own trouble (a reset, a timeout), kept: the linked PC may never have seen it (a dropped network
+        // leaves its end open until its time is up), so asking it would only say it kept no reason.
+        let wireWhy = '';
+        const since = Date.now();
+        w.socket.on('error', e => void (wireWhy ||= wireWords(e as NodeJS.ErrnoException, Date.now() - since, w.socket.bytesRead, w.socket.bytesWritten)));
         const end = () => {
           local.destroy();
           w.socket.destroy();
@@ -197,7 +215,7 @@ export async function testBridge(r: Pick<Remote, 'name' | 'url' | 'token' | 'key
           s.on('close', end);
           s.on('error', end);
         }
-        local.once('close', () => ended('', w.nonce));
+        local.once('close', () => ended(wireWhy, w.nonce));
       } else {
         local.resume();
         void sealedPipe(local, w.socket, w.keys, 'host', { head: w.head }).then(why => ended(why, w.nonce));

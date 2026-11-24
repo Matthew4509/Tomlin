@@ -13,12 +13,14 @@ const { scheduleLive } = require('./live-state');
 const { shutdown, stopEverything } = require('./lifecycle');
 const { handle } = require('./routes');
 
+const { appendCapped } = require('./logcap'); // the fault log's cap
+
 // A fault in one background job (a project file nobody expected, a live check, a token count) is written down and
 // the rest keeps running: it must never take every local copy (or TOMLIN) down with it.
 function logFault(kind, e) {
   const line = new Date().toISOString() + ' ' + kind + ': ' + ((e && e.stack) || e) + '\n';
   console.error('The Bridge part hit an error and kept running (' + kind + '): ' + ((e && e.message) || e));
-  try { fs.mkdirSync(path.join(cfg.DATA, 'logs'), { recursive: true }); fs.appendFileSync(path.join(cfg.DATA, 'logs', 'bridge-errors.log'), line); } catch {}
+  try { appendCapped(path.join(cfg.DATA, 'logs'), 'bridge-errors.log', line); } catch {}
 }
 
 // The folders are read after the page can already answer, so nothing waits on them.
@@ -41,7 +43,7 @@ function embed() {
   embedded = true;
   cfg.ensureDataDirs();
   try { require('./hosting/connections').sweepTemps(); } catch {}
-  process.on('exit', stopEverything);
+  require('../exithook.ts').onExit(stopEverything);
   warmUp().catch(e => logFault('starting', e));
   return { handle };
 }

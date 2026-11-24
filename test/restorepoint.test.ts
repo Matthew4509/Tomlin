@@ -42,6 +42,8 @@ test('two PCs: a restore point kept on the node carries no keys, comes back whol
     assert.match(token, /\w{16}/);
     // The host has a PIN too, and a sharing code of its own.
     writeFileSync(join(hostDir, 'data', 'app-lock.json'), '{"salt":"HOST-SALT","hash":"HOST-PIN-HASH"}');
+    // And a Bootable USB admin key, which opens every stick minted with it.
+    writeFileSync(join(hostDir, 'data', 'usb.json'), '{"key":"ADMINKEYABCDEFGH"}');
 
     const sent = await host.post('/api/network/backup', { pc });
     assert.equal(sent.status, 200, JSON.stringify(sent.body));
@@ -53,10 +55,11 @@ test('two PCs: a restore point kept on the node carries no keys, comes back whol
     assert.equal(kept.length, 1, kept.join(', '));
     const names = execFileSync(TAR, ['-t', '-f', kept[0]], { encoding: 'utf8' }).split(/\r?\n/).map(n => n.replace(/^\.\//, ''));
     assert.ok(names.includes('settings.json'));
-    assert.ok(!names.includes('app-lock.json') && !names.includes('share.json'), names.join(', '));
+    assert.ok(!names.includes('app-lock.json') && !names.includes('share.json') && !names.includes('usb.json'), names.join(', '));
     const everything = execFileSync(TAR, ['-x', '-O', '-f', kept[0]], { encoding: 'latin1', maxBuffer: 64 << 20 });
     assert.ok(!everything.includes(token), 'the host\'s key to the node is not in the restore point');
     assert.ok(!everything.includes('HOST-PIN-HASH'), 'nor its PIN');
+    assert.ok(!everything.includes('ADMINKEYABCDEFGH'), 'nor its Bootable USB admin key');
 
     // Brought back: whole, so it is kept (the host's own copy is moved aside first, so this one really comes back).
     const listed = await host.get(`/api/network/backups?pc=${pc}`);

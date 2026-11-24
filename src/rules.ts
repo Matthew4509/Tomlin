@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeAtomic } from './atomic.ts';
 import * as ws from './workspace.ts';
+import { scanText } from './promptscan.ts';
 
 export const RULES_FILE = 'rules.md';
 export const RULES_MAX = 4000;
@@ -93,16 +94,21 @@ export function withRules<T extends { role: string; content: string }>(turns: T[
 // ---- Hard checks on what a model saves (src/filetools.ts save_file) ----
 
 const SECRET = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bsk-[A-Za-z0-9_-]{20,}|\bghp_[A-Za-z0-9]{30,}|\bxox[abp]-[A-Za-z0-9-]{10,}|\b(?:api[_-]?key|secret|password|passwd|token)\s*[:=]\s*['"]?[A-Za-z0-9_\-/+=]{12,}/i;
+// A quoted value under a key that names a password or key, as JSON, YAML, .ini and code write it ("pw": "s3cret!",
+// password = 'hunter22'): the pattern above needs the colon right after the name and 12 characters, so a JSON
+// "password": "…" or a short one went through. A value of 6 to 11 characters counts only with a digit or a sign in it,
+// so "password": "Password" (a label) is not taken for one.
+const KEYED = /\b(?:pw|pwd|pass|passwd|password|passphrase|passcode|secret|client[_-]?secret|api[_-]?key|apikey|access[_-]?key|private[_-]?key|token|access[_-]?token|auth[_-]?token|bearer)['"]?\s*[:=]\s*(['"])(?:[^'"\s]{12,}|(?=[^'"\s]*[\d!#$%&()*+,./:;<=>?@[\]^_{|}~\-])[^'"\s]{6,11})\1/i;
 
 /** Whether a text looks like it holds a key, a token or a password: what a tool read is withheld then, as a save is refused. */
-export const looksSecret = (text: string): boolean => SECRET.test(text);
+export const looksSecret = (text: string): boolean => SECRET.test(text) || KEYED.test(text);
 
 /**
  * A reason a model's save must be refused, or null. `old`: the file's text now (null: new file). Refuses an empty save over
  * a file, a save that cuts a file of 400+ characters to under a third, and text that holds a key or password.
  */
 export function checkSave(old: string | null, text: string, r: Rules = current): string | null {
-  if (SECRET.test(text)) return 'Not saved: the text looks like it holds a password, key or token. Standing rules: never handle those. Leave it out and tell the person.';
+  if (looksSecret(text)) return 'Not saved: the text looks like it holds a password, key or token. Standing rules: never handle those. Leave it out and tell the person.';
   if (!r.on) return null;
   if (old !== null && old.trim() && !text.trim()) return 'Not saved: this would empty a file. Standing rules: never delete. Tell the person instead.';
   if (old !== null && old.length >= 400 && text.length < old.length / 3) return 'Not saved: this would cut the file to under a third of its size. Standing rules: never delete. Save the whole file with the parts kept, or ask the person.';
@@ -120,6 +126,17 @@ export async function readProjectRules(root: string, id: unknown): Promise<strin
   if (!validProject(id)) return '';
   const r = await ws.read(root, projectPath(id));
   return 'error' in r ? '' : cleanRules(r.text).slice(0, PROJECT_RULES_MAX);
+}
+
+/**
+ * A project's rules for a model's system turn: left out ('', held: true) when the prompt scanner reads them as an attempt
+ * to take a model over. Model saves cannot write jobs\ (folders.ownedByTomlin), so this is the second guard: a rules
+ * file put there some other way (a restored backup, another program) is not obeyed. Settings still shows the text.
+ */
+export async function projectRulesForModel(root: string, id: unknown): Promise<{ text: string; held: boolean }> {
+  const text = await readProjectRules(root, id);
+  if (!text || !scanText(text, { long: false }).suspect) return { text, held: false };
+  return { text: '', held: true };
 }
 
 /** Saves them (empty text: no rules). Null for something that is not a project id. */

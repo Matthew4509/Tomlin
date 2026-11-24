@@ -181,7 +181,7 @@ export interface ShareState {
   /** Whether a PIN is asked for as well as the setup code (off by default). */
   pinOn: boolean;
   pin: string;
-  paired: { name: string; hash: string; at: string; /** The linking PC's own id (newer copies send it), so linking again replaces its old link. */ from?: string; /** The encrypted link's keys (src/link.ts); a link from before has none and must be made again. */ key?: string; /** Where this link's restore points and update are kept here: made at linking, never said by the linking PC (links made before use `from`). */ keep?: string; /** 'guest': linked with a guest pass (src/guestpass.ts), not the setup code. Absent: a link as it always was. */ role?: 'guest'; /** The guest pass it was made with. */ passId?: string; /** When a guest link ends (its pass's end then); null or absent: no end. */ expires?: string | null; /** Renewed after a request: its own end counts. */ renewed?: boolean; /** Its requests are not taken (Block). */ blocked?: boolean; /** Its pass was removed then: it may collect work for a while. */ endedAt?: string }[];
+  paired: { name: string; hash: string; at: string; /** The linking PC's own id (newer copies send it), so linking again replaces its old link. */ from?: string; /** The encrypted link's keys (src/link.ts); a link from before has none and must be made again. */ key?: string; /** Where this link's restore points and update are kept here: made at linking, never said by the linking PC (links made before use `from`). */ keep?: string; /** 'guest': linked with a guest pass (src/guestpass.ts), not the setup code. Absent: a link as it always was. */ role?: 'guest'; /** The guest pass it was made with. */ passId?: string; /** When a guest link ends (its pass's end then); null or absent: no end. */ expires?: string | null; /** Renewed after a request: its own end counts. */ renewed?: boolean; /** Its requests are not taken (Block). */ blocked?: boolean; /** Its pass was removed then: it may collect work for a while. */ endedAt?: string; /** Linked with an admin key this PC was minted with (Bootable USB). */ byKey?: boolean }[];
   /** Guest passes made here (src/guestpass.ts): never their codes, only the keys they are proven with. */
   passes?: GuestPass[];
   /** This PC as a host: the generation of its own passes (src/guestpass.ts nextGen), up at each change. */
@@ -227,6 +227,13 @@ export interface ShareState {
   plainLinks?: boolean;
   /** The last update a linked PC pushed here (src/update.ts): to which version, by whom, when; `pulled`: taken from that PC by someone here. */
   updated?: { version: string; by: string; at: string; pulled?: boolean } | null;
+  /**
+   * The public key of the admin this PC was minted by (Bootable USB, src/adminkey.ts): only the PC holding its private
+   * half links here with no setup code or PIN. Set from the stick's tomlin-node.json at start; one admin per stick.
+   */
+  adminPub?: string;
+  /** This PC runs from a Bootable USB stick (Linux, no disk of its own): the scan and the admin's list say so. */
+  usbNode?: boolean;
   /** The last PC that linked here: shown on the Network page with the new setup code; `dropped`: the oldest link it pushed out (10 at most). */
   lastLinked?: { name: string; at: string; dropped?: string } | null;
 }

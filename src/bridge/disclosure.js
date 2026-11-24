@@ -335,7 +335,7 @@ async function scratchGitDir() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-disclosure-' + process.pid + '-'));
   const r = await git(null, ['init', '--bare', '-q', d]);
   scratchGit = r.ok ? d : null;
-  process.once('exit', () => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+  require('../exithook.ts').onExit(() => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
   return scratchGit;
 }
 

@@ -14,7 +14,7 @@ import type { ChatInfo } from '../chats.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
 import { cleanFrom, cleanWritten, markSent, promptFor } from '../sendto.ts';
-import { cleanFoldWait, findInChat, FOLD_WAIT_MAX, isBigRead, LOG_KINDS, recallLine, sentLines, startIn, type LogKind } from '../layers.ts';
+import { cleanFoldWait, findInChat, FOLD_WAIT_MAX, isBigRead, leaving, LOG_KINDS, recallLine, sentLines, startIn, SUM_ANSWER_TOKENS, sumAsk, sumInputRoom, type LogKind } from '../layers.ts';
 import { HOME, HOST_OFF, HOST_ON, type Route, type Routes, SECURITY_HEADERS, chatLogs, chats, json, notebooks, shortName, staff, staffId, store, workspaceDir } from './core.ts';
 import { chat, chatList, fitsAloneNow, lastUsed, main, maxEngineFor, maxGateNow, maxLoadEta, maxRunOf, maxSpeeds, runOn, runnerUsed, toolsModels } from './panes.ts';
 import { afterAnswer } from '../maxmode.ts';
@@ -36,7 +36,7 @@ import { loadAsk, widenForWeb } from './webctx.ts';
 import type { Kit } from '../toolkit.ts';
 import { holdFindings, kitFor } from './tools.ts';
 import { chatFilesRoot } from './places.ts';
-import { readProjectRules, withProjectRules } from '../rules.ts';
+import { projectRulesForModel, withProjectRules } from '../rules.ts';
 import { runnerHeaders } from '../runnerkeys.ts';
 import type { Pane } from '../pane.ts';
 import { faultFor, faultFrom, thisPc } from './faults.ts';
@@ -255,6 +255,11 @@ async function answerTurn(res: ServerResponse, send: (event: string, data: unkno
     // hire it is with.
     const info = await chats.get(t.openId);
     await inScope({ project: info?.project ?? '', staff: staffOfWho(info?.who) }, () => answerTurnBody(res, live.send, t, live));
+  } catch (e) {
+    // A fault outside the answer's own handling (saving the chat, a file held by another program): said, and logged,
+    // never a stream that just ends with nothing.
+    log.error('chat', `A chat turn failed: ${(e as Error).stack ?? e}`);
+    live.send('error', { text: `Something went wrong here and this turn ended (${(e as Error).message}). Your message is in the chat; send it again if no answer was kept.` });
   } finally {
     live.finish();
   }
@@ -455,6 +460,17 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const keepSent = async () => {
     if ('layered' in built && built.folded) await chatLogs.setSent(openId, built.sent);
   };
+  // "Sum up what a fold lets go" (the chat's tick, off unless he ticks it): where sending started before this turn, so a
+  // fold knows which messages leave. Only for a new message: Continue and the handoff never fold a summary in.
+  const sumsOn = !!layers.sums && mode === 'message' && !!info?.id;
+  const logBefore = sumsOn ? await chatLogs.read(openId) : null;
+  const sentBefore = logBefore?.sent ?? null;
+  // Where the newest summary ends: nothing up to there is summed up again.
+  const summedTo = logBefore?.sums.reduce<string | undefined>((m, s) => (!m || s.to > m ? s.to : m), undefined);
+  /** Stop before the answer started, after a fold was kept: what was sent before goes back, so the next turn's fold sums those messages up. */
+  const putBackSent = async () => {
+    if (sumsOn && 'layered' in built && built.folded) await chatLogs.setSent(openId, sentBefore).catch(() => undefined);
+  };
   let built = await build();
   const sources = built.docsWhole ? `${docs.map(d => d.name).join('; ')} (whole)` : found.length ? sourcesLine(found) : '';
   // A message bigger than this model's context can read with an answer: said plainly, never sent to be cut or refused.
@@ -465,8 +481,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   }
   lastContext.set(openId, { ctx: built.ctx, at: Date.now(), model: ran });
   await keepSent();
-  // The chat's project's own rules (jobs/<id>/rules.md), on top of the standing rules.
-  const projectRules = await readProjectRules(await workspaceDir(), info?.project).catch(() => '');
+  // The chat's project's own rules (jobs/<id>/rules.md), on top of the standing rules; left out when they read as an
+  // attempt to take a model over (the Project rules card says so).
+  const projectRules = (await projectRulesForModel(await workspaceDir(), info?.project).catch(() => null))?.text ?? '';
   let turns = withProjectRules(built.turns, projectRules);
   // Continue: the cut answer is the last turn, so the model goes on from inside it.
   const before = mode === 'continue' ? history.at(-1)?.content ?? '' : '';
@@ -493,8 +510,9 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const thinkAsked = thinkRoomOf(t.room);
   // What the model's context leaves after the prompt (about 3 characters a word-piece) and the answer: the working may not
   // be given more than that, or the context fills before the answer starts and the whole working is lost.
-  const { room: thinkRoom, free: ctxFree } = thinkRoomFit(thinkAsked, built.ctx, built.used, built.answerTokens);
-  const answerTokens = mode === 'handoff' ? Math.min(built.answerTokens, 1200) : built.answerTokens + (thinkNow || thinks === 'always' ? thinkRoom : 0);
+  let { room: thinkRoom, free: ctxFree } = thinkRoomFit(thinkAsked, built.ctx, built.used, built.answerTokens);
+  const answerFor = () => (mode === 'handoff' ? Math.min(built.answerTokens, 1200) : built.answerTokens + (thinkNow || thinks === 'always' ? thinkRoom : 0));
+  let answerTokens = answerFor();
   // The working so far, as it was last sent (Answer now on a linked PC's model asks again with it).
   const working = { text: '', seconds: 0 };
   const sendThought = everyFew(1000, (text: string, seconds: number) => send('thinking', { text, seconds }));
@@ -509,10 +527,54 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   if (target && !target.here) takeChat(ac, null, openId, who);
   else await takeTurn(ac, runner, openId, who, send);
   if (ac.signal.aborted) {
+    await putBackSent();
     endAnswer(ac);
     if (mode === 'message' || mode === 'continue') send('error', { text: 'Stopped before it started: nothing was written.' });
     else send('error', { text: 'Stopped: the chat is as it was.' });
     return void res.end();
+  }
+  // A fold with "Sum up what a fold lets go" on: before the oldest messages leave, the same model (here or on the linked
+  // PC) is asked once to sum them up; the summary goes above the latest messages from this turn on. It reads only the
+  // leaving messages, so a fold takes a little longer (that read and about 300 word-pieces written). Any fault, or no
+  // summary: the fold goes on without one and the note under the answer says so. Stop ends the turn as before it started.
+  let sumNote = '';
+  if (sumsOn && 'layered' in built && built.folded) {
+    const asked = sumAsk(leaving(history, sentBefore, built.older, summedTo), books.name, sumInputRoom(built.room));
+    const here = !target || target.here;
+    if (asked && here && !(runner.view.state === 'connected' && runner.worker.base)) {
+      sumNote = 'This answer started a fold, but no model was loaded here to sum up the older messages, so they left without a summary.';
+    } else if (asked) {
+      send('status', { text: `Summing up the ${asked.n} older message${asked.n === 1 ? '' : 's'} this fold lets go…` });
+      // A model that always thinks first spends its working from the same limit: it is given the working's room too.
+      const sumTokens = SUM_ANSWER_TOKENS + (thinks === 'always' ? thinkRoom : 0);
+      try {
+        const text = !here
+          ? await target!.brain.chat(asked.turns, sumTokens, () => undefined, ac.signal, { plain })
+          : (await streamChat(runner.worker.base!, runner.view.model ?? '', asked.turns, () => undefined, ac.signal, sumTokens, { plain, think: false })).text;
+        const kept = text && !ac.signal.aborted ? await chatLogs.addSum(openId, { from: asked.from, to: asked.to, n: asked.n, text, by: ran }) : null;
+        if (kept) {
+          // Built again with the summary on top, keeping the same start (as "Send them now" does).
+          const foldedTo = built.older;
+          await chatLogs.stale(openId);
+          built = await build();
+          await keepSent();
+          turns = withProjectRules(built.turns, projectRules);
+          ({ room: thinkRoom, free: ctxFree } = thinkRoomFit(thinkAsked, built.ctx, built.used, built.answerTokens));
+          answerTokens = answerFor();
+          // The summary takes room at the top: when the window is small, a few more messages may leave with it.
+          const more = 'layered' in built ? built.older - foldedTo : 0;
+          sumNote = `This answer started a fold: ${asked.n} older message${asked.n === 1 ? ' was' : 's were'} summed up by the model (Memory shows the summary)${asked.skipped ? `; ${asked.skipped} older one${asked.skipped === 1 ? '' : 's'} were too many to read with them` : ''}${more > 0 ? `; the summary took room, so ${more} more message${more === 1 ? '' : 's'} left without one (the chat log and Find in this chat still have them)` : ''}.`;
+        } else if (!ac.signal.aborted) sumNote = 'This answer started a fold, but the model wrote no summary for it, so those messages left without one.';
+      } catch (error) {
+        if (!ac.signal.aborted) sumNote = `This answer started a fold, but its summary could not be written (${(error as Error).message}), so those messages left without one.`;
+      }
+      if (ac.signal.aborted) {
+        await putBackSent();
+        endAnswer(ac);
+        send('error', { text: 'Stopped before it started: nothing was written.' });
+        return void res.end();
+      }
+    }
   }
   let shown = '';
   let looped = false;
@@ -649,7 +711,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     const turnWeb = webAsked && !webWhy ? new WebTurn(webSeed, { search, perCall: i.webPerCall, total: i.webTotal, onStatus: i.say, ...(research ? { pagesPerAnswer: RESEARCH_BUDGET.pagesPerAnswer } : {}) }) : null;
     web = turnWeb;
     const files = i.filesRoot ? new FileTurn(i.filesRoot, { perCall: i.webPerCall, allowed: true }) : null;
-    const turnKit = i.kitOk ? await kitFor({ perms, gate, perCall: i.webPerCall, root: i.filesRoot, web: !!turnWeb, webUses: () => turnWeb?.uses ?? [], page: u => turnWeb?.pageOf(u) ?? null, second: i.second, canQueue: true }) : null;
+    const turnKit = i.kitOk ? await kitFor({ perms, gate, perCall: i.webPerCall, root: i.filesRoot, web: !!turnWeb, webUses: () => turnWeb?.uses ?? [], page: u => turnWeb?.pageOf(u) ?? null, second: i.second, canQueue: true, saved: () => files?.saved ?? [] }) : null;
     kit = turnKit;
     const baseRounds = files ? FILE_ROUNDS : turnWeb ? (research ? RESEARCH_BUDGET.rounds : WEB_ROUNDS) : 0;
     const tools = turnWeb || files || turnKit ? {
@@ -821,14 +883,15 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
       return void res.end();
     }
   } finally {
-    endAnswer(ac);
+    // The answer stays listed until the turn ends (live 'close'), not here: until it is saved, the next message in this
+    // chat waits for it (and a queued subagent check after this still uses the runner and can be stopped).
     runnerUsed.set(runner, Date.now());
     holdNoMore();
     // Came in whole, stopped, or failed there: nothing is owed any more.
     if (owe && !stillOwed) await dropOwed(owe.rid);
   }
   const used = kit as Kit | null;
-  const note = [stalledNote, looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, ctxNotes.filter(n => !/^Web is on: starting /.test(n)).join(' '), webWhy, webNo, heldNote, ...permitLate,target?.brain.toolsOff ? `${target.brain.toolsOff}, so it answered from what it knows.` : '', thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : '', used?.note() ?? ''].filter(Boolean).join(' ');
+  const note = [stalledNote, looped ? 'The answer began repeating itself, so it was stopped there.' : ac.signal.aborted ? 'Stopped.' : target?.note ?? '', thinkNote, ctxNotes.filter(n => !/^Web is on: starting /.test(n)).join(' '), webWhy, webNo, heldNote, ...permitLate,target?.brain.toolsOff ? `${target.brain.toolsOff}, so it answered from what it knows.` : '', thought?.stopped && shown.trim() ? STOPPED_WORKING[thought.stopped] : '', used?.note() ?? '', sumNote].filter(Boolean).join(' ');
   const tools: ToolUse[] = [...((web as WebTurn | null)?.uses ?? awayTools), ...((used?.uses() ?? []) as ToolUse[])];
   // Findings the model suggested: shown with Save buttons, kept only when one is pressed (src/server/tools.ts).
   const findings = used?.findings() ?? [];
@@ -879,6 +942,8 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
     send('error', { text: 'Stopped before the answer began: your message is kept, no answer was written.' });
     return void res.end();
   }
+  // Nothing written, nothing stopped: said, and the message marked, so the next turn never sends two messages in a row.
+  if (!shown.trim() && mode === 'message') return fault('The model wrote no answer. Send it again, or try another model.');
   // A "REMEMBER: ..." line is only a suggestion: it comes off the answer and he decides (Save / No).
   const sug = memory.takeSuggestion(shown);
   shown = sug.answer;
@@ -889,7 +954,7 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   if (queuedCheck && runner.worker.base) {
     send('status', { text: 'A subagent is reading the answer against its quotes…' });
     try {
-      const r = await streamChat(runner.worker.base, runner.view.model ?? '', [{ role: 'system', content: queuedCheck.system }, { role: 'user', content: queuedCheck.user }], () => undefined, AbortSignal.timeout(240_000), 700, { plain: true });
+      const r = await streamChat(runner.worker.base, runner.view.model ?? '', [{ role: 'system', content: queuedCheck.system }, { role: 'user', content: queuedCheck.user }], () => undefined, AbortSignal.any([ac.signal, AbortSignal.timeout(240_000)]), 700, { plain: true });
       const found = cleanAnswer(r.text).trim().slice(0, 3000);
       if (found) shown = `${shown.trimEnd()}\n\n---\nSubagent check (${shortName(runner.view.modelName ?? '') || 'the model'} on this PC, after the answer): ${/^\W*all supported\W*$/i.test(found) ? 'every statement of fact is supported by the kept quotes.' : `\n${found}`}`;
       else subNote = 'The queued subagent check gave no answer.';
@@ -912,11 +977,13 @@ async function answerTurnBody(res: ServerResponse, send: (event: string, data: u
   const here = !target || target.here;
   const modelId = here ? runner.view.model ?? '' : '';
   const loadedAs = here ? maxRunOf(runner) : null;
-  if (modelId && !ac.signal.aborted && loadedAs?.engine !== 'layers') maxSpeeds.record(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : [], perSecond, tokens);
+  // Where this speed was measured (the context and how full the chat was): Max is only compared with speeds from the same.
+  const speedAt = { ctx: built.ctx, full: built.fill / 100 };
+  if (modelId && !ac.signal.aborted && loadedAs?.engine !== 'layers') maxSpeeds.record(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : [], perSecond, tokens, speedAt);
   const maxOn = mode === 'message' && (t.max ?? info?.max ?? false);
   const lenders = maxOn && modelId ? maxGateNow() : { why: '', names: [], ids: [], build: '' };
   const maxEngine = maxOn && modelId && !lenders.why ? maxEngineFor(modelId, lenders) : null;
-  const maxSaid = afterAnswer({ on: maxOn, away: here ? '' : target!.pc, fitsAlone: modelId ? fitsAloneNow(modelId) : null, loaded: loadedAs, gate: lenders, engine: maxEngine, perSecond, measured: modelId ? maxSpeeds.get(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : lenders.ids) : {}, model: runner.view.modelName || modelId, seconds: maxEngine?.use === 'experts' ? maxLoadEta(modelId, lenders.names) : null });
+  const maxSaid = afterAnswer({ on: maxOn, away: here ? '' : target!.pc, fitsAlone: modelId ? fitsAloneNow(modelId) : null, loaded: loadedAs, gate: lenders, engine: maxEngine, perSecond, measured: modelId ? maxSpeeds.get(modelId, loadedAs?.engine === 'experts' ? loadedAs.ids : lenders.ids, speedAt) : {}, model: runner.view.modelName || modelId, seconds: maxEngine?.use === 'experts' ? maxLoadEta(modelId, lenders.names) : null });
   const said = [note, subNote, keptSaid, maxSaid.note].filter(Boolean).join(' ');
   send('done', { text: shown, perSecond, ...(tokens ? { tokens } : {}), ran, cut, sources, thought, ...(tools.length ? { tools } : {}), ...(findings.length ? { findings } : {}), large: largeOf(marked), suggest: sug.suggest, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', note: said, ...(unsaved ? { unsaved } : {}) });
   // Web is off and the message plainly asked for it (a link or address, "search the web"): a card under the answer says
@@ -1073,7 +1140,8 @@ async function chatMore(res: ServerResponse, mode: 'continue' | 'handoff', at: S
 /** An answer cut off part-way: the words written so far are saved and shown, with why it stopped under them. */
 async function keepCutAnswer(file: string, text: string, ran: unknown, send: (event: string, data: unknown) => unknown, note: string, mark?: number): Promise<void> {
   const content = `${text.trimEnd()} …`;
-  await store.changeChat(file, lines => [...lines, { role: 'assistant', content, at: new Date().toISOString(), ...(ran ? { ran } : {}) } as ChatLine], mark);
+  const kept = await store.changeChat(file, lines => [...lines, { role: 'assistant', content, at: new Date().toISOString(), ...(ran ? { ran } : {}) } as ChatLine], mark);
+  if (!kept) return void send('error', { text: 'This chat was emptied (or deleted) while the answer was being written, so the answer was not kept.' });
   send('done', { text: content, perSecond: 0, ...(ran ? { ran } : {}), note });
 }
 
@@ -1102,7 +1170,8 @@ export const chatGet: Routes = {
     // ?chat=<id>: that chat's log (src/layers.ts), each line as he can see, change or delete it in Memory.
     const c = await logChat(url.searchParams.get('chat'));
     if ('error' in c) return json(res, c.status, { error: c.error });
-    return json(res, 200, { lines: (await chatLogs.read(c.id)).lines, kinds: LOG_KINDS });
+    const f = await chatLogs.read(c.id);
+    return json(res, 200, { lines: f.lines, sums: f.sums, kinds: LOG_KINDS });
   },
   '/api/chat/find': async ({ res, url }) => {
     // ?chat=<id>&q=<words>: the older messages, no longer sent word for word, that match the words (Find in this chat).
@@ -1222,6 +1291,23 @@ export const chatPost: Routes = {
     await chats.mark(c.id, { layersOff: b.on !== true });
     return json(res, 200, { on: b.on === true });
   },
+  '/api/chat/foldsums': async ({ res, b }) => {
+    // {chatId, on}: that chat's "Sum up what a fold lets go" tick (off unless he ticks it).
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    await chats.mark(c.id, { foldSums: b.on === true });
+    return json(res, 200, { on: b.on === true });
+  },
+  '/api/chat/sum': async ({ res, b }) => {
+    // {chatId, action: edit | delete, id, text}: a fold summary changed or taken out by him (a model only adds them, at a fold).
+    const c = await logChat(b.chatId);
+    if ('error' in c) return json(res, c.status, { error: c.error });
+    const r = b.action === 'delete'
+      ? (await chatLogs.removeSum(c.id, b.id)) ? { ok: true } : { error: 'That summary is not there any more. It may have been deleted in another window.' }
+      : b.action === 'edit' ? await chatLogs.editSum(c.id, b.id, b.text) : { error: 'Edit or delete a summary: nothing else is done here.' };
+    if ('error' in r) return json(res, 400, r);
+    return json(res, 200, { sums: (await chatLogs.read(c.id)).sums });
+  },
   '/api/chat/recall': async ({ res, b }) => {
     // {chatId, at, role}: an older message brought back into the chat (Find in this chat), as a line of his.
     const c = await logChat(b.chatId);
@@ -1274,6 +1360,11 @@ export const chatPost: Routes = {
     // message). Nothing loads here: a Max load is asked on the card under an answer (src/maxmode.ts).
     const c = await chats.get(b.chatId);
     if (c) await chats.mark(c.id, { max: b.on === true });
+    // Max switched on again: a model held after its expert-parallel runner stopped may try it again.
+    if (b.on === true) {
+      const freed = maxSpeeds.epForgive();
+      if (freed.length) log.info('max', `Max switched on again: expert parallel may be tried again for ${freed.join(', ')}.`);
+    }
     return json(res, 200, { ok: true });
   },
   '/api/chat/follow': async ({ res, b }) => {
@@ -1300,7 +1391,8 @@ export const chatPost: Routes = {
     if (open) {
       // An answer still running here saves nothing after this (its turn checks the mark).
       store.chatEmptied(chats.file(open.id));
-      await store.saveChat([], chats.file(open.id));
+      // Under the same lock as every other change, so a save already on its way cannot bring the old lines back.
+      await store.changeChat(chats.file(open.id), () => []);
       await chats.mark(open.id, { fill: 0, askedLarge: 0 });
       // The chat log stays, as its documents do (he empties messages, not what was decided); the next turn starts a
       // fresh record of what is sent.

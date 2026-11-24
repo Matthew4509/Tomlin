@@ -26,9 +26,9 @@ test('the left panel has no TOMLIN - HOME or Settings line; only the submenu is 
   assert.match(html, /id="settings-open"/);
 });
 
-test('thirteen lines in the order drawn: Hire staff, Models, This PC; then Network, Cluster, Network Storage; Create a guest pass; Theme at the very end', () => {
-  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'This PC', 'Network', 'Cluster', 'Network Storage', 'Create a guest pass', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Permissions', 'Theme']);
-  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'thispc', 'nodes', 'cluster', 'storage', 'guestpass', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
+test('sixteen lines in the order drawn: Hire staff, Models, This PC; then Add another PC, Bootable USB, Network, Manage, Cluster, Network Storage, Create a guest pass; Theme at the very end', () => {
+  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'This PC', 'Add another PC', 'Bootable USB', 'Network', 'Manage', 'Cluster', 'Network Storage', 'Create a guest pass', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Permissions', 'Theme']);
+  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'thispc', 'addpc', 'usb', 'nodes', 'manage', 'cluster', 'storage', 'guestpass', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
 });
 
 test('each has one short sentence', () => {
@@ -41,11 +41,26 @@ test('each has one short sentence', () => {
   assert.match(lines.find(l => l.name === 'Permissions')!.about, /may do on its own/);
 });
 
+test('three groups shown, the same in the submenu and on the tiles page: Staff and models, Your network, This app (Work is hidden)', () => {
+  // Each heading comes right before the first line of its group; the last value: that group is hidden.
+  const groups = [...sub.matchAll(/<li class="rail-group"( hidden)?><h3 class="rail-group-head" id="rail-group-(\w+)">([^<]+)<\/h3><\/li>\s*<li( hidden)?><button class="link" type="button" data-setup="(\w+)"/g)].map(m => [m[2], m[3], m[5], !!m[1] && !!m[4]]);
+  assert.deepEqual(groups, [['staff', 'Staff and models', 'staff', false], ['network', 'Your network', 'addpc', false], ['work', 'Work', 'jobs', true], ['app', 'This app', 'updates', false]]);
+  // Jobs and Files and blog writer are not in Settings: their lines are hidden, and a hidden line makes no tile.
+  assert.match(sub, /<li hidden><button class="link" type="button" data-setup="files"/);
+  assert.match(read('homeview.js'), /if \(li\.hidden\) continue;/);
+  // The group heading is the same size as the lines under it: no small label above them.
+  const css = read('style.css');
+  assert.match(css, /\.rail-group-head \{[^}]*font-size: var\(--fs-md\)/);
+  assert.match(css, /\.settings-group > h3 \{[^}]*font-size: var\(--fs-md\)/);
+});
+
 test('the tiles are made from the submenu, so the two always match', () => {
-  assert.match(html, /<div class="settings-tiles" id="settings-tiles"><\/div>/);
+  assert.match(html, /<div class="settings-groups" id="settings-tiles"><\/div>/);
   const view = read('homeview.js');
-  assert.match(view, /document\.querySelectorAll\('#rail-settings-sub \[data-setup\]'\)/);
+  assert.match(view, /document\.querySelectorAll\('#rail-settings-sub > li'\)/);
+  assert.match(view, /li\.querySelector\('\.rail-group-head'\)/);
   assert.match(view, /\$\('#settings-tiles'\)\.replaceChildren\(/);
+  assert.match(view, /el\('div', \{ class: 'settings-tiles' \}, \.\.\.g\.tiles\)/);
   assert.match(view, /dataset\.about/);
   // Three across, so the last row is the low-priority three; fewer only on a narrow screen.
   assert.match(read('style.css'), /\.settings-tiles \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
@@ -79,7 +94,7 @@ test('Settings opens the tiles; what was on its long page has pages of its own',
 });
 
 test('the two new pages behave like the other Settings pages', () => {
-  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'\];/);
+  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage'];/);
   assert.match(read('home.js'), /data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours'/);
   const css = read('style.css');
   assert.match(css, /\.shell:not\(\[data-view="data"\]\) > #settings-data/);
@@ -125,8 +140,8 @@ test('Manage updates is a page of its own: pressing it goes there and marks it, 
 
 test('everywhere else the foot of the left panel shows nothing, and the submenu opens on Settings pages', () => {
   const css = read('style.css');
-  assert.match(css, /:not\(\[data-view="colours"\]\) > \.rail #rail-settings-sub \{ display: none; \}/);
-  assert.match(css, /:not\(\[data-view="colours"\]\) > \.rail > \.rail-setup \{ display: none; \}/, 'no empty box with a line across it');
+  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\) > \.rail #rail-settings-sub \{ display: none; \}/);
+  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\) > \.rail > \.rail-setup \{ display: none; \}/, 'no empty box with a line across it');
 });
 
 test('links to what moved go to its new place, and no words send anyone to "Set up"', () => {
@@ -139,10 +154,10 @@ test('links to what moved go to its new place, and no words send anyone to "Set 
   assert.doesNotMatch(words, /aria-label="Set up"/);
 });
 
-test('Guest passes has no Add a node; the map\'s + Add a node opens Linked PCs, Add another PC', () => {
+test('Guest passes has no Add a node; the map\'s + Add a node opens the Add another PC page', () => {
   assert.doesNotMatch(html, /id="node-pass-addnode"/);
   assert.match(read('netmap.js'), /onclick: \(\) => app\.addNode\?\.\(\) \}/);
-  assert.match(read('home.js'), /app\.addNode = \(\) => \{\s+netSection\('linked'\);\s+\$\('#net-add'\)\.open = true;/);
+  assert.match(read('home.js'), /app\.addNode = \(\) => app\.openAddPc\(\);/);
 });
 
 test('the bottom of Linked PCs: Guest, Connect to a network as a guest, which opens the address and code boxes', () => {

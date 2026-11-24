@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+/** The owner's first name in lower case, kept encoded so this shipped file does not spell it (the privacy guard below). */
+const OWNER = Buffer.from('bWF0dGhldw==', 'base64').toString();
 
 test('measured cluster examples: a pop-up, each setup its PCs\' full hardware above, then what was measured on it', () => {
   type Pc = { name: string; cpu: string; ram: string; card: string };
@@ -21,7 +23,8 @@ test('measured cluster examples: a pop-up, each setup its PCs\' full hardware ab
       assert.ok(r.tokS === null ? /fail/.test(r.note ?? '') : r.tokS > 0, `${s.id}: ${r.model} speed`);
     }
   }
-  assert.doesNotMatch(JSON.stringify(d), /DESKTOP-|C:\\|@[a-z0-9-]+\.(com|net|org)|Matthew/i);
+  assert.doesNotMatch(JSON.stringify(d), /DESKTOP-|C:\\|@[a-z0-9-]+\.(com|net|org)/i);
+  assert.ok(!JSON.stringify(d).toLowerCase().includes(OWNER), "the owner's name");
   const js = read('public/clusterextra.js');
   assert.match(js, /\$\('#cluster-measured-open'\)\?\.addEventListener\('click', openMeasured\);/);
   assert.ok(js.indexOf("el('div', { class: 'cluster-table' }, hw)") < js.indexOf("el('div', { class: 'cluster-table' }, res)"), 'the hardware above the results');

@@ -181,25 +181,6 @@ span.df-add{color:var(--ok)} span.df-del{color:var(--bad)} .df-lines span.df-add
 .set-row .txt b{font-weight:400;display:block;overflow-wrap:anywhere}
 .set-row .txt span{color:var(--muted);font-size:12px;line-height:16px;display:block}
 /* This PC, in the nav pane: rings two to a line (four at 60px do not fit the pane) for CPU, memory and disk, then GPU (and CPU temperature when lib/sensors.js CPU_TEMP is on), then the facts and the token count. */
-.pcpanel{margin:14px 4px 4px;padding:12px 12px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px}
-.pc-head{display:flex;align-items:baseline;gap:6px;font-weight:600;margin-bottom:8px;min-width:0}
-.pc-head span{color:var(--muted);font-weight:400;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rings{display:flex;flex-wrap:wrap;justify-content:center;row-gap:6px;text-align:center}
-.ring{position:relative;flex:0 0 50%;min-width:0}
-button.ring{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;border-radius:6px}
-button.ring:hover .ring-k{color:var(--ink);text-decoration:underline}
-.ring.off .ring-v{color:var(--muted);font-weight:400}
-.ring svg{width:60px;height:60px;display:block;margin:0 auto}
-.ring .trk{stroke:var(--off-soft)}
-.ring .val{stroke:var(--accent);transition:stroke-dashoffset .6s ease}
-.ring.hot .val{stroke:var(--warn)}
-.ring-v{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;font-variant-numeric:tabular-nums}
-.ring-k{color:var(--muted);font-size:12px;line-height:16px;margin-top:2px}
-.pc-facts{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
-.pc-fact{display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:22px}
-.pc-fact span{color:var(--muted);white-space:nowrap}
-.pc-fact b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pc-count{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin-top:4px}
 .linkbtn{border:0;background:none;padding:2px 4px;min-height:24px;margin-right:-4px;border-radius:4px;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600}
 .linkbtn:hover{background:var(--hover)} .linkbtn:disabled{color:var(--muted);cursor:default;background:none}
 
@@ -282,9 +263,6 @@ dialog.wide{width:min(820px,calc(100vw - 32px))}
 [data-theme="orbital"] .row:hover{background:var(--card2);border-color:var(--line2);box-shadow:0 0 0 1px rgba(56,187,255,.18),0 0 22px rgba(56,187,255,.09)}
 [data-theme="orbital"] .btn.accent{background:linear-gradient(180deg,#167ad6,#0b4e99);border-color:rgba(56,187,255,.6);color:#fff;box-shadow:0 0 14px rgba(56,187,255,.22)}
 [data-theme="orbital"] .b-run{box-shadow:0 0 10px rgba(63,224,129,.18)}
-[data-theme="orbital"] .pcpanel{background:rgba(10,26,47,.7);box-shadow:inset 0 1px 0 rgba(140,210,255,.06),0 0 18px rgba(56,187,255,.06)}
-[data-theme="orbital"] .ring .val{filter:drop-shadow(0 0 3px rgba(56,187,255,.8))}
-[data-theme="orbital"] .ring.hot .val{stroke:#ff8a3c;filter:drop-shadow(0 0 3px rgba(255,138,60,.8))}
 [data-theme="orbital"] dialog::backdrop{background:rgba(0,4,14,.6);backdrop-filter:blur(2px)}
 [data-theme="orbital"] footer{border-top-color:rgba(90,170,255,.22)}
 
@@ -494,7 +472,7 @@ a.btn.accent{color:var(--accent-ink)}
 }
 @media (max-width:820px){
   .app{grid-template-columns:56px 1fr}
-  nav .lbl,.brand .lbl,.nav-item .count,.pcpanel,.runpanel{display:none}
+  nav .lbl,.brand .lbl,.nav-item .count,.runpanel{display:none}
   .brand .logo i{display:block}
   .brand{padding:6px 7px 16px}
   main{padding:20px 16px}

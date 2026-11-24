@@ -215,3 +215,10 @@ test('the action log: one line an action, a file a day, nothing with a line brea
     await rm(join(dir, '..'), { recursive: true, force: true });
   }
 });
+
+test('a run at Allowed is asked after a held answer or a save in this answer, and says why', async () => {
+  const { runAskWhy } = await import('../src/toolkit.ts');
+  assert.equal(runAskWhy('', []), '');
+  assert.equal(runAskWhy('', ['a.js', 'a.js']), 'this answer saved 1 file in the folder, which the command may run');
+  assert.equal(runAskWhy('a page looked like orders', ['a.js', 'b.json']), 'this answer read text that looked like orders for an AI; this answer saved 2 files in the folder, which the command may run');
+});

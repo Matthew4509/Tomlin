@@ -218,6 +218,12 @@ export const KEY_FILES = ['package.json', 'src/server.ts', 'tools/tray.cs', 'too
 /** The key files a copy lacks (none = whole). */
 export const missingFiles = (dir: string): string[] => KEY_FILES.filter(f => !existsSync(join(dir, ...f.split('/'))));
 
+/** Why a copy staged for the zip (tools/pack.ts) must not be packed: the key files it lacks, one per line; '' when whole. */
+export function stagedMissing(dir: string): string {
+  const miss = missingFiles(dir);
+  return miss.length ? `Pack stopped: the zip would miss ${miss.length} key file(s), and a copy without them cannot start:\n  ${miss.join('\n  ')}` : '';
+}
+
 /** A copy's version from its package.json, or null. */
 export function versionOf(dir: string): string | null {
   try {
@@ -285,6 +291,15 @@ export function followStarted(dir: string, env: NodeJS.ProcessEnv = process.env,
  * (KEEP_COPIES, for going back). Only a folder named like a copy that holds TOMLIN's own package.json; the one
  * current.txt names is kept whatever its name. Returns the folders removed. Never throws.
  */
+/** Whether a copy's models/ folder holds a model file (a chat model, a picture model or a LoRA). */
+export function holdsModels(dir: string): boolean {
+  try {
+    return readdirSync(join(dir, 'models'), { recursive: true }).some(n => /\.(gguf|safetensors|ckpt)$/i.test(String(n)));
+  } catch {
+    return false;
+  }
+}
+
 export async function pruneOldCopies(root: string, running: string): Promise<string[]> {
   const gone: string[] = [];
   try {
@@ -302,6 +317,8 @@ export async function pruneOldCopies(root: string, running: string): Promise<str
       } catch {
         continue; // not a whole copy of TOMLIN: left alone
       }
+      // Models kept inside an older copy are used in place (src/oldcopies.ts): that copy stays until they are moved.
+      if (holdsModels(dir)) continue;
       try {
         await rm(dir, { recursive: true, force: true });
         gone.push(old);
@@ -382,7 +399,10 @@ export type WindowChoice = Exclude<SetupAction, 'quit'>;
 export function windowMenu(installed: string, mine: string, where: string, root: string, home: string): { intro: string; choices: { key: WindowChoice; label: string }[]; pick: WindowChoice | ''; uninstall: string } {
   const m = actionMenu(installed, mine, where);
   return {
-    intro: `${m.intro} This setup holds ${NAME} ${mine}. Pick what to do, or Cancel to change nothing.`,
+    // Three lines: what is installed and where, this setup's version against it, then "Choose from below:".
+    intro: [`${NAME} ${installed} is installed in ${where}.`,
+      installed === mine ? `This setup is the same version, ${mine}.` : newer(installed, mine) ? `This setup is an older version, ${mine}, so it does not replace it.` : `This setup is a newer version, ${mine}.`,
+      'Choose from below:'].join('\n'),
     choices: m.options.filter((o): o is { key: WindowChoice; label: string } => o.key !== 'quit'),
     pick: m.defaultKey === 'quit' ? '' : m.defaultKey,
     uninstall: `This removes ${NAME} ${installed} from ${root}: the program, its copies, its Start menu and desktop shortcuts, its start when this PC starts, and its entry in Settings > Apps.` +

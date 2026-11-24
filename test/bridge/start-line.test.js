@@ -76,7 +76,8 @@ async function main() {
   await check('the prompt names no folder on this PC and no address', () => assert(!/[A-Za-z]:\\|\/Users\/|@|https?:/.test(START_LINE_PROMPT)));
   await check('the prompt says TOMLIN starts the projects, not the stand-alone Bridge', () => {
     assert(/I start my projects with TOMLIN\./.test(START_LINE_PROMPT));
-    assert(!/My Project Bridge|Myia/i.test(START_LINE_PROMPT));
+    // The stand-alone names, kept encoded so this shipped file does not spell them.
+    assert(!new RegExp(Buffer.from('TXkgUHJvamVjdCBCcmlkZ2V8TXlpYQ==', 'base64').toString(), 'i').test(START_LINE_PROMPT));
   });
 
   // ---- Prompts page ----

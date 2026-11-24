@@ -26,7 +26,7 @@ import { Images } from '../images.ts';
 import { TONES } from '../persona.ts';
 import { cacheBytes, modelShape, type ModelShape } from '../gguf.ts';
 import { modelCaps, type Caps } from '../capabilities.ts';
-import { cleanRunWith, devicesForRun, guessersFor, pickRoomyCtx, withLendersRoomy } from '../runset.ts';
+import { autoCache, cleanRunWith, devicesForRun, guessersFor, pickRoomyCtx, withLendersRoomy } from '../runset.ts';
 import { cleanFoldWait } from '../layers.ts';
 import { plainModelName } from '../llama.ts';
 import { incompleteWords } from '../models.ts';
@@ -689,7 +689,8 @@ export function chatPlace(id: string): runnersOf.Place {
   const entry = chatModels.list().find(m => m.id === id);
   if (!entry) return { error: `The model ${id} is not in the models folder any more. Pick another.` };
   const s = store.peek();
-  const run = s ? runOf(s, id) : { ...DEFAULT_RUN };
+  const saved = s ? runOf(s, id) : { ...DEFAULT_RUN };
+  const run = autoCache(saved, { f16Bytes: contextBytes(id, { ...saved, cache: 'f16' }), cardBytes: s?.chat.asked === 'cpu' ? 0 : cardMem().total }).run;
   return runnersOf.place(id, shortName(entry.file.split('/').pop()!.replace(/\.gguf$/i, '')), chatNeed(entry.bytes + draftBytes(run), contextBytes(id, run)), freemem() + maxLent(), runnerLooks());
 }
 
@@ -740,7 +741,11 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   if (at.already) return { ok: true, runner };
   const expected = s.loadSeconds[`chat:${id}`] ?? Math.round(entry.bytes / (150 * 2 ** 20)) + 4;
   const ready = async (port: number) => (await fetch(`http://127.0.0.1:${port}/health`)).ok;
-  const run = tryRun ?? roomyWithLenders(runOf(s, id), id, s.run[id], maxLent());
+  // The speed finder's try is used as it is; a normal load gets q8_0 when an f16 cache would crowd the card (autoCache).
+  const saved = tryRun ?? roomyWithLenders(runOf(s, id), id, s.run[id], maxLent());
+  const picked = tryRun ? { run: tryRun, why: '' } : autoCache(saved, { f16Bytes: contextBytes(id, { ...saved, cache: 'f16' }), cardBytes: asked === 'cpu' ? 0 : cardMem().total });
+  const run = picked.run;
+  if (picked.why) log.info('chat', `${name} at ${run.ctx.toLocaleString('en-GB')}: ${picked.why}.`);
   let timeLimit = startSeconds(entry.bytes, false);
   runnerRun.set(runner, run);
   const draftPath = run.draft ? chatModels.path(run.draft) : null;
@@ -754,8 +759,24 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   // automatic way below (borrowRule), switch or not: a model that does not fit (Cluster), and a model Max mode does not
   // take (dense, no CUDA card, measured slower, no lender ready), so Max on never loads it worse than Max off.
   const asksMax = !!o.max && !forced && fitsOnePc(alone);
+  // The expert-parallel runner crashed with this model before (data/max-crashes.json): expert parallel is not used for it
+  // until Max is switched on again in a chat or another build of that runner is installed (then the crash is forgotten
+  // here). Until the person loads it themselves (Connect, a chat's send, Reload with linked PCs: `main` or Max asked), no
+  // load of it starts by itself (a hire's step, a give-way reload): after such a crash a load started on its own lent
+  // from whichever PCs answered.
+  const epCrash = maxSpeeds.epCrash(id, runtimes.expertStamp());
+  if (epCrash?.held) {
+    if (main || o.max) maxSpeeds.epLetGo(id);
+    else if (!tryRun && !forced) {
+      const said = MaxSpeeds.heldWords(epCrash);
+      log.info('max', said);
+      return { error: said };
+    }
+  }
   const gate = asksMax ? maxGateNow(runnerOptions(held)) : null;
-  const engine = gate && !gate.why ? maxEngineFor(id, gate) : null;
+  // Max mode's "is it faster than this PC alone?" compares like with like: a load starts an empty chat at this context,
+  // so only speeds measured at this context in a short chat count (a full 64k chat's speed is not this PC alone at 32k).
+  const engine = gate && !gate.why ? maxEngine({ model: name, moe: (shapes.get(id)?.experts ?? 0) > 0, cuda: devicesFor('llama', asked).includes('cuda'), measured: maxSpeeds.get(id, gate.ids, { ctx: run.ctx, full: 0 }) }) : null;
   const maxPath = maxRoute({ asked: asksMax, fits: true, gate, engine }) === 'experts';
   let maxWords = !asksMax || maxPath ? '' : `${gate!.why ? `Max mode: not used: ${gate!.why}` : engine!.words}; it loads as it would with Max off.`;
   let max: Awaited<ReturnType<typeof maxLoad>>;
@@ -787,8 +808,22 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   // layer's experts at the same time. Measured 15 Nov 2026 on two PCs: DeepSeek-V4-Flash 1.84 tok/s against 1.16 for
   // the layer split, Qwen3.8 2.45 against 1.69. Null (the layer split below) without the patched runner or a plan.
   const shape = shapes.get(id);
-  const ep = started.moe && cardDevice === 'cuda' && max?.endpoints.length && !forced ? await maxExperts({ runtimeDir: [runtimes.kept, runtimes.dir], path, name, experts: shape?.experts ?? 0, used: shape?.expertsUsed ?? 0, cache: contextBytes(id, run), cards, max }).catch(e => (log.info('max', `${name}: expert parallel not used: ${(e as Error).message}.`), null)) : null;
+  // Its expert-parallel runner crashed with this model (kept above): not tried again, said in the load's note and the log
+  // (a load the chat's Max switch did not ask for says "Cluster:", as every note of its borrowing does).
+  if (epCrash && started.moe && cardDevice === 'cuda' && max?.endpoints.length && !forced) {
+    const said = `${MaxSpeeds.crashWords(epCrash)}.`;
+    log.info('max', `${name}: ${said}`);
+    if (!asksMax) max = { ...max, notes: [...(max.notes ?? []), said] };
+  }
+  const ep = !epCrash && started.moe && cardDevice === 'cuda' && max?.endpoints.length && !forced ? await maxExperts({ runtimeDir: [runtimes.kept, runtimes.dir], path, name, experts: shape?.experts ?? 0, used: shape?.expertsUsed ?? 0, cache: contextBytes(id, run), cards, max }).catch(e => (log.info('max', `${name}: expert parallel not used: ${(e as Error).message}.`), null)) : null;
   if (ep) started = { ...started, ...ep.run };
+  // An expert-parallel start that failed on its runner (not a chat template the runner could not read): kept as a crash
+  // with this model and build, so it is not tried again by itself (src/server/faults.ts keeps one once it was loaded).
+  const epFailed = (tail: string) => {
+    if (!ep || TEMPLATE_FAULT.test(tail)) return;
+    const c = maxSpeeds.epCrashed(id, { name, build: max?.build || runtimes.buildOfPin(chatExe('cuda', held, run, want).id), stamp: runtimes.expertStamp(), when: 'loading' });
+    log.info('max', `${name}: ${MaxSpeeds.crashWords(c)}.`);
+  };
   // Max mode and expert parallel did not start (no patched runner, no plan, a card that is not CUDA): this PC alone, said
   // so. The layer split below is never used for Max mode: it was slower than one PC every time it was measured.
   if (maxPath && !ep && max?.endpoints.length) {
@@ -885,7 +920,7 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     // Expert parallel starts the patched runner (same build as the stock one, b11284) with its split in the environment.
     build: device => ({ ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit }),
     // A start that failed with the expert placement (or expert parallel) is tried again on the stock runner with llama.cpp's own layer split.
-    retry: (device, tail) => (ep ? log.info('max', `${name}: the expert parallel start failed, so ${maxPath ? 'it is started again on this PC alone (Max mode never uses the layer split)' : 'llama.cpp\'s own layer split is tried'}. The runner's last words: ${tail.replace(/s+/g, ' ').trim().slice(-1500) || '(none)'}`) : undefined, TEMPLATE_FAULT.test(tail) ? { ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, true, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : started.maxPlace ? { ...chatExe(device, held, run, want), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, maxPath ? (maxAlone(runner, name), { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: undefined }) : { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: max?.endpoints, fitMargin: FIT_KEEP_WITH_LENDERS }), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : null),
+    retry: (device, tail) => (ep ? (log.info('max', `${name}: the expert parallel start failed, so ${maxPath ? 'it is started again on this PC alone (Max mode never uses the layer split)' : 'llama.cpp\'s own layer split is tried'}. The runner's last words: ${tail.replace(/s+/g, ' ').trim().slice(-1500) || '(none)'}`), epFailed(tail)) : undefined, TEMPLATE_FAULT.test(tail) ? { ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, true, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : started.maxPlace ? { ...chatExe(device, held, run, want), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, maxPath ? (maxAlone(runner, name), { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: undefined }) : { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: max?.endpoints, fitMargin: FIT_KEEP_WITH_LENDERS }), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : null),
     why: tail => whyItFailed(tail, entry.file),
     fileFault,
     // A card start that put the model on the CPU counts as failed (Max mode's lent cards aside): the next device is

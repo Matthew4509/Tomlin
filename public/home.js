@@ -92,7 +92,7 @@ function setView(view) {
 app.showPanes = () => setView('chat');
 
 /** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
-const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', storage: '#storage-page', help: '#help' };
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', allchats: '#allchats-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', usb: '#settings-usb', addpc: '#settings-addpc', manage: '#settings-manage', storage: '#storage-page', help: '#help' };
 /** Off for the first view at start: the page opens where it was, focus left alone. */
 let pageFocus = false;
 /**
@@ -133,7 +133,7 @@ const crumbName = view => (view === 'chat' ? 'Chat' : view === 'staff' ? 'Staff'
 // ---- Settings' pages: Staff, Jobs and Files open as pages beside the Settings menu, not as windows over it ----
 
 /** The pages the Settings menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours'];
+const SETUP_VIEWS = ['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings', fromMenu: false };
@@ -199,7 +199,6 @@ for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('cl
 $('#rail-home').addEventListener('click', () => setView('home'));
 $('#rail-home-row').addEventListener('click', () => setView('home'));
 // Under Projects: the Staff menu (Hire staff, Manage staff) as the Staff page, the Settings menu beside it.
-$('#rail-staff-row').addEventListener('click', () => app.openStaffMenu());
 phone.addEventListener('change', e => {
   if (!e.matches && homeUi.view === 'rail') setView(store('view') === 'chat' ? 'chat' : 'home');
 });
@@ -209,16 +208,17 @@ pageFocus = true;
 // The staff list under "Staff" starts open; folding it is kept in this browser.
 $('#rail-staff-fold').open = store('staff-open') !== '0';
 $('#rail-staff-fold').addEventListener('toggle', e => store('staff-open', e.target.open ? '1' : '0'));
-// Home's "Waiting for you" panel folds to a strip (it keeps the number); folding it is kept in this browser.
-$('#home-side-fold').open = store('home-waiting-open') !== '0';
+// Home's right panel (Urgent, Staff overview) starts hidden, a strip with one arrow (and the number, when something
+// is urgent), as the chat's does; opened, it stays open in this browser until hidden again.
+$('#home-side-fold').open = store('home-waiting-open') === '1';
 $('#home-side').classList.toggle('folded', !$('#home-side-fold').open);
 $('#home-side-fold').addEventListener('toggle', e => {
   $('#home-side').classList.toggle('folded', !e.target.open);
   store('home-waiting-open', e.target.open ? '1' : '0');
 });
-// Its three tabs, Waiting for you | Staff overview | To Do (the one picked is kept in this browser). A tab never folds
-// the panel: pressed while it is folded to its strip, it opens it on that tab.
-const homeTabs = [$('#tab-waiting'), $('#tab-home-staff'), $('#tab-home-todo')];
+// Its tabs, Urgent | Staff overview (the one picked is kept in this browser); To Do is hidden for now and skipped. A
+// tab never folds the panel: pressed while it is folded to its strip, it opens it on that tab.
+const homeTabs = [$('#tab-waiting'), $('#tab-home-staff'), $('#tab-home-todo')].filter(t => !t.hidden);
 function homeTab(tab, focus = false) {
   for (const t of homeTabs) {
     const on = t === tab;
@@ -325,25 +325,52 @@ const activityDot = a => el('span', { class: 'sdot', 'data-activity': a, 'aria-h
 const staffActivity = s => (s.activity === 'available' && s.state === 'asleep' ? 'asleep' : s.activity);
 
 /**
- * A person in the left panel. With `level` (a hire): "Name | Level", the software under it, and a third line only when
- * they are working or muted (how they are otherwise is the dot's shape on their icon, and the tooltip).
+ * A person in the left panel. With `level`: "Name | Level", the software under it. With `inline` (a hire): "Name | Status"
+ * (Available, Working, Asleep...), the software under it. A third line only when they are working (with `level`) or
+ * muted; otherwise how they are is the dot's shape on their icon, and the tooltip.
  */
-function staffRow({ key, name, avatar, sub, level, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true, flag, updating }) {
+/**
+ * What was just done to a linked PC from here, until it shows (pcId -> { kind: 'off' | 'update', at }): a PC takes a while
+ * to go quiet after Shut down, and is quiet while an update restarts it, so its card said Asleep meanwhile. Now it says
+ * Shutting down or Updating with a turning wheel, and the PCs are read again 12 and 25 s later.
+ */
+const pcJustDid = {};
+/** How long each says so at most, if the PC never shows it (ms). */
+const JUST_DID_MS = { off: 3 * 60_000, update: 10 * 60_000 };
+function markPcDid(id, kind) {
+  pcJustDid[id] = { kind, at: Date.now() };
+  for (const ms of [12_000, 25_000]) setTimeout(() => (typeof refreshPcs === 'function' ? refreshPcs() : app.refreshPcs?.()), ms);
+  if (typeof refreshPcs === 'function') refreshPcs();
+}
+/** The card's word for what was just done to `p` ('' once it shows: off and offline, or back on the new version). */
+function pcDidWord(p) {
+  const did = pcJustDid[p.id];
+  if (!did) return '';
+  const done = Date.now() - did.at > JUST_DID_MS[did.kind] || (did.kind === 'off' ? p.activity === 'offline' : !p.updating && !p.outdated && p.activity !== 'offline' && Date.now() - did.at > 20_000);
+  if (done) {
+    delete pcJustDid[p.id];
+    return '';
+  }
+  return did.kind === 'off' ? 'Shutting down' : 'Updating';
+}
+
+function staffRow({ key, name, avatar, sub, level, inline = false, artist = false, state, stateText, activity, activityWord, busy, count, active, title, onClick, onEdit, editTitle, mutable = true, flag, updating }) {
   // Muted (right-click the row, or Mute all): a bell with a line and "Muted until …", a grey dot in place of the number.
   const muted = mutable ? app.mutedBy?.([key]) : null;
   const bits = app.muteBits?.(muted, count) ?? { icon: null, count: count ? el('span', { class: 'rail-count', text: String(count) }) : null };
   const word = activity ? activityWord ?? ACTIVITY_WORD[activity] : busy ? 'Working' : STATE_WORD[state] ?? stateText;
   const mark = activity ? activityDot(activity) : dot(state);
   const b = el('button', { class: 'rail-row', type: 'button', 'data-key': key, title: `${title}\n${name}: ${sub}\n${busy ?? stateText}${muted ? `\nMuted ${muted.text}` : mutable ? '\nTo mute: right-click, or the … in the chat' : ''}`, 'aria-current': active ? 'true' : null },
-    app.avatar ? app.avatar(key, avatar, mark) : el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, avatar, mark),
+    // An artist (a picture hire) on a tinted disc with a ring of that colour, so one is told from a chat hire at a glance.
+    ((pic) => (artist && pic.classList.add('is-artist'), pic))(app.avatar ? app.avatar(key, avatar, mark) : el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, avatar, mark)),
     el('span', { class: 'rail-text' },
       // flag: a yellow (!) at the right of the name line, with its words (a linked PC behind this one).
       // updating: in its place a turning wheel while an update goes there (or comes here from it), with its words.
       updating ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'net-spin rail-spin', role: 'img', 'aria-label': updating, title: updating }))
       : flag ? el('span', { class: 'rail-name has-flag' }, el('span', { class: 'rail-name-text', text: name }), el('span', { class: 'rail-flag', role: 'img', 'aria-label': flag, title: flag, text: '!' }))
-        : el('span', { class: 'rail-name' }, name, level ? el('span', { class: 'rail-level', text: ` | ${level}` }) : null),
+        : el('span', { class: 'rail-name' }, name, inline ? el('span', { class: `rail-level rail-now ${activity ? `a-${activity}` : `s-${busy ? 'on' : state}`}`, text: ` | ${busy ? 'Working' : word}` }) : level ? el('span', { class: 'rail-level', text: ` | ${level}` }) : null),
       el('span', { class: 'rail-sub', text: sub }),
-      level && !busy && !muted ? null : el('span', { class: `rail-state ${activity ? `a-${activity}` : `s-${busy ? 'on' : state}`}`, text: [busy && level ? 'Working' : word, app.mutedWords?.(muted)].filter(Boolean).join(' · ') })),
+      (level || inline) && (inline || !busy) && !muted ? null : inline ? el('span', { class: 'rail-state', text: app.mutedWords?.(muted) ?? '' }) : el('span', { class: `rail-state ${activity ? `a-${activity}` : `s-${busy ? 'on' : state}`}`, text: [busy && level ? 'Working' : word, app.mutedWords?.(muted)].filter(Boolean).join(' · ') })),
     bits.icon, bits.count);
   b.addEventListener('click', onClick);
   if (!onEdit) return el('li', {}, b);
@@ -380,6 +407,8 @@ function drawRail() {
   $('#home-waiting-count').textContent = loud ? String(loud) : '';
   $('#home-waiting-count').setAttribute('aria-label', $('#rail-count').getAttribute('aria-label'));
   $('#rail-home-sub').textContent = n ? `${n} waiting for you${n > loud ? ` (${n - loud} muted)` : ''}` : d.working ? 'Work in progress' : 'Nothing waiting';
+  // The Home row is gone from the left panel (the logo is Home): what it said is in the logo's tooltip.
+  $('#rail-home').title = `Home: ${$('#rail-home-sub').textContent.toLowerCase()}, and the jobs`;
   const inChat = homeUi.view === 'chat';
   // Marked: the person in the chat on screen in this window (the server's "who" is whichever window chose last).
   const onScreen = String(chatUi.open?.who ?? '');
@@ -399,7 +428,7 @@ function drawRail() {
   const showing = $('#panes').dataset.show;
   for (const s of d.staff) {
     const li = staffRow({
-      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), level: s.level || 'Default', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: staffActivity(s),
+      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), inline: true, artist: s.kind === 'image', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: staffActivity(s),
       busy: s.busy ? `Working: ${s.busy}` : null, count: counts[s.id], active: inChat && (s.kind === 'image' ? s.active && showing === 'image' : marked(`staff:${s.id}`, s.active)),
       title: `${s.role}${s.pc ? ` on ${s.pc}` : ''}${tokSub(s.speed)}. Press: a new chat, or one of their recent chats`,
       onClick: () => (app.openPerson ? app.openPerson(s.who ?? `staff:${s.id}`, s.name) : talkTo(s)), onEdit: () => app.editStaff?.(s.id),
@@ -407,7 +436,7 @@ function drawRail() {
     deskDrag(li, s);
     rows.push(li);
   }
-  if (!rows.length) rows.push(el('li', { class: 'rail-empty' }, el('span', { class: 'hint', text: 'Nobody hired yet.' }), el('button', { class: 'btn primary rail-hire', type: 'button', text: 'Hire staff', onclick: () => app.openHire() })));
+  if (!rows.length) rows.push(el('li', { class: 'rail-empty' }, themeWords.put(el('span', { class: 'hint' }), 'nobody-hired', 'Nobody hired yet.'), el('button', { class: 'btn primary rail-hire', type: 'button', text: 'Hire staff', onclick: () => app.openHire() })));
   $('#rail-staff-title').textContent = d.staff.length ? `Staff (${d.staff.length})` : 'Staff';
   keepFocus($('#rail-staff'), rows);
   app.drawChats?.();
@@ -449,11 +478,13 @@ function drawRail() {
       : [at, mem ? memWords(mem.ram, mem.vram) : '', pcMake(p.id), p.model, p.speed?.expect ? app.speedWords(p.speed.expect, true) : '', p.picture ? `draws with ${p.picture}` : ''];
     // In the cluster while it is on: held for big models, greyed out, no staff go there (the Cluster card has the switch).
     const held = p.heldByCluster === true;
+    // Just shut down or updated from here: says so with a turning wheel until it shows (pcDidWord).
+    const did = pcDidWord(p);
     desks.push({ id: p.id, name: at ? `${name} (${at})` : name, activity: p.activity, backupsOnly: p.backupsOnly, held, row: staffRow({
-      key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: held && p.activity !== 'offline' ? 'In the cluster: held for big models, no staff' : p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: held && p.activity !== 'offline' ? 'In the cluster' : p.word ?? (asleep ? 'Asleep' : undefined),
+      key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: held && p.activity !== 'offline' ? 'In the cluster: held for big models, no staff' : p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: did || (held && p.activity !== 'offline' ? 'In the cluster' : p.word ?? (asleep ? 'Asleep' : undefined)),
       title: upd ? `${[upd, full].filter(Boolean).join('\n')}
 ${p.name} at ${p.url}` : `${flag ? `${flag}
-` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => (p.updating ? app.showUpdate?.(p.updating.id) : app.openPc?.(p.id)), mutable: false, flag: flag || undefined, updating: upd || undefined,
+` : ''}${p.name} at ${p.url}: its uptime, total tokens and what its work cost`, onClick: () => (p.updating ? app.showUpdate?.(p.updating.id) : app.openPc?.(p.id)), mutable: false, flag: flag || undefined, updating: upd || (did ? `${did}: "${p.name}"` : undefined),
     }) });
   }
   const card = x => {
@@ -477,12 +508,14 @@ ${p.name} at ${p.url}` : `${flag ? `${flag}
   keepFocus($('#rail-cluster'), clusterCard ? [clusterCard] : []);
   keepFocus($('#rail-mypc'), [card(desks[0])]);
   $('#rail-pcs-head').hidden = desks.length < 2;
-  // Fast update at the right of the Linked PCs heading, only while a linked PC that answers is behind this one.
+  // Manage at the right of the Linked PCs heading (Update all, Scan for hardware changes, Shut down all: manage.js),
+  // with a yellow ! when some linked PCs are behind this one (how many: on hover).
   const behind = homeUi.pcs.filter(p => p.outdated && !p.updating && p.activity !== 'offline').length;
   const railFast = $('#rail-fast-update');
-  railFast.hidden = !behind;
-  railFast.onclick = updateAllLinked;
-  if (behind) railFast.replaceChildren(clusterIcon(ICON_BOLT, 14), `Fast update (${behind})`);
+  railFast.hidden = !homeUi.pcs.length;
+  railFast.onclick = () => app.openManage?.();
+  const toUpdate = `${behind} linked PC${behind === 1 ? '' : 's'} to update`;
+  railFast.replaceChildren('Manage', ...(behind ? [el('span', { class: 'rail-flag', role: 'img', 'aria-label': toUpdate, title: toUpdate, text: '!' })] : []));
   keepFocus($('#rail-pcs'), desks.slice(1).map(card));
   // The office in Staff overview (office.js): the same desks and staff; in a chat it follows the person talked to.
   app.office?.update({
@@ -677,7 +710,10 @@ function drawCluster(pcs, cl) {
       : !cl.members.length ? (chosenPart ? 'On: when you put PCs in the cluster, the model loads on this PC, which keeps a share of it on its own card and RAM and sends each other PC its part.' : 'Off: you have not chosen yet, and there is no cluster yet. Switch it on now to choose that this PC loads the model once you put PCs in the cluster below.')
       : cl.part !== true ? 'Off: you have not chosen yet. Until you do, the model loads on this PC as it always has, and nothing here changes by itself. Switch it on to choose that this PC takes part; switch it on and then off to choose that another PC loads the model.'
       : 'On: the model loads on this PC, which keeps a share of it on its own card and RAM and sends each other PC its part over this PC\'s network link. Switch it off to only connect, for example from a laptop on Wi-Fi: the strongest wired PC in the cluster then loads the model, if it can (it needs links of its own to the other PCs, made on it).' })),
-    el('span', { class: 'set-side' }, part)));
+    el('span', { class: 'set-side' }, part)),
+    // Before the switch is pressed off: what staying out needs (the members linked to each other, on the PCs themselves).
+    // The switch's own refusal is unchanged; this only says it first.
+    !cl.out && cl.members.length && cl.linksNeeded ? el('p', { class: 'hint', role: 'note', 'data-key': 'cluster-links-needed', text: cl.linksNeeded }) : null);
   /** One side of the page: takes a PC dropped on it when the PC comes from the other side. */
   const zone = (inSet, title, about, kids) => {
     const z = el('section', { class: 'cluster-zone', 'data-zone': inSet ? 'in' : 'out', 'aria-label': title,
@@ -923,7 +959,7 @@ function drawStaffOverview(counts) {
         el('strong', { text: s.name }), el('span', { class: 'so-where', text: where })),
       el('button', { class: 'icon-btn so-chat', type: 'button', title: `Chat with ${s.name}`, 'aria-label': `Chat with ${s.name}`, onclick: () => talkTo(s) }, svgIcon(CHAT_BUBBLE, 18)));
   };
-  const empty = () => el('li', { class: 'home-empty so-empty' }, el('span', { text: 'Nobody hired yet.' }), el('button', { class: 'btn primary', type: 'button', text: 'Hire staff', onclick: () => app.openHire() }));
+  const empty = () => el('li', { class: 'home-empty so-empty' }, themeWords.put(el('span'), 'nobody-hired', 'Nobody hired yet.'), el('button', { class: 'btn primary', type: 'button', text: 'Hire staff', onclick: () => app.openHire() }));
   for (const list of [$('#home-staff-overview'), $('#side-staff')]) keepFocus(list, d.staff.length ? d.staff.map(card) : [empty()]);
 }
 
@@ -938,24 +974,74 @@ function deskModels(s, pc) {
   return pc ? list.filter(c => c.id.startsWith(`remote:${pc}:`) || (c.id === `remote:${pc}` && c.ok !== false)) : list.filter(c => !c.id.startsWith('remote:'));
 }
 
+/**
+ * Would a hire fit on one PC, for the hot desk while they are dragged? From what the page already has (the staff list's
+ * models, each with its fit there, and that PC's memory), so nothing is asked of the server on the drag. null when not
+ * known (no staff list yet, a PC not in it, its memory not told, or a model's size unknown): the card lights as it
+ * always has. fit: 'ok' (strong), 'tight' (lighter), 'maybe' (no model fits, but the move window still offers copying
+ * their model there or downloading it: droppable, dimmed), 'no' (nothing for them there: refused). The window and the
+ * server check again at the move.
+ */
+function deskFit(s, pc) {
+  const d = team.data;
+  const mem = !d ? null : pc ? d.pcs?.find(p => p.id === pc) : d.here;
+  if (!mem?.ram) return null;
+  const kind = s.kind === 'image' ? 'image' : 'chat';
+  const fitOf = c => c.ramFit ?? moveFit(c.need, mem);
+  const models = deskModels(s, pc);
+  const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
+  const same = models.find(c => short(c.name) === short(s.modelName));
+  const fits = models.map(fitOf);
+  const sameFit = same ? fitOf(same) : null;
+  if (sameFit === 'ok') return { fit: 'ok', drop: true, hint: 'Fits: their model is here' };
+  if (fits.includes('ok')) return { fit: 'ok', drop: true, hint: 'Fits: another model here' };
+  if (fits.includes('tight')) return { fit: 'tight', drop: true, hint: 'Tight fit: may load slowly' };
+  if (fits.includes(null)) return null;
+  // The move window's other ways: copying their own model there (when it would fit), or downloading one deleted here.
+  const own = pc && s.model && !String(s.model).startsWith('remote:') && !s.modelGone ? (d.hireChoices?.[kind] ?? []).find(c => c.id === s.model) : null;
+  const other = (own && moveFit(own.need, mem) !== 'no') || (pc && s.modelGone && kind === 'chat');
+  const why = models.length ? 'Not enough memory' : 'No model for them here';
+  return other ? { fit: 'maybe', drop: true, hint: `${why}: drop to see other ways` } : { fit: 'no', drop: false, hint: why };
+}
+app.deskFit = (s, pc) => deskFit(s, pc);
+
+const DESK_MARKS = ['drop-ok', 'drop-no', 'drop-over', 'drop-fit', 'drop-tight', 'drop-maybe', 'drop-nofit'];
+/** Takes every mark and hint the drag put on the PC cards off again. */
+function deskClear() {
+  for (const c of document.querySelectorAll('.pc-card')) {
+    c.classList.remove(...DESK_MARKS);
+    c.querySelector(':scope > .drop-hint')?.remove();
+    c.removeAttribute('aria-description');
+  }
+}
+
 function deskDrag(node, s) {
   node.draggable = true;
   node.addEventListener('dragstart', e => {
     homeUi.dragging = s;
     e.dataTransfer.setData('text/plain', s.name);
     e.dataTransfer.effectAllowed = 'move';
+    deskClear();
     // The PCs they could work on light up; the one they are on, or one that is off or in use by its owner, does not.
+    // Of those, a PC where a model of theirs fits lights strongly, a tight fit lightly, and one with nothing for them
+    // is dimmed; each says why in words on the card.
     for (const c of document.querySelectorAll('.pc-card')) {
       const pc = c.dataset.pc;
       const here = (s.pcId ?? '') === pc;
       const shut = c.querySelector('.sdot')?.dataset.activity === 'offline' || c.querySelector('.sdot')?.dataset.activity === 'owner' || c.dataset.backups === '1' || c.dataset.held === '1';
-      c.classList.toggle('drop-ok', !here && !shut);
-      c.classList.toggle('drop-no', here || shut);
+      const f = here || shut ? null : deskFit(s, pc);
+      const ok = !here && !shut && f?.drop !== false;
+      c.classList.toggle('drop-ok', ok);
+      c.classList.toggle('drop-no', !ok);
+      if (!f) continue;
+      c.classList.add({ ok: 'drop-fit', tight: 'drop-tight', maybe: 'drop-maybe', no: 'drop-nofit' }[f.fit]);
+      c.append(el('span', { class: 'drop-hint', text: f.hint }));
+      c.setAttribute('aria-description', f.hint);
     }
   });
   node.addEventListener('dragend', () => {
     homeUi.dragging = null;
-    for (const c of document.querySelectorAll('.pc-card')) c.classList.remove('drop-ok', 'drop-no', 'drop-over');
+    deskClear();
   });
 }
 
@@ -971,6 +1057,8 @@ function deskDrop(li, x) {
     const s = homeUi.dragging;
     if (!s || !li.classList.contains('drop-ok')) return;
     e.preventDefault();
+    homeUi.dragging = null;
+    deskClear();
     deskMove(s, x.id, x.name ?? 'My PC');
   });
 }
@@ -1201,10 +1289,13 @@ $('#desk-move-go').addEventListener('click', async () => {
   }
 });
 
+// Two formatters made once: toLocaleString makes a new one on every call, which cost 0.8 s over 2,000 chats.
+const TIME_ONLY = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' });
+const DAY_TIME = new Intl.DateTimeFormat([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const timeText = iso => {
   const d = new Date(iso);
   const today = new Date().toDateString() === d.toDateString();
-  return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (today ? TIME_ONLY : DAY_TIME).format(d);
 };
 // ---- Network (this PC as a node, and the models other PCs may use; finding and linking PCs) and This PC:
 // models and updates (the models on this PC, Update this install) as tiles with their
@@ -1682,11 +1773,7 @@ $('#node-test-net').addEventListener('click', async () => {
 
 // "+ Add a node" on the Network map: Linked PCs, with the Add another PC fold open (it was a button under Guest passes,
 // where it did not belong).
-app.addNode = () => {
-  netSection('linked');
-  $('#net-add').open = true;
-  $('#net-add').scrollIntoView({ block: 'start' });
-};
+app.addNode = () => app.openAddPc();
 // Linked PCs, Guest: connect to someone else's network with the guest pass they gave you: Add another PC, its address
 // and code boxes open (the same link as a node's, with the guest pass code in the code box).
 $('#net-join-guest').addEventListener('click', () => {
@@ -1935,6 +2022,7 @@ async function updatePcWithPin(pc, held) {
     try {
       const r = await api('/api/network/update', hostPin !== undefined ? { pc: pc.id, hostPin } : nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
       if (held && hostPin === undefined && nodePin !== undefined) held.pin = nodePin;
+      markPcDid(pc.id, 'update');
       return r;
     } catch (e) {
       if (!e.data?.needNodePin) throw e;
@@ -1974,7 +2062,9 @@ async function powerOffWithPin(pc, held) {
   let nodePin;
   for (;;) {
     try {
-      return await api('/api/network/power-off', hostPin !== undefined ? { pc: pc.id, hostPin } : nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
+      const r = await api('/api/network/power-off', hostPin !== undefined ? { pc: pc.id, hostPin } : nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
+      markPcDid(pc.id, 'off');
+      return r;
     } catch (e) {
       if (!e.data?.needNodePin) throw e;
       const tried = hostPin !== undefined || nodePin !== undefined;
@@ -2215,10 +2305,11 @@ function askPcName(after, pc) {
 }
 
 /** Links a PC: true when linked; otherwise the fault is shown, and `needPin` says the PC asks for a link PIN. */
-async function linkPc(url, code, pin, fault, needPin) {
+async function linkPc(url, code, pin, fault, needPin, adminKey = false) {
   fault.textContent = 'Linking…';
   try {
-    const r = await api('/api/remotes', { action: 'add', url, code, pin });
+    // A PC started from a stick minted here (Bootable USB): this PC's admin key stands for its setup code.
+    const r = await api('/api/remotes', adminKey ? { action: 'add', url, adminKey: true } : { action: 'add', url, code, pin });
     // The other PC told which code it was: its setup code links as its admin, a guest pass as a guest.
     const as = r?.linked?.role === 'guest' ? `Linked as a guest${r.linked.expires ? `, until ${new Date(r.linked.expires).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}. You can use the models its host picked for you; its owner can see what runs there.` : 'Linked as its admin.';
     fault.textContent = r?.sameName ? `${as} ${r.sameName}` : as;
@@ -2287,7 +2378,7 @@ function passAskBox(f) {
 /** Opens the helper, with the address carried over when one was typed or found. */
 function openLinkHelp(address) {
   if (address && !$('#link-help-addr').value) $('#link-help-addr').value = address;
-  $('#net-add').open = true;
+  if (homeUi.view !== 'addpc') app.openAddPc();
   $('#link-help').open = true;
 }
 $('#link-help-check').addEventListener('click', async () => {
@@ -2323,7 +2414,13 @@ $('#node-scan').addEventListener('click', async () => {
     line.textContent = found.length ? `Found ${found.length} PC${found.length > 1 ? 's' : ''} with "Enable this PC as a node" on.${looked}`
       : `None found.${looked} On the other PC, press Check under "Can other PCs reach this one?": it names what is in the way there. The Link helper below tests it from here.`;
     if (!found.length) openLinkHelp();
-    box.replaceChildren(...found.map(f => {
+    // PCs started from a stick minted with this PC's admin key (Bootable USB): added with no code, one by one or all.
+    const mineNew = found.filter(f => f.mine && !(f.linked && !f.broken));
+    const addAll = mineNew.length > 1 ? el('button', { class: 'btn primary', type: 'button', text: `Add all ${mineNew.length} made with your admin key`, onclick: async e => {
+      e.currentTarget.disabled = true;
+      for (const b of [...box.querySelectorAll('[data-key-add]')]) if (!b.disabled) await b.onclickAdd();
+    } }) : null;
+    box.replaceChildren(...(addAll ? [addAll] : []), ...found.map(f => {
       const code = el('input', { type: 'text', maxlength: '9', autocomplete: 'off', placeholder: 'ABCD-EFGH', required: '', 'data-setup-code': '', 'aria-label': `Setup code of ${f.name}, or a guest pass code` });
       // The link PIN box shows when that PC asks for one: at the scan, or when linking says so (turned on since).
       const pin = el('input', { type: 'text', inputmode: 'numeric', maxlength: '6', autocomplete: 'off', placeholder: '6 digits', 'aria-label': `Link PIN of ${f.name}` });
@@ -2344,12 +2441,26 @@ $('#node-scan').addEventListener('click', async () => {
       // Linked before: the link may have broken since (the other PC removed it, or was set up again), so it can be linked
       // again. A saved link known not to work says so, with the setup code box open.
       if (f.linked && !f.broken && f.state !== 'new') form.hidden = true;
+      // Started from a stick minted with this PC's admin key: Add, no code; the code form stays for another admin's.
+      let keyAdd = null;
+      if (f.mine && !(f.linked && !f.broken)) {
+        form.hidden = true;
+        keyAdd = el('button', { class: 'btn primary', type: 'button', text: 'Add', 'data-key-add': '' });
+        keyAdd.onclickAdd = async () => {
+          keyAdd.disabled = true;
+          const ok = await linkPc(f.url, '', '', fault, null, true);
+          if (ok) keyAdd.replaceWith(el('span', { class: 'hint ok', text: '✓ Added' }));
+          else keyAdd.disabled = false;
+        };
+        keyAdd.addEventListener('click', () => void keyAdd.onclickAdd());
+      }
       const again = f.linked && !f.broken ? el('button', { class: 'link', type: 'button', text: 'Not working? Link it again', onclick: e => { form.hidden = false; e.target.remove(); code.focus(); } }) : null;
       // What this PC is there, in one line: its admin, a guest (until when), a guest whose pass expired, or nothing yet.
       return el('article', { class: 'node-card' },
         el('div', { class: 'node-head' }, el('strong', { text: f.name }), el('span', { class: 'hint', text: f.url.replace('http://', '') })),
         f.broken ? el('span', { class: 'hint', text: 'Linked before, but that link no longer works. Type its setup code (shown on that PC under Network) and press Link again.' })
-          : el('span', { class: `hint${f.state === 'admin' || f.state === 'guest' ? ' ok' : ''}`, text: f.stateText ?? (f.linked ? 'You are already connected (admin)' : 'Network found: enter the code') }),
+          : el('span', { class: `hint${f.state === 'admin' || f.state === 'guest' ? ' ok' : ''}`, text: f.mine && !f.linked ? `Made with your admin key${f.usb ? ' (a Bootable USB stick)' : ''}: press Add` : f.stateText ?? (f.linked ? 'You are already connected (admin)' : 'Network found: enter the code') }),
+        keyAdd,
         f.state === 'expired' ? passAskBox(f) : null,
         f.state === 'new' ? null : again,
         form,
@@ -2366,13 +2477,15 @@ $('#node-addr-form').addEventListener('submit', async e => {
 });
 
 /** Other PCs (the rail, Home's set-up card, the Jobs window) open here. */
-app.openPcs = async () => {
-  openNodes();
-  netSection('linked');
-  $('#net-add').open = true;
-  await new Promise(r => setTimeout(r, 100));
-  $('#node-link').scrollIntoView({ block: 'start' });
-};
+app.openPcs = async () => app.openAddPc();
+/**
+ * Add another PC (its own page: Settings, Network's Add another PC button, the end of Bootable USB): two tiles, Install
+ * TOMLIN on another PC and Create a Linux USB, then Find other PCs (scan, type its address, the link helper).
+ */
+app.openAddPc = () => showSettingsPage('addpc', '#settings-addpc');
+$('#net-add-open').addEventListener('click', () => app.openAddPc());
+$('#addpc-scan').addEventListener('click', () => $('#node-scan').click());
+$('#addpc-usb').addEventListener('click', () => app.openUsb?.());
 /** The Cluster page (Settings, the Cluster card above My PC, and Network's Cluster part). */
 app.openCluster = () => {
   setView('cluster');
@@ -3035,6 +3148,14 @@ $('#node-install-file').addEventListener('change', async e => {
 
 /** What the last Update all could not start: stays through every refresh, until the next press. */
 let updateAllFaults = '';
+/** True while Update all / Fast update is starting the updates: the buttons keep Updating… through every refresh. */
+let updatingAll = false;
+
+/** While Update all runs: each of its buttons says Updating… after a spinning ring, and the lines under them say what it is doing. */
+function updateAllBusy(buttons, words) {
+  for (const x of buttons) x.replaceChildren(el('span', { class: 'net-spin', 'aria-hidden': 'true' }), 'Updating…');
+  for (const q of ['#node-update-all-line', '#net-push-line']) $(q)?.replaceChildren(el('span', { class: 'net-spin', 'aria-hidden': 'true' }), words);
+}
 
 /**
  * Update all and Fast update (the Network page, and the heading of Linked PCs in the left panel): every linked PC that is
@@ -3044,6 +3165,28 @@ async function updateAllLinked() {
   const buttons = ['#node-update-all', '#node-fast-update', '#rail-fast-update', '#net-push-updates'].map(q => $(q)).filter(Boolean);
   for (const x of buttons) x.disabled = true;
   updateAllFaults = '';
+  // From the press until every PC has started: Updating… with a spinning ring, as Scan for hardware changes does
+  // (asking each PC and its PIN takes a few seconds, and the left panel's ring only shows once a PC says it is updating).
+  // The left panel's Manage button is only greyed out: it opens Manage, it is not this run.
+  const busy = buttons.filter(x => x.id !== 'rail-fast-update');
+  const labels = busy.map(x => [...x.childNodes]);
+  // Manage updates' line describes Push updates to network: put back after, unless something could not start.
+  const pushLine = $('#net-push-line');
+  const about = pushLine ? [...pushLine.childNodes] : [];
+  updatingAll = true;
+  updateAllBusy(busy, 'Asking the linked PCs which can update…');
+  try {
+    await updateAllRun(busy);
+  } finally {
+    updatingAll = false;
+    busy.forEach((x, i) => x.replaceChildren(...labels[i]));
+    if (pushLine && !updateAllFaults) pushLine.replaceChildren(...about);
+    for (const x of buttons) x.disabled = false;
+    refreshOthers();
+  }
+}
+
+async function updateAllRun(buttons) {
   const failed = [];
   let can = [];
   try {
@@ -3054,7 +3197,7 @@ async function updateAllLinked() {
   if (!can.length && !failed.length) {
     // Nothing can be started from here now: Network says why for each PC.
     updateAllFaults = 'No linked PC can be updated from here now.';
-    for (const x of buttons) x.disabled = false;
+    $('#node-update-all-line')?.replaceChildren(updateAllFaults);
     openNodes();
     return;
   }
@@ -3070,6 +3213,7 @@ async function updateAllLinked() {
     if (pin !== null) Object.assign(held, { hostPin: pin, holders });
   }
   for (const p of can) {
+    updateAllBusy(buttons, `Starting the update on "${p.name}"…`);
     const r = await updatePcWithPin(p, held).catch(err => void failed.push(`"${p.name}": ${err.message}`));
     if (r === null) failed.push(`"${p.name}": its PIN was not typed.`);
   }
@@ -3080,8 +3224,6 @@ async function updateAllLinked() {
   if (updateAllFaults && $('#net-push-line')) $('#net-push-line').textContent = updateAllFaults;
   // The updates under way show in Models on my other PCs, each with its own line.
   if (failed.length < Math.max(can.length, 1)) app.openNet?.();
-  for (const x of buttons) x.disabled = false;
-  refreshOthers();
 }
 
 // The top of the Network page: Scan for hardware changes (this PC and every linked PC read their hardware again,
@@ -3089,9 +3231,12 @@ async function updateAllLinked() {
 $('#net-hw-scan').addEventListener('click', async e => {
   const b = e.currentTarget;
   const said = $('#net-head-said');
+  const label = b.textContent;
   b.disabled = true;
+  // While it runs: the button says Scanning…, and a spinning ring sits before the line.
+  b.textContent = 'Scanning…';
   said.hidden = false;
-  said.textContent = 'Reading the hardware of this PC and each linked PC…';
+  said.replaceChildren(el('span', { class: 'net-spin', 'aria-hidden': 'true' }), 'Reading the hardware of this PC and each linked PC…');
   try {
     const r = await api('/api/network/hardware-scan', {});
     said.textContent = r.said;
@@ -3100,6 +3245,7 @@ $('#net-hw-scan').addEventListener('click', async e => {
   } catch (err) {
     said.textContent = err.message;
   }
+  b.textContent = label;
   b.disabled = false;
 });
 $('#net-push-updates').addEventListener('click', () => updateAllLinked());
@@ -3113,6 +3259,8 @@ function drawUpdateAll(pcs) {
   const b = $('#node-update-all');
   // Fast update: at the right of the Linked PCs heading, only while some linked PC can be updated now.
   const fast = $('#node-fast-update');
+  // A refresh while Update all is starting the updates leaves its buttons and line as they are (Updating…).
+  if (updatingAll) return;
   b.disabled = !can.length;
   b.textContent = can.length ? `Update all linked PCs (${can.length})` : 'Update all linked PCs';
   const push = $('#net-push-updates');

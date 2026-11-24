@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { moveSure } from './keep.ts';
 import { addPiece, afterStop, freeBytes, partOf, readPiece, roomWhy, sizeOf, type Progress, type Wire } from './carry.ts';
 
 /** Exit code Start TOMLIN.cmd reads as "start the copy named in next-copy.txt (in this folder) instead". */
@@ -282,6 +283,8 @@ export interface UpdateNodeDeps {
    * link gave this PC (src/hostpin.ts), sent in place of the PC's own.
    */
   pinCheck?: (pin: unknown, who: string, host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>;
+  /** Why this PC takes no update from a linked PC at all (a Bootable USB node: its TOMLIN comes from the stick), or null. */
+  blocked?: () => string | null;
 }
 
 const no = (status: number, error: string) => ({ status, json: { error } as Record<string, unknown> });
@@ -290,7 +293,7 @@ const no = (status: number, error: string) => ({ status, json: { error } as Reco
 const HERE = 'this PC';
 
 /** An update's files while they come in, beside the app's copies. */
-const INCOMING = /^\.tomlin-\d+\.\d+\.\d+-incoming$/;
+const INCOMING = /^\.tomlin-\d+(\.\d+){1,3}-incoming$/;
 /** An update left half way stays to be carried on, but not for ever: at start, one untouched this long is removed. */
 export const INCOMING_DAYS = 3;
 
@@ -328,6 +331,8 @@ export function updateSide(d: UpdateNodeDeps) {
   // The same version is taken too when it is other files (both build ids known and different): the build id says what
   // code each copy is, so one number held by two apps no longer stops the update.
   const why = (version: unknown, build?: unknown, here = false): string | null => {
+    const blocked = d.blocked?.();
+    if (blocked) return blocked;
     if (!here && !d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`;
     if (!d.restarts) return `TOMLIN on "${d.pcName()}" was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself. Install it there with Install TOMLIN.cmd (or start it with Start TOMLIN.cmd), then update it again.`;
     if (!isVersion(version)) return 'the update did not say its version.';
@@ -470,7 +475,8 @@ export function updateSide(d: UpdateNodeDeps) {
         const busyNow = d.busy();
         if (busyNow) return { status: 200, json: { busy: busyNow } };
         const final = await newFolder(dirname(d.root), c.version);
-        await rename(c.staging, final);
+        // A virus scanner reading the new programs (or a cloud folder syncing) can hold the folder a moment: tried again.
+        await moveSure(c.staging, final);
         const version = c.version;
         current = null;
         starting = { version, fromName: who.name };

@@ -1,4 +1,6 @@
 :root {
+  --artist: #7b45c9;
+  --artist-bg: #efe6fb;
   /* Day (the redesign's colours): cool grey page, white cards, one blue accent; green only
      means "on". Night (below) is neutral grey; blue means "press here" in both. Both follow Windows
      unless Day or Night is picked in the app (theme.js). */
@@ -39,7 +41,9 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="day"]) {
+  :root:not([data-theme="day"]):not([data-theme="silly"]) {
+    --artist: #b892f0;
+    --artist-bg: #2c2340;
     --bg: #15171b;
     --rail: #191c20;
     --panel: #1e2126;
@@ -70,6 +74,8 @@
 }
 /* Night picked in the app (theme.js), whatever Windows says; Day picked keeps the colours above. */
 :root[data-theme="night"] {
+  --artist: #b892f0;
+  --artist-bg: #2c2340;
   --bg: #15171b;
   --rail: #191c20;
   --panel: #1e2126;
@@ -97,6 +103,84 @@
   --shadow-lg: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 44px rgba(0, 0, 0, .65);
   color-scheme: dark;
 }
+/* ---- The Vibe code theme (stored as silly) (Settings, Theme): hot pink, round, and agreeable to a fault. Colours only change, and a few
+   words in pink ribbons: every control keeps its place and its real name (the Send button is still "Send" to a screen
+   reader). The pink is a deep one, so white text on it stays readable. ---- */
+:root[data-theme="silly"] {
+  --artist: #7a2fc0;
+  --artist-bg: #efe3fb;
+  --bg: #fff0f7;
+  --rail: #ffe1f0;
+  --panel: #ffffff;
+  --ink: #4a1035;
+  --ink-soft: #8a2a63;
+  --line: #ffc2e0;
+  --accent: #d6136f;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffd6ea;
+  --field: #ffffff;
+  --field-ink: #4a1035;
+  --warn: #7a5200;
+  --warn-bg: #fbefd6;
+  --bad: #a3262b;
+  --bad-bg: #fbe8e6;
+  --good: #0f6b47;
+  --track: #ffd6ea;
+  --user: #ffe3f2;
+  --select: #ffb3d9;
+  --select-ink: #4a1035;
+  --hover: rgba(214, 19, 111, .08);
+  --scrim: rgba(74, 16, 53, .4);
+  --shadow-sm: 0 1px 2px rgba(138, 42, 99, .12);
+  --shadow: 0 1px 2px rgba(138, 42, 99, .08), 0 8px 24px rgba(214, 19, 111, .10);
+  --shadow-lg: 0 2px 6px rgba(138, 42, 99, .12), 0 24px 60px rgba(214, 19, 111, .22);
+  --radius: 20px;
+  --r-ctl: 14px;
+  color-scheme: light;
+}
+:root[data-theme="silly"] .btn.primary { box-shadow: 0 3px 0 #8f0b4a; }
+:root[data-theme="silly"] .btn.primary:active { box-shadow: 0 1px 0 #8f0b4a; transform: translateY(2px); }
+/* Send says what it really means. The word Send stays in the button, so its name does not change. */
+:root[data-theme="silly"] #chat-send { position: relative; min-width: 11.5em; color: transparent; }
+:root[data-theme="silly"] #chat-send::after { content: "Absolutely, let's go"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--accent-ink); }
+/* A ribbon over the message box. */
+:root[data-theme="silly"] #chat-form::before {
+  content: "You're absolutely right!";
+  order: -1; justify-self: start; margin: -20px 0 2px -4px; padding: 4px 12px; border-radius: 10px;
+  background: #d6136f; color: #ffffff; font-size: var(--fs-xs); font-weight: 600; box-shadow: 0 3px 0 #8f0b4a; transform: rotate(-1deg);
+}
+/* And one over the project card on Home. */
+:root[data-theme="silly"] #home-ask::before {
+  content: "You're absolutely right!"; display: block; width: fit-content; margin: -30px 0 0 -8px; padding: 6px 16px; border-radius: 12px;
+  background: #d6136f; color: #ffffff; font-size: var(--fs-lg); font-weight: 700; box-shadow: 0 4px 0 #8f0b4a; transform: rotate(-1.5deg);
+}
+@media (prefers-reduced-motion: reduce) { :root[data-theme="silly"] .btn.primary:active { transform: none; } }
+
+/* ---- The Theme page's tiles (Settings, Theme): each a small picture of the page in that theme. Auto is half Day,
+   half Night; Follow Windows the same, split on a slant. The picture's colours are the themes' own. ---- */
+.theme-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; border: 0; padding: 0; margin: 0; max-width: 760px; }
+@media (max-width: 760px) { .theme-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.theme-tile { position: relative; display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); cursor: pointer; }
+.theme-tile:hover { border-color: var(--ink-soft); }
+.theme-tile input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.theme-tile:has(input:checked) { border: 2px solid var(--accent); padding: 9px; }
+.theme-tile:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-tile-name { font-weight: 600; }
+.theme-tile-about { color: var(--ink-soft); font-size: var(--fs-xs); }
+.tp-box { display: block; height: 96px; border-radius: calc(var(--radius) - 6px); overflow: hidden; border: 1px solid var(--line); }
+.tp { position: relative; display: block; width: 100%; height: 100%; background: var(--p-bg); }
+.tp i { position: absolute; display: block; }
+.tp-bar { left: 0; right: 0; top: 0; height: 14%; background: var(--p-panel); border-bottom: 1px solid var(--p-line); }
+.tp-rail { left: 0; top: 14%; bottom: 0; width: 26%; background: var(--p-rail); border-right: 1px solid var(--p-line); }
+.tp-card { left: 34%; right: 8%; top: 26%; height: 44%; background: var(--p-panel); border: 1px solid var(--p-line); border-radius: 4px; }
+.tp-btn { right: 12%; top: 58%; width: 22%; height: 9%; background: var(--p-accent); border-radius: 3px; }
+.tp-day { --p-bg: #f6f7f9; --p-rail: #eff1f4; --p-panel: #ffffff; --p-line: #d8dde5; --p-accent: #2457d6; }
+.tp-night { --p-bg: #15171b; --p-rail: #191c20; --p-panel: #1e2126; --p-line: #33373f; --p-accent: #7ea6ff; }
+.tp-silly { --p-bg: #fff0f7; --p-rail: #ffe1f0; --p-panel: #ffffff; --p-line: #ffc2e0; --p-accent: #d6136f; }
+.tp-split { position: relative; display: block; width: 100%; height: 100%; }
+.tp-split > .tp { position: absolute; inset: 0; }
+.tp-split > .tp-night { clip-path: inset(0 0 0 50%); }
+.tp-diag > .tp-night { clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%); }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
@@ -215,7 +299,7 @@ button, input, select, textarea { font: inherit; }
 .pick-model-line { margin: 6px 4px 0; font-size: var(--fs-sm); color: var(--warn); }
 /* A chat kept to read: nothing that sends, loads or answers shows, and one line says why. */
 #pane-chat.read-only .connect-row .connect, #pane-chat.read-only .pane-head > .state, #pane-chat.read-only .think-pick,
-#pane-chat.read-only #doc-add, #pane-chat.read-only #notebook-open, #pane-chat.read-only #prompt-save, #pane-chat.read-only #chat-send { display: none; }
+#pane-chat.read-only #doc-add, #pane-chat.read-only #notebook-open, #pane-chat.read-only #chat-options, #pane-chat.read-only #prompt-save, #pane-chat.read-only #chat-send { display: none; }
 .read-only-line { margin: 0 0 4px; font-size: var(--fs-sm); }
 /* A chat with someone who left the team: their own picture, a little faded. */
 .rail-avatar.left-team, .left-team .rail-avatar { opacity: 0.6; }
@@ -486,7 +570,7 @@ dialog#code-save::backdrop { background: rgba(0,0,0,.55); }
 /* Shell: the rail on the left, then Home or the two panes */
 .shell { flex: 1; display: flex; min-height: 0; }
 .shell > .panes { flex: 1; min-width: 0; }
-.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="updates"]) > #updates-page, .shell:not([data-view="cluster"]) > #cluster-page, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="data"]) > #settings-data, .shell:not([data-view="perms"]) > #settings-perms, .shell:not([data-view="colours"]) > #settings-colours, .shell:not([data-view="storage"]) > #storage-page, .shell:not([data-view="help"]) > #help { display: none; }
+.shell:not([data-view="chat"]) > .panes, .shell:not([data-view="home"]) > .home, .shell:not([data-view="nodes"]) > #nodes, .shell:not([data-view="thispc"]) > #thispc, .shell:not([data-view="updates"]) > #updates-page, .shell:not([data-view="cluster"]) > #cluster-page, .shell:not([data-view="models"]) > #models-page, .shell:not([data-view="settings"]) > #settings, .shell:not([data-view="data"]) > #settings-data, .shell:not([data-view="perms"]) > #settings-perms, .shell:not([data-view="colours"]) > #settings-colours, .shell:not([data-view="usb"]) > #settings-usb, .shell:not([data-view="addpc"]) > #settings-addpc, .shell:not([data-view="allchats"]) > #allchats-page, .shell:not([data-view="manage"]) > #settings-manage, .shell:not([data-view="storage"]) > #storage-page, .shell:not([data-view="help"]) > #help { display: none; }
 .back { display: none; }
 .rail { flex: 0 0 248px; min-width: 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 8px 16px; display: flex; flex-direction: column; gap: 2px; }
 .rail-head { font-size: var(--fs-md); margin: 14px 8px 4px; }
@@ -516,7 +600,8 @@ dialog.person-chats { width: min(640px, calc(100vw - 32px)); }
 .person-chats-new { display: grid; justify-items: center; gap: 12px; padding: 16px 8px; border: 1px solid var(--line); border-radius: var(--radius); }
 .person-chats-new .avatar, .person-chats-new .rail-avatar { width: 56px; height: 56px; }
 .person-chats-recent h3 { margin: 0 0 6px; font-size: var(--fs-sm); }
-.person-chats-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; }
+/* 8px between rows: the Resume chat buttons never touch, the silly theme's 3px button shadow included. */
+.person-chats-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; }
 .person-chat { display: flex; align-items: baseline; gap: 0; width: 100%; min-width: 0; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
 .person-chat:hover, .person-chat:focus-visible { background: var(--track); }
 /* Recent chats: the picture opens the person's window, so it shows a ring when pointed at. */
@@ -578,10 +663,19 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 /* Home: what is waiting for you, what is working, paused jobs, and a box to start a job */
 .home { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 20px; }
 .home > * { width: 100%; max-width: 920px; }
+/* Getting started? at the top of Home: three numbered steps on one line (they wrap on a narrow screen) */
+.home-start { margin: 0 0 14px; }
+.home-start h3 { margin: 0 0 8px; font-size: var(--fs-md); font-weight: 600; }
+.home-start-steps { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 0; padding: 0; list-style: none; }
+.home-start-steps li { display: flex; align-items: center; gap: 8px; }
+.home-start-n { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--panel); font-size: var(--fs-sm); font-weight: 700; }
 .home-head { display: flex; align-items: center; gap: 10px; }
 .home-head h2 { margin: 0; font-size: var(--fs-xl); }
 .home-part h3, .home-setup h3 { margin: 0 0 8px; font-size: var(--fs-lg); }
 .home-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+/* Developer notes on Home: one line, the words then a button for each */
+.devnotes-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.devnotes-row > a.btn { text-decoration: none; }
 .home-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .home-item.k-result { border-left: 4px solid var(--accent); }
 .home-item.k-working { border-left: 4px solid var(--good); }
@@ -699,6 +793,10 @@ dialog.preview-big { width: min(720px, calc(100vw - 32px)); }
 .chat-with:empty { display: none; }
 dialog#new-chat, dialog#chat-menu { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); width: min(560px, 96vw); max-height: 90vh; padding: 16px; }
 dialog#new-chat::backdrop, dialog#chat-menu::backdrop { background: rgba(0,0,0,.55); }
+/* This chat window: Clear and Delete each on one line, the words on the left and the button on the right. */
+#chat-menu .menu-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+#chat-menu .menu-row > .hint { margin: 0; flex: 1 1 auto; }
+#chat-menu .menu-row > .team-actions { flex: 0 0 auto; justify-content: flex-end; }
 .pick-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 4px; }
 .pick-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: none; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; color: var(--ink); cursor: pointer; font: inherit; }
 .pick-row:hover { background: var(--track); }
@@ -1083,6 +1181,11 @@ dialog#notebook::backdrop, dialog#reading::backdrop { background: rgba(0,0,0,.55
 .find-text { white-space: pre-wrap; max-height: 9em; overflow: auto; }
 .chat-logbox .nb-add select, .chat-logbox .nb-edit select { flex: 0 0 auto; }
 .chat-log-wait .link { font-size: inherit; }
+/* Fold summaries in Memory: the model's lines kept as written, one block per fold. */
+.sum-text { white-space: pre-line; }
+.chat-sums { margin-top: 0.75em; }
+.sum-edit { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.sum-edit textarea { flex: 1 1 100%; min-width: 0; }
 .mem-suggest { align-self: flex-start; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 92%; padding: 8px 12px; border: 1px dashed var(--accent); border-radius: 10px; font-size: var(--fs-sm); }
 .rd-bar { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; margin: 8px 0 4px; }
 .rd-fill { height: 100%; background: var(--accent); }
@@ -1151,6 +1254,8 @@ h1, h2, h3 { letter-spacing: -.01em; }
 .rail-row:hover { background: var(--hover); }
 .rail-row[aria-current] { background: var(--panel); box-shadow: var(--shadow-sm); }
 .rail-avatar { background: var(--panel); border: 1px solid var(--line); font-size: 13px; color: var(--ink-soft); width: 34px; height: 34px; }
+.rail-avatar.is-artist { background: var(--artist-bg); border: 2px solid var(--artist); color: var(--artist); }
+.rail-avatar.is-artist .face-img { inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); }
 .rail-name { font-weight: 500; }
 .rail-links li { padding: 0; }
 .rail-links .link { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 10px; text-decoration: none; color: var(--ink); font-size: var(--fs-md); }
@@ -1159,6 +1264,9 @@ h1, h2, h3 { letter-spacing: -.01em; }
 /* Set up sits at the foot of the left panel and stays in view while the rest scrolls; folded, it is one line. */
 .rail-setup { position: sticky; bottom: -16px; z-index: 2; margin: auto -10px -16px; padding: 0 10px 12px; background: var(--rail); border-top: 1px solid var(--line); }
 .rail-setup { padding-top: 6px; }
+.rail-group-head { margin: 12px 10px 2px; font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
+.rail-links .rail-group:first-child .rail-group-head { margin-top: 4px; }
+.rail-links .rail-group ~ li:not(.rail-group) .link { padding-left: 18px; }
 .rail-links .link.rail-top { font-weight: 700; letter-spacing: .02em; }
 /* On a phone the page scrolls, not the panel, so these two lines keep to the foot of the screen. */
 @media (max-width: 760px) {
@@ -1176,7 +1284,7 @@ h1, h2, h3 { letter-spacing: -.01em; }
 .state { border-color: var(--line); color: var(--ink-soft); font-size: var(--fs-xs); padding: 3px 10px; }
 .state .dot { width: 8px; height: 8px; border-width: 1.5px; }
 .state[data-state="connected"] { border-color: transparent; background: #e7f3ec; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .state[data-state="connected"] { background: #17362a; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]):not([data-theme="silly"]) .state[data-state="connected"] { background: #17362a; } }
 :root[data-theme="night"] .state[data-state="connected"] { background: #17362a; }
 .splitter::after { background: transparent; }
 .splitter:hover::after, .splitter:focus-visible::after { background: var(--ink-soft); }
@@ -1265,10 +1373,10 @@ dialog::backdrop { background: var(--scrim) !important; backdrop-filter: blur(2p
 .rail-room { color: var(--ink); }
 .team-card, .job-step, .job-box, .nb-line, .pj-hire, .pj-preview { border-color: var(--line); border-radius: 12px; }
 .profile-banner { background: linear-gradient(120deg, #dfe7f5, #f0f3f7); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .profile-banner { background: linear-gradient(120deg, #31353d, #1e2126); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]):not([data-theme="silly"]) .profile-banner { background: linear-gradient(120deg, #31353d, #1e2126); } }
 :root[data-theme="night"] .profile-banner { background: linear-gradient(120deg, #31353d, #1e2126); }
 .job-badge.done, .job-ok { background: #e7f3ec; border-color: var(--good); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) .job-badge.done, :root:not([data-theme="day"]) .job-ok { background: #0f2e25; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]):not([data-theme="silly"]) .job-badge.done, :root:not([data-theme="day"]):not([data-theme="silly"]) .job-ok { background: #0f2e25; } }
 :root[data-theme="night"] .job-badge.done, :root[data-theme="night"] .job-ok { background: #0f2e25; }
 .job-log li.ok, .job-check-list li.ok, .job-remote .hint.ok { color: var(--good); }
 
@@ -1432,6 +1540,10 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .ring.high .val { stroke: var(--warn); }
 .ring.off .trk { stroke-dasharray: 3 3; }
 .ring.off .val { visibility: hidden; }
+/* Folded (app.js busiest): only the ring reading highest shows, beside a small button that opens all four. */
+.meters.folded > .ring:not(.busiest) { display: none; }
+.meters-fold { align-self: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink-soft); border-radius: var(--r-ctl); padding: 2px 8px; font-size: var(--fs-sm); line-height: 1.2; cursor: pointer; }
+.meters-fold:hover { color: var(--ink); border-color: var(--ink-soft); }
 .ring.off .ring-v { color: var(--ink-soft); }
 .ring .ring-off { width: 16px; height: 16px; transform: none; }
 .ring-v { position: absolute; top: 0; left: 0; right: 0; height: 36px; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -1440,6 +1552,8 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .active-row { display: flex; align-items: center; gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
 .active-k { flex: none; width: 46px; color: var(--ink-soft); font-weight: 600; }
 .loaded .chip { display: inline-flex; align-items: center; min-width: 0; max-width: 340px; padding: 1px 4px 1px 9px; color: var(--ink); white-space: nowrap; }
+/* TOMLIN not answering: two lines, the second sentence under the first, inside its border */
+.loaded .chip.chip-down { display: inline-block; max-width: none; white-space: normal; border-radius: 12px; padding: 3px 10px; line-height: 1.3; }
 .loaded .chip .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--good); }
 .loaded .chip.state-loading .dot, .loaded .chip.state-unloading .dot, .loaded .chip.working .dot { background: var(--warn); }
 .loaded .chip.state-failed .dot { background: var(--bad); }
@@ -1449,7 +1563,8 @@ dialog#calc { background: var(--panel); color: var(--ink); width: min(980px, 96v
 .chip-drop:hover { background: var(--accent-soft); }
 .chip-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* The name beside the SM mark goes first when the bar is short of room. */
-@media (max-width: 1280px) { .brand-home .brand-name { display: none; } }
+/* "Home" beside the logo (it is the way Home); only a very narrow window drops the word. */
+@media (max-width: 760px) { .brand-home .brand-name { display: none; } }
 /* Nothing in the top bar overlaps, from 800 wide up: the models line keeps a width of its own, "No models loaded"
    keeps all its words on one line (the bar wraps to a second line rather than squeeze it or run items into each
    other), and while all is muted the bar says only Unmute (the bell beside it, and its tip, say until when). */
@@ -1471,6 +1586,49 @@ body.app-locked > :not(#applock) { display: none !important; }
 .applock-card { display: flex; flex-direction: column; gap: 12px; width: min(360px, 100%); padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .applock-card h1 { margin: 0; }
 .applock-mark { align-self: flex-start; }
+/* The lock screen: the icon and "Access is restricted." on one line; the note under the PIN centred; New PIN and the
+   new PIN again each on one line with its box. */
+.applock-head { display: flex; align-items: center; gap: 10px; }
+.applock-head .applock-mark { align-self: center; flex: none; }
+.applock-off-note { text-align: center; }
+/* Settings, Manage: its three tools as tiles, three across (one under another on a narrow window), each button at the foot. */
+/* All chats: search and two filters, then a tile for each chat (hover: its first message) */
+#allchats-page > * { max-width: 1100px; }
+.allchats-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 10px; }
+.allchats-tools input[type="search"] { flex: 1 1 280px; min-width: 0; }
+.allchats-pick { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--ink-soft); }
+.allchats-tiles { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+/* New chat's search box (more than 6 staff): above the cards, not full width. */
+.new-chat-find { max-width: 320px; margin: 0 0 12px; }
+/* Show more: the whole width under the tiles, centred. */
+.allchats-more { grid-column: 1 / -1; display: flex; justify-content: center; }
+.allchats-tile { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 6px; padding: 14px; text-align: left; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; font: inherit; }
+.allchats-tile:hover { border-color: var(--accent); }
+.allchats-tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.allchats-who { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-sm); color: var(--ink-soft); }
+.allchats-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.allchats-subject { overflow-wrap: anywhere; }
+.allchats-mini { font-size: var(--fs-sm); color: var(--ink-soft); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.allchats-where { font-size: var(--fs-xs); color: var(--ink-soft); margin-top: auto; }
+/* Add another PC: two tiles side by side, half each (one under the other on a narrow screen), then Find other PCs */
+.addpc-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+@media (max-width: 760px) { .addpc-tiles { grid-template-columns: minmax(0, 1fr); } }
+.addpc-tile { display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.addpc-tile .set-about { color: var(--ink-soft); font-size: var(--fs-xs); flex: 1; }
+.addpc-go { display: flex; justify-content: flex-start; margin-top: 4px; }
+.manage-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; max-width: 900px; }
+@media (max-width: 760px) { .manage-tiles { grid-template-columns: minmax(0, 1fr); } }
+.manage-tile { display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+/* Manage: the tiles' pictures drawn large; Scan's radar sends its waves out one after another */
+.manage-tile > .set-tile { width: 64px; height: 64px; border-radius: 14px; }
+.manage-tile .wave { animation: manage-wave 2.4s ease-out infinite; }
+.manage-tile .wave-2 { animation-delay: .4s; }
+.manage-tile .wave-3 { animation-delay: .8s; }
+@keyframes manage-wave { 0% { opacity: 0; } 25% { opacity: 1; } 70%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .manage-tile .wave { animation: none; } }
+.manage-tile .set-about { color: var(--ink-soft); font-size: var(--fs-xs); flex: 1; }
+.manage-go { display: flex; justify-content: flex-start; margin-top: 4px; }
+.applock-card .field.lock-inline { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); align-items: center; gap: 10px; }
 .applock-card .btn.primary { align-self: stretch; }
 /* "Unlock [PIN]" and "Send host [the message]": a button, then its field, on one line (stacked on a phone). */
 .applock-card { width: min(520px, 100%); }
@@ -1493,7 +1651,8 @@ body.app-locked > :not(#applock) { display: none !important; }
 .lock-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .lock-pad .btn { min-height: 44px; font-size: 1.1em; justify-content: center; }
 .lock-strength[data-strength="weak"] { color: var(--warn); }
-.lock-recover-open { align-self: flex-start; }
+/* Words only, centred, the size of the note above it ("You can disable pin locks") */
+.lock-recover-open { align-self: center; font-size: var(--fs-sm); }
 .codes-list { margin: 0; padding: 10px 10px 10px 36px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; border: 1px solid var(--line); border-radius: 8px; font: 600 1.05em/1.5 ui-monospace, Consolas, monospace; user-select: all; }
 @media (max-width: 480px) { .codes-list { grid-template-columns: minmax(0, 1fr); } }
 .update-banner { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60; width: max-content; max-width: calc(100% - 32px); box-shadow: var(--shadow); }
@@ -1579,7 +1738,7 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
    pictures (a white box with a dark edge and a white halo); ticked pictures get a thick blue frame; an × top right deletes
    one, after the picture itself asks. The "picture shown above" ring is hidden while editing so it cannot be taken for a tick. */
 :root { --pick: #20252d; --pick-ink: #ffffff; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]) { --pick: #eef0f3; --pick-ink: #15171b; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="day"]):not([data-theme="silly"]) { --pick: #eef0f3; --pick-ink: #15171b; } }
 :root[data-theme="night"] { --pick: #eef0f3; --pick-ink: #15171b; }
 .g-tools { gap: 8px; }
 .g-picked { gap: 8px; }
@@ -1642,6 +1801,7 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 .subjects-sum::-webkit-details-marker { display: none; }
 .subjects-sum h2 { margin: 0; font-size: var(--fs-md); }
 .subjects-now { display: none; }
+.subjects-arrow { display: none; }
 .subjects-with { margin: 10px 14px 0; }
 .subjects-new { display: grid; gap: 8px; padding: 8px 14px 4px; }
 .subjects-new[hidden] { display: none; }
@@ -1651,13 +1811,15 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 /* On a wide screen the tabs are the panel's top line; the fold's own line is for a narrow screen */
 @media (min-width: 901px) {
   .subjects-sum { display: none; }
-  .side-hide { margin-left: auto; padding-left: 6px; font-size: var(--fs-sm); white-space: nowrap; }
+  .side-hide { margin-left: auto; display: inline-flex; align-items: center; padding: 2px 4px; }
   .subjects .side-tab { white-space: nowrap; padding: 4px 7px; }
   /* Hidden: a thin strip at the right, its title written downwards and Show under it; the chat takes the room */
   .subjects.folded { flex: 0 0 auto; }
-  .subjects.folded .subjects-sum { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 10px; border-bottom: 0; cursor: pointer; }
-  .subjects.folded .subjects-sum h2 { writing-mode: vertical-rl; font-size: var(--fs-sm); }
-  .subjects.folded .subjects-sum::after { content: "Show"; writing-mode: vertical-rl; font-size: var(--fs-sm); color: var(--accent); text-decoration: underline; }
+  /* Hidden (the start, until he leaves it open): a thin strip at the right with one arrow that opens it */
+  .subjects.folded .subjects-sum { display: flex; flex-direction: column; align-items: center; padding: 10px 6px; border-bottom: 0; cursor: pointer; color: var(--accent); }
+  .subjects.folded .subjects-sum h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .subjects.folded .subjects-arrow { display: inline-flex; }
+  .subjects.folded .subjects-sum:hover { background: var(--track); }
 }
 @media (max-width: 900px) { .side-hide { display: none; } }
 .side-tabs { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
@@ -1672,7 +1834,6 @@ dialog#jobs.previewing { width: min(1500px, 98vw); max-width: 98vw; }
 .side-group:first-child h3 { margin-top: 4px; }
 .side-who { font-weight: 600; }
 .side-chats .rail-row[aria-current] { background: var(--track); box-shadow: inset 3px 0 0 var(--accent); }
-#panel-chats .rail-more { margin: 0 14px 12px; }
 @media (max-width: 900px) {
   .panes-back { order: -2; }
   .subjects { order: -1; flex: 0 0 auto; margin: 0; overflow: visible; }
@@ -1737,12 +1898,14 @@ dialog#snippets-dlg::backdrop, dialog#prompt-save-dlg::backdrop { background: rg
 .home-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
 .home-main > * { width: 100%; }
 .home-main > .home-head { order: -2; }
+.home-main > .home-start, .home > .home-start { order: -3; }
 .home-side { flex: 0 0 300px; position: sticky; top: 0; max-height: 100%; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
 .home-side-sum { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; list-style: none; }
 .home-side-sum::-webkit-details-marker { display: none; }
 .home-side-sum h3 { margin: 0; flex: 1 1 auto; font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
-.home-side-sum::after { content: "Hide"; flex: none; font-size: var(--fs-sm); color: var(--accent); text-decoration: underline; }
-.home-side-fold:not([open]) > .home-side-sum::after { content: "Show"; }
+.home-side-open, .home-side-close { display: none; color: var(--accent); }
+.home-side-fold[open] .home-side-close { display: inline-flex; margin-left: auto; }
+@media (max-width: 900px) { .home-side-fold:not([open]) .home-side-open { display: inline-flex; order: 9; margin-left: auto; } }
 .home-side-fold[open] > .home-side-sum { border-bottom: 1px solid var(--line); }
 .home-side-sum:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: var(--radius); }
 .home-side .home-list { padding: 12px; }
@@ -1758,12 +1921,13 @@ dialog#snippets-dlg::backdrop, dialog#prompt-save-dlg::backdrop { background: rg
 @media (min-width: 901px) {
   /* Folded: a strip at the side, the title written downwards and the number above it */
   .home-side.folded { flex: 0 0 auto; }
-  .home-side.folded .home-side-sum { flex-direction: column; padding: 14px 10px; }
-  .home-side.folded .home-side-tabs { writing-mode: vertical-rl; flex: none; }
-  .home-side.folded .side-tab-bar { display: none; }
-  .home-side.folded .home-side-sum::after { writing-mode: vertical-rl; order: 2; }
+  /* Hidden: a thin strip at the right with one arrow that opens it (the number above it when something is urgent) */
+  .home-side.folded .home-side-sum { flex-direction: column; padding: 10px 6px; gap: 6px; }
+  .home-side.folded .home-side-tabs { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .home-side.folded .home-side-open { display: inline-flex; }
+  .home-side.folded .home-side-sum:hover { background: var(--track); }
   .home-side.folded .rail-count { order: -1; }
-  .home-side.folded .home-side-busy { writing-mode: vertical-rl; }
+  .home-side.folded .home-side-busy { display: none; }
 }
 @media (max-width: 900px) {
   .home { flex-direction: column; align-items: center; justify-content: flex-start; }
@@ -1837,6 +2001,12 @@ dialog#send-to::backdrop { background: rgba(0,0,0,.55); }
 
 /* Quick or Think in the chat box, and the working folded above a Think answer */
 .chat-actions .think-pick { padding: 2px; }
+/* The chat box's foot: Options and the paperclip on the left, Stop and Send on the right */
+.chat-actions-gap { flex: 1 1 auto; }
+.chat-options { position: relative; }
+.chat-options-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; min-width: 190px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.chat-options-menu[hidden] { display: none; }
+.chat-clip { display: inline-flex; align-items: center; }
 .chat-actions .think-pick .g-shelf { padding: 4px 10px; }
 .msg details.thought { margin: 0 0 8px; padding: 4px 8px; border-left: 3px solid var(--line); color: var(--ink-soft); font-size: var(--fs-sm); white-space: normal; }
 .msg details.thought summary { cursor: pointer; }
@@ -1954,8 +2124,8 @@ dialog#jobs { width: min(1240px, 96vw); max-height: 92vh; min-height: min(640px,
 .home-staff-select { flex: 1 1 240px; min-width: 0; max-width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--field); color: var(--field-ink); font: inherit; }
 .home-staff-select:focus { border-color: var(--ink-soft); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
 .home-ask .field { gap: 8px; }
-.home-staff-row .home-advanced { margin-left: auto; }
-.home-staff-row .home-go { padding: 9px 24px; }
+/* Plan as a job is hidden (Developer notes' Planner still clicks it), so Lets go! keeps the right-hand end itself. */
+.home-staff-row .home-go { padding: 9px 24px; margin-left: auto; }
 .home-ask .hint { margin: 0; }
 .home-ask .home-ask-title { margin: 0; font-size: 22px; font-weight: 600; color: var(--ink); letter-spacing: -.01em; }
 @media (max-width: 760px) { .home-ask .home-ask-title { font-size: 18px; } }
@@ -2022,6 +2192,16 @@ dialog.scan-dlg { width: min(720px, 94vw); max-height: 92vh; overflow: auto; }
 .pc-card.drop-ok { border-color: var(--good); border-style: dashed; }
 .pc-card.drop-no { opacity: .5; }
 .pc-card.drop-over { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--good); }
+/* While a hire is dragged (home.js deskFit): a model of theirs fits there (strong), fits tightly (lighter), or nothing
+   fits (dimmed); each card says which in words, so it is not told by colour alone */
+.pc-card.drop-fit { border: 2px solid var(--good); background: color-mix(in srgb, var(--good) 12%, var(--panel)); }
+.pc-card.drop-tight { border-color: var(--warn); border-style: dashed; background: var(--warn-bg); }
+.pc-card.drop-maybe { opacity: .7; border-color: var(--line); border-style: dashed; }
+.pc-card.drop-fit.drop-over, .pc-card.drop-tight.drop-over, .pc-card.drop-maybe.drop-over { opacity: 1; background: var(--accent-soft); }
+.pc-card .drop-hint { display: block; margin: 2px 6px 2px; font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--ink-soft); }
+.pc-card.drop-fit .drop-hint { color: var(--good); }
+.pc-card.drop-tight .drop-hint { color: var(--warn); }
+.pc-card.drop-nofit .drop-hint { color: var(--bad); }
 /* A chat's project, in its head; a project's chats, in its Overview */
 .chat-project { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--ink-soft); flex: none; }
 .chat-project select { max-width: 200px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--field-ink); font-size: var(--fs-sm); }
@@ -2095,17 +2275,17 @@ dialog#upd-dlg { width: min(680px, 94vw); }
 /* Settings puts its menu at the top of the left panel, alone: no PCs, staff or chats. It stays there on every page it
    opens, with the page open marked, so the next one is one press away. Every other page has no menu at the foot of the
    panel: the TOMLIN - HOME and Settings lines were removed (Home is the logo and the Home row, Settings is the top bar). */
-.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail > :not(#rail-setup-fold) { display: none; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
-.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail #rail-settings-sub { padding-left: 14px; }
-.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="storage"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]) > .rail #rail-settings-sub { display: none; }
-.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="storage"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]) > .rail > .rail-setup { display: none; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"], [data-view="usb"], [data-view="addpc"]) > .rail > :not(#rail-setup-fold) { display: none; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"], [data-view="usb"], [data-view="addpc"]) > .rail > .rail-setup { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
+.shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"], [data-view="usb"], [data-view="addpc"]) > .rail #rail-settings-sub { padding-left: 14px; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="storage"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]):not([data-view="usb"]):not([data-view="addpc"]) > .rail #rail-settings-sub { display: none; }
+.shell:not([data-view="settings"]):not([data-view="models"]):not([data-view="storage"]):not([data-view="nodes"]):not([data-view="thispc"]):not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]):not([data-view="updates"]):not([data-view="data"]):not([data-view="perms"]):not([data-view="colours"]):not([data-view="usb"]):not([data-view="addpc"]) > .rail > .rail-setup { display: none; }
 /* The page on screen: the selection blue, bold, so the line under the mouse (the faint grey hover) never looks like a
    second page marked. */
 .rail-links .link[aria-current="page"] { background: var(--select); color: var(--select-ink); font-weight: 600; }
 .rail-links .link[aria-current="page"] svg { color: var(--select-ink); }
 /* On a phone the menu sits above the page */
-@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"]) > .rail { display: flex; } }
+@media (max-width: 760px) { .shell:is([data-view="settings"], [data-view="models"], [data-view="storage"], [data-view="nodes"], [data-view="thispc"], [data-view="staff"], [data-view="jobs"], [data-view="files"], [data-view="updates"], [data-view="data"], [data-view="perms"], [data-view="colours"], [data-view="usb"], [data-view="addpc"]) > .rail { display: flex; } }
 /* Staff, Jobs and Files as pages (home.js showAsPage): the window's own box, backdrop and height let go */
 .shell:not([data-view="staff"]):not([data-view="jobs"]):not([data-view="files"]) > #setup-page { display: none; }
 #setup-page > dialog.as-page { position: static; display: block; inset: auto; width: 100%; max-width: 1240px; height: auto; max-height: none; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: inherit; overflow: visible; }
@@ -2284,9 +2464,14 @@ button.office-tile:hover { background: var(--hover); border-color: var(--accent)
 }
 
 /* Hire staff (hire.js): the profile on the left; the PC, then the models on that PC, on the right. */
+/* Edit staff, Who: Tone for writing on one line with its list, under Role. */
+.tone-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.tone-line > span { color: var(--ink-soft); }
 dialog#hire-dlg { width: min(1180px, 96vw); max-height: 92vh; padding: 16px; background: var(--panel); color: var(--ink); }
 .hs-split { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); border-top: 1px solid var(--line); }
 .hs-profile { padding: 4px 18px 8px 0; border-right: 1px solid var(--line); display: grid; gap: 10px; align-content: start; }
+/* Moving a hire (hire.js app.openMove): their name, look and role stay as they are, so only the PC and model are picked. */
+dialog#hire-dlg.hs-moving #hs-random, dialog#hire-dlg.hs-moving #hs-look-btn, dialog#hire-dlg.hs-moving .hs-profile .pick-set, dialog#hire-dlg.hs-moving #hs-role-line, dialog#hire-dlg.hs-moving #hs-see-staff { display: none; }
 .hs-right { padding: 4px 0 8px 18px; min-width: 0; display: grid; gap: 10px; align-content: start; }
 .hs-profile h3, .hs-right h3 { margin: 10px 0 0; }
 /* Their picture in the middle, a small pencil at its lower right to change the look. */
@@ -2638,6 +2823,8 @@ dialog.vend-dlg { width: min(460px, calc(100vw - 32px)); max-width: none; paddin
 .todo-due { color: var(--warn); font-weight: 600; }
 .todo-fault { color: var(--bad); }
 /* Settings: tiles, three across, so the last row is the low-priority three */
+.settings-groups { display: grid; gap: 22px; max-width: 980px; }
+.settings-group > h3 { margin: 0 0 10px; font-size: var(--fs-md); font-weight: 600; }
 .settings-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 980px; }
 .settings-tile { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 2px 12px; align-content: start; padding: 14px; text-align: left; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
 .settings-tile:hover { background: var(--hover); border-color: var(--accent); }
@@ -3267,3 +3454,40 @@ dialog.dl-dlg { width: min(680px, 94vw); }
 .storage-bar.full > span { background: var(--warn); }
 .storage-warn { color: var(--warn); }
 @media (max-width: 760px) { .storage-tiles { grid-template-columns: minmax(0, 1fr); } }
+
+/* Settings, Bootable USB (public/usb.js): three yellow steps, the admin key, the running download or Mint, and the
+   best settings per kind of hardware. */
+.usb-card { display: grid; gap: 10px; padding: 14px 16px; }
+.usb-card p { margin: 0; }
+.usb-step h3 { display: flex; align-items: center; }
+.usb-row { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.usb-row input[type="text"] { min-width: 220px; }
+.usb-key { font-family: var(--mono, ui-monospace, Consolas, monospace); letter-spacing: .04em; }
+.usb-howto { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; font-size: var(--fs-md); }
+.usb-task { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+.usb-task progress { width: 100%; height: 10px; }
+.usb-lines { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-xs); background: var(--hover); border-radius: 8px; padding: 8px 10px; }
+.usb-kind { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.usb-kind:last-of-type { border-bottom: 0; }
+.usb-kind h4 { margin: 0; font-size: var(--fs-md); }
+.usb-best { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.usb-best th, .usb-best td { text-align: left; padding: 4px 8px 4px 0; vertical-align: top; border-top: 1px solid var(--line); }
+.usb-slow { color: var(--bad); font-weight: 600; }
+.usb-other summary { cursor: pointer; }
+.usb-sticks tr.usb-lost td { color: var(--ink-soft); }
+@media (max-width: 760px) { .usb-best thead { display: none; } .usb-best td { display: block; border-top: 0; } .usb-best tr { display: block; border-top: 1px solid var(--line); padding: 6px 0; } }
+/* Scan the network: Add (a PC started from this PC's stick) and Add all keep their own width. */
+#node-found > .btn, .node-card [data-key-add] { justify-self: start; width: auto; }
+
+/* Home and a chat line up (wide screen): going from one to the other, the box in the middle and the panel on the right
+   stay put. The middle of the two old layouts: the box 38px after the left panel and 40px before the right one, the
+   right panel a card 290px wide, 8px in from the window's edge, top and bottom. Home keeps room for its scroll bar, so a
+   short page does not move it either. */
+@media (min-width: 901px) {
+  .home > .home-main { padding-left: 38px; padding-right: 25px; scrollbar-gutter: stable; }
+  .home-side { margin: 8px 8px 8px 0; border-width: 1px; border-radius: var(--radius); }
+  .home-side:not(.folded) { flex-basis: 290px; }
+  .panes { padding: 8px 8px 8px 19px; }
+  .subjects { margin-left: 21px; }
+  .subjects:not(.folded) { flex-basis: 290px; }
+}

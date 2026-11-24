@@ -1,0 +1,34 @@
+[Unit]
+Description=TOMLIN node (Bootable USB: this PC runs TOMLIN as a linked node)
+After=network-online.target systemd-udevd.service
+Wants=network-online.target
+ConditionKernelCommandLine=tomlin.node=1
+
+[Service]
+Type=simple
+# TOMLIN and the runners it starts run as a plain user: the link port and a cluster's RPC server listen on the network,
+# so a fault in them must not give root on a PC whose own disks are attached. The user is made by the boot hook.
+User=tomlin-node
+Group=tomlin-node
+NoNewPrivileges=yes
+# The setup (unpacking, the network, the firewall, packages, the clock, NVIDIA's driver) needs root: "+" runs it with
+# full rights. Run from the stick itself, so a stick minted again brings its new start script to nodes kept on the
+# persistence.
+ExecStartPre=+/bin/sh /run/live/medium/tomlin/stick/start.sh setup
+ExecStart=/bin/sh /run/live/medium/tomlin/stick/start.sh run
+# NVIDIA's driver build in the setup can take 20 minutes.
+TimeoutStartSec=infinity
+Restart=on-failure
+# 30 s: a lock file left by a power cut is cleared by a start 20 s or more after it (src/onecopy.ts).
+RestartSec=30
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Environment=TOMLIN_STATE=/var/lib/tomlin-node
+Environment=TOMLIN_HOME=/var/lib/tomlin-node/home
+Environment=TOMLIN_USB_NODE=/opt/tomlin/tomlin-node.json
+Environment=TOMLIN_MODELS=/run/live/medium/tomlin/models
+Environment=TOMLIN_NO_TOAST=1
+
+[Install]
+WantedBy=multi-user.target

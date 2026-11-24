@@ -75,6 +75,17 @@ test('the node network list: only shared models, once each, where each can be co
   assert.match(carry.copyWhy(pc({ ok: false }), 'x'), /off or not answering/);
 });
 
+test('a Backups only PC is a place to copy a model from: its kept models are listed, marked backup', () => {
+  const store = pc({ id: 'e', name: 'Store', backupsOnly: true, models: [], held: [shared('Big-80B.gguf'), shared('Qwen-2B.gguf')] });
+  const a = pc({ id: 'a', name: 'Worker PC', models: [shared('Qwen-2B.gguf')] });
+  const rows = carry.networkList([a, store], { chatFiles: [], pictures: [] });
+  const big = rows.find(r => r.name === 'Big-80B')!;
+  assert.deepEqual(big.on.map(o => [o.pcName, o.copy, o.backup === true]), [['Store', true, true]]);
+  assert.deepEqual(rows.find(r => r.name === 'Qwen-2B')!.on.map(o => [o.pcName, o.backup === true]), [['Worker PC', false], ['Store', true]]);
+  // A PC that is not Backups only keeps its held models to itself (a cluster member, held for borrowing).
+  assert.equal(carry.networkList([pc({ id: 'f', name: 'Held', models: [], held: [shared('Big-80B.gguf')] })], { chatFiles: [], pictures: [] }).length, 0);
+});
+
 test('send and keep-a-restore-point say why not, naming the tick on that PC (sending a model needs "Accept models from linked PCs" there)', () => {
   const asks = ['models', 'carry', 'receive'];
   assert.match(carry.sendWhy(pc({ can: asks })), /Accept models from linked PCs/);

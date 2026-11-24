@@ -9,6 +9,7 @@ import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stagedMissing } from '../src/installer.ts';
 import { repoOf } from '../src/release.ts';
 import { PARTS, SKIP } from '../src/update.ts';
 import { ensureKey, keyHits, nativeGaps, nextSteps, signZip } from './sign.ts';
@@ -50,6 +51,14 @@ const keys = keyHits(join(stage, name));
 if (keys.length) {
   await rm(stage, { recursive: true, force: true });
   console.error(`Pack stopped: a private key would ship in ${keys.length} file(s). Take it out, then pack again:\n  ${keys.join('\n  ')}`);
+  process.exit(1);
+}
+// Every key file a copy cannot start without (src/installer.ts KEY_FILES) is in what was staged: a launcher or runner
+// left out by PARTS or SKIP stops the pack here, not on the PC it is installed on.
+const missing = stagedMissing(join(stage, name));
+if (missing) {
+  await rm(stage, { recursive: true, force: true });
+  console.error(missing);
   process.exit(1);
 }
 // Windows' own tar makes zip files; named by full path because Git's tar reads "C:\..." as a remote machine.

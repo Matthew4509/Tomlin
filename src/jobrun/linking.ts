@@ -18,6 +18,8 @@ import { clusterGaps, labelOf, lendersInUse, membersFacts, setBorrow, setPlainLi
 import { addWhy, heldFor, withHere, withMembers, withOn, without } from '../cluster/members.ts';
 import { chooseLoader, loaderWhy } from '../cluster/loader.ts';
 import { lanAddresses, lanList, shareState } from './node.ts';
+import * as usbadmin from '../usbadmin.ts';
+import * as adminkey from '../adminkey.ts';
 
 /** The link request with as many extra proofs as fit: a node reads only 4 KB of it (and an older one cuts the rest). */
 function pairBody(ask: Record<string, unknown>, proofs: string[]): string {
@@ -41,11 +43,15 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     if (advice.problem || /\.1(:\d+)?\/?$/.test(typed.trim())) advice = linkhelp.addressAdvice(typed, await ownNow());
     const url = advice.problem ? null : share.cleanWorkerUrl(typed);
     if (!url) return { status: 400, body: { error: advice.problem ?? 'That PC\'s address is not one on your home network. Press "Find PCs on my network" again, or type the address shown on that PC (for example 192.168.1.20:8741).', suggest: advice.suggest } };
-    const code = share.cleanCode(b.code);
-    if (code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network (for example ABCD-EFGH).' } };
+    // Linking a node minted by this PC (Bootable USB): signed with the admin key, with no setup code or PIN.
+    const usb = b.adminKey === true ? usbadmin.cleanRecords(await d.store.readJson<unknown>(usbadmin.FILE, {})) : null;
+    const own = usb?.key ?? null;
+    if (b.adminKey === true && !own) return { status: 400, body: { error: 'This PC has no admin key yet: make one under Settings, Bootable USB.' } };
+    const code = own ? '' : share.cleanCode(b.code);
+    if (!own && code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network (for example ABCD-EFGH).' } };
     const pinWhy = linkhelp.pinAdvice(String(b.pin ?? ''));
     if (pinWhy) return { status: 400, body: { error: pinWhy } };
-    const pin = String(b.pin ?? '').replace(/\D/g, '');
+    const pin = own ? '' : String(b.pin ?? '').replace(/\D/g, '');
     // A name (desk.local) must point inside the home network before anything is sent to it (S6).
     const outside = await share.homeNetworkWhy(url);
     if (outside) return { status: 400, body: { error: outside } };
@@ -66,9 +72,13 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // so whatever answers here is not that PC's link part.
     if (about.app !== 'smart-manager') return { status: 400, body: { error: `Something answered at ${url}, but it is not TOMLIN's link part. If TOMLIN is running on that PC, tick "Enable this PC as a node" there (Settings, Network) and use the address shown there; the port is usually 8741, not the one in the browser address bar.` } };
     if (Number(about.link) !== link.LINK_VERSION) return { status: 400, body: { error: `That PC runs an older TOMLIN (${String(about.version || 'before 2.0.26').slice(0, 20)}), which cannot make the encrypted link. Update TOMLIN there, then link again.` } };
-    // The setup code (and the PIN) never cross the network: both PCs prove they know them (src/link.ts).
-    const key = await link.pairKey(code, pin);
-    const { ask, priv } = link.hostAsk(key, shareState.id, shareState.name !== share.DEFAULT_SHARE.name ? shareState.name : 'TOMLIN', !!pin);
+    // The setup code (and the PIN) never cross the network: both PCs prove they know them (src/link.ts). A stick of this
+    // admin's is checked before anything is sent: on the list of sticks minted here, and not marked lost.
+    const stickId = own ? adminkey.cleanStickId(about.stick) : '';
+    if (own && usb && !usbadmin.stickPubOf(usb, stickId)) return { status: 400, body: { error: usb.sticks.some(x => x.id === stickId) ? 'That stick is marked lost on this PC (Settings, Bootable USB), so it is not linked. Mint a new stick for that PC.' : 'That PC was not started from a stick minted by this PC with its admin key now. Mint the stick here, then link again.' } };
+    const key = own ? Buffer.alloc(0) : await link.pairKey(code, pin);
+    const myName = shareState.name !== share.DEFAULT_SHARE.name ? shareState.name : 'TOMLIN';
+    const { ask, priv } = own ? link.adminHostAsk(own, shareState.id, myName) : link.hostAsk(key, shareState.id, myName, !!pin);
     // Linked before at this address with working keys: proved, so the new link takes over the old one there.
     const oldKeys = link.keysOf(s.remotes.find(r => r.url === url)?.key);
     const proof = oldKeys ? link.takeOverProof(oldKeys, ask.pub) : undefined;
@@ -86,7 +96,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     if (!res.ok) return { status: res.status === 429 ? 429 : 400, body: { error: `That PC said: ${String(data.error ?? `no (${res.status})`)}`, needPin: data.needPin === true } };
     let done: ReturnType<typeof link.hostFinish>;
     try {
-      done = link.hostFinish(key, ask, priv, data);
+      done = own && usb ? link.adminHostFinish(own.pub, id => usbadmin.stickPubOf(usb, id), ask as link.AdminAsk, priv, data) : link.hostFinish(key, ask, priv, data);
     } catch (e) {
       return { status: 502, body: { error: `That PC: ${(e as Error).message}` } };
     }
@@ -102,6 +112,11 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const same = now.find(r => r.id === id);
     const made: Remote = { ...(same?.backupsOnly ? { backupsOnly: true } : {}), ...(same?.noBorrow ? { noBorrow: true } : {}), ...(same?.mac ? { mac: same.mac } : {}), ...(same?.models ? { models: same.models } : {}), id, name, url, token: done.token, key: link.keysText(done.keys) };
     await d.store.saveSettings({ remotes: [...others, made] });
+    // A stick of this admin's: its row on the list says which PC it is now, and when it was last seen.
+    if (own && stickId) {
+      const r = usbadmin.cleanRecords(await d.store.readJson<unknown>(usbadmin.FILE, {}));
+      await d.store.writeJson(usbadmin.FILE, usbadmin.withStick(r, stickId, { pc: id, lastSeen: new Date().toISOString() }));
+    }
     // A PC released for now, back: its hires go back on it.
     for (const m of d.staff.list()) {
       const back = restored(m, id);
@@ -143,24 +158,25 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     if (!r) return { status: 404, body: { error: 'That PC is no longer linked.' } };
     if (!link.keysOf(r.key)) return { status: 400, body: { error: `"${r.name}" was linked before links were encrypted, so it cannot be found this way. Link it again: Find PCs on my network, then its setup code.` } };
     if (await hello(r, 4000).then(() => true, () => false)) return { status: 200, body: { ...(await setup()), note: `"${r.name}" answers at its address (${r.url.replace(/^https?:\/\//, '')}): nothing to change.` } };
-    let port = share.DEFAULT_SHARE.port;
-    try {
-      port = Number(new URL(r.url).port) || port;
-    } catch {
-      // A saved address that cannot be read: the usual port.
-    }
-    const found = await scan(port);
-    // Read after the scan: every PC that answered it is now in the ARP table.
-    const order = findagain.rankFound(r, found, findagain.ipForMac(await findagain.readArp(), r.mac));
-    for (const url of order) {
-      if (await share.homeNetworkWhy(url)) continue;
-      if (!(await answersAt(r, url))) continue;
-      const now = (await d.store.settings()).remotes;
-      if (!now.some(x => x.id === r.id)) return { status: 404, body: { error: 'That PC is no longer linked.' } };
-      await d.store.saveSettings({ remotes: now.map(x => (x.id === r.id ? { ...x, url } : x)) });
-      console.log(`"${r.name}" moved from ${r.url} to ${url}: its address is saved.`);
-      await hello((await d.store.settings()).remotes.find(x => x.id === r.id)!, 4000).catch(() => undefined);
-      return { status: 200, body: { ...(await setup()), note: findagain.foundWords(r.name, r.url, url), moved: url } };
+    // Its saved port first, then the usual one: a PC whose owner set sharing back to the usual port is found too.
+    const found: Awaited<ReturnType<typeof scan>> = [];
+    const tried = new Set<string>();
+    for (const port of findPorts(r.url)) {
+      for (const x of await scan(port)) if (!found.some(y => y.url === x.url)) found.push(x);
+      // Read after the scan: every PC that answered it is now in the ARP table.
+      const order = findagain.rankFound(r, found, findagain.ipForMac(await findagain.readArp(), r.mac));
+      for (const url of order) {
+        if (tried.has(url)) continue;
+        tried.add(url);
+        if (await share.homeNetworkWhy(url)) continue;
+        if (!(await answersAt(r, url))) continue;
+        const now = (await d.store.settings()).remotes;
+        if (!now.some(x => x.id === r.id)) return { status: 404, body: { error: 'That PC is no longer linked.' } };
+        await d.store.saveSettings({ remotes: now.map(x => (x.id === r.id ? { ...x, url } : x)) });
+        console.log(`"${r.name}" moved from ${r.url} to ${url}: its address is saved.`);
+        await hello((await d.store.settings()).remotes.find(x => x.id === r.id)!, 4000).catch(() => undefined);
+        return { status: 200, body: { ...(await setup()), note: findagain.foundWords(r.name, r.url, url), moved: url } };
+      }
     }
     return { status: 404, body: { error: findagain.notFoundWords(r.name, found.length) } };
   } else if (b.action === 'answer') {
@@ -379,11 +395,31 @@ async function diagnose(b: Record<string, unknown>): Promise<linkhelp.Verdict> {
 }
 
 /**
+ * The ports "Find it on my network" scans for a linked PC, in turn: its saved port, then the usual port when that is
+ * another (a saved address that cannot be read: the usual port only).
+ */
+export function findPorts(url: string): number[] {
+  const usual = share.DEFAULT_SHARE.port;
+  let port = usual;
+  try {
+    port = Number(new URL(url).port) || usual;
+  } catch {
+    // A saved address that cannot be read: the usual port.
+  }
+  return port === usual ? [usual] : [port, usual];
+}
+
+/**
  * "Find PCs on my network": asks every address next to this PC's own (the same /24) whether TOMLIN is there with
  * sharing on. Each answers only its name and whether it asks for a PIN; linking still needs its setup code. A PC
  * linked before is "broken" when its saved link cannot work (made before links were encrypted): it needs linking again.
  */
-async function scan(port: number): Promise<{ url: string; name: string; pin: boolean; linked: boolean; broken: boolean; version: string; id: string | null; state: string; stateText: string; canAsk: boolean; ask: unknown }[]> {
+async function scan(port: number): Promise<{ url: string; name: string; pin: boolean; linked: boolean; broken: boolean; version: string; id: string | null; state: string; stateText: string; canAsk: boolean; ask: unknown; usb: boolean; mine: boolean }[]> {
+  // This PC's admin key's tag (Bootable USB): a node minted here says so, names its stick, and is added with no setup
+  // code when that stick is on this PC's list and not marked lost. A scan that finds one notes when it was last seen.
+  const usb = usbadmin.cleanRecords(await d.store.readJson<unknown>(usbadmin.FILE, {}).catch(() => ({})));
+  const ownTag = usb.key ? adminkey.keyTag(usb.key.pub) : '';
+  const seenSticks: string[] = [];
   const own = new Set(lanAddresses().map(a => `http://${a}:${shareState.port}`));
   const saved = new Map((await d.store.settings()).remotes.map(r => [r.url, r]));
   const linked = new Set(saved.keys());
@@ -407,11 +443,20 @@ async function scan(port: number): Promise<{ url: string; name: string; pin: boo
       try {
         const r = await fetch(`${url}/worker/whoami`, { signal: AbortSignal.timeout(1500) });
         const j = (await r.json()) as Record<string, unknown>;
-        if (r.ok && j.app === 'smart-manager') found.push({ url, name: String(j.name ?? 'Worker PC').replace(/[^\w .'-]/g, '').slice(0, 40), pin: j.pin === true, linked: linked.has(url), broken: broken(url), version: String(j.version ?? '').slice(0, 20), ...standing(url) });
+        if (!r.ok || j.app !== 'smart-manager') return;
+        const stick = adminkey.cleanStickId(j.stick);
+        const mine = !!ownTag && Array.isArray(j.admin) && j.admin.includes(ownTag) && !!usbadmin.stickPubOf(usb, stick);
+        if (mine) seenSticks.push(stick);
+        found.push({ url, name: String(j.name ?? 'Worker PC').replace(/[^\w .'-]/g, '').slice(0, 40), pin: j.pin === true, linked: linked.has(url), broken: broken(url), version: String(j.version ?? '').slice(0, 20), ...standing(url), usb: j.usb === true, mine });
       } catch {
         // Nothing there.
       }
     }));
+  }
+  if (seenSticks.length) {
+    const now = new Date().toISOString();
+    const r = usbadmin.cleanRecords(await d.store.readJson<unknown>(usbadmin.FILE, {}).catch(() => ({})));
+    await d.store.writeJson(usbadmin.FILE, seenSticks.reduce((x, id) => usbadmin.withStick(x, id, { lastSeen: now }), r)).catch(() => undefined);
   }
   return found.sort((a, b) => a.name.localeCompare(b.name));
 }

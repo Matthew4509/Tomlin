@@ -139,6 +139,8 @@ export interface LayerAsk {
   off?: boolean;
   readPerSecond: number;
   foldMinutes: number;
+  /** "Sum up what a fold lets go" is on in this chat (off unless he ticks it). */
+  sums?: boolean;
 }
 
 /**
@@ -147,7 +149,7 @@ export interface LayerAsk {
  */
 export async function layerAsk(info: ChatInfo | null | undefined, modelId: string, away: boolean): Promise<LayerAsk> {
   const s = await store.settings();
-  return { chatId: info?.id ?? '', off: info?.layersOff, readPerSecond: away ? info?.readSpeed ?? 0 : layerReadSpeed(readSpeedsNow()[modelId], s.run[modelId]?.found?.read), foldMinutes: cleanFoldWait(s.foldWait?.[modelId]) };
+  return { chatId: info?.id ?? '', off: info?.layersOff, readPerSecond: away ? info?.readSpeed ?? 0 : layerReadSpeed(readSpeedsNow()[modelId], s.run[modelId]?.found?.read), foldMinutes: cleanFoldWait(s.foldWait?.[modelId]), ...(info?.foldSums ? { sums: true } : {}) };
 }
 
 /** The one context builder for a chat turn with the manager or a hire: in layers when `layers` says so and it is 16K+. */
@@ -163,8 +165,8 @@ export async function chatContext(who: string, member: StaffMember | undefined, 
   const card = member ? staffSystem(member, toneOf(member.tone ?? tone).prompt) : systemFor(who, tone, store.peek()?.managerName ?? '');
   const x = { ctx, maxAnswer: ANSWER_CEILING, card, rules: memory.SUGGEST_RULE, team, own, name: books.name, history, message, opening, docs, docsWhole, squeeze };
   if (layers && layeredFor(ctx, false, layers.off)) {
-    const f = layers.chatId ? await chatLogs.read(layers.chatId) : { lines: [], sent: null };
-    return buildLayered({ ...x, log: f.lines, sent: f.sent, readPerSecond: layers.readPerSecond, foldMinutes: layers.foldMinutes });
+    const f = layers.chatId ? await chatLogs.read(layers.chatId) : { lines: [], sent: null, sums: [] };
+    return buildLayered({ ...x, log: f.lines, sent: f.sent, readPerSecond: layers.readPerSecond, foldMinutes: layers.foldMinutes, ...(layers.sums ? { sums: f.sums } : {}) });
   }
   return memory.buildChat(x);
 }
@@ -195,7 +197,7 @@ async function readingView(q: URLSearchParams): Promise<Record<string, unknown> 
   const books = notebooksOf(who);
   // The layers of this chat for Memory: on or off, and what a fold costs here. `can`: the tick does something here
   // (16K or more, not a Default hire).
-  const layers = { on: !open?.layersOff, can: layeredFor(ctx, isPlain(member), false), plain: isPlain(member), min: LAYER_MIN_CTX, layered: 'layered' in built, foldMinutes: ask.foldMinutes, readPerSecond: ask.readPerSecond, ...('layered' in built ? { older: built.older, shortTokens: built.shortTokens, foldTokens: built.foldTokens, foldSeconds: built.foldSeconds, waiting: built.logWaiting } : {}) };
+  const layers = { on: !open?.layersOff, sums: !!open?.foldSums, can: layeredFor(ctx, isPlain(member), false), plain: isPlain(member), min: LAYER_MIN_CTX, layered: 'layered' in built, foldMinutes: ask.foldMinutes, readPerSecond: ask.readPerSecond, ...('layered' in built ? { older: built.older, shortTokens: built.shortTokens, foldTokens: built.foldTokens, foldSeconds: built.foldSeconds, waiting: built.logWaiting } : {}) };
   return { name: books.name, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', ctx: built.ctx, answerTokens: built.answerTokens, room: built.room, used: built.used, parts: built.parts, model: last?.model ?? '', measured: !!last, chat: open?.id ?? '', layers };
 }
 

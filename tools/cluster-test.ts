@@ -11,6 +11,12 @@
 //       --node: keep it on that CPU socket (NUMA node) there; --cpu: lend only RAM and cores, not the card. Two runs on
 //       two ports with --node 0 --all and --node 1 --cpu give one member per socket (needs TOMLIN 2.1.5 there).
 //
+//   node tools/cluster-test.ts <PC name or id> dllama [--plain] [--port 9990] [--threads N] [--minutes 30]
+//       a port on 127.0.0.1 that is a distributed-llama worker there (each connection a fresh worker),
+//       for docs/PLAN-2026-11-23-DISTRIBUTED-LLAMA-TEST.md: the root here takes --workers 127.0.0.1:<port>. One worker
+//       per linked PC: workers that must reach each other (three PCs or more) cannot through this (needs TOMLIN
+//       2.1.17 there).
+//
 // --plain asks for the bytes after the opening NOT to be encrypted: anyone on the home network who can reach the wire
 // could read or change them. Only on a private, wired network.
 import { readFileSync } from 'node:fs';
@@ -53,7 +59,7 @@ export function testSummary(n: StreamNews): string {
 }
 
 async function main(): Promise<void> {
-  if (!who || !['probe', 'rpc'].includes(what)) {
+  if (!who || !['probe', 'rpc', 'dllama'].includes(what)) {
     console.log('Use: node tools/cluster-test.ts <PC name or id> probe [--count N] [--hidden N]\n     node tools/cluster-test.ts <PC name or id> rpc [--plain] [--build bNNNN] [--all] [--port N] [--minutes N]');
     process.exit(1);
   }
@@ -81,6 +87,20 @@ async function main(): Promise<void> {
     }
     console.log('Both include one Node relay on each PC; a direct link would save about 0.1 to 0.2 ms more.');
     process.exit(0);
+  }
+  if (what === 'dllama') {
+    const want: TestWant = { target: 'dllama', plain: args.includes('--plain'), minutes: flag('--minutes', 30), threads: flag('--threads', 0) };
+    const summed = new Set<string>();
+    const { port } = await testBridge(pc, want, flag('--port', 9990), line => console.log(line), n => {
+      const line = testSummary(n);
+      if (line && !summed.has(line)) {
+        summed.add(line);
+        console.log(line);
+      }
+    });
+    console.log(`"${pc.name}"'s distributed-llama worker (${want.plain ? 'NOT encrypted' : 'sealed'}) is at 127.0.0.1:${port}: give the root --workers 127.0.0.1:${port}. Each run starts a fresh worker there; this stays open for ${want.minutes} minutes or until Ctrl+C.`);
+    setTimeout(() => process.exit(0), (want.minutes ?? 30) * 60_000).unref();
+    return;
   }
   const node = args.includes('--node') ? flag('--node', 0) : undefined;
   const want: TestWant = { target: 'rpc', plain: args.includes('--plain'), build: text('--build', ''), all: args.includes('--all'), minutes: flag('--minutes', 15), threads: flag('--threads', 0), ...(node !== undefined ? { node } : {}), cpu: args.includes('--cpu') };

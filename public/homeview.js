@@ -131,6 +131,8 @@ function workingCards() {
 /** Big set-up cards while the basics are missing; afterwards they live under Settings. */
 function setupCards() {
   const u = homeUi.data.setup;
+  // Getting started? goes once there is a hire, a model (here, or a linked PC's) and one chat a model answered.
+  $('#home-start').hidden = !!(u.staff && (u.chatModels || u.imageModels || u.pcs) && u.answered);
   const box = $('#home-setup');
   const sig = JSON.stringify(u);
   if (sig === homeUi.drawn.setup) return;
@@ -160,7 +162,7 @@ function setupCards() {
 function greet() {
   const now = new Date();
   const h = now.getHours();
-  $('#home-title').textContent = h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  themeWords.put($('#home-title'), 'greeting', h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
   $('#home-date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
@@ -174,7 +176,7 @@ function drawHome() {
   const sig = JSON.stringify([d.waiting, d.paused, d.recent]);
   if (sig !== homeUi.drawn.items) {
     homeUi.drawn.items = sig;
-    keepFocus($('#home-waiting'), d.waiting.length ? d.waiting.map((x, i) => itemCard(x, `w:${x.job}:${i}`)) : [el('p', { class: 'home-empty', text: 'Nothing waiting' })]);
+    keepFocus($('#home-waiting'), d.waiting.length ? d.waiting.map((x, i) => itemCard(x, `w:${x.job}:${i}`)) : [themeWords.put(el('p', { class: 'home-empty' }), 'nothing-waiting', 'Nothing waiting')]);
     $('#home-paused-box').hidden = !d.paused.length;
     keepFocus($('#home-paused'), d.paused.map((x, i) => itemCard(x, `p:${x.job}:${i}`)));
     const recent = d.recent ?? [];
@@ -182,7 +184,7 @@ function drawHome() {
     keepFocus($('#home-ready'), recent.map((x, i) => recentCard(x, `r:${x.job}:${i}`)));
   }
   const working = workingCards();
-  keepFocus($('#home-working'), working.length ? working : [el('p', { class: 'home-empty', text: 'Nobody working' })]);
+  keepFocus($('#home-working'), working.length ? working : [themeWords.put(el('p', { class: 'home-empty' }), 'nobody-working', 'Nobody working')]);
   app.drawQueue?.();
   // Folded, the panel still says that someone is working.
   $('#home-working-count').hidden = !working.length;
@@ -295,6 +297,9 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     else if (b.dataset.setup === 'perms') app.openPermissions?.();
     else if (b.dataset.setup === 'colours') app.openColours?.();
     else if (b.dataset.setup === 'storage') app.openStorage?.();
+    else if (b.dataset.setup === 'usb') app.openUsb?.();
+    else if (b.dataset.setup === 'addpc') app.openAddPc?.();
+    else if (b.dataset.setup === 'manage') app.openManage?.();
     else if (b.dataset.setup === 'guestpass') {
       // Network, Guest passes, with the new-pass form open (Create guest pass pressed for you) and its name box ready.
       openNodes();
@@ -305,28 +310,39 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     else app.openPcs();
   });
 }
-// Settings' tiles are the submenu's own lines, so the two always match: a tile does what its line does.
-// Two tiles have two buttons on their right, not one press: Hire staff (Hire, Manage: All staff) and Models (See
-// installed: This PC, Add new: the Models page).
+// Settings' tiles are the submenu's own lines, so the two always match: a tile does what its line does, and they sit
+// under the same group headings (Staff and models, Your network, Work, This app).
+// Two tiles have two buttons on their right, not one press, New then Manage in both: Hire staff (New: Hire, Manage:
+// All staff) and Models (New: the Models page, Manage: This PC).
 const TILE_PLUS = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z';
 const TILE_LIST = 'M4 6h2v2H4zM9 6h11v2H9zM4 11h2v2H4zM9 11h11v2H9zM4 16h2v2H4zM9 16h11v2H9z';
 const tileButton = (text, path, onclick) => el('button', { class: 'btn tile-act', type: 'button', onclick }, text, svgIcon(path, 16));
-$('#settings-tiles').replaceChildren(...[...document.querySelectorAll('#rail-settings-sub [data-setup]')].map(b => {
+const settingsTile = b => {
   const icon = el('span', { class: 'settings-tile-icon' }, b.querySelector('svg').cloneNode(true));
   const name = el('strong', { text: b.textContent.trim() });
   const about = el('span', { class: 'hint', text: b.dataset.about });
   if (b.dataset.setup === 'staff') {
     return el('div', { class: 'settings-tile settings-tile-two' }, icon, name, about,
       el('div', { class: 'tile-acts' },
-        tileButton('Hire', TILE_PLUS, () => { asPage.fromMenu = true; app.openHire({ page: true, fromMenu: true }); }),
+        tileButton('New', TILE_PLUS, () => { asPage.fromMenu = true; app.openHire({ page: true, fromMenu: true }); }),
         tileButton('Manage', TILE_LIST, () => { asPage.fromMenu = true; app.seeAllStaff(); })));
   }
   if (b.dataset.setup === 'models') {
     return el('div', { class: 'settings-tile settings-tile-two' }, icon, name, about,
-      el('div', { class: 'tile-acts' }, tileButton('See installed', TILE_LIST, () => openThisPc()), tileButton('Add new', TILE_PLUS, () => app.openModels())));
+      el('div', { class: 'tile-acts' }, tileButton('New', TILE_PLUS, () => app.openModels()), tileButton('Manage', TILE_LIST, () => openThisPc())));
   }
   return el('button', { class: 'settings-tile', type: 'button', onclick: () => b.click() }, icon, name, about);
-}));
+};
+const settingsGroups = [];
+for (const li of document.querySelectorAll('#rail-settings-sub > li')) {
+  // Hidden lines (Work: Jobs, Files and blog writer) are not tiles either.
+  if (li.hidden) continue;
+  const h = li.querySelector('.rail-group-head');
+  if (h) settingsGroups.push({ id: `settings-group-${h.id.replace('rail-group-', '')}`, words: h.textContent, tiles: [] });
+  else if (li.querySelector('[data-setup]')) settingsGroups.at(-1)?.tiles.push(settingsTile(li.querySelector('[data-setup]')));
+}
+$('#settings-tiles').replaceChildren(...settingsGroups.map(g => el('section', { class: 'settings-group', 'aria-labelledby': g.id },
+  el('h3', { id: g.id, text: g.words }), el('div', { class: 'settings-tiles' }, ...g.tiles))));
 // Hiring, letting go, pairing a PC or sharing this one changes the lists: redraw when those windows close.
 for (const id of ['#team', '#jobs']) $(id)?.addEventListener('close', () => {
   refresh();
@@ -345,6 +361,29 @@ function folderNow() {
   const p = x => String(x).padStart(2, '0');
   return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}-${p(n.getHours())}${p(n.getMinutes())}`;
 }
+
+/**
+ * The folder a typed name gives the project, as the server makes it (src/jobs.ts projectFolderFrom, folders.ts
+ * firstWords): its plain words, at most 40 characters; none: the date and time. One already there gets " 2" and so on.
+ */
+function folderFromName(name) {
+  const words = name.replace(/[^\p{L}\p{N}\s-]+/gu, ' ').replace(/\s+/g, ' ').trim().split(' ');
+  let out = '';
+  for (const w of words) {
+    if ((out ? `${out} ${w}` : w).length > 40) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  out = (out || words[0]?.slice(0, 40) || '').replace(/[-\s]+$/, '');
+  return /[\p{L}\p{N}]/u.test(out) && !/^(jobs|chats|notes|node_modules|con|prn|aux|nul|com\d|lpt\d)$/i.test(out) ? out : folderNow();
+}
+/** Hovering Project name shows the folder it will make, as it is typed. */
+function nameHover() {
+  const typed = $('#home-name').value.trim();
+  const folder = typed ? folderFromName(typed) : folderNow();
+  $('#home-name-field').title = `The project's name, shown in Recent projects. It also names the project's folder in your workspace, where the files staff make go: "${folder}"${typed ? '' : ' (left empty: Project and the date and time)'}. A folder of that name already there gets " 2" after it.`;
+}
+$('#home-name').addEventListener('input', nameHover);
+$('#home-name-field').addEventListener('mouseenter', nameHover);
 
 /** The name it gets when none is typed, and the staff to pick from: Name - software - PC (or Hire staff). */
 function drawHomeAsk() {
@@ -428,3 +467,13 @@ $('#home-ask').addEventListener('submit', async e => {
   }
 });
 
+// Developer notes (above Recent projects): what may be phased out, each one still opening from here. Planner is
+// "Advanced / job planner"; Jobs has no Settings line now, so this is its way in.
+$('#devnotes-planner').addEventListener('click', () => $('#project-open').click());
+$('#devnotes-jobs').addEventListener('click', () => $('#jobs-open').click());
+
+
+// Getting started? (top of Home): 1 Hire staff, 2 Install a model, 3 Start chatting, each opening where that is done.
+$('#home-start-hire').addEventListener('click', () => app.openHire?.({ page: true }));
+$('#home-start-model').addEventListener('click', () => app.openModels?.());
+$('#home-start-chat').addEventListener('click', () => $('#rail-new').click());

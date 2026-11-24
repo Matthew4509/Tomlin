@@ -5,7 +5,8 @@
 // Both sides are here as plain parts, tested in test/camhelper.test.ts with a made-up helper:
 // - helperHandle: the helper's side (started on the laptop by tools/cam-helper.ts, which also holds the Windows reader).
 // - linkHelper / callHelper: TOMLIN's side (and MachineTurn in src/machinetools.ts, one answer's use of it).
-// This file needs only src/link.ts and src/share.ts, so the laptop gets four files (docs/CAM-HELPER.md).
+// This file needs only src/link.ts and src/share.ts (and link.ts needs src/adminkey.ts), so the laptop gets five files
+// (docs/CAM-HELPER.md).
 // The helper refuses a caller that is not on the home network, a request not sealed by a PC linked to it, and any
 // tool name but its own fixed ones. Nothing here clicks, types or runs a menu item.
 import { randomBytes } from 'node:crypto';

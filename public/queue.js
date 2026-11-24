@@ -25,13 +25,13 @@
     app.refreshHome?.();
   }
 
-  // ---- Waiting for you: what came back ----
+  // ---- Urgent: what came back ----
 
-  /** A line of Home's Waiting for you from the queue: its button, and Seen to take it off. */
+  /** A line of Home's Urgent from the queue: its button, and Seen to take it off. */
   app.queueCard = (x, key) => {
     const go = el('button', { class: `btn${x.kind === 'photos' || x.kind === 'documents' ? ' primary' : ''}`, type: 'button', text: x.action, 'data-key': key });
     go.addEventListener('click', () => act(x));
-    const off = el('button', { class: 'btn quiet', type: 'button', text: 'Seen', title: 'Take this line off Waiting for you', 'data-key': `${key}:seen` });
+    const off = el('button', { class: 'btn quiet', type: 'button', text: 'Seen', title: 'Take this line off Urgent', 'data-key': `${key}:seen` });
     off.addEventListener('click', () => seen(x.ids));
     return el('article', { class: `home-item k-q-${x.kind}` },
       el('div', { class: 'home-item-text' }, el('strong', { text: x.text }), el('span', { class: 'hint', text: x.detail })),
@@ -147,7 +147,7 @@
     keep($('#home-queue-tools'), tools);
     let n = 0;
     const rows = [...open.map(x => row(x, x.state === 'waiting' ? ++n : 0)), ...done.slice(-8).reverse().map(x => row(x, 0))];
-    keep($('#home-queue'), rows.length ? rows : [el('li', { class: 'home-empty', text: 'Add pictures from the Images window, a project from Jobs, or a message when a PC is busy.' })]);
+    keep($('#home-queue'), rows.length ? rows : [el('li', { class: 'home-empty', text: "Nothing waiting. Lets go! adds a project here; so does Add to the queue in an artist's pictures, and a message sent while its PC is busy." })]);
   }
   app.drawQueue = async () => {
     try {

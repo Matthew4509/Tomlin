@@ -168,3 +168,22 @@ test('a model loaded with the linked PCs\' memory gets the roomy context counted
   assert.equal(withLendersRoomy(run, undefined, { lentBytes: 0, fitsAlone: () => false, roomy }), run, 'no lender, no change');
   assert.equal(withLendersRoomy(run, undefined, { lentBytes: 90e9, fitsAlone: () => true, roomy }), run, 'a model that fits alone is not loaded roomier on what is lent');
 });
+
+test('an f16 context cache over half the card starts as q8_0; RAM, CPU, a smaller cache and a small one stay as set', () => {
+  const run = { ctx: 131072, cache: 'f16' as const, place: 'auto' as const };
+  // The Z820's 12 GB card at 131,072: about 12 GB of f16 cache, so q8_0, with words saying why.
+  const big = rs.autoCache(run, { f16Bytes: 12 * GB, cardBytes: 12 * GB });
+  assert.equal(big.run.cache, 'q8_0');
+  assert.equal(big.run.ctx, 131072);
+  assert.match(big.why, /12\.0 GB of the card's 12\.0 GB.*q8_0 \(6\.4 GB/);
+  // 32,768 there (3 GB) stays f16; exactly half stays too.
+  assert.equal(rs.autoCache(run, { f16Bytes: 3 * GB, cardBytes: 12 * GB }).run.cache, 'f16');
+  assert.equal(rs.autoCache(run, { f16Bytes: 6 * GB, cardBytes: 12 * GB }).why, '');
+  // No card (CPU), the cache in RAM, or a cache already set smaller: left as it is.
+  assert.equal(rs.autoCache(run, { f16Bytes: 12 * GB, cardBytes: 0 }).run.cache, 'f16');
+  assert.equal(rs.autoCache({ ...run, kvRam: true }, { f16Bytes: 12 * GB, cardBytes: 12 * GB }).run.cache, 'f16');
+  assert.equal(rs.autoCache({ ...run, cache: 'q4_0' as const }, { f16Bytes: 12 * GB, cardBytes: 12 * GB }).run.cache, 'q4_0');
+  // Flash attention off only goes with f16 (src/runset.ts cleanRunWith): dropped when q8_0 is picked; on is kept.
+  assert.equal(rs.autoCache({ ...run, fa: 'off' as const }, { f16Bytes: 12 * GB, cardBytes: 12 * GB }).run.fa, undefined);
+  assert.equal(rs.autoCache({ ...run, fa: 'on' as const }, { f16Bytes: 12 * GB, cardBytes: 12 * GB }).run.fa, 'on');
+});

@@ -35,25 +35,6 @@ async function pollGit() {
   } catch { /* not answering: the 5 s status poll reloads the list when the Bridge is back */ }
   gitPolling = false;
 }
-// Recount: the button says "Counting…" from the click until the new count is in (up to half a minute on the server),
-// then a message gives the new total.
-let recounting = false;
-async function recount() {
-  if (recounting) return;
-  const before = stats && stats.tokensAt, started = Date.now();
-  recounting = true; renderPC();
-  try {
-    await api('/api/refresh-tokens', {});
-    for (let i = 0; i < 90; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      await load();
-      if (stats && !stats.tokensBusy && (stats.tokensAt !== before || stats.tokensError) && Date.now() - started > 900) break;
-    }
-    if (stats && stats.tokensError) info('Token count failed: ' + stats.tokensError, true);
-    else info('Tokens counted again: ' + fmtTok(rows.reduce((t, r) => t + r.tokens, 0)) + ' on disk, ' + fmtTok(rows.reduce((t, r) => t + r.tokensMonth, 0)) + ' this month.');
-  } catch (e) { info(e.message, true); }
-  recounting = false; renderPC();
-}
 async function act(what, r) {
   try {
     const d = await api('/api/' + what, { id: r.id });

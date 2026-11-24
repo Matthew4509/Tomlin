@@ -46,13 +46,20 @@ linked PC that needs it; nothing goes to an AI service in the cloud.
   or 4 hours) so it stops taking work. From the main PC you can update a linked PC (**Update it**, or **Fast update** for
   all of them), change its run settings, and turn it off when its owner allows that and you know its PIN. A PC whose
   owner ticked **Let linked PCs pull TOMLIN updates from here** can be pulled from.
-- **Cluster and Max mode.** **Cluster** runs one model too big for any one PC across your linked PCs, so it runs at all;
-  it is for room, not speed (see the measurements below). **Max mode**, a switch in each chat, borrows a linked PC's
-  graphics card for a model that fits one PC, and stops using it for a model once it measured slower than the PC alone.
+- **Max mode and Cluster mode.**
+  - **Max mode:** If a LLM can run on your computer, max mode is intended to use GPU of other computers that also run
+    tomlin, and are not in use. It is a switch in each chat, and it stops borrowing for a model once it measured slower
+    than your PC alone.
+  - **Cluster mode:** If an LLM is too large to run on your computer, this uses the full CPU, RAM, GPU to run massive
+    LLM's across a cluster. It is for room, not speed (see the measurements below).
+
   The split is either by **layers** (each PC holds a run of the model's layers) or by **experts** (in a mixture-of-experts
   model, the experts are spread over the PCs). Every word crosses the network, so both were nearly always slower than a PC
   that holds the whole model. On the Cluster page, **Encrypted links** can be turned off for a cluster link, which is a little faster; it
   needs a tick on both PCs and is on (encrypted) unless you change it.
+- **Tomlin on USB (still under development).** A bootable USB stick can run TOMLIN on a spare PC with no disk, so it can
+  join your network as a linked PC. To be honest: this is still under development and has not been thoroughly tested. It
+  has not yet been booted on real hardware, so it may not work yet.
 - **Network Storage.** Choose which drives on your PCs keep a copy of your models (**Main model storage**) and your
   backups (**Backup storage**).
 - **Guest passes.** **Create a guest pass** lets someone else's PC use your models for 1 day, 1 week or with no limit,

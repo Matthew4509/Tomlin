@@ -6,21 +6,23 @@
 // sharing turned off ends the loan within a second or two: the RPC server is stopped and the linked PC's answer ends
 // there (it is asked again on what is left). Plain rules and the parts that run it; tested in test/maxlend.test.ts.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
 import { connect, createServer, type Socket } from 'node:net';
 import { availableParallelism, freemem, totalmem } from 'node:os';
 import { join } from 'node:path';
+import { libDirEnv } from './libdir.ts';
 import type { Duplex } from 'node:stream';
 import type { Allow } from './carry.ts';
 import { alive } from './hardware.ts';
 import * as leftovers from './leftovers.ts';
 import { LEND_AIM_KEEP } from './maxplace.ts';
 import { cleanedTail } from './runnerexit.ts';
+import { onExit } from './exithook.ts';
 
 /** The RPC servers and presence readers running now: ended with TOMLIN (its window closed, Quit), never left lending. */
 const running = new Set<ChildProcess>();
-process.on('exit', () => {
+onExit(() => {
   for (const c of running) if (c.exitCode === null) c.kill();
 });
 function keepTrack(child: ChildProcess): void {
@@ -339,6 +341,33 @@ export function presenceOf(line: string): Presence | null {
 }
 
 /**
+ * Presence on Linux: the newest key press on any text console but tty1 (the node's own screen, which TOMLIN writes) or
+ * SSH terminal, from each device's last-read time (as `w` reads IDLE). No terminal used since the start: nobody there.
+ */
+export function linuxPresence(devs: () => string[] = linuxTerminals, atime: (f: string) => number = f => statSync(f).atimeMs, now = Date.now()): Presence {
+  let newest = 0;
+  for (const f of devs()) {
+    try {
+      newest = Math.max(newest, atime(f));
+    } catch {
+      // Gone meanwhile.
+    }
+  }
+  return { idleMs: newest ? Math.max(0, now - newest) : 24 * 3_600_000, locked: false };
+}
+
+/** The terminals a person could type at: tty2 to tty6 and every SSH terminal (/dev/pts). */
+function linuxTerminals(): string[] {
+  const out = ['/dev/tty2', '/dev/tty3', '/dev/tty4', '/dev/tty5', '/dev/tty6'];
+  try {
+    for (const n of readdirSync('/dev/pts')) if (/^\d+$/.test(n)) out.push(`/dev/pts/${n}`);
+  } catch {
+    // No /dev/pts.
+  }
+  return out;
+}
+
+/**
  * Reads presence once a second while it is wanted: one small PowerShell process, started at the first ask and ended
  * a few minutes after the last. TOMLIN_TEST_PRESENCE_FILE (tests only): read that file's "idleMs locked" line instead.
  */
@@ -359,6 +388,9 @@ export class PresenceReader {
         return null;
       }
     }
+    // Linux (a Bootable USB node): no desktop, so someone there means someone typing at a text console (Alt+F2) or
+    // over SSH; how long since then is read as `w` reads it, from the terminals' last-read times.
+    if (process.platform === 'linux') return linuxPresence();
     if (process.platform !== 'win32') return null;
     if (!this.child) this.start();
     return this.last && Date.now() - this.last.at < 5_000 ? this.last.p : null;
@@ -582,7 +614,7 @@ export class Lender {
 
   /** Starts the RPC server program on `port` (a test puts a stand-in here). */
   protected spawnRpc(program: RpcProgram, port: number, cache: boolean): ChildProcess {
-    return spawn(program.exe, rpcArgs(port, program, cache), { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, LLAMA_CACHE: this.cacheDir, ...(program.device === 'cuda' ? { CUDA_CACHE_MAXSIZE: process.env.CUDA_CACHE_MAXSIZE || String(4 * 2 ** 30) } : {}) } });
+    return spawn(program.exe, rpcArgs(port, program, cache), { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: libDirEnv(program.exe, { ...process.env, LLAMA_CACHE: this.cacheDir, ...(program.device === 'cuda' ? { CUDA_CACHE_MAXSIZE: process.env.CUDA_CACHE_MAXSIZE || String(4 * 2 ** 30) } : {}) }) });
   }
 
   /** The RPC server's port for `by` (started when it is not running). Throws in plain words when it cannot start. */
@@ -736,6 +768,7 @@ export class Lender {
     c.kill();
     for (let i = 0; i < 25 && alive(c.pid); i++) await new Promise(r => setTimeout(r, 200));
     if (alive(c.pid) && process.platform === 'win32') await new Promise(r => execFile('taskkill.exe', ['/PID', String(c.pid), '/T', '/F'], { windowsHide: true }, () => r(null)));
+    else if (alive(c.pid)) c.kill('SIGKILL');
     // The loan is over: the cache it grew is brought down to the limit now, not at the next loan.
     void tidy().catch(() => undefined);
   }

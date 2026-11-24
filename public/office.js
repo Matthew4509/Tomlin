@@ -188,6 +188,26 @@
   const SEATS = { 1: [0], 2: [-24, 24], 3: [-32, 0, 32] };
   const seatsOf = n => SEATS[Math.max(1, Math.min(3, n))];
 
+  // The PCs that already have a desk, kept in this browser: when the page opens, Home's first list holds only this PC
+  // (the linked PCs are read a moment later), so without this every linked PC was carried in and set up again at each
+  // sign-in. Only a PC never seen here before is set up; one taken away is forgotten, so linking it again sets it up.
+  const KNOWN_DESKS = 'tomlin-office-desks';
+  const knownDesks = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(KNOWN_DESKS) ?? '[]');
+      return new Set(Array.isArray(v) ? v.filter(k => typeof k === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  })();
+  const keepKnownDesks = () => {
+    try {
+      localStorage.setItem(KNOWN_DESKS, JSON.stringify([...knownDesks].slice(-200)));
+    } catch {
+      // Not kept (private window, storage off): a PC may be set up again next time, nothing worse.
+    }
+  };
+
   function placeDesks(list, animate) {
     const before = new Map(world.desks.map(d => [d.key, d]));
     // PCs that answer fill the room from the top left; a PC that is off is pushed into the far corner (bottom right),
@@ -205,9 +225,10 @@
     });
     const layout = JSON.stringify(desks.map(d => [d.key, d.seats.length, d.dead, d.x, d.y]));
     world.desks = desks;
+    const knownBefore = knownDesks.size;
     if (animate) {
-      // A PC newly linked: IT carries it in and sets it up. One removed: IT comes to take it away.
-      for (const d of desks) if (!before.has(d.key)) {
+      // A PC newly linked (never had a desk here): IT carries it in and sets it up. One removed: IT comes to take it away.
+      for (const d of desks) if (!before.has(d.key) && !knownDesks.has(d.key)) {
         world.installing.add(d.key);
         itJobs.push({ kind: 'install', key: d.key });
       }
@@ -215,8 +236,11 @@
         const ghost = { key, x: d.x, y: d.y, name: d.name };
         world.ghosts.push(ghost);
         itJobs.push({ kind: 'remove', ghost });
+        knownDesks.delete(key);
       }
     }
+    for (const d of desks) knownDesks.add(d.key);
+    if (knownDesks.size !== knownBefore || !animate) keepKnownDesks();
     if (layout !== world.layout) {
       world.layout = layout;
       background = null;
@@ -2045,7 +2069,7 @@
         el('button', { class: 'btn quiet', type: 'button', text: 'Show everyone', onclick: () => { world.selected = null; v.told = ''; } }));
       return;
     }
-    const hint = el('span', { class: 'hint', text: world.staff.length ? 'Click on a staff to see what they are up to.' : 'Nobody hired yet.' });
+    const hint = world.staff.length ? themeWords.put(el('span', { class: 'hint' }), 'office-hint', 'Click on a staff to see what they are up to.') : themeWords.put(el('span', { class: 'hint' }), 'nobody-hired', 'Nobody hired yet.');
     if (v.kind !== 'tile' || !world.staff.length) return v.strip.replaceChildren(hint);
     v.strip.replaceChildren(el('div', { class: 'office-thoughts' }, ...thoughtsParts(THOUGHTS_TILE), el('div', { class: 'office-thoughts-foot' }, chitTick() ?? '', hint, soundButton())));
   }
@@ -2077,7 +2101,9 @@
   const onFrame = (x, y) => x > FRAME.x && x < FRAME.x + FRAME.w && y > FRAME.y && y < FRAME.y + FRAME.h;
   const deskUnder = (x, y) => world.desks.find(d => x > d.x - 60 && x < d.x + 60 && y > d.y - 30 && y < d.y + 55);
   /** Whether `s` can be moved to desk d: not the one they sit at, not a PC that is off or in use by its owner. */
-  const canMove = (s, d) => !!d && d.key !== (s.pcId ?? '') && d.activity !== 'offline' && d.activity !== 'owner';
+  // Not where nothing of theirs can run (home.js deskFit, from what the page has; unknown stays allowed).
+  const noFit = (s, d) => (d ? app.deskFit?.(s, d.key) : null)?.drop === false;
+  const canMove = (s, d) => !!d && d.key !== (s.pcId ?? '') && d.activity !== 'offline' && d.activity !== 'owner' && !noFit(s, d);
 
   function hookPointer(view) {
     const cv = view.canvas;
@@ -2127,7 +2153,7 @@
         [p.x, p.y] = press.from;
         p.drag = null;
         if (canMove(p.row, d)) app.deskMove?.(p.row, d.key, d.name);
-        else if (d) say(p, d.key === (p.row.pcId ?? '') ? 'This is my desk.' : 'That PC is not free.');
+        else if (d) say(p, d.key === (p.row.pcId ?? '') ? 'This is my desk.' : d.activity !== 'offline' && d.activity !== 'owner' && noFit(p.row, d) ? `${app.deskFit(p.row, d.key).hint}.` : 'That PC is not free.');
         return;
       }
       if (press.p) {

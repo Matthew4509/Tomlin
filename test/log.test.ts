@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { askLog, cleanLogDay, keptDays, lastLines, log, logAnswer, logFile, logLine, openLog } from '../src/log.ts';
+import { askLog, cleanLogDay, flushLog, keptDays, lastLines, log, logAnswer, logFile, logLine, openLog, REPEAT_MS } from '../src/log.ts';
 
 test('a log line: time, level, where, the message on one line', () => {
   const at = new Date(2026, 9, 5, 9, 4, 7);
@@ -85,4 +85,54 @@ test('the answer read on the asking PC: an older PC that ignores day and find st
   assert.deepEqual(logAnswer(400, { error: 'that day is not kept here' }), { state: 'off', error: 'that day is not kept here' });
   assert.deepEqual(logAnswer(200, null), { state: 'off' });
   assert.deepEqual(logAnswer(500, { lines: [] }), { state: 'off' });
+});
+
+test('an entry that repeats within a minute is counted, not written each time; the count is written with the next one', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-log-'));
+  try {
+    openLog(dir);
+    for (let i = 0; i < 500; i++) log.warn('cluster', 'the same fault again');
+    log.warn('cluster', 'something else');
+    const lines = (await readFile(logFile()!, 'utf8')).trim().split('\n');
+    assert.equal(lines.length, 3, lines.join('\n'));
+    assert.match(lines[0], /WARN \[cluster\] the same fault again$/);
+    assert.match(lines[1], /INFO \[log\] The entry above came 499 more times \(not written one by one\)\.$/);
+    assert.match(lines[2], /WARN \[cluster\] something else$/);
+    assert.equal(REPEAT_MS, 60_000);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the repeat count goes out on its own once the minute is up, with nothing else written after it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-log-'));
+  try {
+    openLog(dir, new Date(), 40);
+    for (let i = 0; i < 5; i++) log.warn('cluster', 'a fault that then stops');
+    await new Promise(res => setTimeout(res, 120));
+    const lines = (await readFile(logFile()!, 'utf8')).trim().split('\n');
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.match(lines[1], /The entry above came 4 more times/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a repeat count still waiting is written when the log is flushed (the app closing) or moved', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sm-log-'));
+  const dir2 = await mkdtemp(join(tmpdir(), 'sm-log-'));
+  try {
+    openLog(dir);
+    for (let i = 0; i < 3; i++) log.warn('cluster', 'the closing fault');
+    flushLog();
+    assert.match(await readFile(logFile()!, 'utf8'), /came 2 more times/);
+    for (let i = 0; i < 3; i++) log.warn('cluster', 'the closing fault');
+    const first = logFile()!;
+    openLog(dir2);
+    // Still within the same minute, so all three are counted.
+    assert.match(await readFile(first, 'utf8'), /came 2 more times[^]*came 3 more times/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await rm(dir2, { recursive: true, force: true });
+  }
 });

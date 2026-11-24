@@ -89,8 +89,7 @@ test('with a keyboard, setup names the copy it found and offers Repair | Update 
 test('the setup window names the copy it found and offers Repair | Update | Uninstall to click; Cancel is its own button', () => {
   const older = inst.windowMenu('2.0.87', '2.0.88', 'C:\\P\\TOMLIN\\tomlin-2.0.87', 'C:\\P\\TOMLIN', 'C:\\Users\\sam\\TOMLIN');
   assert.match(older.intro, /TOMLIN 2\.0\.87 is installed in C:\\P\\TOMLIN\\tomlin-2\.0\.87\./, 'the folder and version found');
-  assert.match(older.intro, /This setup holds TOMLIN 2\.0\.88\./, 'the version it would put in');
-  assert.match(older.intro, /Cancel to change nothing/);
+  assert.equal(older.intro, 'TOMLIN 2.0.87 is installed in C:\\P\\TOMLIN\\tomlin-2.0.87.\nThis setup is a newer version, 2.0.88.\nChoose from below:', 'three lines: found, this setup, choose');
   assert.deepEqual(older.choices.map(c => c.key), ['update', 'repair', 'uninstall'], 'no Quit: Cancel is the window\'s own button');
   assert.equal(older.pick, 'update');
   assert.match(older.uninstall, /removes TOMLIN 2\.0\.87 from C:\\P\\TOMLIN/);
@@ -99,9 +98,11 @@ test('the setup window names the copy it found and offers Repair | Update | Unin
   assert.deepEqual(same.choices.map(c => c.key), ['repair', 'update', 'uninstall']);
   assert.match(same.choices[1].label, /^Reinstall/);
   assert.equal(same.pick, '', 'the same version: nothing ticked, so no default decides it');
+  assert.equal(same.intro.split('\n')[1], 'This setup is the same version, 2.0.88.');
   const newer = inst.windowMenu('2.0.90', '2.0.88', 'C:\\x', 'C:\\x', 'C:\\h');
   assert.deepEqual(newer.choices.map(c => c.key), ['repair', 'uninstall'], 'a newer copy is never replaced by an older setup');
   assert.equal(newer.pick, 'repair');
+  assert.equal(newer.intro.split('\n')[1], 'This setup is an older version, 2.0.88, so it does not replace it.');
   // The choice is passed by name (install --action ...), never left to a yes/no default.
   assert.equal(inst.actionFlag(null, '2.0.88', '2.0.88'), null, 'no --action: the questions decide, as before');
   assert.deepEqual(inst.actionFlag('update', '2.0.88', '2.0.88'), { action: 'update' });
@@ -385,7 +386,7 @@ test('the setup window: status names the copy found and the choices; the choice 
   const { s, choices } = statusOf(run(['status'], env));
   assert.equal(s.installed, version);
   assert.equal(s.found, copy, 'the folder of the copy found');
-  assert.match(s.intro, new RegExp(`installed in .*tomlin-${version.replace(/\./g, '\\.')}\\. It is the same version as this setup\\. This setup holds TOMLIN ${version.replace(/\./g, '\\.')}\\.`));
+  assert.match(s.intro, new RegExp(`installed in .*tomlin-${version.replace(/\./g, '\\.')}\\.\\|This setup is the same version, ${version.replace(/\./g, '\\.')}\\.\\|Choose from below:$`), 'one status line, the breaks as |');
   assert.deepEqual(choices, ['repair', 'update', 'uninstall']);
   assert.equal(s.pick, '');
   assert.match(s.removes, /are kept/);
@@ -521,4 +522,20 @@ test('where setup looks: Desktop, Downloads, Documents and the user folder; a te
   assert.equal(places.at(-1)?.depth, 1, 'the user folder only one level down');
   assert.deepEqual(inst.lookIn({ USERPROFILE: 'C:\\Users\\sam', TOMLIN_INSTALL_ROOT: 'C:\\t' }, null), []);
   assert.deepEqual(inst.lookIn({ TOMLIN_LOOK_IN: '' }, null), []);
+});
+
+test('an older copy that still holds models (used in place) is not removed; one with only the helper is', async () => {
+  const root = tmp();
+  for (const v of ['2.0.80', '2.0.85', '2.0.90', '2.0.97']) {
+    mkdirSync(join(root, `tomlin-${v}`, 'models', 'helpers'), { recursive: true });
+    writeFileSync(join(root, `tomlin-${v}`, 'package.json'), JSON.stringify({ name: 'tomlin', version: v }));
+    writeFileSync(join(root, `tomlin-${v}`, 'models', 'helpers', 'u2netp.onnx'), 'x');
+  }
+  mkdirSync(join(root, 'tomlin-2.0.80', 'models', 'chat'), { recursive: true });
+  writeFileSync(join(root, 'tomlin-2.0.80', 'models', 'chat', 'Qwen3-8B-Q4_K_M.gguf'), 'x');
+  assert.equal(inst.holdsModels(join(root, 'tomlin-2.0.80')), true);
+  assert.equal(inst.holdsModels(join(root, 'tomlin-2.0.85')), false, 'the helper that comes with every copy is not a model of his');
+  const gone = await inst.pruneOldCopies(root, 'tomlin-2.0.97');
+  assert.deepEqual(gone, ['tomlin-2.0.85']);
+  assert.deepEqual(readdirSync(root).sort(), ['tomlin-2.0.80', 'tomlin-2.0.90', 'tomlin-2.0.97']);
 });

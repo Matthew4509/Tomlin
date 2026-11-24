@@ -51,7 +51,8 @@ test('an answer is reading until it thinks or writes; waiting for the runner is 
 
 test('the office page script is one closed function that adds only app.office, and reads the server words', async () => {
   const js = await readFile(new URL('../public/office.js', import.meta.url), 'utf8');
-  const body = js.replace(/^(\/\/.*\n)*/, '').trim();
+  // A Windows checkout may hold the file with CRLF line ends.
+  const body = js.replace(/^(\/\/.*\r?\n)*/, '').trim();
   assert.match(body, /^'use strict';\s*\n\s*\(\(\) => \{/);
   assert.match(body, /\}\)\(\);$/);
   assert.match(js, /app\.office = /);

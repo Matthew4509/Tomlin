@@ -141,7 +141,7 @@ test('a narrow window: the buttons go under a model\'s words; "No models loaded"
 
 test('a name is made up on opening; a woman\'s name draws a woman, a man\'s name a man', async () => {
   const open = between(hire, 'app.openHire = async', 'app.hireRedraw');
-  assert.match(open, /\$\('#hs-name'\)\.value = name\.trim\(\) \|\| freeName\(\);/);
+  assert.match(open, /\$\('#hs-name'\)\.value = move \? move\.name : name\.trim\(\) \|\| freeName\(\);/);
   // The lists and genderOf, run as the page runs them.
   const names = between(hire, '  const WOMEN = [', '  app.genderOfName = genderOf;');
   const ctx: Record<string, unknown> = {};
@@ -200,7 +200,8 @@ test('Hire staff: role is two tiles with a sub-role drop-down, numbered steps, t
 test('Hire staff: a copy between two linked PCs goes straight, never through this PC, and a full disk says so', () => {
   const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
   assert.doesNotMatch(hire, /\(through this PC\)|Goes through/);
-  assert.match(hire, /return linked \? \{ from: linked, direct: true \}/);
+  // Straight between two linked PCs; a Backups only PC's copy comes through this PC (it is not introduced for copying).
+  assert.match(hire, /return linked \? \{ from: linked, direct: !linked\.backup \}/);
   assert.match(hire, /api\('\/api\/share', \{ peerCopy: \{ from: route\.from\.pc, to: target, kind: k, model: route\.from\.model \} \}\)/);
   assert.match(hire, /`insufficient space on \$\{pcName\(target\)\}/);
   assert.match(hire, /text: 'Install', title: `Install on \$\{pcName\(target\)\}`/);

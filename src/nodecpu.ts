@@ -6,6 +6,8 @@ export interface NodeCpu {
   name: string;
   cores: number;
   threads: number;
+  /** Processors in the PC (2 on a Z820), from a node that reads it (Linux); unset when not known. */
+  sockets?: number;
 }
 
 /** The processor from a hello, checked: whole numbers in a sane range and a plain name, or null. */
@@ -16,5 +18,6 @@ export function cleanCpu(v: unknown): NodeCpu | null {
   const threads = typeof x.threads === 'number' ? x.threads : NaN;
   if (!Number.isInteger(cores) || cores < 1 || cores > 1024) return null;
   const name = typeof x.name === 'string' ? x.name.replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) : '';
-  return { name, cores, threads: Number.isInteger(threads) && threads >= cores && threads <= 4096 ? threads : cores };
+  const sockets = typeof x.sockets === 'number' && Number.isInteger(x.sockets) && x.sockets >= 1 && x.sockets <= 16 ? x.sockets : undefined;
+  return { name, cores, threads: Number.isInteger(threads) && threads >= cores && threads <= 4096 ? threads : cores, ...(sockets ? { sockets } : {}) };
 }

@@ -6,6 +6,7 @@
 // refused. Built on node:crypto only. Plain functions, tested in test/link.test.ts.
 import { createCipheriv, createDecipheriv, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, scrypt, timingSafeEqual, type KeyObject } from 'node:crypto';
 import { closeSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
+import { signWith, signedBy } from './adminkey.ts';
 
 /** What a node says in whoami when it speaks this link; an older one says nothing. */
 export const LINK_VERSION = 2;
@@ -91,6 +92,58 @@ export function hostFinish(key: Buffer, ask: PairAsk, priv: KeyObject, raw: Reco
   const n = { pub: String(raw.pub ?? ''), id: String(raw.id ?? ''), name: String(raw.name ?? '') };
   if (!sameMac(raw.mac, mac(key, `node|${answerWords(ask, n)}`))) throw new Error('its answer did not prove it knows the setup code, so something on the network may be in the middle. Not linked.');
   const keys = linkKeys(shared(priv, n.pub), key, ask.pub, n.pub);
+  const token = open(toHost(keys), String(raw.box ?? ''), 'pair')?.toString() ?? '';
+  if (!/^[0-9a-f]{64}$/.test(token)) throw new Error('its answer could not be opened. Not linked.');
+  return { token, keys, ...n };
+}
+
+// ---- Linking a Bootable USB node to its admin (src/adminkey.ts) ----
+// No shared secret: the admin PC signs its request with the admin's private key (which never leaves it) and the node
+// signs its answer with its stick's own key. The node checks the admin's signature with the public key on its stick; the
+// admin checks the node's with the public key it recorded at Mint. Each side's X25519 half is inside what is signed, so
+// nothing in the middle can swap keys; the request carries a time, so a recording is no use after LINK_WINDOW_MS.
+
+export interface AdminAsk extends PairAsk {
+  /** When it was made (ISO). */
+  at: string;
+  /** The admin's signature over the request. */
+  adminSig: string;
+}
+
+const adminAskWords = (a: Pick<AdminAsk, 'pub' | 'nonce' | 'at' | 'from' | 'name'>) => `tomlin admin pair v1|${a.pub}|${a.nonce}|${a.at}|${a.from}|${a.name}`;
+const adminAnswerWords = (a: AdminAsk, n: { pub: string; id: string; name: string; stick: string }) => `${adminAskWords(a)}|${n.pub}|${n.id}|${n.name}|${n.stick}`;
+/** The link keys' salt for an admin link: no secret is needed, the signatures prove both ends. */
+const adminSalt = (adminPub: string, stick: string) => createHmac('sha256', 'tomlin admin link v1').update(`${adminPub}|${stick}`).digest();
+
+/** The admin PC's request to a stick node. Keep `priv` for reading the answer. */
+export function adminHostAsk(admin: { priv: string }, from: string, name: string, now = new Date()): { ask: AdminAsk; priv: KeyObject } {
+  const { pub, priv } = keyPair();
+  const base = { pub, nonce: b64(randomBytes(16)), at: now.toISOString(), from, name };
+  return { ask: { v: LINK_VERSION, ...base, pinGiven: false, mac: '', adminSig: signWith(admin.priv, adminAskWords(base)) }, priv };
+}
+
+/** The stick node checks the request against its admin's public key. Null: not signed by its admin, or too old. */
+export function adminNodeAnswer(adminPub: string, stick: { id: string; priv: string }, raw: Record<string, unknown>, me: { id: string; name: string }, token: string, now = Date.now()): { answer: PairAnswer & { stick: string; sig: string }; keys: Buffer } | null {
+  const ask: AdminAsk = { v: Number(raw.v), pub: String(raw.pub ?? ''), nonce: String(raw.nonce ?? ''), at: String(raw.at ?? ''), from: String(raw.from ?? ''), name: String(raw.name ?? ''), pinGiven: false, mac: '', adminSig: String(raw.adminSig ?? '') };
+  if (!signedBy(adminPub, adminAskWords(ask), ask.adminSig)) return null;
+  const at = Date.parse(ask.at);
+  if (!Number.isFinite(at) || Math.abs(now - at) > LINK_WINDOW_MS) return null;
+  const { pub, priv } = keyPair();
+  const keys = linkKeys(shared(priv, ask.pub), adminSalt(adminPub, stick.id), ask.pub, pub);
+  const base = { pub, id: me.id, name: me.name, stick: stick.id };
+  return { answer: { v: LINK_VERSION, ...base, mac: '', sig: signWith(stick.priv, adminAnswerWords(ask, base)), box: seal(toHost(keys), Buffer.from(token), 'pair') }, keys };
+}
+
+/**
+ * The admin PC checks the answer: it must come from a stick on its list (`stickPub` gives that stick's public key, or ''
+ * when it is not on the list or is marked lost), signed by that stick's own key. Gives the token and the link's keys.
+ */
+export function adminHostFinish(adminPub: string, stickPub: (id: string) => string, ask: AdminAsk, priv: KeyObject, raw: Record<string, unknown>): { token: string; keys: Buffer; id: string; name: string; stick: string } {
+  const n = { pub: String(raw.pub ?? ''), id: String(raw.id ?? ''), name: String(raw.name ?? ''), stick: String(raw.stick ?? '') };
+  const known = stickPub(n.stick);
+  if (!known) throw new Error('it is not a stick on this PC\'s list of minted sticks (or it is marked lost). Not linked.');
+  if (!signedBy(known, adminAnswerWords(ask, n), raw.sig)) throw new Error('its answer was not signed by the stick it names, so it may be a copy or something on the network in the middle. Not linked.');
+  const keys = linkKeys(shared(priv, n.pub), adminSalt(adminPub, n.stick), ask.pub, n.pub);
   const token = open(toHost(keys), String(raw.box ?? ''), 'pair')?.toString() ?? '';
   if (!/^[0-9a-f]{64}$/.test(token)) throw new Error('its answer could not be opened. Not linked.');
   return { token, keys, ...n };

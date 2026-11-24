@@ -1,6 +1,7 @@
-// Day or night colours: kept in this browser as 'day', 'night' or 'auto' (day from sunrise to sunset, night after);
-// nothing kept = follow the Windows light/dark setting. Loaded in <head>, before the page is drawn, so it never flashes
-// the other colours. The colours are in style.css (:root, and [data-theme="night"]).
+// Day or night colours: kept in this browser as 'day', 'night' or 'auto' (day from sunrise to sunset, night after), or
+// 'silly' (hot pink, picked in Settings, Theme); nothing kept = follow the Windows light/dark setting. Loaded in <head>,
+// before the page is drawn, so it never flashes the other colours. The colours are in style.css (:root,
+// [data-theme="night"] and [data-theme="silly"]).
 // Answers [data-colours-set] (the switch at the top: Day, Night, Auto) and [data-colours-pick] (radios in Settings:
 // Follow Windows '', day, night, auto); a picker drawn later calls window.tomlinColours.draw() to show the one picked.
 // Auto reckons the sun from this PC's time zone (its main city, or for a zone not listed, its offset and region), so it
@@ -88,11 +89,11 @@
 
   // ---- The choice, and the colours it means now ----
 
-  /** 'day', 'night', 'auto', or '' (follow Windows). Private windows and blocked storage read as ''. */
+  /** 'day', 'night', 'auto', 'silly' (hot pink, Settings only), or '' (follow Windows). Private windows and blocked storage read as ''. */
   function picked() {
     try {
       const v = localStorage.getItem(KEY);
-      return v === 'day' || v === 'night' || v === 'auto' ? v : '';
+      return v === 'day' || v === 'night' || v === 'auto' || v === 'silly' ? v : '';
     } catch {
       return '';
     }
@@ -111,6 +112,8 @@
       if (root.dataset.theme !== want) root.dataset.theme = want;
     } else delete root.dataset.theme;
     draw();
+    // Words that follow the theme (themewords.js) are swapped now.
+    window.dispatchEvent(new Event('tomlin-colours'));
   }
 
   function pick(v) {
@@ -121,7 +124,7 @@
     apply();
   }
 
-  const WORD = { day: 'Day', night: 'Night', auto: 'Auto' };
+  const WORD = { day: 'Day', night: 'Night', auto: 'Auto', silly: 'Vibe code' };
   function draw() {
     const v = picked();
     const now = shown();

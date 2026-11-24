@@ -2,13 +2,16 @@
 // window). Left: the profile (their look, name, role, and what they will run on). Right: the PC first, then the
 // models on that PC as cards with the memory each needs, then Hire staff. There is no Level to pick (2.0.75): it
 // follows the size of the model they use (src/staff.ts levelOfHire).
+// The same window moves a hire (Edit staff, "Move to another PC, see more models"; app.openMove): their name, look and
+// role are fixed, the PC and model are picked as when hiring, a model elsewhere is installed first, and the button
+// moves them.
 // Everything here sits in one block: page scripts share one global scope, so no name of this file can clash.
 'use strict';
 {
   const dlg = $('#hire-dlg');
   // fromMenu: opened from the Staff menu's Create, so Cancel and Close go back to that menu.
   // turn: each opening counts one, so a slow answer for an earlier one is not drawn over a later one.
-  const hs = { role: '', pc: '', model: '', look: null, lookPicked: false, q: '', net: null, moving: new Map(), fromMenu: false, turn: 0, fresh: false };
+  const hs = { role: '', pc: '', model: '', look: null, lookPicked: false, q: '', net: null, moving: new Map(), fromMenu: false, turn: 0, fresh: false, move: null };
 
   /** Names of four or five letters for Random and the name filled in on opening: a woman's, then a man's. */
   const WOMEN = ['Susan', 'June', 'Jane', 'Linda', 'Alice', 'Grace', 'Helen', 'Laura', 'Megan', 'Nancy', 'Ruth', 'Sarah', 'Emma', 'Clara', 'Ella', 'Julia', 'Maria', 'Nora', 'Olive', 'Paula', 'Rose', 'Tessa', 'Vera', 'Wendy', 'Anna', 'Beth', 'Carol', 'Diana', 'Edith', 'Fiona', 'Gwen', 'Holly', 'Irene', 'Joan', 'Kate', 'Lucy', 'Mabel', 'Molly', 'Nell', 'Polly', 'Rita', 'Sally', 'Tina'];
@@ -127,7 +130,8 @@
     const m = onPc(hs.pc).find(c => c.id === hs.model);
     $('#hs-sum-pc').textContent = pcName(hs.pc);
     $('#hs-sum-model').textContent = m ? m.label : kind() === 'image' ? 'None yet: pick one after hiring' : hs.pc ? 'None picked' : 'None yet: the model loaded here';
-    $('#hs-go').disabled = !!hs.pc && !m;
+    // Moving: a model on the PC picked, and not the one they have now.
+    $('#hs-go').disabled = hs.move ? !m || m.id === hs.move.model : !!hs.pc && !m;
   }
 
   // ---- Assign a PC (right, top) ----
@@ -187,7 +191,8 @@
       : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => { dlg.close(); app.openModels(kind() === 'image' ? 'image' : 'chat'); } }), '.')];
     // The model kept when it is still offered; else the one loaded now on this PC; else the first on the list.
     if (!list.some(c => c.id === hs.model)) {
-      const now = !hs.pc ? (kind() === 'image' ? d().connectedImage : d().connected) : null;
+      // Moving: their own model first, when it is on the PC picked.
+      const now = hs.move?.model && list.some(c => c.id === hs.move.model) ? hs.move.model : !hs.pc ? (kind() === 'image' ? d().connectedImage : d().connected) : null;
       hs.model = list.find(c => c.id === now)?.id ?? list[0]?.id ?? '';
     }
     keepCards($('#hs-models'), list.length ? list.map(modelCard) : empty);
@@ -222,7 +227,7 @@
       all.set(key, e);
     };
     for (const m of hs.net?.mine ?? []) if (m.kind === k) add(keyOf(k, m.id), m.name, m.bytes, { pc: '', model: m.id, copy: true, why: '' });
-    for (const r of hs.net?.rows ?? []) if (r.kind === k) for (const o of r.on) add(r.key, r.name, r.bytes, { pc: o.pc, name: o.pcName, model: o.model, copy: o.copy, why: o.why });
+    for (const r of hs.net?.rows ?? []) if (r.kind === k) for (const o of r.on) add(r.key, r.name, r.bytes, { pc: o.pc, name: o.pcName, model: o.model, copy: o.copy, why: o.why, backup: o.backup === true });
     return [...all.values()];
   }
 
@@ -239,7 +244,8 @@
     if (send) return { why: send };
     if (room) return { why: room };
     if (here) return { from: here };
-    return linked ? { from: linked, direct: true } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
+    // A Backups only PC's copy comes to this PC first, then goes on (it is not introduced to the other PCs for copying).
+    return linked ? { from: linked, direct: !linked.backup } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
   }
   /** "Insufficient space" when the PC's models drive (as it last said) has not room for the file and the spare kept free. */
   function roomWhy(e, target) {
@@ -462,17 +468,23 @@
    * name is made up. Shown at once, never waiting on a linked PC: blurred stand-ins first (before any staff list has
    * come), then the PCs as they said last, then as they answer now (one that is off takes 3 s to give up on).
    */
-  app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false } = {}) => {
+  app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false, move = null } = {}) => {
     const turn = ++hs.turn;
     hs.role = role;
     hs.pc = pc === 'here' ? '' : pc;
     hs.model = '';
-    hs.lookPicked = false;
-    hs.look = null;
+    // Moving a hire: the same window, their own name, look and role, and Move for Hire.
+    hs.move = move;
+    dlg.classList.toggle('hs-moving', !!move);
+    $('#hs-name').readOnly = !!move;
+    $('#hs-title').textContent = move ? `Move ${move.first} to another PC` : 'Hire staff';
+    $('#hs-go').textContent = move ? `Move ${move.first} here` : 'Hire staff';
+    hs.lookPicked = !!move?.look;
+    hs.look = move?.look ?? null;
     hs.q = '';
     hs.net = null;
     hs.fromMenu = fromMenu;
-    $('#hs-name').value = name.trim() || freeName();
+    $('#hs-name').value = move ? move.name : name.trim() || freeName();
     $('#hs-search').value = '';
     fault('');
     closeLook();
@@ -514,6 +526,8 @@
       drawAll();
     }
   };
+  /** Edit staff's "Move to another PC, see more models": this window for that hire, on the PC they work on now. */
+  app.openMove = (m, pc = '') => app.openHire({ role: m.role, pc: pc || 'here', move: { id: m.id, name: m.name, first: m.name.split(/s+/)[0], look: m.look ?? null, model: m.model ?? null } });
   /** A model hidden, shown, deleted or got: the cards are read again while the window is open. */
   app.hireRedraw = async () => {
     if (!dlg.open) return;
@@ -569,9 +583,15 @@
     const go = $('#hs-go');
     const goText = go.textContent;
     go.disabled = true;
-    go.textContent = 'Hiring…';
+    go.textContent = hs.move ? 'Moving…' : 'Hiring…';
     fault('');
     try {
+      if (hs.move) {
+        team.data = await api('/api/staff', { action: 'change', id: hs.move.id, model: hs.model });
+        dlg.close();
+        await app.afterMove?.(hs.move.id);
+        return;
+      }
       team.data = await api('/api/staff', { action: 'hire', name: $('#hs-name').value, role: hs.role, model: hs.model || undefined, look: hs.look ?? undefined });
       dlg.close();
       // The rest of the page catches up (left panel, Home, chats, faces); a hire with no model opens their profile.

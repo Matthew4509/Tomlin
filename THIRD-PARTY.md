@@ -10,6 +10,7 @@ TOMLIN's own files are under the PolyForm Noncommercial licence 1.0.0 (LICENSE).
 | llama.cpp (llama-server, CPU build) | b11284 | MIT | runtime/llama-cpu |
 | stable-diffusion.cpp (sd-server, CPU build) | master-929 (3f8527a) | MIT | runtime/sd-cpu |
 | LLVM OpenMP runtime (inside the llama.cpp build) | | Apache-2.0 with LLVM exception | runtime/llama-cpu/LICENSE-LLVM-OpenMP |
+| distributed-llama (dllama worker, two CPU builds: AVX2 and AVX), only for the engine test of a linked PC | v0.17.1, built with Clang | MIT | tools/dllama (tools/dllama/LICENSE.txt) |
 | sharp | 0.35.5 | Apache-2.0 | node_modules/sharp |
 | libvips and the libraries inside @img/sharp-win32-x64 | 8.18.7 | LGPL-3.0-or-later (libvips; loaded as a separate DLL, not changed), others as listed in its versions.json | node_modules/@img/sharp-win32-x64 |
 | ONNX Runtime (onnxruntime-node, Windows x64 only) | 1.30.0 | MIT | node_modules/onnxruntime-node |

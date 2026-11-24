@@ -9,8 +9,10 @@ import { forget, remember } from './runnerkeys.ts';
 import { startFact } from './runnerpush.ts';
 import type { Device } from './runtimes.ts';
 import * as leftovers from './leftovers.ts';
+import { libDirEnv } from './libdir.ts';
 import { dllLine, dllNotFound } from './vcrt.ts';
 import { watchRunner } from './runnerexit.ts';
+import { onExit } from './exithook.ts';
 import { timeUpLine } from './loadlimit.ts';
 import type { LoadTrack, LoadView } from './loadeta.ts';
 
@@ -151,11 +153,23 @@ export class Worker {
   /** Lines from the runner, for listeners (image progress reads them). */
   onLine: ((line: string) => void) | null = null;
   onExit: (() => void) | null = null;
+  /** Takes this worker's step off the exit list (src/exithook.ts); set only while a runner is held, so a pane with none adds nothing. */
+  private dropExit: (() => void) | null = null;
 
   constructor(pane: 'chat' | 'image') {
     this.pane = pane;
     this.view = Worker.empty('auto', 0);
-    process.on('exit', () => this.killNow());
+  }
+
+  /** A runner is held: it is ended with TOMLIN. */
+  private holdExit(): void {
+    this.dropExit ??= onExit(() => this.killNow());
+  }
+
+  /** No runner is held now: the exit step goes. */
+  private letExit(): void {
+    this.dropExit?.();
+    this.dropExit = null;
   }
 
   static empty(asked: Asked, threads: number): WorkerView {
@@ -190,7 +204,7 @@ export class Worker {
     this.errors = [];
     this.facts = [];
     this.timedOut = false;
-    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: spec.env ? { ...(runnerEnv(spec.device) ?? process.env), ...spec.env } : runnerEnv(spec.device) });
+    const child = spawn(spec.exe, spec.args(port, key), { windowsHide: true, env: libDirEnv(spec.exe, spec.env ? { ...(runnerEnv(spec.device) ?? process.env), ...spec.env } : runnerEnv(spec.device)) });
     const started = Date.now();
     // Ended without Disconnect (or a load that ran out of time): its exit and last error lines go in the log.
     const exitLog = watchRunner(child, spec.exe, () => this.child !== child, { feed: true });
@@ -198,6 +212,7 @@ export class Worker {
     if (start) lastStart = start;
     leftovers.started(child.pid, spec.exe);
     this.child = child;
+    this.holdExit();
     this.port = port;
     const base = `http://127.0.0.1:${port}`;
     remember(base, key);
@@ -243,6 +258,7 @@ export class Worker {
       if (this.child === child) {
         this.child = null;
         this.port = null;
+        this.letExit();
         this.onExit?.();
       }
     });
@@ -280,6 +296,7 @@ export class Worker {
     if (this.port) forget(`http://127.0.0.1:${this.port}`);
     this.child = null;
     this.port = null;
+    this.letExit();
     if (!child?.pid) return true;
     const pid = child.pid;
     const exited = new Promise<void>(r => (child.exitCode !== null || child.signalCode !== null ? r() : child.once('exit', () => r())));
@@ -288,7 +305,7 @@ export class Worker {
     if (alive(pid) && process.platform === 'win32') {
       // It did not end when asked: force it, with anything it started.
       await new Promise(r => execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => r(null)));
-    }
+    } else if (alive(pid)) child.kill('SIGKILL');
     for (let i = 0; i < 25 && alive(pid); i++) await sleep(200);
     return !alive(pid);
   }

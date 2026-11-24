@@ -720,12 +720,12 @@ stopBtn.addEventListener('click', () => {
   }
   api('/api/chat/stop', { chatId: id }).catch(() => undefined);
 });
-// Empty this chat (in its … window): asked on the page first, and a refusal is said, not hidden.
+// Clear this chat (in its … window): asked on the page first, and a refusal is said, not hidden.
 const clearBtn = $('#chat-clear');
 clearBtn.addEventListener('click', () => {
   const row = $('#chat-clear-actions');
   const back = () => row.replaceChildren(clearBtn);
-  const yes = el('button', { class: 'btn danger', type: 'button', text: 'Empty it for good' });
+  const yes = el('button', { class: 'btn danger', type: 'button', text: 'Clear it for good' });
   yes.addEventListener('click', async () => {
     yes.disabled = true;
     try {
@@ -739,11 +739,11 @@ clearBtn.addEventListener('click', () => {
       $('#chat-menu').close();
     } catch (err) {
       back();
-      $('#chat-menu-fault').textContent = 'Nothing was emptied: ' + err.message;
+      $('#chat-menu-fault').textContent = 'Nothing was cleared: ' + err.message;
       $('#chat-menu-fault').hidden = false;
     }
   });
-  row.replaceChildren(el('span', { class: 'hint', text: 'Empty this chat for good?' }), yes, el('button', { class: 'btn quiet', type: 'button', text: 'Keep the messages', onclick: back }));
+  row.replaceChildren(el('span', { class: 'hint', text: 'Clear this chat for good?' }), yes, el('button', { class: 'btn quiet', type: 'button', text: 'Keep the messages', onclick: back }));
   yes.focus();
 });
 // The window opens with the plain button, whatever was left showing.

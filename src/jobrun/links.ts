@@ -117,11 +117,16 @@ function learnMac(r: Remote): void {
 }
 
 /** A PC that does not answer is sent the wake-on-LAN packet (when its address is known) and waited for. Throws plain words if it does not come back. */
-async function wakeUp(r: Remote, stage?: (text: string) => void): Promise<boolean> {
+async function wakeUp(r: Remote, stage?: (text: string) => void, signal?: AbortSignal): Promise<boolean> {
   const mac = wake.cleanMac(d.store.peek()?.remotes.find(x => x.id === r.id)?.mac);
   if (!mac) return false;
   stage?.(`"${r.name}" is not answering. Waking it (wake-on-LAN) and waiting up to ${wake.WAKE_WAIT_MS / 1000} seconds…`);
-  const back = await wake.wakeNode({ mac, send: wake.sendMagic, reached: () => hello(r, 3000).then(() => true), waitMs: wake.WAKE_WAIT_MS, stepMs: 5000, sleep: async ms => void (await sleep(ms)), now: Date.now });
+  const back = await wake.wakeNode({ mac, send: wake.sendMagic, reached: () => hello(r, 3000).then(() => true), waitMs: wake.WAKE_WAIT_MS, stepMs: 5000, sleep: async ms => {
+    // Stop is heard between the tries, not only after the whole wait.
+    await sleep(ms);
+    if (signal?.aborted) throw new Error('Stopped.');
+  }, now: Date.now });
+  if (signal?.aborted) throw new Error('Stopped.');
   if (!back) throw Object.assign(new Error(wake.wakeFailed(r.name, wake.WAKE_WAIT_MS / 1000, true)), { unreached: true });
   return true;
 }
@@ -192,6 +197,7 @@ export async function hello(r: Remote, ms = 4000): Promise<Hello> {
     version: String(data.version ?? ''),
     // An older TOMLIN sends no build id: it is then judged by its version alone (src/update.ts standing).
     build: update.isBuild(data.build) ? data.build : '',
+    ...(data.usb === true ? { usb: true } : {}),
     // Its card as TOMLIN would use it: an older TOMLIN named the first card Windows listed (src/pccards.ts).
     memory: data.memory && typeof data.memory === 'object' ? cardFix(data.memory, runnerpush.cleanRunner(data.runner)) : null,
     can: Array.isArray(data.can) ? data.can.map(String) : [],
@@ -352,10 +358,11 @@ export const lostOf = (e: unknown): Lost['lost'] | null => (e as Partial<Lost>)?
 
 export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel, stage?: (text: string) => void): Brain {
   /** One ask, waiting while the model there answers someone else (up to 10 minutes, or Stop). */
+  // Woken once for each answer (set back at its start): each reconnect try does not wait for another wake-on-LAN round.
+  let woken = false;
   const once = async (body: Record<string, unknown>, signal: AbortSignal): Promise<Response> => {
     const until = Date.now() + 10 * 60_000;
     let told = false;
-    let woken = false;
     const began = Date.now();
     for (;;) {
       let res: Response;
@@ -367,7 +374,7 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
         // Asleep, perhaps: woken by the wake-on-LAN packet once, then asked again.
         if (!woken && notAnswering(e)) {
           woken = true;
-          if (await wakeUp(r, stage)) continue;
+          if (await wakeUp(r, stage, signal)) continue;
         }
         // Nothing came back for a minute or more before the link closed (undici gives up after 5 minutes with "fetch failed"): said as silence.
         if (notAnswering(e) && Date.now() - began >= wake.SILENT_WARN_MS) throw Object.assign(new Error(`${wake.silentWords(r.name, Date.now() - began)} The link then closed. Press Send again once it is awake.`), { unreached: true });
@@ -409,6 +416,8 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
     const watch = setInterval(() => quiet() >= wake.SILENT_WARN_MS && stage?.(wake.silentWords(r.name, quiet())), 15_000);
     const cutBy = (e: unknown) => (quiet() >= wake.SILENT_WARN_MS && nodestaff.cutWords(r.name, (e as Error).message) !== (e as Error).message ? new Error(`${wake.silentWords(r.name, quiet())} The link then closed. Press Send again once it is awake.`) : e);
     try {
+      // A new answer may wake that PC again (once for the answer, its reconnect tries included).
+      woken = false;
       let res = await once(body, signal);
       if (!res.ok) throw new Error(`"${r.name}": ${String(((await res.json().catch(() => ({}))) as Record<string, unknown>).error ?? `answered ${res.status}`)}${res.status === 401 ? '. Link it again under Network, Find other PCs.' : ''}`);
       let lostAt = 0;
@@ -759,7 +768,7 @@ export async function remoteStatus(o: { known?: boolean } = {}) {
       const behind = update.updateWhy({ name: r.name, ok: true, version: h.version, build: h.build, away: h.away, can: h.can, restarts: h.restarts, allowUpdate: h.allow?.update === true }, d.version, d.build());
       // build: the 7 characters shown beside its version ('' from an older TOMLIN); update.other: the same version with
       // different files, and update.build this PC's, for "Runs 2.0.48 but different files from this PC (build x there, y here)".
-      return { id: r.id, name: r.name, url: r.url, ok: true, slow, role: r.role, expires: h.guest?.expires ?? r.expires ?? null, caps: h.guest?.caps ?? null, line: h.line ?? null, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, drives: h.drives, modelsDrive: h.modelsDrive, cpu: h.cpu ?? null, runner: h.runner, held: h.held, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, plainLink: r.plainLink === true, plainOk: h.plainLinks === true, plainNow: plainNow.has(r.id), inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
+      return { id: r.id, name: r.name, url: r.url, ok: true, slow, role: r.role, expires: h.guest?.expires ?? r.expires ?? null, caps: h.guest?.caps ?? null, line: h.line ?? null, model: h.model, ctx: h.ctx, version: h.version, build: update.shortBuild(h.build), memory: h.memory, usb: h.usb === true, can: h.can, image: h.image, away: h.away, models: h.models, allow: h.allow, disk: h.disk, drives: h.drives, modelsDrive: h.modelsDrive, cpu: h.cpu ?? null, runner: h.runner, held: h.held, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, plainLink: r.plainLink === true, plainOk: h.plainLinks === true, plainNow: plainNow.has(r.id), inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), update: behind === null ? null : { why: behind, mine: d.version, build: update.shortBuild(d.build()), other: update.standing(h, d.version, d.build()) === 'other' }, pull: pullOf(h, r.name) };
     } catch (e) {
       return { id: r.id, name: r.name, url: r.url, ok: false, role: r.role, expires: r.expires ?? null, passEnd: r.passEnd ?? null, canAsk: r.passEnd?.canAsk === true && !r.askOut, ask: r.askOut ? { state: 'waiting', at: r.askOut.at, reason: '', held: true } : r.passEnd?.ask ?? null, backupsOnly: r.backupsOnly === true, noBorrow: r.noBorrow === true, plainLink: r.plainLink === true, inCluster: isMember(d.store.peek()?.cluster, r.id), heldByCluster: clusterHeld(r.id), seenAt: seen.get(r.id)?.at ?? null, error: (e as Error).message, relink: relink(e), answered: (e as { answered?: boolean }).answered === true, asking: (e as { asking?: boolean }).asking === true };
     }

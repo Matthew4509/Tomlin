@@ -188,12 +188,27 @@ export async function namedCommands(root: string, extra: string[] = []): Promise
 export interface Ran { code: number | null; out: string; timedOut: boolean }
 export type Exec = (exe: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; maxChars: number }) => Promise<Ran>;
 
+/**
+ * npm's arguments as run: --ignore-scripts first, so `npm run test` runs the test script the card shows and not the
+ * pretest and posttest scripts beside it, which the card does not show (a saved package.json could hide anything there).
+ */
+export const npmArgs = (args: string[]): string[] => ['--ignore-scripts', ...args];
+
+/** The scripts of a folder's package.json as text ('' when there is none), to tell whether they changed during an answer. */
+export async function scriptsOf(root: string): Promise<string> {
+  try {
+    return JSON.stringify((JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { scripts?: unknown }).scripts ?? null);
+  } catch {
+    return '';
+  }
+}
+
 /** Runs a program without a shell (src/checks.ts run: the time limit ends the whole tree with taskkill /T). npm goes through Node. */
 export const realExec: Exec = (exe, args, o) => {
   if (exe === 'npm' || exe === 'npx') {
     const cli = npmCli();
     if (!cli) return Promise.resolve({ code: -1, out: 'npm was not found beside Node on this PC.', timedOut: false });
-    return runProgram(process.execPath, [exe === 'npx' ? cli.replace(/npm-cli\.js$/, 'npx-cli.js') : cli, ...args], { ...o, shell: false });
+    return runProgram(process.execPath, [exe === 'npx' ? cli.replace(/npm-cli\.js$/, 'npx-cli.js') : cli, ...(exe === 'npm' ? npmArgs(args) : args)], { ...o, shell: false });
   }
   return runProgram(exe === 'node' ? process.execPath : exe, args, { ...o, shell: false });
 };
@@ -210,6 +225,11 @@ export interface CodeTurnOpts {
   extra?: string[];
   /** Puts the Ask each time card for a run: true only for Once. */
   confirm?: (what: string, extra?: CardExtra) => Promise<boolean>;
+  /**
+   * Why a run must be asked on a card even at Allowed ('' when it need not): this answer read text that looked like
+   * orders, or saved files in the folder that the command may run.
+   */
+  mustAsk?: () => string;
   exec?: Exec;
   log?: (e: CodeLog) => void;
   timeoutMs?: number;
@@ -223,9 +243,12 @@ export class CodeTurn {
   readonly uses: CodeUse[] = [];
   private running = false;
   private readonly o: CodeTurnOpts;
+  /** The package.json scripts as they were when this answer began. */
+  private readonly before: Promise<string>;
 
   constructor(o: CodeTurnOpts) {
     this.o = { ...o, perCall: Math.max(500, o.perCall) };
+    this.before = scriptsOf(o.root);
   }
 
   get defs(): ToolDef[] {
@@ -275,9 +298,12 @@ export class CodeTurn {
       const list = await namedCommands(this.o.root, this.o.extra);
       const cmd = list.find(c => c.name === asked);
       if (!cmd) return done('run_command', false, asked.slice(0, 60), 'no such name', `Not run: there is no command named "${asked.slice(0, 40)}" here. ${list.length ? `The names are: ${list.map(c => c.name).join(', ')}.` : 'This folder has no named commands.'} You cannot write a command line.`);
-      if (this.o.run === 'each') {
+      // Allowed runs with no card only while nothing in this answer could have changed what it runs.
+      const why = [this.o.mustAsk?.() ?? '', (await scriptsOf(this.o.root)) !== (await this.before) ? 'the scripts in package.json changed during this answer' : ''].filter(Boolean).join('; ');
+      if (this.o.run === 'each' || why) {
         const t = now();
-        const yes = this.o.confirm ? await this.o.confirm(`run "${cmd.name}" in ${basename(this.o.root)}`, { detail: cmd.shown }).catch(() => false) : false;
+        const detail = why ? `${cmd.shown}\n\nAsked${this.o.run === 'allowed' ? ' although Run is Allowed' : ''}: ${why}.` : cmd.shown;
+        const yes = this.o.confirm ? await this.o.confirm(`run "${cmd.name}" in ${basename(this.o.root)}`, { detail }).catch(() => false) : false;
         waited = now() - t;
         if (!yes) return done('run_command', false, cmd.name, 'not allowed', deniedWords('run'));
       }

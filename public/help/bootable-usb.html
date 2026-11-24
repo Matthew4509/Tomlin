@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bootable USB - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="bootable-usb">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-network">Your network</a></li><li aria-current="page">Bootable USB</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Bootable USB</h1>
+<p class="lead">Run TOMLIN on a diskless node: a USB stick that starts any PC as a linked node.</p>
+<p>Settings, <b>Bootable USB</b> makes a stick that starts a PC into TOMLIN with no Windows and nothing written to its own disk. The PC is then an ordinary linked PC: chats run on it, guest passes can be made for it, and it can be part of a cluster. Take the stick out and switch the PC off, and it is as it was.</p>
+<h2>The admin key</h2>
+<p>The page makes this PC's <b>admin key</b> once. It never leaves this PC: it is not shown, not written to any stick, and not in a restore point sent to another PC. Mint gives each stick an identity of its own instead, so no two sticks are the same.</p>
+<ul>
+<li>A PC started from one of your sticks links only to this PC: it checks that this PC signed the request with the admin key. Anyone else holding the stick, or a copy of it, cannot link to it.</li>
+<li>This PC links only to the sticks on its own list, each proven by its own identity, with no setup code and no PIN.</li>
+<li>One admin per stick. Minting a stick again on another admin PC makes it that PC's, and the old admin's link to it ends.</li>
+</ul>
+<h2>Sticks minted here</h2>
+<p>The page lists every stick minted on this PC: its name and id, when it was minted, the PC started from it, and <b>Last seen</b>, the last time this PC heard from that PC (linked, or found by a scan). If a stick goes missing, press <b>Mark lost</b>: this PC removes its link and never links it again, so a copy of it reaches nothing. <b>Found</b> undoes it.</p>
+<p>If this PC is lost or replaced, press <b>Make a new admin key</b> on the new admin PC and mint every stick again there.</p>
+<h2>The four steps</h2>
+<ol>
+<li><b>Download Rufus</b> (it's free) from rufus.ie. Rufus is needed to image the usb drive.</li>
+<li><b>Download the Linux ISO</b>: the page downloads Debian 13's live image with no desktop into your Downloads folder, and checks it against its SHA-256. <b>Get the parts</b> downloads what Mint adds: Node.js and llama.cpp for Linux (the same build as this PC's runners, so a cluster's parts match) and the picture tools' Linux part. Tick the CUDA build only for NVIDIA RTX 20 series cards and newer.</li>
+<li><b>Use Rufus to image the USB drive</b>: the stick, the ISO, a persistent partition of about a third of the stick, then START and "Write in ISO Image mode".</li>
+<li><b>Select the stick and Mint</b>: pick the stick on the page, name it, and press <b>Mint</b>.</li>
+</ol>
+<h2>Starting a PC from the stick</h2>
+<p>Put the stick in, with a network cable, and pick it in the PC's boot menu (F9, F12 or Esc on most PCs). <b>TOMLIN node</b> starts by itself after 5 seconds. The first start takes a few minutes. The screen then shows the PC's address and its admin.</p>
+<p>With an NVIDIA card, start <b>TOMLIN node (install NVIDIA driver once, needs a network)</b> once, with Secure Boot off in the PC's firmware. Without it, the card is not used and the PC lends its processor and memory. AMD and Intel graphics use Vulkan with no driver to install.</p>
+<h2>Adding it</h2>
+<p>On this PC: Network, <b>Add another PC</b>, <b>Find PCs on my network</b>. A PC started from a stick minted here says "Made with your admin key": press <b>Add</b>, or <b>Add all</b> for several. It then shows under Linked PCs like any other.</p>
+<h2>What it allows at first</h2>
+<p>A stick PC starts with node mode on and these ticks: take models sent to it, be tested and have its run settings changed, be part of a cluster, and be turned off from here. <b>Allow unencrypted cluster links</b> is off unless ticked at Mint. Change them later under Network, the PC, Sharing permissions: a stick PC has no app lock, so its admin's link stands for its PIN.</p>
+<h2>Best settings per kind of hardware</h2>
+<p>At the foot of the page, <b>Read</b> lists every linked PC by its kind: the same processor, memory and cards. For each model, the fastest speed found on that kind is kept with its run settings, and each PC's own speed is shown beside it. A twin under 85% of the best is marked: it usually has bad RAM, a hot card or the wrong driver. <b>Use on its twins</b> puts those settings on every other PC of the kind.</p>
+<h2>Ports and the firewall</h2>
+<p>A stick PC listens on its link port (8741 unless changed). Its start script lets that port, and a cluster's ports, answer the home network only; TOMLIN also refuses any address outside it. Nothing needs opening on this PC: it calls the stick PC, not the other way round.</p>
+<h2>Updates</h2>
+<p>A stick PC runs the TOMLIN on its stick, so it takes no update sent from here. To update it, press <b>Mint</b> again on the same stick and start the PC from it again: its settings, links and models are kept on the stick's persistent part.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="adding-pc.html" rel="prev"><span>&larr; Previous</span><b>Adding a PC</b></a><a class="next" href="linked-pcs.html" rel="next"><span>Next &rarr;</span><b>Linked PCs</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

@@ -33,6 +33,8 @@ import { chatNeed, memOfReport, moveWontFit, ramFit } from '../calc.ts';
 /** The roster for the page: each hire with every installed chat model laid against their level (suggestion, never a limit). */
 async function staffView(o: { known?: boolean } = {}) {
   const models = chatList();
+  // Read once: each read checks every picture model's files on disk (once per artist, 99 staff took 0.7 s).
+  const pictures = images.list();
   const done = staff.auditions();
   const s = await store.settings();
   // Each paired PC as a brain (asked now, a few seconds at most; `known`: as each said last, at once, for Hire staff's
@@ -90,7 +92,7 @@ async function staffView(o: { known?: boolean } = {}) {
     // For Hire staff (public/hire.js): every model a new hire can start on, with the short name the name box offers (src/nicknames.ts).
     hireChoices: {
       chat: [...models.filter(x => onShow(x.id, twins)).map(x => ({ id: x.id, name: marked(shortName(x.name) || x.name, x), nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, ramFit: ramFit(Math.round(chatNeed(x.bytes)), here), loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
-      image: [...images.list().filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
+      image: [...pictures.filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
     },
     connectedAll: runners.filter(p => p.view.state === 'connected').map(p => p.view.model),
     connectedImage: images.pane.view.state === 'connected' ? images.pane.view.model : null,
@@ -101,7 +103,7 @@ async function staffView(o: { known?: boolean } = {}) {
         use: hireModelOf(m),
         pcBrains: pcBrains(true),
         styles: brains.STYLES.map(st => ({ id: st, name: brains.STYLE_NAME[st] })),
-        models: images.list().map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, installed: x.installed, hidden: hidden.has(x.id), unit: 'GB', ...matchImageModel(m, x.bytes), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
+        models: pictures.map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, installed: x.installed, hidden: hidden.has(x.id), unit: 'GB', ...matchImageModel(m, x.bytes), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
           .sort((a, b) => Number(b.installed) - Number(a.installed) || b.rank - a.rank || a.bytes - b.bytes),
       }
       : {
@@ -296,6 +298,24 @@ function keepTest(key: string, name: string, where: string, s: { write: number; 
 const seenWorking = new Map<string, number>();
 const WORKING: ReadonlySet<string> = new Set(['arriving', 'waiting', 'researching', 'thinking', 'typing', 'drawing', 'working']);
 
+/**
+ * Whether any chat has had a real answer from a model (not failed, refused or still waiting), for Home's Getting
+ * started: it goes once there is a hire, a model and one such answer. Looked for newest chat first, at most 20 files
+ * a call; a chat is looked at again when its count of lines changes; once found it stays true.
+ */
+let answered = false;
+const lookedAt = new Set<string>();
+async function answeredOnce(): Promise<boolean> {
+  if (answered) return true;
+  const list = (await chats.list()).filter(c => c.messages >= 2 && !lookedAt.has(`${c.id}:${c.messages}`)).sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 20);
+  for (const c of list) {
+    lookedAt.add(`${c.id}:${c.messages}`);
+    const lines = await chats.lines(c.id).catch(() => []);
+    if (lines.some(l => l.role === 'assistant' && !l.failed && !l.refused && !l.waiting && !!l.content.trim())) return (answered = true);
+  }
+  return false;
+}
+
 /** Home: the staff list with each person's state, and what the jobs need from the person. Every line is written by code. */
 async function homeView() {
   const s = await store.settings();
@@ -385,7 +405,7 @@ async function homeView() {
     waiting: [...jobRoutes.pcAsks().map(x => ({ kind: 'pcask', pc: x.pc, name: x.name, hours: x.hours, at: x.at, text: `"${x.name}": ${askText(x.hours)}.`, job: null, goal: '', staffId: null })), ...queueItems, ...jobs.waiting.filter(x => !inQueue.has(x.job))],
     paused: jobs.paused.filter(x => !inQueue.has(x.job)),
     queue: { count: queue.count, paused: queue.paused, waiting: queue.waiting, running: queue.running },
-    setup: { chatModels: chats.length, imageModels: pictures.filter(x => x.installed).length, staff: rows.length, ...(await jobRoutes.linkCount().then(c => ({ pcs: c.working, pcsBroken: c.broken }))), node: jobRoutes.shareView().on },
+    setup: { answered: await answeredOnce(), chatModels: chats.length, imageModels: pictures.filter(x => x.installed).length, staff: rows.length, ...(await jobRoutes.linkCount().then(c => ({ pcs: c.working, pcsBroken: c.broken }))), node: jobRoutes.shareView().on },
   };
 }
 

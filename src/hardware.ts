@@ -4,11 +4,13 @@
 // Graphics memory on Windows comes from the system's own counters (typeperf, kept running, one line a second), which
 // work for every make of chip; an NVIDIA card is read with nvidia-smi as well, which knows its true total.
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
 import { cpus, freemem, totalmem } from 'node:os';
 import { promisify } from 'node:util';
 import { Worker } from 'node:worker_threads';
 import { builtIn } from './devices.ts';
 import { ccFromName, ccNumber } from './runtimes.ts';
+import { onExit } from './exithook.ts';
 
 const run = promisify(execFile);
 
@@ -58,6 +60,68 @@ export interface HardwareInfo {
   gpus: Gpu[];
   /** The NVIDIA driver's version (e.g. "581.57"), from nvidia-smi; null with no NVIDIA card, or when it could not be read. */
   nvidiaDriver?: string | null;
+  /** Processors in the PC (2 on a Z820), when read (Linux: /proc/cpuinfo). */
+  sockets?: number;
+}
+
+/** Linux: the processor's real cores and sockets from /proc/cpuinfo (each "physical id" with its "core id"s). */
+export function linuxCpu(cpuinfo: string): { cores: number; sockets: number } | null {
+  const cores = new Set<string>();
+  const sockets = new Set<string>();
+  for (const block of cpuinfo.split(/\n\s*\n/)) {
+    const phys = /^physical id\s*:\s*(\d+)/m.exec(block)?.[1];
+    const core = /^core id\s*:\s*(\d+)/m.exec(block)?.[1];
+    if (phys === undefined || core === undefined) continue;
+    sockets.add(phys);
+    cores.add(`${phys}:${core}`);
+  }
+  return cores.size ? { cores: cores.size, sockets: sockets.size } : null;
+}
+
+/** One graphics device as Linux lists it under /sys/class/drm/cardN/device. */
+export interface DrmCard { vendor: string; vram: number | null; name?: string; boot?: boolean }
+
+/**
+ * Linux's graphics devices as the lines readHardware reads from Windows ("GPU|name|memory|"), so gpusFrom treats both
+ * alike. NVIDIA cards are left to nvidia-smi (without its driver the runners cannot use them anyway); AMD cards give
+ * their memory (mem_info_vram_total); an Intel chip shares the RAM.
+ */
+export function linuxCim(cards: DrmCard[]): string {
+  const out: string[] = [];
+  for (const c of cards) {
+    const v = c.vendor.toLowerCase();
+    // A chip in the processor (an APU) keeps a small slice of the RAM (512 MB to 2 GB); a card has its own.
+    if (v === '0x1002') out.push(`GPU|${c.name || ((c.vram ?? 0) > 2 * 2 ** 30 ? 'AMD Radeon card' : 'AMD Radeon Graphics')}|${c.vram ?? 0}|`);
+    else if (v === '0x8086') out.push(`GPU|${c.name || 'Intel(R) UHD Graphics'}|0|`);
+  }
+  return out.join('\n');
+}
+
+/** Linux: the graphics devices under /sys/class/drm (card0, card1...), their vendor and memory. */
+function readDrm(): DrmCard[] {
+  const out: DrmCard[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync('/sys/class/drm').filter(n => /^card\d+$/.test(n));
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    const dev = `/sys/class/drm/${n}/device`;
+    try {
+      const vendor = readFileSync(`${dev}/vendor`, 'utf8').trim();
+      let vram: number | null = null;
+      try {
+        vram = Number(readFileSync(`${dev}/mem_info_vram_total`, 'utf8').trim()) || null;
+      } catch {
+        // Not an AMD card.
+      }
+      out.push({ vendor, vram });
+    } catch {
+      // Not a PCI device.
+    }
+  }
+  return out;
 }
 
 export interface ProcessUse {
@@ -205,6 +269,16 @@ const VIDEO_PS = [
 /** What Windows listed at start, kept to read the cards again when nvidia-smi answers late (SmiReader.takeBack). */
 let lastCim = '';
 
+/** The processor's cores as Windows last gave them (null: not read yet, or not Windows). */
+export function coresRead(): number | null {
+  let cores = 0;
+  for (const line of lastCim.split(/\r?\n/)) {
+    const [kind, a] = line.trim().split('|');
+    if (kind === 'CPU') cores += Number(a) || 0;
+  }
+  return cores || null;
+}
+
 /**
  * What changed between two readings of a PC's hardware, in plain words ([] when nothing): the processor, its cores,
  * the RAM, the graphics chips and the NVIDIA driver. For "Scan for hardware changes" on the Network page.
@@ -219,7 +293,7 @@ export function hardwareChanges(was: HardwareInfo, now: HardwareInfo): string[] 
   // Windows always lists at least a basic display adapter, so no cards at all means PowerShell and nvidia-smi did not
   // answer in time (a busy PC), and a driver gone means nvidia-smi did not: not read this time, not taken out.
   const cardsUnread = !now.gpus.length && was.gpus.length > 0;
-  const driverUnread = cardsUnread || (!!was.nvidiaDriver && !now.nvidiaDriver);
+  const driverUnread = cardsUnread || (!!was.nvidiaDriver && !now.nvidiaDriver && now.gpus.some(g => g.vendor === 'nvidia'));
   if (!cardsUnread && cards(was) !== cards(now)) out.push(`graphics ${cards(was)} → ${cards(now)}`);
   if (!driverUnread && (was.nvidiaDriver ?? null) !== (now.nvidiaDriver ?? null)) out.push(`NVIDIA driver ${was.nvidiaDriver ?? 'none'} → ${now.nvidiaDriver ?? 'none'}`);
   return out;
@@ -229,22 +303,40 @@ export function hardwareChanges(was: HardwareInfo, now: HardwareInfo): string[] 
 export async function readHardware(): Promise<HardwareInfo> {
   const list = cpus();
   const info: HardwareInfo = { cpuName: list[0]?.model.trim() ?? 'Processor', cores: Math.max(1, Math.round(list.length / 2)), threads: list.length, ram: totalmem(), gpus: [] };
+  if (process.platform === 'linux') {
+    try {
+      const c = linuxCpu(readFileSync('/proc/cpuinfo', 'utf8'));
+      if (c) {
+        info.cores = c.cores;
+        info.sockets = c.sockets;
+      }
+    } catch {
+      // The guesses from os.cpus().
+    }
+    const rows = await smi.rows();
+    const caps = rows.length ? await smi.caps() : [];
+    info.nvidiaDriver = rows.find(g => g.driver)?.driver ?? null;
+    info.gpus = strongestFirst(gpusFrom(linuxCim(readDrm()), rows, caps, []));
+    return info;
+  }
   if (process.platform !== 'win32') return info;
   let cim = '';
   try {
     const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', VIDEO_PS], { windowsHide: true, timeout: 20_000 });
     cim = stdout;
-    let cores = 0;
-    for (const line of stdout.split(/\r?\n/)) {
-      const [kind, a] = line.trim().split('|');
-      if (kind === 'CPU') cores += Number(a) || 0;
-    }
-    if (cores) info.cores = cores;
   } catch {
-    // keep the guesses from os.cpus()
+    // read below from the last good answer, or the guesses from os.cpus()
   }
-  // A timed-out reading leaves the last good list for the late-answer repair (SmiReader.takeBack).
+  // A timed-out reading leaves the last good list for the late-answer repair (SmiReader.takeBack), and is read in its
+  // place: a busy PC whose PowerShell did not answer keeps its other cards and its true core count.
   if (cim) lastCim = cim;
+  else cim = lastCim;
+  let cores = 0;
+  for (const line of cim.split(/\r?\n/)) {
+    const [kind, a] = line.trim().split('|');
+    if (kind === 'CPU') cores += Number(a) || 0;
+  }
+  if (cores) info.cores = cores;
   const rows = await smi.rows();
   const caps = rows.length ? await smi.caps() : [];
   const modes = rows.length ? await smi.modes() : [];
@@ -522,7 +614,7 @@ export class Sampler {
     const tick = oneAtATime(() => this.tick());
     this.timer = setInterval(() => void tick(), 1000);
     this.timer.unref();
-    process.on('exit', () => {
+    onExit(() => {
       this.typeperf?.kill();
       this.enginePerf?.kill();
     });

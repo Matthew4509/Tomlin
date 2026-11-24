@@ -8,6 +8,7 @@ import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { writeAtomicSync } from './atomic.ts';
 import { log } from './log.ts';
+import { onExit } from './exithook.ts';
 
 /** The running mark in the log folder: this run's process, when it started and when it was last seen alive. */
 export const MARK = 'running-now.json';
@@ -98,7 +99,7 @@ export function startLastWords(logDir: string, version: string, o: { now?: () =>
   keep();
   log.info('started', `TOMLIN ${version} started (process ${process.pid}).`);
   setInterval(keep, ALIVE_MS).unref();
-  process.on('exit', code => {
+  onExit(code => {
     const c = typeof code === 'number' ? code : 0;
     (c === 0 || c === 75 || c === 76 || c === 78 ? log.info : log.warn)('stopped', exitLine(c, why));
     try {

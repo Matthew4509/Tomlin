@@ -16,7 +16,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="day"]) {
+  :root:not([data-theme="day"]):not([data-theme="silly"]) {
     --bg: #15171b; --panel: #1e2126; --ink: #eef0f3; --ink-soft: #a3a9b4; --line: #33373f; --accent: #7ea6ff;
     --accent-soft: #252c3d; --warn: #f0b45a; --bad: #ff8a80; --good: #3fbf7a; --code: #2a2e35;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);

@@ -37,6 +37,7 @@ import * as keep from '../keep.ts';
 import { LOCK_FILE, releaseHome, takeHomeOrRepair } from '../onecopy.ts';
 import { sweepHalfSaves } from '../atomic.ts';
 import { HfList } from '../hflist.ts';
+import { onExit } from '../exithook.ts';
 import { buildId, NEXT_COPY_FILE, RESTART_INTO } from '../update.ts';
 import { openWaitDoor } from '../waitdoor.ts';
 
@@ -80,7 +81,7 @@ export const HOME = keep.resolveHome();
     process.exit(ALREADY_RUNNING);
   }
   if (took.repaired) console.log(`Repaired the start lock: ${took.repaired}. ${join(HOME.home, LOCK_FILE)} now names this copy.`);
-  process.on('exit', () => releaseHome(HOME.home));
+  onExit(() => releaseHome(HOME.home));
 }
 export const startupOf = autostart(ROOT);
 /**
@@ -186,7 +187,10 @@ export async function rescanHardware(): Promise<string[]> {
   const now = await readHardware();
   // A busy PC can time PowerShell or nvidia-smi out: a reading that lost every card, or the NVIDIA driver, keeps the
   // good record (the runner choice, the sampler and the hello read it) rather than wiping it.
-  if ((!now.gpus.length && was.gpus.length) || (was.nvidiaDriver && !now.nvidiaDriver)) {
+  // A driver gone while Windows still lists an NVIDIA card is nvidia-smi not answering; with no NVIDIA card listed, the
+  // card (or its driver) really went, and the new reading is kept.
+  const smiUnread = !!was.nvidiaDriver && !now.nvidiaDriver && now.gpus.some(g => g.vendor === 'nvidia');
+  if ((!now.gpus.length && was.gpus.length) || smiUnread) {
     now.gpus = was.gpus;
     now.nvidiaDriver = was.nvidiaDriver;
   }

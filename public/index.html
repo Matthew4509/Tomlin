@@ -7,10 +7,11 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 <script src="theme.js"></script>
+<script src="themewords.js"></script>
 </head>
 <body>
 <header class="bar" aria-label="This PC">
-  <h1 class="brand"><button class="brand-home" type="button" id="rail-home" title="Home: what is waiting for you, and the jobs"><img class="brand-mark" src="icon.svg" alt="" width="30" height="30"> <span class="brand-name">TOMLIN</span> <span class="rail-count" id="rail-count" hidden></span></button></h1>
+  <h1 class="brand"><button class="brand-home" type="button" id="rail-home" title="Home: what is waiting for you, and the jobs"><img class="brand-mark" src="icon.svg" alt="" width="30" height="30"> <span class="brand-name">Home</span> <span class="rail-count" id="rail-count" hidden></span></button></h1>
   <!-- This PC's name, shown when a linked PC's meters are beside its own (so the two are told apart). -->
   <div class="bar-pc bar-mine" id="bar-mine" hidden><strong class="bar-pc-name" id="bar-mine-name"></strong><span class="bar-pc-model">This PC</span></div>
   <div class="meters">
@@ -35,12 +36,13 @@
   <span class="chip serving-chip" id="serving-chip" role="status" hidden></span>
   <button class="btn quiet mute-all" type="button" id="mute-all" aria-label="Mute all"></button>
   <button class="btn quiet padlock" type="button" id="applock-btn" aria-label="App lock" title="App lock: set a PIN for the whole app" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="applock-shackle" d="M8 11V7a4 4 0 0 1 8 0"/></svg></button>
-  <div class="theme-switch" role="radiogroup" aria-label="Theme">
+  <!-- The theme is picked in Settings, Theme; this switch is kept, hidden, in case it comes back to the top bar. -->
+  <div class="theme-switch" role="radiogroup" aria-label="Theme" hidden>
     <button type="button" role="radio" aria-checked="false" data-colours-set="day" aria-label="Day"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7 7 17M17 7l1.7-1.7"/></svg></button>
     <button type="button" role="radio" aria-checked="false" data-colours-set="night" aria-label="Night"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="fill" d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/></svg></button>
     <button type="button" role="radio" aria-checked="false" data-colours-set="auto" aria-label="Auto, by sunrise and sunset"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9.5" cy="12" r="3.2"/><path d="M9.5 5.2v1.6M9.5 17.2v1.6M2.7 12h1.6M4.7 7.2l1.1 1.1M4.7 16.8l1.1-1.1"/><path class="fill" d="M13.5 3.2a8.8 8.8 0 0 1 0 17.6a10.5 10.5 0 0 0 0-17.6z"/></svg></button>
   </div>
-  <button class="btn quiet settings-open" type="button" id="settings-open" title="Settings: staff, models, network, your data, colours and more"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg><span class="settings-word">Settings</span></button>
+  <button class="btn quiet settings-open icon-only" type="button" id="settings-open" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7.3 7.3 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg></button>
   <button class="btn quiet" type="button" id="help-open" data-help="help-title">Help</button>
 </header>
 <div class="bar-ask" id="bar-ask" hidden></div>
@@ -49,9 +51,7 @@
 <nav class="rail" id="rail" aria-label="Chats, home and staff">
   <button class="btn primary rail-new" type="button" id="rail-new"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
   <ul class="rail-list rail-homeline" aria-label="Home">
-    <li><button class="rail-row" type="button" id="rail-home-row"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></span><span class="rail-text"><span class="rail-name">Home</span><span class="rail-sub" id="rail-home-sub">What is waiting for you, and the jobs</span></span><span class="rail-count" id="rail-home-count" hidden></span></button></li>
-    <li><a class="rail-row" href="/bridge/" id="rail-bridge"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17v-5M19 17v-5M3 12c4-5 14-5 18 0"/><path d="M9 17v-6M12 17v-7M15 17v-6"/></svg></span><span class="rail-text"><span class="rail-name">Projects</span><span class="rail-sub">The Bridge: your project folders, local copies, audits, backups and prompts</span></span></a></li>
-    <li><button class="rail-row" type="button" id="rail-staff-row"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg></span><span class="rail-text"><span class="rail-name">Staff: hire and edit</span><span class="rail-sub">Hire someone, or change your staff</span></span></button></li>
+    <li hidden><button class="rail-row" type="button" id="rail-home-row"><span class="rail-home-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></span><span class="rail-text"><span class="rail-name">Home</span><span class="rail-sub" id="rail-home-sub">What is waiting for you, and the jobs</span></span><span class="rail-count" id="rail-home-count" hidden></span></button></li>
   </ul>
   <details class="rail-fold" id="rail-recent-fold">
     <summary class="rail-head"><span id="rail-recent-title">Recent chats</span></summary>
@@ -65,35 +65,50 @@
   </details>
   <div id="rail-pcs-box" hidden>
     <h2 class="rail-head" id="rail-hw-title">PCs</h2>
-    <ul class="rail-list rail-cluster" id="rail-cluster" aria-label="Cluster" hidden></ul>
     <ul class="rail-list rail-mypc" id="rail-mypc" aria-label="My PC"></ul>
+    <ul class="rail-list rail-cluster" id="rail-cluster" aria-label="Cluster" hidden></ul>
     <div class="rail-head-row" id="rail-pcs-head">
       <h2 class="rail-head" id="rail-pcs-title">Linked PCs</h2>
-      <button class="btn quiet rail-fast" type="button" id="rail-fast-update" hidden title="Updates every linked PC that is behind this one, asking for the host PIN once when the PCs hold it"></button>
+      <button class="btn quiet rail-fast" type="button" id="rail-fast-update" hidden title="Manage: update, rescan or shut down every linked PC at once"></button>
     </div>
     <ul class="rail-list" id="rail-pcs" aria-labelledby="rail-pcs-title"></ul>
   </div>
   <div class="rail-setup" id="rail-setup-fold">
     <ul class="rail-list rail-links rail-settings-sub" id="rail-settings-sub" aria-label="Settings">
+      <li class="rail-group"><h3 class="rail-group-head" id="rail-group-staff">Staff and models</h3></li>
       <li><button class="link" type="button" data-setup="staff" data-about="Add someone to chat, write or draw, or change who you have."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Hire staff</button></li>
       <li><button class="link" type="button" data-setup="models" data-about="Add or remove the AI models on this PC."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Models</button></li>
       <li><button class="link" type="button" data-setup="thispc" data-about="See this PC's models, memory and use."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC</button></li>
+      <li class="rail-group"><h3 class="rail-group-head" id="rail-group-network">Your network</h3></li>
+      <li><button class="link" type="button" data-setup="addpc" data-about="Link a PC with TOMLIN on it, or one started from a stick."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M12 7v6M9 10h6"/></svg>Add another PC</button></li>
+      <li><button class="link" type="button" data-setup="usb" data-about="Run TOMLIN on a diskless node from a USB stick."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="6" rx="1"/><path d="M10 4.5h.01M14 4.5h.01"/><rect x="6" y="8" width="12" height="14" rx="2"/><path d="M10 13h4"/></svg>Bootable USB</button></li>
       <li><button class="link" type="button" data-setup="nodes" data-about="Link your other PCs and share their work."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg>Network</button></li>
+      <li><button class="link" type="button" data-setup="manage" data-about="Update, rescan or shut down every linked PC at once."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg>Manage</button></li>
       <li><button class="link" type="button" data-setup="cluster" data-about="Put linked PCs together for models too big for one PC."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="14" width="7" height="6" rx="1"/><path d="M10 7h4M7 10l3 4M17 10l-3 4"/></svg>Cluster</button></li>
       <li><button class="link" type="button" data-setup="storage" data-about="Choose which drive keeps models and backups."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="6" rx="1.5"/><rect x="3" y="13" width="18" height="6" rx="1.5"/><path d="M7 8h.01M7 16h.01"/></svg>Network Storage</button></li>
       <li><button class="link" type="button" data-setup="guestpass" data-about="Let someone else's PC use your models for a while."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>Create a guest pass</button></li>
-      <li><button class="link" type="button" data-setup="jobs" data-about="Plan big work as small steps, then run them."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Jobs</button></li>
-      <li><button class="link" type="button" data-setup="files" data-about="Open your work and write blog posts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>Files and blog writer</button></li>
+      <li class="rail-group" hidden><h3 class="rail-group-head" id="rail-group-work">Work</h3></li>
+      <li hidden><button class="link" type="button" data-setup="jobs" data-about="Plan big work as small steps, then run them."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Jobs</button></li>
+      <li hidden><button class="link" type="button" data-setup="files" data-about="Open your work and write blog posts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>Files and blog writer</button></li>
+      <li class="rail-group"><h3 class="rail-group-head" id="rail-group-app">This app</h3></li>
       <li><button class="link" type="button" data-setup="updates" data-about="Check for a new version and install it."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>Manage updates</button></li>
       <li><button class="link" type="button" data-setup="data" data-about="Back up your data, set a PIN and choose alerts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Data and lock</button></li>
       <li><button class="link" type="button" data-setup="perms" data-about="Choose what a chat&#39;s model may do on its own."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Permissions</button></li>
-      <li><button class="link" type="button" data-setup="colours" data-about="Pick Day, Night or Auto."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.500 0 2-1 2-2s-1-2 0-3 2-1 3-1h2c1.200 0 2-1 2-3a9 9 0 0 0-9-9z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Theme</button></li>
+      <li><button class="link" type="button" data-setup="colours" data-about="Pick Day, Night, Auto or Vibe code."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.500 0 2-1 2-2s-1-2 0-3 2-1 3-1h2c1.200 0 2-1 2-3a9 9 0 0 0-9-9z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Theme</button></li>
     </ul>
   </div>
 </nav>
 
 <section class="home" id="home" aria-labelledby="home-title">
   <div class="home-main">
+  <section class="home-start" id="home-start" aria-labelledby="home-start-title">
+    <h3 id="home-start-title">Getting started?</h3>
+    <ol class="home-start-steps">
+      <li><span class="home-start-n" aria-hidden="true">1</span><button class="btn" type="button" id="home-start-hire">Hire staff</button></li>
+      <li><span class="home-start-n" aria-hidden="true">2</span><button class="btn" type="button" id="home-start-model">Install a model</button></li>
+      <li><span class="home-start-n" aria-hidden="true">3</span><button class="btn" type="button" id="home-start-chat">Start chatting</button></li>
+    </ol>
+  </section>
   <div class="home-head">
     <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
     <div class="home-greet"><h2 id="home-title">Home</h2><span class="home-date" id="home-date"></span></div>
@@ -104,29 +119,37 @@
     <h3 id="home-paused-title">Part done</h3>
     <div class="home-list" id="home-paused"></div>
   </section>
+  <section class="home-part home-devnotes" id="home-devnotes" aria-labelledby="home-devnotes-title">
+    <h3 id="home-devnotes-title">Developer notes</h3>
+    <div class="devnotes-row"><span>Possibly phasing out:</span>
+      <a class="btn" href="/bridge/" id="devnotes-bridge">Bridge</a>
+      <button class="btn" type="button" id="devnotes-planner">Planner</button>
+      <button class="btn" type="button" id="devnotes-jobs">Jobs</button>
+    </div>
+  </section>
   <section class="home-part" id="home-ready-box" aria-labelledby="home-ready-title" hidden>
     <h3 id="home-ready-title">Recent projects</h3>
     <div class="home-list" id="home-ready"></div>
   </section>
   <form class="home-part home-ask" id="home-ask" novalidate>
-    <h3 class="home-ask-title" id="home-ask-title">Lets create a project</h3>
-    <label class="field"><span>Project name (optional)</span><input id="home-name" type="text" maxlength="80" autocomplete="off"></label>
-    <label class="field"><span>Mini description (optional)</span><input id="home-about" type="text" maxlength="200" autocomplete="off" placeholder="e.g. billion dollar saas make no mistake"></label>
-    <label class="field"><span>Prompt</span><textarea id="home-goal" rows="3" spellcheck="true" maxlength="1500" placeholder="Describe what should exist when it is finished, e.g. a one-page tip calculator"></textarea></label>
+    <h3 class="home-ask-title" id="home-ask-title" data-words="ask-title">Lets create a project</h3>
+    <label class="field" id="home-name-field" title="The project's name, shown in Recent projects. It also names the project's folder in your workspace (the files staff make go there). Left empty: Project and the date and time, in a folder named by the date and time."><span>Project name (optional)</span><input id="home-name" type="text" maxlength="80" autocomplete="off"></label>
+    <label class="field" id="home-about-field" title="One line on what the project is for. It goes on the project's Scope card as its statement, which staff read before they work on it. The Prompt below is what they are asked to make."><span>Mini description (optional)</span><input id="home-about" type="text" maxlength="200" autocomplete="off" placeholder="e.g. billion dollar saas make no mistake"></label>
+    <label class="field"><span>Prompt</span><textarea id="home-goal" rows="3" spellcheck="true" maxlength="1500" placeholder="Describe what should exist when it is finished, e.g. a one-page tip calculator" data-words-ph="ask-goal"></textarea></label>
     <div class="home-staff-row">
       <label class="home-staff-label" for="home-staff">Staff:</label>
       <select class="home-staff-select" id="home-staff"></select>
       <div class="staff-pick" id="home-hire" role="group" aria-label="Hire staff" hidden></div>
-      <button class="btn home-advanced" type="button" id="project-open" title="A few questions, then the colours, layout and type, then a plan in steps (Jobs)">Advanced / job planner</button>
-      <button class="btn primary home-go" type="submit" id="home-go" title="Sends the prompt to the hire under Staff (Default: the strongest worker available) in a chat in the new project, as a normal message: no plan">Lets go!</button>
+      <button class="btn home-advanced" type="button" id="project-open" hidden data-words="ask-advanced" title="A few questions, then the colours, layout and type, then a plan in steps (Jobs)">Advanced / job planner</button>
+      <button class="btn primary home-go" type="submit" id="home-go" data-words="ask-go" title="Adds the project to the Queue beside this: it is planned into steps, then each step goes to its hire (a picture alone goes to the artist)">Lets go!</button>
     </div>
     <p class="hint" id="home-staff-line"></p>
     <div id="home-ask-say" hidden></div>
   </form>
   </div>
-  <aside class="home-side" id="home-side" aria-label="Waiting for you, staff overview and To Do">
+  <aside class="home-side" id="home-side" aria-label="Urgent and staff overview">
     <details class="home-side-fold" id="home-side-fold" open>
-      <summary class="home-side-sum" id="home-side-sum" title="Fold or open what is waiting for you, the staff overview and the To Do"><span class="home-side-tabs" role="tablist" aria-label="Waiting for you, staff overview and To Do"><button class="side-tab" type="button" role="tab" id="tab-waiting" aria-controls="home-panel-waiting" aria-selected="true"><span id="home-waiting-title">Waiting for you</span></button><span class="side-tab-bar" aria-hidden="true">|</span><button class="side-tab" type="button" role="tab" id="tab-home-staff" aria-controls="home-panel-staff" aria-selected="false" tabindex="-1">Staff overview</button><span class="side-tab-bar" aria-hidden="true">|</span><button class="side-tab" type="button" role="tab" id="tab-home-todo" aria-controls="home-panel-todo" aria-selected="false" tabindex="-1">To Do<span class="rail-count todo-count" id="home-todo-count" hidden></span></button></span><span class="rail-count" id="home-waiting-count" hidden></span><span class="home-side-busy" id="home-working-count" hidden></span></summary>
+      <summary class="home-side-sum" id="home-side-sum" title="Show or hide what is urgent and the staff overview"><span class="subjects-arrow home-side-open" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></span><span class="home-side-tabs" role="tablist" aria-label="Urgent and staff overview"><button class="side-tab" type="button" role="tab" id="tab-waiting" aria-controls="home-panel-waiting" aria-selected="true"><span id="home-waiting-title">Urgent</span></button><span class="side-tab-bar" aria-hidden="true">|</span><button class="side-tab" type="button" role="tab" id="tab-home-staff" aria-controls="home-panel-staff" aria-selected="false" tabindex="-1">Staff overview</button><span class="side-tab-bar" aria-hidden="true" hidden>|</span><button class="side-tab" type="button" role="tab" id="tab-home-todo" hidden aria-controls="home-panel-todo" aria-selected="false" tabindex="-1">To Do<span class="rail-count todo-count" id="home-todo-count" hidden></span></button></span><span class="rail-count" id="home-waiting-count" hidden></span><span class="home-side-busy" id="home-working-count" hidden></span><span class="home-side-close" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span></summary>
       <div class="side-panel" role="tabpanel" id="home-panel-staff" aria-labelledby="tab-home-staff" hidden>
         <div class="office" data-office="home"></div>
         <ul class="staff-overview" id="home-staff-overview"></ul>
@@ -227,47 +250,7 @@
   </div>
   <div class="net-sec" id="net-sec-linked" data-sec="linked" hidden>
   <div class="net-actions">
-  <details class="net-add" id="net-add"><summary class="btn primary">Add another PC</summary>
-  <section class="set-part" id="node-link" aria-labelledby="node-others-title">
-    <h3 id="node-others-title">Find other PCs</h3>
-    <div class="set-card">
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16 16l4 4"/></svg></span>
-        <span class="set-txt"><b>Search this network</b><span class="set-about">On the other PC, turn on <strong>Enable this PC as a node</strong>. Then find it here.</span></span>
-        <span class="set-side"><label class="node-scan-port"><span>Port (if changed there)</span><input id="node-scan-port" type="number" min="1024" max="65535" value="8741"></label><button class="btn primary" type="button" id="node-scan">Find PCs on my network</button></span>
-      </div>
-      <div class="set-block">
-        <p class="hint" id="node-scan-line" aria-live="polite"></p>
-        <div class="home-list" id="node-found"></div>
-      </div>
-      <details class="set-row" id="node-addr-box">
-        <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></span><span class="set-txt"><b>Not found? Type its address instead</b><span class="set-about">Its address and setup code are shown on that PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
-        <div class="set-inside">
-          <form id="node-addr-form" class="node-link-form">
-            <label class="field"><span>Its address (shown on that PC)</span><input id="node-addr" type="text" placeholder="192.168.1.20:8741" autocomplete="off" required></label>
-            <label class="field"><span>Setup code or guest pass code</span><input id="node-addr-code" type="text" maxlength="9" autocomplete="off" placeholder="ABCD-EFGH" required data-setup-code></label>
-            <label class="field"><span>Link PIN: 6 digits, only if that PC shows one (never its app lock PIN)</span><input id="node-addr-pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off"></label>
-            <button class="btn" type="submit">Link</button>
-          </form>
-        </div>
-      </details>
-      <details class="set-row" id="link-help">
-        <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></span><span class="set-txt"><b>Still not linking? Link helper</b><span class="set-about">Tests the other PC from here and says, in plain words, what is in the way. Nothing is changed on either PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
-        <div class="set-inside">
-          <fieldset class="link-help-q"><legend>Is TOMLIN open on the other PC, with "Enable this PC as a node" turned on?</legend>
-            <label class="check"><input type="radio" name="link-help-on" value="yes" checked> Yes</label>
-            <label class="check"><input type="radio" name="link-help-on" value="no"> No</label>
-            <label class="check"><input type="radio" name="link-help-on" value="unsure"> Not sure</label>
-          </fieldset>
-          <label class="field"><span>Its address (on that PC: TOMLIN, Network, This PC's address)</span><input id="link-help-addr" type="text" placeholder="192.168.0.20:8741" autocomplete="off"></label>
-          <label class="field"><span>Its name, if you know it (on that PC: Settings, System, About, Device name)</span><input id="link-help-name" type="text" maxlength="63" autocomplete="off" placeholder="DESKTOP-ABC123"></label>
-          <div class="team-actions"><button class="btn primary" type="button" id="link-help-check">Check</button></div>
-          <div class="link-help-out" id="link-help-out" aria-live="polite"></div>
-        </div>
-      </details>
-    </div>
-  </section>
-  </details>
+  <button class="btn primary" type="button" id="net-add-open">Add another PC</button>
   <button class="btn" type="button" id="node-test-net">Test network</button>
   </div>
   <div class="set-block net-test" id="node-test-out" hidden></div>
@@ -541,6 +524,21 @@
   </section>
 </section>
 
+<section class="nodes" id="allchats-page" aria-labelledby="allchats-title">
+  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <div class="home-head">
+    <h2 id="allchats-title">All chats</h2>
+  </div>
+  <div class="allchats-tools">
+    <input id="allchats-search" type="search" placeholder="Search subjects, staff, projects and first messages" aria-label="Search chats" autocomplete="off">
+    <label class="allchats-pick"><span>Project</span><select id="allchats-project"></select></label>
+    <label class="allchats-pick"><span>Staff</span><select id="allchats-staff"></select></label>
+  </div>
+  <div id="allchats-left"></div>
+  <p class="hint" id="allchats-count" role="status"></p>
+  <ul class="allchats-tiles" id="allchats-tiles"></ul>
+</section>
+
 <section class="nodes" id="cluster-page" data-crumb="Cluster" aria-labelledby="cluster-title">
   <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
   <div class="home-head">
@@ -693,7 +691,7 @@
     <h2 id="settings-title">Settings</h2>
   </div>
   <div class="help-body page-body">
-    <div class="settings-tiles" id="settings-tiles"></div>
+    <div class="settings-groups" id="settings-tiles"></div>
   </div>
 </section>
 
@@ -746,15 +744,100 @@
     <h2 id="settings-colours-title">Theme</h2>
   </div>
   <div class="help-body page-body set-page">
-    <p class="set-lead">Kept in this browser. The switch beside Settings at the top picks Day, Night or Auto.</p>
-    <fieldset class="colours-pick set-card set-choices" data-colours-pick>
+    <p class="set-lead">Kept in this browser.</p>
+    <fieldset class="colours-pick theme-tiles" data-colours-pick>
       <legend class="sr-only">Theme</legend>
-      <label class="check"><input type="radio" name="colours" value=""> Follow Windows (light or dark, as Windows is set)</label>
-      <label class="check"><input type="radio" name="colours" value="day"> Day: light grey and blue</label>
-      <label class="check"><input type="radio" name="colours" value="night"> Night: dark grey and soft blue</label>
-      <label class="check"><input type="radio" name="colours" value="auto"> Auto: Day from sunrise to sunset, Night after</label>
+      <label class="theme-tile"><input type="radio" name="colours" value="day"><span class="tp-box" aria-hidden="true"><span class="tp tp-day"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span></span><span class="theme-tile-name">Day</span><span class="theme-tile-about">Light grey and blue</span></label>
+      <label class="theme-tile"><input type="radio" name="colours" value="night"><span class="tp-box" aria-hidden="true"><span class="tp tp-night"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span></span><span class="theme-tile-name">Night</span><span class="theme-tile-about">Dark grey and soft blue</span></label>
+      <label class="theme-tile"><input type="radio" name="colours" value="auto"><span class="tp-box" aria-hidden="true"><span class="tp-split"><span class="tp tp-day"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span><span class="tp tp-night"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span></span></span><span class="theme-tile-name">Auto</span><span class="theme-tile-about">Day from sunrise to sunset, Night after</span></label>
+      <label class="theme-tile"><input type="radio" name="colours" value=""><span class="tp-box" aria-hidden="true"><span class="tp-split tp-diag"><span class="tp tp-day"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span><span class="tp tp-night"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span></span></span><span class="theme-tile-name">Follow Windows</span><span class="theme-tile-about">Light or dark, as Windows is set</span></label>
+      <label class="theme-tile"><input type="radio" name="colours" value="silly"><span class="tp-box" aria-hidden="true"><span class="tp tp-silly"><i class="tp-bar"></i><i class="tp-rail"></i><i class="tp-card"></i><i class="tp-btn"></i></span></span><span class="theme-tile-name">Vibe code</span><span class="theme-tile-about">Hot pink, and hot vibes</span></label>
     </fieldset>
     <p class="set-said" data-colours-today></p>
+  </div>
+</section>
+
+<section class="models-page app-page" id="settings-manage" data-crumb="Manage" aria-labelledby="settings-manage-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="settings-manage-title">Manage</h2>
+  </div>
+  <div class="help-body page-body set-page">
+    <p class="set-lead">One press each, for every linked PC at once.</p>
+    <div id="manage-body"></div>
+  </div>
+</section>
+
+<section class="models-page app-page" id="settings-usb" data-crumb="Bootable USB" aria-labelledby="settings-usb-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="settings-usb-title">Bootable USB: run TOMLIN on a diskless node</h2>
+  </div>
+  <div class="help-body page-body set-page" id="usb-body">
+    <p class="set-lead">A bootable USB can be used to run Tomlin on a computer that has no hard drive. You can then add it to your network and use it as a node.</p>
+    <div id="usb-page"></div>
+  </div>
+</section>
+
+<section class="models-page app-page" id="settings-addpc" data-crumb="Add another PC" aria-labelledby="settings-addpc-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
+    <h2 id="settings-addpc-title">Add another PC</h2>
+  </div>
+  <div class="help-body page-body set-page" id="addpc-body">
+    <div class="addpc-tiles">
+      <div class="addpc-tile">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M12 7v5M9.5 9.5 12 12l2.5-2.5"/></svg></span>
+        <b>Install TOMLIN on another PC</b>
+        <span class="set-about">Install TOMLIN on that PC and open it, then turn on <strong>Enable this PC as a node</strong> in its Settings, Network. Then find it here.</span>
+        <div class="addpc-go"><button class="btn" type="button" id="addpc-scan">Scan the network</button></div>
+      </div>
+      <div class="addpc-tile">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="6" rx="1"/><path d="M10 4.5h.01M14 4.5h.01"/><rect x="6" y="8" width="12" height="14" rx="2"/><path d="M10 13h4"/></svg></span>
+        <b>Create a Linux USB</b>
+        <span class="set-about">A stick that starts a PC with no hard drive as a node. Start that PC from it, then find it here.</span>
+        <div class="addpc-go"><button class="btn" type="button" id="addpc-usb">Bootable USB</button></div>
+      </div>
+    </div>
+  <section class="set-part" id="node-link" aria-labelledby="node-others-title">
+    <h3 id="node-others-title">Find other PCs</h3>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16 16l4 4"/></svg></span>
+        <span class="set-txt"><b>Scan the network</b><span class="set-about">On the other PC, turn on <strong>Enable this PC as a node</strong>, or start it from a stick made under Settings, <strong>Bootable USB</strong>. Then find it here: a PC started from your stick is added with no code.</span></span>
+        <span class="set-side"><label class="node-scan-port"><span>Port (if changed there)</span><input id="node-scan-port" type="number" min="1024" max="65535" value="8741"></label><button class="btn primary" type="button" id="node-scan">Find PCs on my network</button></span>
+      </div>
+      <div class="set-block">
+        <p class="hint" id="node-scan-line" aria-live="polite"></p>
+        <div class="home-list" id="node-found"></div>
+      </div>
+      <details class="set-row" id="node-addr-box">
+        <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></span><span class="set-txt"><b>Not found? Type its address instead</b><span class="set-about">Its address and setup code are shown on that PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
+        <div class="set-inside">
+          <form id="node-addr-form" class="node-link-form">
+            <label class="field"><span>Its address (shown on that PC)</span><input id="node-addr" type="text" placeholder="192.168.1.20:8741" autocomplete="off" required></label>
+            <label class="field"><span>Setup code or guest pass code</span><input id="node-addr-code" type="text" maxlength="9" autocomplete="off" placeholder="ABCD-EFGH" required data-setup-code></label>
+            <label class="field"><span>Link PIN: 6 digits, only if that PC shows one (never its app lock PIN)</span><input id="node-addr-pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+            <button class="btn" type="submit">Link</button>
+          </form>
+        </div>
+      </details>
+      <details class="set-row" id="link-help">
+        <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></span><span class="set-txt"><b>Still not linking? Link helper</b><span class="set-about">Tests the other PC from here and says, in plain words, what is in the way. Nothing is changed on either PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
+        <div class="set-inside">
+          <fieldset class="link-help-q"><legend>Is TOMLIN open on the other PC, with "Enable this PC as a node" turned on?</legend>
+            <label class="check"><input type="radio" name="link-help-on" value="yes" checked> Yes</label>
+            <label class="check"><input type="radio" name="link-help-on" value="no"> No</label>
+            <label class="check"><input type="radio" name="link-help-on" value="unsure"> Not sure</label>
+          </fieldset>
+          <label class="field"><span>Its address (on that PC: TOMLIN, Network, This PC's address)</span><input id="link-help-addr" type="text" placeholder="192.168.0.20:8741" autocomplete="off"></label>
+          <label class="field"><span>Its name, if you know it (on that PC: Settings, System, About, Device name)</span><input id="link-help-name" type="text" maxlength="63" autocomplete="off" placeholder="DESKTOP-ABC123"></label>
+          <div class="team-actions"><button class="btn primary" type="button" id="link-help-check">Check</button></div>
+          <div class="link-help-out" id="link-help-out" aria-live="polite"></div>
+        </div>
+      </details>
+    </div>
+  </section>
   </div>
 </section>
 
@@ -833,6 +916,7 @@
         <button class="btn quiet chat-whole" type="button" id="chat-save" title="Save this whole chat as a text file" aria-label="Save this whole chat as a text file"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
         <button class="btn quiet chat-whole" type="button" id="chat-copy" title="Copy this whole chat" aria-label="Copy this whole chat"></button>
         <button class="btn quiet chat-whole" type="button" id="chat-find-open" hidden title="Find in this chat: bring back an older message, word for word" aria-label="Find in this chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+          <button class="btn quiet chat-whole chat-memory" type="button" id="notebook-open" title="What this person and the team remember: see, change or delete each line" aria-label="Memory"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7h6M9 11h4"/></svg></button>
         <button class="btn quiet" type="button" id="chat-menu-open" hidden title="Rename, mute, empty or delete this chat" aria-label="This chat: rename, mute, empty or delete">…</button>
       </div>
     </div>
@@ -854,19 +938,24 @@
         <textarea id="chat-input" rows="2" spellcheck="true" placeholder="Message" aria-label="Message"></textarea>
         <button class="box-save" type="button" id="prompt-save" title="Save to prompts (global)" aria-label="Save to prompts (global)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg></button>
         <div class="chat-actions">
-          <button class="btn quiet" type="button" id="notebook-open" title="What this person and the team remember: see, change or delete each line">Memory</button>
-          <button class="btn quiet" type="button" id="doc-add" title="Add a PDF, text or code file to this chat: each answer reads the parts that match your words, and names the page">Add a document</button>
+          <div class="chat-options" id="chat-options">
+            <button class="btn quiet chat-options-open" type="button" id="chat-options-open" aria-haspopup="true" aria-expanded="false" aria-controls="chat-options-menu" title="How this chat answers: Quick or Think, Web, Max">Options</button>
+            <div class="chat-options-menu" id="chat-options-menu" role="group" aria-label="Options for this chat" hidden>
+              <div class="g-shelves think-pick" id="think-pick" role="group" aria-label="How to answer">
+                <button class="g-shelf" type="button" data-think="quick" aria-pressed="true" title="Quick: answers straight away">Quick</button>
+                <button class="g-shelf" type="button" data-think="think" aria-pressed="false" title="Think: works it out first, then answers. Better for sums, code and plans; slower, because it writes its working before the first word of the answer. Only models that can think do it (Qwen 3 and 3.5).">Think</button>
+              </div>
+              <div class="g-shelves think-pick web-pick" role="group" aria-label="Web">
+                <button class="g-shelf" type="button" id="web-pick" aria-pressed="false" title="Web: the model may search the web and read pages while it answers (models that can call tools, such as Qwen 3 and 3.5, on this PC). Your search words go to the search engine chosen in Settings, Data and lock; a page on this PC or your home network is never opened.">Web: off</button>
+              </div>
+              <div class="g-shelves think-pick web-pick max-pick" role="group" aria-label="Max mode">
+                <button class="g-shelf" type="button" id="max-pick" aria-pressed="false" title="Max mode is for a model that fits on this PC alone: it borrows from your linked PCs to try to raise the tokens a second (built, not yet measured on two PCs). Cluster is for a model too big for one PC: it lets it run at all.">Max: off</button>
+              </div>
+            </div>
+          </div>
+          <button class="btn quiet chat-clip" type="button" id="doc-add" title="Add a PDF, text or code file to this chat: each answer reads the parts that match your words, and names the page" aria-label="Add a document"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
           <input type="file" id="doc-file" accept=".pdf,.txt,.md,.csv,.json,.xml,.yml,.yaml,.toml,.ini,.log,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.py,.php,.sql,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.sh,.ps1,.bat" multiple hidden>
-          <div class="g-shelves think-pick" id="think-pick" role="group" aria-label="How to answer">
-            <button class="g-shelf" type="button" data-think="quick" aria-pressed="true" title="Quick: answers straight away">Quick</button>
-            <button class="g-shelf" type="button" data-think="think" aria-pressed="false" title="Think: works it out first, then answers. Better for sums, code and plans; slower, because it writes its working before the first word of the answer. Only models that can think do it (Qwen 3 and 3.5).">Think</button>
-          </div>
-          <div class="g-shelves think-pick web-pick" role="group" aria-label="Web">
-            <button class="g-shelf" type="button" id="web-pick" aria-pressed="false" title="Web: the model may search the web and read pages while it answers (models that can call tools, such as Qwen 3 and 3.5, on this PC). Your search words go to the search engine chosen in Settings, Data and lock; a page on this PC or your home network is never opened.">Web: off</button>
-          </div>
-          <div class="g-shelves think-pick web-pick max-pick" role="group" aria-label="Max mode">
-            <button class="g-shelf" type="button" id="max-pick" aria-pressed="false" title="Max mode is for a model that fits on this PC alone: it borrows from your linked PCs to try to raise the tokens a second (built, not yet measured on two PCs). Cluster is for a model too big for one PC: it lets it run at all.">Max: off</button>
-          </div>
+          <span class="chat-actions-gap"></span>
           <button class="btn" type="button" id="chat-stop" hidden>Stop</button>
           <button class="btn primary" type="submit" id="chat-send">Send</button>
         </div>
@@ -969,6 +1058,7 @@
         </div>
       </div>
       <div class="fault" id="img-fault" hidden></div>
+      <p class="hint img-lowdisk" id="img-lowdisk" role="status" hidden></p>
 
       <section class="main-photo" id="main-photo" aria-label="Picture">
         <div class="mp-frame" id="mp-frame" tabindex="0" aria-label="Picture: left and right arrow keys step through them">
@@ -1018,26 +1108,20 @@
     </div>
   </section>
 
-  <aside class="subjects" id="subjects" aria-label="Chats, tools and staff overview">
+  <aside class="subjects" id="subjects" aria-label="Tools and staff overview">
     <details class="subjects-fold" id="subjects-fold" open>
-      <summary class="subjects-sum" id="subjects-sum"><h2 id="subjects-title">Chats | Tools | Staff overview</h2><span class="hint subjects-now" id="subjects-now"></span></summary>
-      <div class="side-tabs" role="tablist" aria-label="Chats, tools and staff overview">
-        <button class="side-tab" type="button" role="tab" id="tab-chats" aria-controls="panel-chats" aria-selected="true">Chats</button>
-        <span class="side-tab-bar" aria-hidden="true">|</span>
-        <button class="side-tab" type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1">Tools</button>
+      <summary class="subjects-sum" id="subjects-sum" title="Show tools and staff overview"><h2 id="subjects-title">Tools | Staff overview</h2><span class="hint subjects-now" id="subjects-now"></span><span class="subjects-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></span></summary>
+      <div class="side-tabs" role="tablist" aria-label="Tools and staff overview">
+        <button class="side-tab" type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="true">Tools</button>
         <span class="side-tab-bar" aria-hidden="true">|</span>
         <button class="side-tab" type="button" role="tab" id="tab-staff" aria-controls="panel-staff" aria-selected="false" tabindex="-1">Staff overview</button>
-        <button class="link side-hide" type="button" id="subjects-hide" title="Hide this panel: the chat takes its room (Show brings it back)">Hide</button>
+        <button class="btn quiet side-hide" type="button" id="subjects-hide" title="Hide this panel: the chat takes its room (the arrow brings it back)" aria-label="Hide this panel"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
       <div class="side-panel" role="tabpanel" id="panel-staff" aria-labelledby="tab-staff" hidden>
         <div class="office" data-office="chat"></div>
         <ul class="staff-overview" id="side-staff"></ul>
       </div>
-      <div class="side-panel" role="tabpanel" id="panel-chats" aria-labelledby="tab-chats">
-        <ul class="rail-list side-chats" id="rail-chats" aria-labelledby="tab-chats"></ul>
-        <button class="link rail-more" type="button" id="rail-chats-more" hidden>Show all chats</button>
-      </div>
-      <div class="side-panel" role="tabpanel" id="panel-tools" aria-labelledby="tab-tools" hidden>
+      <div class="side-panel" role="tabpanel" id="panel-tools" aria-labelledby="tab-tools">
         <p class="hint subjects-with" id="subjects-with"></p>
         <form class="subjects-new" id="subjects-new">
           <div class="field">
@@ -1179,8 +1263,7 @@
 
 <div class="applock" id="applock" hidden>
   <form class="applock-card" id="applock-form">
-    <img class="brand-mark applock-mark" src="icon.svg" alt="" width="30" height="30">
-    <h1 id="applock-title">Access is restricted.</h1>
+    <div class="applock-head"><img class="brand-mark applock-mark" src="icon.svg" alt="" width="30" height="30"><h1 id="applock-title">Access is restricted.</h1></div>
     <div class="fault" id="applock-fault" role="alert" hidden></div>
     <div class="applock-row applock-pin-row">
       <input id="applock-open-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="current-password" aria-label="PIN" placeholder="PIN" required>
@@ -1188,7 +1271,7 @@
     </div>
     <div class="lock-pad" id="applock-pad" role="group" aria-label="Number pad" hidden></div>
     <p class="hint applock-off-note" id="applock-off-note">You can disable pin locks in Settings, Data and lock</p>
-    <button class="btn quiet lock-recover-open" type="button" id="applock-recover-open" hidden>Use a recovery code</button>
+    <button class="link lock-recover-open" type="button" id="applock-recover-open" hidden>Use a recovery code</button>
     <p class="hint" id="applock-about" hidden></p>
     <div class="applock-node" id="applock-node" hidden>
       <div class="applock-row" id="applock-ask-row">
@@ -1212,9 +1295,9 @@
       <button type="button" role="radio" aria-checked="true" data-kind="pin">PIN</button>
       <button type="button" role="radio" aria-checked="false" data-kind="password">Password</button>
     </div>
-    <label class="field"><span id="applock-new1-label">New PIN</span><input id="applock-new1" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <label class="field lock-inline"><span id="applock-new1-label">New PIN</span><input id="applock-new1" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
     <p class="hint lock-strength" id="applock-recover-strength" role="status" hidden></p>
-    <label class="field"><span id="applock-new2-label">The new PIN again</span><input id="applock-new2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <label class="field lock-inline"><span id="applock-new2-label">The new PIN again</span><input id="applock-new2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
     <p class="hint" id="applock-recover-rule">4 to 12 digits.</p>
     <div class="team-actions" id="applock-recover-gen-row" hidden><button class="btn quiet" type="button" id="applock-recover-gen">Generate</button><span class="hint" id="applock-recover-gen-words" role="status"></span></div>
     <div class="team-actions">
@@ -1360,6 +1443,7 @@
     <h2 id="new-chat-title">New chat: who with?</h2>
     <p class="hint">Each chat keeps its own messages and pictures.</p>
     <div class="fault" id="new-chat-fault" role="alert" hidden></div>
+    <label class="field new-chat-find"><span>Search staff</span><input id="new-chat-search" type="search" autocomplete="off" placeholder="Name, role or model"></label>
     <ul class="people-grid" id="new-chat-people"></ul>
     <p class="hint"><button class="link" type="button" id="new-chat-team">Hire someone, or give someone their own model…</button></p>
     <form method="dialog"><button class="btn" type="submit">Cancel</button></form>
@@ -1475,15 +1559,16 @@
       <label class="field grow"><span>Name</span><input id="chat-rename-text" type="text" maxlength="80" required autocomplete="off"></label>
       <button class="btn" type="submit">Save the name</button>
     </form>
-    <h3>Mute</h3>
-    <p class="hint" id="chat-mute-about"></p>
-    <div class="team-actions" id="chat-mute-actions"></div>
-    <h3>Empty it</h3>
-    <p class="hint">Every message goes, for good; the chat keeps its name, its documents, its chat log and its pictures.</p>
-    <div class="team-actions" id="chat-clear-actions"><button class="btn" type="button" id="chat-clear">Empty this chat</button></div>
-    <h3>Delete it</h3>
-    <p class="hint" id="chat-delete-about">The chat's messages are deleted for good.</p>
-    <div class="team-actions" id="chat-delete-actions"></div>
+    <h3>Clear chat</h3>
+    <div class="menu-row">
+      <p class="hint">Erase all messages, but retain documents, chat log and images</p>
+      <div class="team-actions" id="chat-clear-actions"><button class="btn" type="button" id="chat-clear">Clear</button></div>
+    </div>
+    <h3>Delete chat</h3>
+    <div class="menu-row">
+      <p class="hint" id="chat-delete-about">Erase this entire chat</p>
+      <div class="team-actions" id="chat-delete-actions"></div>
+    </div>
     <form method="dialog"><button class="btn" type="submit">Close</button></form>
   </div>
 </dialog>
@@ -2002,6 +2087,8 @@
 <script src="sendto.js"></script>
 <script src="notes.js"></script>
 <script src="mute.js"></script>
+<script src="usb.js"></script>
+<script src="manage.js"></script>
 <script src="dlchip.js"></script>
 <script src="notify.js"></script>
 <script src="memory.js"></script>

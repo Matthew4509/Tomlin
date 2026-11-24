@@ -11,6 +11,7 @@ import { isNetworkPath, NETWORK_WHY, overlaps } from '../workspace.ts';
 import { HOME, ROOT, type Routes, chatModels, json, modelsHome } from './core.ts';
 import { hfBusy } from './hf.ts';
 import { images, loadShapes, runOn, runners } from './panes.ts';
+import { drivesHere } from '../jobrun/storage.ts';
 
 const loaded = (state: string | undefined) => state === 'connected' || state === 'loading';
 
@@ -93,7 +94,9 @@ function modelsHere(): { name: string; path: string; bytes: number }[] {
 
 /** What the page shows under "Where models are kept". */
 async function view() {
-  const all = await drives();
+  // The drives as last read, read again behind, as the Storage page does: the page asks often, and each reading
+  // started a PowerShell (about a second). Look again, a folder chosen or a move done reads them afresh first.
+  const all = await drivesHere();
   const dir = modelsHome.dir();
   const missing = modelsHome.missing();
   const waiting = filesToMove(modelsHome.others());

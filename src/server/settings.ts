@@ -14,7 +14,7 @@ import { repoOf } from '../release.ts';
 import { toneOf } from '../persona.ts';
 import { roleOf } from '../staff.ts';
 import * as claude from '../claude.ts';
-import { DEFAULT_RULES, PROJECT_RULES_MAX, RULES_MAX, getRules, readProjectRules, saveProjectRules, rulesBlock, resetRules, saveRules } from '../rules.ts';
+import { DEFAULT_RULES, PROJECT_RULES_MAX, RULES_MAX, getRules, readProjectRules, saveProjectRules, rulesBlock, resetRules, saveRules, projectRulesForModel } from '../rules.ts';
 import * as keep from '../keep.ts';
 import { clearDamaged, damaged } from '../atomic.ts';
 import { BUILD, HOME, PORT, ROOT, type Routes, VERSION, chatModels, hardware, json, publicSettings, ready, runtimes, staff, store, workspaceDir } from './core.ts';
@@ -198,7 +198,8 @@ export const settingsGet: Routes = {
   // ?project=<id>: that project's own rules (jobs/<id>/rules.md), on top of the standing ones.
   '/api/rules/project': async ({ res, url }) => {
     const id = url.searchParams.get('project');
-    return json(res, 200, { project: id, text: await readProjectRules(await workspaceDir(), id), max: PROJECT_RULES_MAX });
+    const root = await workspaceDir();
+    return json(res, 200, { project: id, text: await readProjectRules(root, id), held: (await projectRulesForModel(root, id)).held, max: PROJECT_RULES_MAX });
   },
 };
 

@@ -32,7 +32,8 @@ test('GPU that cannot be used: the fault names the gear wheel and Run on, and do
 test('TOMLIN not answering: it may be restarting after an update; if it does not come back, close this window and open TOMLIN again (Start menu or desktop)', () => {
   const app = read('public/app.js');
   assert.ok(app.includes("throw new Error('TOMLIN is not answering: it may be restarting after an update (about half a minute), or it was closed or stopped. If it does not come back, close this window, then open TOMLIN again (Start menu or desktop shortcut; or Start TOMLIN.cmd in its folder if you run it from there), and try again.');"));
-  assert.ok(app.includes("text: 'TOMLIN is not answering (it may be restarting after an update). If it does not come back, close this window and open TOMLIN again.'"));
+  // The chip at the top: the two sentences on two lines, inside its border.
+  assert.ok(app.includes("'TOMLIN is not answering (it may be restarting after an update).', el('br'), 'If it does not come back, close this window and open TOMLIN again.'"));
   assert.doesNotMatch(app, /is its window still open\?/);
   // The Projects page reconnects by itself: open TOMLIN again is enough there.
   const bridge = read('public/bridge/js/core.js');

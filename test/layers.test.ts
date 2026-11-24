@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BIG_READ_TOKENS, buildLayered, ChatLogs, cleanFoldWait, findInChat, isBigRead, keepBig, layeredFor, layerReadSpeed, LOG_CHARS, logFull, logText, recallLine, shortTokens, startIn, type LayerInput, type LogLine } from '../src/layers.ts';
+import { BIG_READ_TOKENS, buildLayered, ChatLogs, cleanEditedSum, cleanFoldWait, cleanSum, findInChat, isBigRead, keepBig, layeredFor, layerReadSpeed, leaving, LOG_CHARS, logFull, logText, recallLine, shortTokens, startIn, SUM_BLOCK_CHARS, SUM_CHARS, sumAsk, sumsText, type LayerInput, type LogLine, type SumBlock } from '../src/layers.ts';
 import { buildChat, type NoteLine } from '../src/memory.ts';
 import { Store, type ChatLine } from '../src/store.ts';
 
@@ -300,4 +300,127 @@ test('the chat log on disk: add, edit, Done, delete, copy into a carried-on chat
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ---- Fold summaries (the chat's "Sum up what a fold lets go", off unless ticked) ----
+
+const sum = (i: number, text = `- Point ${i}`, n = 4): SumBlock => ({ id: `s${i}`, at: `2026-11-24T10:00:${String(i).padStart(2, '0')}Z`, from: '2026-11-20T09:00:00Z', to: '2026-11-21T09:00:00Z', n, text, by: 'Qwen3 on this PC' });
+
+test('fold summaries as sent: oldest first under their own title, the oldest left out when over the size', () => {
+  assert.deepEqual(sumsText([]), { text: '', ids: [], dropped: 0 });
+  const two = sumsText([sum(1), sum(2)]);
+  assert.match(two.text, /^Earlier in this chat \(summed up by the model/);
+  assert.ok(two.text.indexOf('- Point 1') < two.text.indexOf('- Point 2'));
+  assert.match(two.text, /\(4 messages, 2026-11-20 to 2026-11-21\)/);
+  const many = sumsText(Array.from({ length: 12 }, (_, i) => sum(i, `- ${'x'.repeat(1400)}`)));
+  assert.ok(many.text.length <= SUM_CHARS, `${many.text.length}`);
+  assert.ok(many.dropped > 0);
+  assert.equal(many.ids.at(-1), 's11', 'the newest is always kept');
+  assert.ok(!many.ids.includes('s0'), 'the oldest went first');
+});
+
+test('the messages a fold lets go: from where the last fold started to where this one starts', () => {
+  const h = chat(6);
+  assert.deepEqual(leaving(h, null, 4), h.slice(0, 4), 'no fold before: from the start');
+  const was = { from: h[4].at, n: 4, upper: '', logText: '', ctx: 32768, at: '', parts: [] };
+  assert.deepEqual(leaving(h, was, 8), h.slice(4, 8));
+  assert.deepEqual(leaving(h, was, 4), [], 'the same start ("Send them now"): nothing leaves');
+  assert.deepEqual(leaving(h, was, 2), [], 'a start that moved back: nothing leaves');
+  // Refused and empty lines are never sent, so they are not counted or summed up.
+  const withFault: ChatLine[] = [h[0], { role: 'assistant', content: 'No model', at: 'x', failed: true }, ...h.slice(1)];
+  assert.deepEqual(leaving(withFault, null, 2), h.slice(0, 2));
+});
+
+test('the summary ask: the leaving messages as a transcript, the newest that fit, and what was left out', () => {
+  const h = chat(3, 100);
+  const a = sumAsk(h, 'Sam', 100_000)!;
+  assert.equal(a.turns[0].role, 'system');
+  assert.match(a.turns[0].content, /invent nothing/);
+  assert.match(a.turns[1].content, /^They: Q0 /);
+  assert.match(a.turns[1].content, /Sam: A2 /);
+  assert.equal(a.n, 6);
+  assert.equal(a.skipped, 0);
+  assert.equal(a.from, h[0].at);
+  assert.equal(a.to, h[5].at);
+  const small = sumAsk(h, 'Sam', 250)!;
+  assert.equal(small.n, 2, 'only the newest that fit');
+  assert.equal(small.skipped, 4);
+  assert.equal(small.from, h[4].at);
+  const huge = sumAsk([{ role: 'user', content: 'p'.repeat(10_000), at: 't' }], 'Sam', 500)!;
+  assert.equal(huge.n, 1, 'one message bigger than the room: its start');
+  assert.ok(huge.turns[1].content.length < 700);
+  assert.equal(sumAsk([], 'Sam', 1000), null);
+});
+
+test('a summary is tidied before it is kept: no thinking, no heading, one "- " line each, cut to its size', () => {
+  assert.equal(cleanSum('<think>hmm</think>\n## Summary\nHere is the summary:\n* Sold the upright\n2. Van booked for Friday\nPrice   £400'), '- Sold the upright\n- Van booked for Friday\n- Price £400');
+  assert.equal(cleanSum('   \n'), '');
+  assert.ok(cleanSum(Array.from({ length: 80 }, (_, i) => `- line ${i} ${'w'.repeat(40)}`).join('\n')).length <= SUM_BLOCK_CHARS);
+});
+
+test('fold summaries sit under the log, change only at a fold, and are not sent at all when the tick is off', () => {
+  const lg = [log('decision', 'Sell the upright', 1)];
+  const off = buildLayered(base({ history: chat(2), log: lg }));
+  assert.ok(!off.parts.some(p => p.key === 'sums'), 'off: no summary layer, not even an empty one');
+  const empty = buildLayered(base({ history: chat(2), log: lg, sums: [] }));
+  assert.equal(empty.parts.find(p => p.key === 'sums')?.state, 'none');
+  const first = buildLayered(base({ history: chat(2), log: lg, sums: [sum(1, '- The buyer wants it Friday')] }));
+  const sys = first.turns[0].content;
+  assert.ok(sys.indexOf('Sell the upright') < sys.indexOf('The buyer wants it Friday'), 'under his log');
+  assert.equal(first.parts.find(p => p.key === 'sums')?.state, 'whole');
+  // A new summary (or one he changed) waits for the next fold, as his log lines do: the start stays byte-identical.
+  const later = buildLayered(base({ history: [...chat(2), ...chat(1, 600, 2)], sent: first.sent, log: lg, sums: [sum(1, '- The buyer wants it Friday'), sum(2, '- New')] }));
+  assert.equal(later.folded, false);
+  assert.equal(later.turns[0].content, sys);
+  assert.equal(later.logWaiting, true);
+  // "Send them now" (stale): the new one goes in, the same messages stay.
+  const now = buildLayered(base({ history: [...chat(2), ...chat(1, 600, 2)], sent: { ...first.sent, stale: true }, log: lg, sums: [sum(1, '- The buyer wants it Friday'), sum(2, '- New')] }));
+  assert.equal(now.folded, true);
+  assert.equal(now.older, first.older);
+  assert.ok(now.turns[0].content.includes('- New'));
+  assert.equal(now.logWaiting, false);
+});
+
+test('fold summaries on disk: added by the fold, changed or deleted by him, never copied into a carried-on chat', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tomlin-sums-'));
+  try {
+    const logs = new ChatLogs(new Store(dir));
+    const id = 'a1b2c3d4e5f6';
+    assert.equal(await logs.addSum(id, { from: 'a', to: 'b', n: 2, text: '  \n', by: 'm' }), null, 'an empty summary is not kept');
+    const s = (await logs.addSum(id, { from: 'a', to: 'b', n: 2, text: '* Sold it', by: 'm' }, '2026-11-24T10:00:00Z'))!;
+    assert.equal(s.text, '- Sold it');
+    await logs.add(id, 'fact', 'Van is 3.5 t');
+    assert.deepEqual((await logs.read(id)).sums.map(x => x.text), ['- Sold it'], 'his log and the summaries live side by side');
+    const changed = await logs.editSum(id, s.id, 'Sold it for £400');
+    assert.ok(!('error' in changed) && changed.text === 'Sold it for £400', 'kept as he typed it');
+    assert.ok('error' in (await logs.editSum(id, s.id, '   ')));
+    assert.ok('error' in (await logs.editSum(id, 'nope', 'x')));
+    const other = 'f6e5d4c3b2a1';
+    await logs.copy(id, other);
+    assert.deepEqual((await logs.read(other)).sums, []);
+    assert.equal(await logs.removeSum(id, s.id), true);
+    assert.equal(await logs.removeSum(id, s.id), false);
+    assert.deepEqual((await logs.read(id)).sums, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a fold never sums up again what an earlier summary covers', () => {
+  const h = chat(6);
+  const gone = { from: 'not there any more', n: 4, upper: '', logText: '', ctx: 32768, at: '', parts: [] };
+  assert.deepEqual(leaving(h, gone, 8, h[3].at), h.slice(4, 8), 'the last start was deleted: from after the newest summary, not the chat start');
+  const back = { from: h[2].at, n: 2, upper: '', logText: '', ctx: 32768, at: '', parts: [] };
+  assert.deepEqual(leaving(h, back, 8, h[5].at), h.slice(6, 8), 'the start moved back after a summary: only what it did not cover');
+  assert.deepEqual(leaving(h, back, 6, h[5].at), [], 'all of it summed up already: nothing to ask for');
+});
+
+test('one summary line longer than the cap is cut, not lost; his edits keep his own words', () => {
+  const long = 'x'.repeat(SUM_BLOCK_CHARS + 200);
+  const cut = cleanSum(long);
+  assert.ok(cut.length > 0 && cut.length <= SUM_BLOCK_CHARS, 'a single long paragraph from the model is kept, cut to size');
+  const edit = 'y'.repeat(SUM_BLOCK_CHARS - 1);
+  assert.equal(cleanEditedSum(edit), edit, 'an edit as long as the box allows is kept whole');
+  assert.equal(cleanEditedSum('# My heading\nSummary of the boat:\n  two  spaces kept\n\n'), '# My heading\nSummary of the boat:\ntwo  spaces kept', 'nothing of his is dropped or rewritten, only blank lines and end spaces');
+  assert.equal(cleanEditedSum('  \n '), '', 'nothing but spaces is empty');
 });

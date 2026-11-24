@@ -500,7 +500,8 @@ async function status() {
     // The window's first page when a copy is there: what was found, then the choices (src/installer.ts windowMenu).
     const menu = inst.windowMenu(was.version, lines.version, was.dir, P.root, lines.home);
     console.log(`found=${was.dir}`);
-    console.log(`intro=${menu.intro}`);
+    // One status line each: the intro's line breaks go as | (no Windows path holds one); setup.cs turns them back.
+    console.log(`intro=${menu.intro.replace(/\n/g, '|')}`);
     for (const c of menu.choices) console.log(`choice=${c.key}|${c.label}`);
     console.log(`pick=${menu.pick}`);
     console.log(`removes=${menu.uninstall}`);

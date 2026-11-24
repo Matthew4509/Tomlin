@@ -30,7 +30,9 @@ export const TEST_CHECK_MS = 2_000;
 
 /** What the linked PC asks for, as checked here. */
 export interface TestAsk {
-  target: 'echo' | 'rpc';
+  /** dllama: a distributed-llama worker of this PC's own copy (tools/dllama), for the engine test of
+   * docs/PLAN-2026-11-23-DISTRIBUTED-LLAMA-TEST.md; one stream is one worker, started for it and stopped with it. */
+  target: 'echo' | 'rpc' | 'dllama';
   /** The bytes after the opening are not sealed. */
   plain: boolean;
   /** The llama.cpp build its runner talks to ("b11284"); '' for the first this PC has. */
@@ -45,6 +47,37 @@ export interface TestAsk {
   node: number;
   /** Lend only the RAM and cores, not the card. */
   cpu: boolean;
+}
+
+/** Whether a CPU name is one without AVX2 (Xeon E5 v1 and v2, as in the Z820 class), so the AVX build is used. */
+export const noAvx2 = (cpu: string): boolean => /Xeon.*E5-\d{4}/i.test(cpu) && !/v[34]\b/i.test(cpu);
+/** The distributed-llama program in an app copy for a CPU of this name (inside the app folder). In tools/, not runtime/:
+ * a node before 2.1.17 refuses an update that names a folder it does not know, and tools/ it knows. */
+export const dllamaFile = (cpu: string): string => `tools/dllama/${noAvx2(cpu) ? 'dllama-avx.exe' : 'dllama-avx2.exe'}`;
+
+/** How long, in words ("2 min 14 s"). */
+export const lasted = (ms: number): string => (ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);
+/** A stream the asking PC closes sooner than this is a short one: counted, not written line by line. */
+export const SHORT_MS = 5_000;
+/** ...and carries less than this each way (llama.cpp's check sends a few bytes; a real session sends far more). */
+export const SHORT_BYTES = 1024;
+/** How often the count of short streams is written (once a minute at most, and only when there were some). */
+export const SHORT_SUM_MS = 60_000;
+const shorts = new Map<string, { n: number; timer: ReturnType<typeof setTimeout> }>();
+/** Counts one short stream for `who`; the first of a minute starts the count, written when the minute is up. */
+export function shortStream(say: (line: string) => void, who: string, sumMs = SHORT_SUM_MS): void {
+  const had = shorts.get(who);
+  if (had) {
+    had.n++;
+    return;
+  }
+  const timer = setTimeout(() => {
+    const n = shorts.get(who)?.n ?? 0;
+    shorts.delete(who);
+    say(`Cluster test for "${who}": ${n} short stream${n === 1 ? '' : 's'} (under ${SHORT_MS / 1000} s each, closed by that PC: llama.cpp checking the server) in the last minute, not written one by one.`);
+  }, sumMs);
+  timer.unref?.();
+  shorts.set(who, { n: 1, timer });
 }
 
 /** How long a stream's end reason is kept for the linked PC to ask, and the most kept at once. */
@@ -69,7 +102,7 @@ export function endReason(hash: string, nonce: string, now = Date.now()): string
 export function readAsk(body: Record<string, unknown>): TestAsk | string {
   const nonce = Buffer.from(String(body.nonce ?? ''), 'base64url');
   if (nonce.length !== 16) return 'a cluster test request was not in the expected form';
-  const target = body.target === 'rpc' ? 'rpc' : body.target === undefined || body.target === 'echo' ? 'echo' : null;
+  const target = body.target === 'rpc' || body.target === 'dllama' ? body.target : body.target === undefined || body.target === 'echo' ? 'echo' : null;
   if (!target) return `there is no cluster test "${String(body.target)}" here`;
   const build = typeof body.build === 'string' && /^b\d{3,6}$/.test(body.build) ? body.build : '';
   const asked = Number(body.minutes);
@@ -99,7 +132,11 @@ export interface DoorDeps {
   /** Starts an RPC server for one test stream (127.0.0.1 only) and says how to stop it. */
   /** `node`: the CPU socket to keep it on (-1: none). */
   startRpc: (p: maxlend.RpcProgram, node: number) => Promise<{ port: number; stop: () => void }>;
+  /** Starts a distributed-llama worker for one test stream (127.0.0.1 only); absent or null when this copy has none. */
+  startDllama?: (threads: number) => Promise<{ port: number; stop: () => void }> | null;
   say: (line: string) => void;
+  /** Below this a stream the asking PC closes is counted, not written (SHORT_MS; the tests write every one with 0). */
+  shortMs?: number;
 }
 
 /** An in-memory echo: what is written comes back (the probe's far end). */
@@ -137,6 +174,10 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
     deps.say(`Did not open a cluster test (${from}): ${error}`);
     refuse(socket, status, error);
   };
+  // What a fault below must undo: a worker or RPC server already started is stopped, and once the 101 has gone out the
+  // stream is closed rather than answered with an HTTP error inside it.
+  let undo = (): void => undefined;
+  let upgraded = false;
   try {
     if (!share.isPrivateAddress(from)) return no(403, 'This worker only answers PCs on its own home network.');
     if (req.headers.origin) return no(403, 'Web pages cannot use this worker.');
@@ -187,12 +228,52 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       }
       inner = rpc;
       stopRpc = started.stop;
+      undo = () => {
+        rpc.destroy();
+        started.stop();
+      };
+    } else if (ask.target === 'dllama') {
+      let started: { port: number; stop: () => void } | null;
+      try {
+        started = await (deps.startDllama?.(ask.threads) ?? null);
+      } catch (e) {
+        return no(409, `"${st.name}" could not start its distributed-llama worker: ${(e as Error).message}.`);
+      }
+      if (!started) return no(409, `"${st.name}" does not have distributed-llama (it comes with TOMLIN 2.1.17 or newer).`);
+      // The first connection that gets through is the stream's own: a worker takes the first one as its root.
+      const w = await maxlend.reachRpc(started.port, () => socket.destroyed);
+      if (!w || socket.destroyed) {
+        w?.destroy();
+        started.stop();
+        return no(503, `"${st.name}" started its distributed-llama worker, but it did not answer.`);
+      }
+      inner = w;
+      stopRpc = started.stop;
+      undo = () => {
+        w.destroy();
+        started.stop();
+      };
     } else inner = echoStream();
 
     const nodeNonce = newNonce();
     const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url'), plain: ask.plain, target: ask.target, minutes: ask.minutes });
+    upgraded = true;
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: ${CLUSTER_TEST_UPGRADE}\r\nconnection: Upgrade\r\nx-link: ${answer}\r\n\r\n`);
-    deps.say(`Cluster test for "${who.name}": ${ask.target === 'rpc' ? `this PC's RPC server (${ask.cpu ? 'RAM and cores' : ask.all ? 'card, RAM and cores' : 'card'}${ask.threads ? `, ${ask.threads} threads` : ''}${ask.node >= 0 ? `, CPU socket ${ask.node}` : ''})` : 'an echo'}, ${ask.plain ? 'NOT encrypted' : 'sealed'}, ${ask.minutes} minutes at most.`);
+    const opening = `Cluster test for "${who.name}": ${ask.target === 'dllama' ? `a distributed-llama worker${ask.threads ? ` (${ask.threads} threads)` : ''}` : ask.target === 'rpc' ? `this PC's RPC server (${ask.cpu ? 'RAM and cores' : ask.all ? 'card, RAM and cores' : 'card'}${ask.threads ? `, ${ask.threads} threads` : ''}${ask.node >= 0 ? `, CPU socket ${ask.node}` : ''})` : 'an echo'}, ${ask.plain ? 'NOT encrypted' : 'sealed'}, ${ask.minutes} minutes at most.`;
+    // A short stream that the asking PC closes (llama.cpp opens one to check a server, many a second) is counted, not
+    // written: two lines each filled the log. Its opening is written once it has lasted SHORT_MS, and every other end.
+    const since = Date.now();
+    // What the stream itself carries is counted from here (the opening request and its answer are left out).
+    const base = { in: (socket as Socket).bytesRead ?? 0, out: (socket as Socket).bytesWritten ?? 0 };
+    const short = deps.shortMs ?? SHORT_MS;
+    let told = short <= 0;
+    if (told) deps.say(opening);
+    const tell = told ? undefined : setTimeout(() => {
+      told = true;
+      deps.say(opening);
+    }, short);
+    // A dead network (the other PC gone without a word) is noticed by the system's keep-alive, not only at the time limit.
+    (socket as Socket).setKeepAlive?.(true, 15_000);
 
     let ended = '';
     // Which end closed first, for an end with no other reason (a sealed pipe ending destroys both at once after).
@@ -204,10 +285,17 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       keepEnd(hash, ask.nonce, ended);
       clearTimeout(limit);
       clearInterval(check);
+      clearTimeout(tell);
+      const moved = { in: (socket as Socket).bytesRead ?? 0, out: (socket as Socket).bytesWritten ?? 0 };
       socket.destroy();
       inner.destroy();
       stopRpc();
-      deps.say(`Cluster test for "${who.name}" ended: ${ended}.`);
+      const ms = Date.now() - since;
+      // Only a check carries next to nothing each way; a real session that fails fast is written in full.
+      const little = moved.in - base.in < SHORT_BYTES && moved.out - base.out < SHORT_BYTES;
+      if (!told && ms < short && ended === byAsker && little) return shortStream(deps.say, who.name);
+      if (!told) deps.say(opening);
+      deps.say(`Cluster test for "${who.name}" ended: ${ended} (after ${lasted(ms)}, ${(moved.in / 2 ** 20).toFixed(1)} MB in, ${(moved.out / 2 ** 20).toFixed(1)} MB out).`);
     };
     const limit = setTimeout(() => end(`its ${ask.minutes} minutes were up`), ask.minutes * 60_000);
     const check = setInterval(() => {
@@ -215,10 +303,12 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       if (stop) end(stop);
     }, TEST_CHECK_MS);
     const byAsker = 'the asking PC closed the stream (or the network between the PCs dropped)';
-    const byInner = ask.target === 'rpc' ? "this PC's RPC server closed the connection (it stopped, or llama.cpp there ended the session)" : 'the echo here ended';
+    const byInner = ask.target === 'dllama' ? "this PC's distributed-llama worker closed the connection (its run ended, or it stopped)" : ask.target === 'rpc' ?"this PC's RPC server closed the connection (it stopped, or llama.cpp there ended the session)" : 'the echo here ended';
     for (const [s, by] of [[socket, byAsker], [inner, byInner]] as const) {
-      for (const ev of ['end', 'close', 'error']) s.on(ev, () => {
-        first ||= by;
+      for (const ev of ['end', 'close', 'error']) s.on(ev, (e?: unknown) => {
+        // An error keeps its code: "reset by the asking PC (ECONNRESET)" says more than "closed".
+        const code = ev === 'error' ? (e as NodeJS.ErrnoException | undefined)?.code : '';
+        first ||= code ? `${by}: ${(e as Error).message} (${code})` : by;
         if (ask.plain) end('');
       });
     }
@@ -232,6 +322,10 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       void sealedPipe(inner, socket, streamKeys(keys, ask.nonce, nodeNonce, 'node'), 'node', { head }).then(why => end(why));
     }
   } catch (e) {
-    no(500, `The cluster test failed here: ${(e as Error).message}`);
+    undo();
+    if (upgraded) {
+      deps.say(`The cluster test stopped here: ${(e as Error).message}`);
+      socket.destroy();
+    } else no(500, `The cluster test failed here: ${(e as Error).message}`);
   }
 }

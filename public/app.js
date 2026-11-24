@@ -183,6 +183,58 @@ function meterOf(id, fraction, text, title) {
     m.title = title;
     m.setAttribute('aria-label', title);
   }
+  m.dataset.v = String(pc);
+  busiest(m.parentElement);
+}
+
+// ---- The meters folded to the busiest (the top bar shows one ring until opened; kept in this browser) ----
+
+// This PC's row and the linked PC's row open and fold on their own, each kept apart (this PC's keeps the old key).
+const METERS_KEY = 'tomlin-meters';
+const keyOf = box => (box.closest('#bar-node') ? `${METERS_KEY}-node` : METERS_KEY);
+const metersOpen = box => {
+  try {
+    return localStorage.getItem(keyOf(box)) === 'open';
+  } catch {
+    return false;
+  }
+};
+/** Marks the ring reading highest in a row of meters (CPU, GPU, RAM, GPU mem): the one shown while they are folded. */
+function busiest(box) {
+  if (!box?.classList.contains('meters')) return;
+  const rings = [...box.querySelectorAll(':scope > .ring')];
+  const top = rings.reduce((a, r) => (Number(r.dataset.v ?? -1) > Number(a?.dataset.v ?? -1) ? r : a), rings[0]);
+  for (const r of rings) r.classList.toggle('busiest', r === top);
+  foldButton(box);
+}
+/** The small button at the end of a row of meters: open all four, or fold back to the busiest. */
+function foldButton(box) {
+  let b = box.querySelector(':scope > .meters-fold');
+  if (!b) {
+    b = el('button', { class: 'meters-fold', type: 'button' });
+    b.addEventListener('click', () => {
+      try {
+        localStorage.setItem(keyOf(box), metersOpen(box) ? 'folded' : 'open');
+      } catch {
+        // Not kept: it folds or opens for now.
+        box.dataset.folded = box.dataset.folded === '1' ? '0' : '1';
+      }
+      // Only this row: the other keeps its own way.
+      drawMetersFold(box);
+    });
+    box.append(b);
+  }
+  drawMetersFold(box);
+}
+function drawMetersFold(box) {
+  const b = box.querySelector(':scope > .meters-fold');
+  if (!b) return;
+  const open = box.dataset.folded === '0' || (box.dataset.folded !== '1' && metersOpen(box));
+  box.classList.toggle('folded', !open);
+  b.textContent = open ? '‹' : '›';
+  b.title = open ? 'Show only the busiest meter' : 'Show all four meters: CPU, GPU, RAM and graphics memory';
+  b.setAttribute('aria-label', b.title);
+  b.setAttribute('aria-expanded', String(open));
 }
 
 const pct = (used, total) => (total ? `${Math.round((used / total) * 100)}%` : '–');
@@ -314,7 +366,7 @@ function drawActive(s) {
   const rows = [];
   if (llm.length) rows.push(el('div', { class: 'active-row' }, el('span', { class: 'active-k', text: 'Chat' }), ...llm.map(v => chip(v, 'Chat model'))));
   if (pics.length) rows.push(el('div', { class: 'active-row' }, el('span', { class: 'active-k', text: 'Images' }), ...pics.map(v => chip(v, 'Picture model'))));
-  if (!rows.length) rows.push(el('span', { class: 'hint', text: 'No models loaded' }));
+  // Nothing loaded: nothing said (the top bar shows a model only while one is loaded).
   const box = $('#loaded');
   // Asked every second: drawn again only when it changes, so a press on Drop is never lost to a redraw.
   if (box.innerHTML !== rows.map(r => r.outerHTML).join('')) box.replaceChildren(...rows);
@@ -956,7 +1008,7 @@ async function poll() {
     }
   } catch {
     serverLost = true;
-    $('#loaded').replaceChildren(el('span', { class: 'chip', text: 'TOMLIN is not answering (it may be restarting after an update). If it does not come back, close this window and open TOMLIN again.' }));
+    $('#loaded').replaceChildren(el('span', { class: 'chip chip-down' }, 'TOMLIN is not answering (it may be restarting after an update).', el('br'), 'If it does not come back, close this window and open TOMLIN again.'));
   } finally {
     polling = false;
   }
@@ -1318,7 +1370,7 @@ function chatText(r, saved) {
   const name = app.chatPerson?.name ?? 'They';
   const when = at => (at ? new Date(at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
   const byApp = l => l.ran === 'written by the app, no model';
-  const head = [r.chat?.title || 'Chat', `${$('#chat-with').textContent}${$('#chat-pc').textContent ? ` on ${$('#chat-pc').textContent}` : ''}`, saved ? `Saved ${when(new Date().toISOString())}` : ''].filter(Boolean);
+  const head = [r.chat?.title || 'Chat', $('#chat-who-box').dataset.full || $('#chat-with').textContent, saved ? `Saved ${when(new Date().toISOString())}` : ''].filter(Boolean);
   const opening = r.chat?.opening ? [`This chat carries on from an earlier one. The handoff it started with:\n${r.chat.opening}`] : [];
   const body = r.lines.filter(l => l.content || l.picture).map(l => {
     const who = l.role === 'user' ? 'You' : byApp(l) ? 'TOMLIN' : name;
@@ -1961,6 +2013,30 @@ async function addDocs(files) {
   }
 }
 $('#doc-add').addEventListener('click', () => $('#doc-file').click());
+
+// ---- Options (bottom left of the chat box): Quick or Think, Web and Max in a menu that opens upward ----
+// The switches are the same buttons as before (thinkPick, webPick, maxPick keep their state); the button names what is
+// on ("Options · Think · Web"), so nothing is hidden by being in the menu.
+const optionsOpen = $('#chat-options-open');
+const optionsMenu = $('#chat-options-menu');
+function drawOptions() {
+  const on = [thinkOn() ? 'Think' : '', webOn() ? 'Web' : '', maxOn() ? 'Max' : ''].filter(Boolean);
+  optionsOpen.textContent = ['Options', ...on].join(' · ');
+}
+function showOptions(open) {
+  optionsMenu.hidden = !open;
+  optionsOpen.setAttribute('aria-expanded', String(open));
+}
+optionsOpen.addEventListener('click', () => showOptions(optionsMenu.hidden));
+document.addEventListener('click', e => { if (!optionsMenu.hidden && !e.target.closest('#chat-options')) showOptions(false); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !optionsMenu.hidden) {
+    showOptions(false);
+    optionsOpen.focus();
+  }
+});
+new MutationObserver(drawOptions).observe(optionsMenu, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'], childList: true, characterData: true });
+drawOptions();
 $('#doc-file').addEventListener('change', e => {
   const files = [...e.target.files];
   e.target.value = '';

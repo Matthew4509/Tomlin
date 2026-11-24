@@ -156,6 +156,11 @@ static class TomlinTray
         // Gone back from a new copy that never started: this copy points "Start with Windows" at itself again.
         if (failedDir != null) si.EnvironmentVariables["TOMLIN_FAILED"] = failedDir;
         else si.EnvironmentVariables.Remove("TOMLIN_FAILED");
+        // A new copy is told where the one before it is: it leaves .started-ok once it is fully up (src/server.ts), and
+        // only then is the way back given up. Its holding page answers before that, while it may still fail.
+        if (previousDir != null) si.EnvironmentVariables["TOMLIN_PREV"] = previousDir;
+        else si.EnvironmentVariables.Remove("TOMLIN_PREV");
+        if (previousDir != null) try { File.Delete(Path.Combine(copyDir, ".started-ok")); } catch { }
         failedDir = null;
         Process proc = new Process();
         proc.StartInfo = si;
@@ -190,10 +195,12 @@ static class TomlinTray
                     icon.ShowBalloonTip(8000, "TOMLIN", "Still starting: the first start of a new version backs up your data first. " + (openWhenReady ? "Its window opens when it is ready." : "Double-click this icon to open it once it is ready."), ToolTipIcon.Info);
                 });
             });
+            // A new copy: waited for here, off the icon's own thread, until it has finished starting.
+            bool whole = up && (previousDir == null || StartedWhole(proc));
             host.BeginInvoke((MethodInvoker)delegate
             {
-                if (child != proc || !up) return;
-                // The new copy answered: the one before it is no longer needed to go back to.
+                if (child != proc || !whole) return;
+                // The new copy answered and finished starting: the one before it is no longer needed to go back to.
                 previousDir = null;
                 icon.Text = "TOMLIN";
                 if (openWhenReady) OpenWindow();
@@ -351,6 +358,23 @@ static class TomlinTray
         File.WriteAllText(tmp, value);
         if (File.Exists(file)) File.Replace(tmp, file, null);
         else File.Move(tmp, file);
+    }
+
+    /** A new copy that has answered: true once it leaves .started-ok (fully up), false if it ends first (up to 10 minutes). */
+    static bool StartedWhole(Process proc)
+    {
+        string ok = Path.Combine(copyDir, ".started-ok");
+        for (int i = 0; i < 1200; i++)
+        {
+            if (child != proc || proc.HasExited) return false;
+            if (File.Exists(ok))
+            {
+                try { File.Delete(ok); } catch { }
+                return true;
+            }
+            Thread.Sleep(500);
+        }
+        return false;
     }
 
     /** True once the copy answers on its port; false if it ended first. `slow` is called once after 90 seconds. */

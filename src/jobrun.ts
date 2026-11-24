@@ -43,16 +43,21 @@ import { downloadLineOn, downloadsView, storeGetOn } from './jobrun/downloads.ts
 import { applyShare, askHost, claimsWaiting, impactOf, lanList, linkedUse, nodeView, projectsCopy, serving, setShare, shareListening, shareState, shareView, startNode, startShare } from './jobrun/node.ts';
 import { remotes } from './jobrun/linking.ts';
 import { goAway } from './jobrun/giveway.ts';
-import { clusterGaps, labelOf } from './jobrun/maxhost.ts';
-import { loaderModelWhy, type ClusterHello } from './cluster/loader.ts';
+import { clusterGaps, labelOf, membersFacts } from './jobrun/maxhost.ts';
+import { linksNeeded, loaderModelWhy, type ClusterHello } from './cluster/loader.ts';
 
 /**
  * The saved cluster for the pages, with a line for each member of a switched-on cluster that cannot lend now (public/home.js
- * shows them). With this PC out of it: the loader's name and the chat models on its disk (the only ones it can load).
+ * shows them). With this PC taking part: `linksNeeded`, what "This PC takes part" off would need first (from what each
+ * member said last). With this PC out of it: the loader's name and the chat models on its disk (the only ones it can load).
  */
 function clusterNow() {
   const c = d.store.peek()?.cluster ?? { on: false, members: [] as string[] };
-  if (!c.out || !c.loader) return { ...c, gaps: clusterGaps() };
+  if (!c.out || !c.loader) {
+    // Only when something is missing: the answer stays as it was otherwise.
+    const need = linksNeeded(membersFacts(c, d.store.peek()?.remotes ?? []));
+    return { ...c, gaps: clusterGaps(), ...(need ? { linksNeeded: need } : {}) };
+  }
   const r = d.store.peek()?.remotes.find(x => x.id === c.loader);
   const models = (lastHello(c.loader)?.models ?? []).filter(m => m.kind === 'chat');
   const name = r ? labelOf(r) : c.loader;
@@ -268,6 +273,8 @@ export interface Hello {
   /** What code that PC runs (src/update.ts buildId): '' from an older TOMLIN, which is then judged by its version alone. */
   build: string;
   memory: unknown;
+  /** It runs from a Bootable USB stick (Linux): updated by minting the stick again, not by an update sent from here. */
+  usb?: boolean;
   /** What this worker understands: 'turns' (a whole chat), 'draw' (pictures). An older worker sends none. */
   can: string[];
   image: { model: string | null; name: string | null; styles: string[]; swaps: boolean; coverage: ReturnType<typeof brains.styleCoverage> } | null;

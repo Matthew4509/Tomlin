@@ -204,7 +204,7 @@ export function modelsHere() {
 }
 
 /** This PC's processor, as the PC window's Specifications show it. */
-export const cpuHere = () => ({ name: hardware.cpuName, cores: hardware.cores, threads: hardware.threads });
+export const cpuHere = () => ({ name: hardware.cpuName, cores: hardware.cores, threads: hardware.threads, ...(hardware.sockets ? { sockets: hardware.sockets } : {}) });
 
 async function nodesView() {
   const s = await store.settings();

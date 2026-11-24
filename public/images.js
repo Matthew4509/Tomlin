@@ -541,6 +541,9 @@ async function drawGallery(more = false) {
     galleryList = galleryList.concat(g.pictures);
     galleryTotal = g.total;
     $('#g-drafts').textContent = g.drafts ? String(g.drafts) : '';
+    // Under 2 GB free where pictures are kept: a reminder only, pictures still save.
+    $('#img-lowdisk').textContent = g.lowDisk ?? '';
+    $('#img-lowdisk').hidden = !g.lowDisk;
     appendTiles(g.pictures);
     drawTools();
     if (!galleryList.length) {

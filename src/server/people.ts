@@ -96,15 +96,28 @@ export async function setWho(to: string): Promise<string> {
 }
 
 /**
+ * This PC's chat or picture models, by id and short name, read once per turn of the event loop: a page asks for every
+ * hire's model in one go, and each read checks every model file on disk (1,000 staff took Home 28 seconds).
+ */
+let hereNow: { chat?: { id: string; name: string }[]; picture?: { id: string; name: string }[] } | null = null;
+function modelsHere(picture: boolean): { id: string; name: string }[] {
+  if (!hereNow) {
+    hereNow = {};
+    setImmediate(() => { hereNow = null; });
+  }
+  return picture
+    ? (hereNow.picture ??= images.list().filter(x => x.installed).map(x => ({ id: x.id, name: shortName(x.name.replace(/\s*\(.*\)$/, '')) || x.name })))
+    : (hereNow.chat ??= chatList().map(x => ({ id: x.id, name: shortName(x.name) || x.name })));
+}
+
+/**
  * The model a hire uses now and whether it is here (src/hiremodel.ts): the one answer All staff, Edit staff, New chat,
  * the chat's head and the left panel all show. A linked PC's models are as it last said (kept while it is off).
  */
 export function hireModelOf(m: StaffMember): HireModel {
   const s = store.peek();
   const picture = !!roleOf(m.role).kind;
-  const here = picture
-    ? images.list().filter(x => x.installed).map(x => ({ id: x.id, name: shortName(x.name.replace(/\s*\(.*\)$/, '')) || x.name }))
-    : chatList().map(x => ({ id: x.id, name: shortName(x.name) || x.name }));
+  const here = modelsHere(picture);
   const pcs = (s?.remotes ?? []).map(r => {
     const h = jobRoutes.lastHello(r.id);
     const list = h?.can?.includes('models') ? h.models : r.models ?? null;
@@ -218,7 +231,8 @@ async function chatsView() {
   // A picture list that cannot be read now (the Images pane says so) does not take the chats away.
   const pics = await images.gallery.countByChat().catch(() => ({} as Record<string, number>));
   const nameOf = (who: string) => people.find(p => p.who === who) ?? (who.startsWith('node:') ? { name: 'Someone on another PC', avatar: '?', role: 'Worked on a linked PC (linked PCs no longer lend staff)' } : who.startsWith('staff:') ? leftPerson(who.slice(6), staff.leaver(who.slice(6))) : { name: HOST_NAME, avatar: '?', role: '' });
-  // left: with someone who left the team (the Chats tab can hide them, or clear them together).
+  // left: with someone who left the team (All chats can hide them, or clear them together).
+  await chats.fillPreviews().catch(() => undefined);
   const list = (await chats.list()).map(c => {
     const p = nameOf(c.who);
     const here = chatPersonHere(c.who);

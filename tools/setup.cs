@@ -288,7 +288,7 @@ class Wizard : Form
             if (k == "version") r.Version = v; else if (k == "installed") r.Installed = v; else if (k == "root") r.Root = v;
             else if (k == "exe") r.Exe = v; else if (k == "home") r.Home = v; else if (k == "vcrt") r.Vcrt = v;
             else if (k == "rule") r.Rule = v; else if (k == "autostart") r.Autostart = v; else if (k == "user") r.User = v;
-            else if (k == "found") r.Found = v; else if (k == "intro") r.Intro = v; else if (k == "pick") r.Pick = v; else if (k == "removes") r.Removes = v;
+            else if (k == "found") r.Found = v; else if (k == "intro") r.Intro = v.Replace("|", "\r\n"); else if (k == "pick") r.Pick = v; else if (k == "removes") r.Removes = v;
             else if (k == "choice") { int bar = v.IndexOf('|'); if (bar > 0) r.Choices.Add(new string[] { v.Substring(0, bar), v.Substring(bar + 1) }); }
         });
         if (r.Version.Length == 0) throw new Exception("no status");
@@ -404,7 +404,7 @@ class Wizard : Form
                 pWelcome.Controls.Add(r); radios.Add(r);
                 y += 34;
             }
-            Text2(pWelcome, "Whichever you pick, your chats, staff, pictures and models in " + info.Home + " are kept. Cancel closes setup and changes nothing.", 26, y + 10, 548, 64);
+            Text2(pWelcome, "Uninstall won't remove content, which is saved in " + info.Home + ".", 26, y + 10, 548, 64);
         }
         pageOf["welcome"] = pWelcome;
 

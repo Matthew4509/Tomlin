@@ -8,11 +8,28 @@ import * as ws from './workspace.ts';
 import { paramsB, withFileTools } from './staff.ts';
 import { checkSave, looksSecret } from './rules.ts';
 import { secretPath } from './codetools.ts';
+import { OWNED_WHY, ownedByTomlin } from './folders.ts';
 
 /** A file whose name says it holds keys or passwords (the same names git_read refuses, and a few more). */
 export function secretFile(path: string): boolean {
-  const name = path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  return secretPath(path) || /^(credentials?|secrets?|passwords?|service[-_]?account[\w-]*|[\w-]*[-_.](credentials?|secrets?|tokens?|passwords?))\.[a-z]+$/.test(name) || /^(auth|token)s?\.json$/.test(name);
+  const rel = path.replace(/\\/g, '/');
+  const name = rel.split('/').pop()?.toLowerCase() ?? '';
+  // secretPath refuses all of a top-level data\ (TOMLIN's own settings, lock and stick keys, for git_read). In a chat's
+  // folder that is often where tables and documents live, so only its .json files keep that refusal; the rest are read
+  // and still withheld when their text looks like a key (withheldWhy).
+  return secretPath(/^data\//i.test(rel) && !/\.json$/i.test(rel) ? rel.replace(/^data\//i, '_/') : rel) || /^(credentials?|secrets?|passwords?|service[-_]?account[\w-]*|[\w-]*[-_.](credentials?|secrets?|tokens?|passwords?))\.[a-z]+$/.test(name) || /^(auth|token)s?\.json$/.test(name);
+}
+
+/**
+ * Why a file a tool read is not given to the model, or null. Keys and passwords are never read, as git_read and
+ * run_command withhold them: by the file's name first, then by what is in it. Every tool that reads a file from the
+ * chat's folder goes through this (read_file here; read_document, find_in_text, keep_quote and table_stats in
+ * src/researchtools.ts: audit P6). `text` null: only the name is checked (before a document is opened).
+ */
+export function withheldWhy(path: string, text: string | null): string | null {
+  if (secretFile(path)) return `Not read: ${path} is a file of keys or passwords by its name, so it is never read. Tell the person; do not guess what it holds.`;
+  if (text !== null && looksSecret(text)) return `Not read: ${path} looks like it holds a password, key or token, so it was withheld. Tell the person; do not guess what it holds.`;
+  return null;
 }
 
 /** Offered to a model of 4B or more (or of a size its name does not tell): a 0.8B offered them stopped answering what was asked. */
@@ -182,11 +199,10 @@ export class FileTurn {
       return out.trimEnd();
     }
     if (name === 'read_file') {
-      // Keys and passwords are never read, as git_read and run_command withhold them: by the file's name first, then by what is in it.
       const r = await ws.read(this.root, a.path);
       if ('error' in r) return r.error;
-      if (secretFile(r.path)) return `Not read: ${r.path} is a file of keys or passwords by its name, so it is never read. Tell the person; do not guess what it holds.`;
-      if (looksSecret(r.text)) return `Not read: ${r.path} looks like it holds a password, key or token, so it was withheld. Tell the person; do not guess what it holds.`;
+      const withheld = withheldWhy(r.path, r.text);
+      if (withheld) return withheld;
       const parts = Math.max(1, Math.ceil(r.text.length / this.perCall));
       if (parts === 1) return `${r.path}:\n${r.text}`;
       const part = Math.min(parts, Math.max(1, Math.floor(Number(a.part) || 1)));
@@ -194,6 +210,9 @@ export class FileTurn {
       return `${r.path}, part ${part} of ${parts}${more}:\n${r.text.slice((part - 1) * this.perCall, part * this.perCall)}`;
     }
     if (name === 'save_file') {
+      // TOMLIN's own files (jobs\: project rules and plans; the person's notes) are never a model's to write (audit P5).
+      const owned = ws.cleanPath(a.path);
+      if (owned && ownedByTomlin(owned)) return OWNED_WHY(owned);
       // Standing rules, checked in code (src/rules.ts): no empty or gutted save, no keys or passwords.
       const was = await ws.read(this.root, a.path);
       const refused = typeof a.text === 'string' ? checkSave('error' in was ? null : was.text, a.text) : null;

@@ -454,14 +454,20 @@ function sound(m: StaffMember): StaffMember {
   const out = RETIRED[m.role] ? { ...m, role: RETIRED[m.role] } : { ...m };
   if (out.parked !== undefined) out.parked = parkedOnly(out.parked);
   if (typeof out.name !== 'string' || !out.name.trim()) out.name = out.id;
-  if (out.group !== undefined && !Array.isArray(out.group)) out.group = [];
   for (const k of ['model', 'fallback', 'active'] as const) if (out[k] !== undefined && typeof out[k] !== 'string') out[k] = null;
+  // One model each (Edit staff, Select model): the other models a hire could be switched to are no longer kept, and a
+  // switch onto one of them ends, so nobody answers on a model their card does not show.
+  delete out.group;
+  if (out.active && out.active !== out.model) out.active = null;
   // No standing fallback any more: a second model that answered on its own hid that the first choice could not (a
   // deleted model answered by another, as the same hire). One saved before is dropped; a first choice that cannot
   // answer is said, and the chat asks what to use instead (public/backup.js).
   if (out.fallback) out.fallback = null;
   return out;
 }
+
+/** The most staff one PC keeps: a team is meant to be about 10; past this every page that lists them gets slow. */
+export const MAX_STAFF = 99;
 
 /** The roster, saved in the data folder as staff.json. Kept in memory, written whole through a temporary file. */
 export class Staff {
@@ -510,6 +516,7 @@ export class Staff {
    * listed; such an id is not given out either.
    */
   async hire(name: unknown, role: unknown, level: unknown, model?: unknown, taken: (id: string) => boolean = () => false, look?: unknown): Promise<StaffMember> {
+    if (this.file.staff.length >= MAX_STAFF) throw new Error(`${MAX_STAFF} staff is the most TOMLIN keeps. Fire someone before hiring another.`);
     const clean = String(name ?? '').trim().replace(/\s+/g, ' ').slice(0, 30);
     if (!clean) throw new Error('Give them a name first.');
     const base = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'staff';
@@ -545,7 +552,8 @@ export class Staff {
     }
     if (change.parked !== undefined) m.parked = parkedOnly(change.parked);
     if (change.style !== undefined) m.style = change.style === 'cartoon' || change.style === 'photo' || change.style === 'icon' ? change.style : null;
-    if (change.group !== undefined) m.group = Array.isArray(change.group) ? [...new Set(change.group.filter((x): x is string => typeof x === 'string' && !!x && !x.startsWith('remote:')))].slice(0, 12) : [];
+    // Other models a hire may use are no longer kept (see sound()): one model each, changed in Edit staff.
+    if (change.group !== undefined) delete m.group;
     if (change.active !== undefined) m.active = typeof change.active === 'string' && change.active ? change.active : null;
     if (change.tone !== undefined) m.tone = TONES.some(t => t.id === change.tone) ? (change.tone as string) : null;
     if (change.look !== undefined) m.look = cleanLook(change.look);

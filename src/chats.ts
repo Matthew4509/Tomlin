@@ -17,6 +17,8 @@ export interface ChatInfo {
   messages: number;
   /** Set when he gave it a name himself: the first message no longer renames it. */
   named?: boolean;
+  /** Its first message's first 100 characters, on one line (All chats shows it on hover); '' when it has none. */
+  preview?: string;
   /** The handoff this chat started from (written by the model at the end of the chat named in `from`). */
   opening?: string;
   from?: string;
@@ -44,6 +46,8 @@ export interface ChatInfo {
   saveAnswer?: boolean;
   /** Its "Short, mid and long memory" tick is off (src/layers.ts): it works as a chat under 16K does. */
   layersOff?: boolean;
+  /** Its "Sum up what a fold lets go" tick is on: at each fold the model sums up the messages that leave (src/layers.ts). Off unless ticked. */
+  foldSums?: boolean;
   /** Its last answer was built in layers: no "getting large" bar (the oldest messages stop being sent at a fold, and the log keeps what matters). */
   layered?: boolean;
   /** The prompt read speed of its last answer on a linked PC (tokens a second), for the size of its latest messages. */
@@ -68,7 +72,14 @@ export function titleFrom(text: string): string {
 export function describe(info: ChatInfo, lines: ChatLine[], now = new Date().toISOString()): ChatInfo {
   const first = lines.find(l => l.role === 'user' && !l.refused);
   const title = info.named || info.title !== NEW_TITLE || !first ? info.title : titleFrom(first.content);
-  return { ...info, title, messages: lines.length, updated: lines.length !== info.messages ? now : info.updated };
+  return { ...info, title, preview: previewOf(lines), messages: lines.length, updated: lines.length !== info.messages ? now : info.updated };
+}
+
+/** A chat's first message (not a refused one), its first 100 characters on one line: '' when there is none. */
+export const PREVIEW_CHARS = 100;
+export function previewOf(lines: ChatLine[]): string {
+  const first = lines.find(l => l.role === 'user' && !l.refused);
+  return first ? String(first.content ?? '').replace(/\s+/g, ' ').trim().slice(0, PREVIEW_CHARS) : '';
 }
 
 /** A name given to a chat (a subject), as kept: one line, at most 80 characters. */
@@ -225,6 +236,21 @@ export class Chats {
     return this.store.chat(this.file(id));
   }
 
+  /**
+   * Chats saved before previews were kept get theirs from their file, once each (All chats asks for every chat's).
+   * Nothing else about them changes.
+   */
+  async fillPreviews(): Promise<void> {
+    const list = await this.index();
+    let changed = false;
+    for (const c of list) {
+      if (c.preview !== undefined || !c.messages) continue;
+      c.preview = previewOf(await this.store.chat(this.file(c.id)).catch(() => [] as ChatLine[]));
+      changed = true;
+    }
+    if (changed) await this.write();
+  }
+
   /** Called whenever a chat file is written: keeps the list's title, count and time right. */
   async saved(file: string, lines: ChatLine[]): Promise<void> {
     const id = /^chats\/([a-f0-9]{12})\.json$/.exec(file)?.[1];
@@ -236,7 +262,7 @@ export class Chats {
   }
 
   /** Changes a chat's own facts (fill, the handoff answer); the title and count are kept by saved(). */
-  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'max' | 'files' | 'webOk' | 'pinned' | 'saveAnswer' | 'layersOff' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
+  async mark(id: string, patch: Partial<Pick<ChatInfo, 'fill' | 'askedLarge' | 'think' | 'web' | 'max' | 'files' | 'webOk' | 'pinned' | 'saveAnswer' | 'layersOff' | 'foldSums' | 'layered' | 'readSpeed'>>): Promise<ChatInfo | null> {
     const c = (await this.index()).find(x => x.id === id);
     if (!c) return null;
     Object.assign(c, patch);

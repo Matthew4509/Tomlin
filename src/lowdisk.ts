@@ -130,3 +130,12 @@ export class LowDiskWatch {
     return () => clearInterval(t);
   }
 }
+
+/** Under this much free on the drive the gallery is on, the picture pane says so (a reminder only: pictures still save). */
+export const PICTURE_ROOM = 2 * GB;
+
+/** The picture pane's reminder ('' when there is room, or the free space could not be read). `drive`: "C:", or '' when not known. */
+export function pictureRoomLine(free: number | null, drive: string): string {
+  if (free === null || free >= PICTURE_ROOM) return '';
+  return `${drive ? `Drive ${drive}` : 'The drive the gallery is on'} has ${gb(free)} free. Pictures still save; free up space soon.`;
+}

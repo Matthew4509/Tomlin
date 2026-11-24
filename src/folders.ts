@@ -38,6 +38,17 @@ export function keptFromModels(path: string): boolean {
   return new RegExp(`^(${NOTES}|${CHATS})/|(^|/)${ADMIN_NOTES}/`, 'i').test(path);
 }
 
+/**
+ * Files TOMLIN itself keeps in the workspace, which no model's save may write: jobs\ (each project's rules, plan, scope,
+ * design and cards: a planted rules.md goes into every chat and job of that project, a planted plan.json can switch the
+ * web on or add steps) and the person's notes. Refused wherever the chat's folder is, which costs nothing.
+ */
+export function ownedByTomlin(path: string): boolean {
+  return /^jobs(\/|$)/i.test(path.replace(/\\/g, '/').replace(/^\/+/, '')) || new RegExp(`^${NOTES}/|(^|/)${ADMIN_NOTES}/`, 'i').test(path.replace(/\\/g, '/'));
+}
+
+export const OWNED_WHY = (path: string) => `Not saved: ${path} is one of TOMLIN's own files (project plans, rules and cards are under jobs, the person's notes under notes and admin notes), which a model never writes. Save your work under another folder, or tell the person what should change.`;
+
 /** The specialist folder a role hands its work into: the writer's "writer", an artist's or a designer's "images". */
 export function specialistFolder(role: string): string | null {
   return role === 'writer' ? 'writer' : role === 'artist' || role === 'designer' ? 'images' : null;

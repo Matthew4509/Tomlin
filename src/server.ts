@@ -32,6 +32,7 @@ import { backupHomeGet, backupHomePost } from './server/backuphome.ts';
 import { noticesGet, noticesPost, tellChat } from './server/notices.ts';
 import { thispcGet, thispcPost } from './server/thispc.ts';
 import { sitecheckGet, sitecheckPost } from './server/sitecheck.ts';
+import { usbGet, usbPost } from './server/usb.ts';
 import { jobRoutes, startJobs } from './server/jobs.ts';
 import { owedPost, startOwed } from './server/owed.ts';
 import { handInPicture, placesGet, placesPost } from './server/places.ts';
@@ -97,8 +98,8 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(backupHomeGet, toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
-const POST = routesOf(backupHomePost, toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
+const GET = routesOf(usbGet, backupHomeGet, toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
+const POST = routesOf(usbPost, backupHomePost, toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
 
 // The holding page's socket (src/waitdoor.ts) when it is listening, so the port never goes quiet; else a new one.
 // Runner faults and whole answers go to the run history (the crash notice reads it).

@@ -4,6 +4,7 @@
 // to console.error and console.warn lands here too. Help has "Open the log". Tested in test/log.test.ts.
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { onExit } from './exithook.ts';
 
 export const KEEP_DAYS = 7;
 const NAME = /^(\d{4}-\d{2}-\d{2})\.log$/;
@@ -13,9 +14,18 @@ export const MAX_DAY_BYTES = 20 * 2 ** 20;
 
 let dir: string | null = null;
 
-/** Where the log goes from now on; files older than a week are deleted. */
-export function openLog(logDir: string, now = new Date()): void {
+/** Where the log goes from now on; files older than a week are deleted. `repeat`: see REPEAT_MS (shorter in tests). */
+export function openLog(logDir: string, now = new Date(), repeat = REPEAT_MS): void {
+  // A count still waiting belongs to the old place.
+  flushLog();
+  last = { key: '', at: 0, more: 0, lastAt: new Date(0) };
+  repeatMs = repeat;
   dir = logDir;
+  lastDay = '';
+  if (!flushOnExit) {
+    flushOnExit = true;
+    onExit(flushLog);
+  }
   try {
     mkdirSync(dir, { recursive: true });
     prune(now);
@@ -148,9 +158,52 @@ export function logLine(level: 'error' | 'warn' | 'info', where: string, what: s
 let lastDay = '';
 /** Bytes in today's file (read from the file at the first entry of each day, so a restart counts what is there). */
 let dayBytes = 0;
+/** The same entry again within this long is counted, not written (a fault repeating every second fills a day's file). */
+export const REPEAT_MS = 60_000;
+let repeatMs = REPEAT_MS;
+let last = { key: '', at: 0, more: 0, lastAt: new Date(0) };
+let repeatTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Writes how many times the last entry came again, if it did: when something else is written, when its minute is up,
+ * when the log moves and when the app closes. It is timed at the last repeat, so it lands in that day's file.
+ */
+export function flushLog(): void {
+  clearTimeout(repeatTimer);
+  repeatTimer = undefined;
+  if (!last.more) return;
+  const n = last.more;
+  last.more = 0;
+  append(logLine('info', 'log', `The entry above came ${n} more time${n === 1 ? '' : 's'} (not written one by one).`, last.lastAt), last.lastAt);
+}
+
+let flushOnExit = false;
+
 function write(level: 'error' | 'warn' | 'info', where: string, what: string): void {
   if (!dir) return;
   const now = new Date();
+  try {
+    const key = `${level}|${where}|${what}`;
+    if (key === last.key && now.getTime() - last.at < repeatMs) {
+      last.more++;
+      last.lastAt = now;
+      if (!repeatTimer) {
+        repeatTimer = setTimeout(flushLog, Math.max(0, last.at + repeatMs - now.getTime()));
+        repeatTimer.unref?.();
+      }
+      return;
+    }
+    flushLog();
+    last = { key, at: now.getTime(), more: 0, lastAt: now };
+    append(logLine(level, where, what, now), now);
+  } catch {
+    // As above: never let the log stop the app.
+  }
+}
+
+/** One line into today's file, within the day's cap. */
+function append(text: string, now: Date): void {
+  if (!dir) return;
   try {
     const file = join(dir, `${day(now)}.log`);
     // The first entry of a new day prunes, so a PC left on for weeks still keeps one week.
@@ -164,7 +217,7 @@ function write(level: 'error' | 'warn' | 'info', where: string, what: string): v
       }
     }
     if (dayBytes >= MAX_DAY_BYTES) return;
-    let line = logLine(level, where, what, now);
+    let line = text;
     if (dayBytes + line.length >= MAX_DAY_BYTES) line = logLine('warn', 'log', `Today's log reached ${MAX_DAY_BYTES / 2 ** 20} MB, so what goes wrong for the rest of today is not written (the same fault is likely repeating: see the lines above).`, now);
     dayBytes += Buffer.byteLength(line);
     appendFileSync(file, line);

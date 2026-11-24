@@ -1,0 +1,69 @@
+{
+  "note": "What a Bootable USB stick carries, each pinned to one file and checked by SHA-256 (from the publishers' own lists, read 23 Nov 2026; the two sharp parts checked against npm's sha512 on 24 Nov 2026). Settings, Bootable USB, Get the parts downloads them into the home's usb-parts folder once; Mint copies them onto the stick. The llama.cpp builds are b11284, the same build as this PC's Windows runners, so a cluster's RPC servers match. The two @img parts are sharp's Linux build (the picture tools): Mint unpacks them into the stick's node_modules. The CUDA build is only for NVIDIA cards of level 7.5 and newer (RTX 20 and up): Debian 13's NVIDIA driver is 550, and llama.cpp's CUDA 12.8 Linux build has only PTX for Maxwell and Pascal cards, which that driver cannot compile, so those go through Vulkan. The CUDA 13.4 build has no Maxwell or Pascal code at all and is not used.",
+  "debianIso": {
+    "file": "debian-live-13.8.0-amd64-standard.iso",
+    "url": "https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.8.0-amd64-standard.iso",
+    "bytes": 2024095744,
+    "sha256": "fc9822eea307a45ad3ff0ab4649c977658710c681cadbf2ae5efef4347c67394",
+    "use": "written to the stick by Rufus (not by these tools); listed so the person gets the same image"
+  },
+  "parts": {
+    "sharp-linux": {
+      "file": "sharp-linux-x64-0.35.5.tgz",
+      "url": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.5.tgz",
+      "bytes": 186507,
+      "sha256": "556787285d3244c07686a355de5b5a4c4d0019a12785bf24764e756a96ea3334",
+      "npm": "@img/sharp-linux-x64",
+      "licence": "Apache-2.0"
+    },
+    "sharp-libvips-linux": {
+      "file": "sharp-libvips-linux-x64-1.3.4.tgz",
+      "url": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.4.tgz",
+      "bytes": 8219515,
+      "sha256": "e371cb713fc8822c96a0d3fb60a3d092799d0aefab6d7f1fb3b72d8d75f1d109",
+      "npm": "@img/sharp-libvips-linux-x64",
+      "licence": "LGPL-3.0-or-later"
+    },
+    "node": {
+      "file": "node-v24.22.3-linux-x64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.22.3/node-v24.22.3-linux-x64.tar.xz",
+      "bytes": 32064292,
+      "sha256": "4f2b175a6d53a5c617a80dba2676238a0688cef28c6da4eba35c7d844e66fcfb",
+      "licence": "MIT"
+    },
+    "llama-cpu": {
+      "file": "llama-b11284-bin-ubuntu-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-ubuntu-x64.tar.gz",
+      "bytes": 17438632,
+      "sha256": "f53f2534e7ac8df1ef056117d215f1581feb6c426310d6423efac9adcdd5c2c8",
+      "runner": "cpu",
+      "licence": "MIT"
+    },
+    "llama-vulkan": {
+      "file": "llama-b11284-bin-ubuntu-vulkan-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-ubuntu-vulkan-x64.tar.gz",
+      "bytes": 31384589,
+      "sha256": "3b5ddda5a6f53550cf7740b056f94afdeaa1f86c5b93cbcd619821158ba3c9d3",
+      "runner": "vulkan",
+      "licence": "MIT"
+    },
+    "llama-cuda": {
+      "file": "llama-b11284-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/llama-b11284-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "bytes": 171058861,
+      "sha256": "409b69983143dfcdfefb4ad1ae931e318c3ee0210562e7873447ea4573f3199b",
+      "runner": "cuda",
+      "optional": true,
+      "licence": "MIT; CUDA runtime under NVIDIA's licence"
+    },
+    "cudart": {
+      "file": "cudart-llama-b11284-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11284/cudart-llama-b11284-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "bytes": 594377553,
+      "sha256": "c8b9f1d3841458938eeba402acd0f64de83ca281e232300be55d4b9091305edb",
+      "runner": "cuda",
+      "optional": true,
+      "licence": "NVIDIA CUDA runtime licence"
+    }
+  }
+}

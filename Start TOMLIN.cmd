@@ -42,6 +42,7 @@ rem The new copy (pushed from a linked PC) ended before it ever answered: the co
 echo The new version did not start. Starting the version before it again...
 set "TOMLIN_FAILED=%CD%"
 cd /d "%TOMLIN_PREV%"
+if exist "%CD%\runtime\node\node.exe" set "PATH=%CD%\runtime\node;%PATH%"
 set TOMLIN_PREV=
 set TOMLIN_OPEN=
 goto run
@@ -52,6 +53,8 @@ del next-copy.txt
 if not exist "%TOMLIN_NEXT%\src\server.ts" (echo The new version is not in "%TOMLIN_NEXT%". Start TOMLIN from its folder. & pause & exit /b 1)
 set "TOMLIN_PREV=%CD%"
 cd /d "%TOMLIN_NEXT%"
+rem The new copy runs on its own Node.js when it has one (the PATH above named the first copy's).
+if exist "%CD%\runtime\node\node.exe" set "PATH=%CD%\runtime\node;%PATH%"
 set TOMLIN_OPEN=
 echo TOMLIN was updated. Starting the new version in %CD% ...
 goto run

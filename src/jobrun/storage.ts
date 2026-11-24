@@ -3,7 +3,7 @@
 // tick) and a pool's Spread or Mirror. Guests are left out: a guest's host tells it nothing about its drives.
 import * as brains from '../brains.ts';
 import * as dj from '../drivejobs.ts';
-import { drives, drivesKnown, driveOf } from '../modelhome.ts';
+import { drives, drivesKnown, driveOf, type Drive } from '../modelhome.ts';
 import { d } from './shared.ts';
 import { lastHello, remoteStatus } from './links.ts';
 import { wireFor } from './copies.ts';
@@ -46,11 +46,15 @@ const withSet = (pc: string, x: PcDrive): PcDrive => {
   return s && Date.now() - s.at < SET_KEEP_MS ? { ...x, jobs: s.jobs } : x;
 };
 
-/** This PC's drives: as last read, read again behind (a reading takes Windows a few seconds); the first time, read now. */
-async function drivesHere() {
-  if (!drivesKnown().length) return drives().catch(() => []);
-  void drives().catch(() => []);
-  return drivesKnown();
+/**
+ * This PC's drives: as last read, read again behind (a reading takes Windows a few seconds); the first time, read now.
+ * The Storage page and "Where models are kept" (src/server/modelhome.ts) both draw from it. `read` and `known` are
+ * for the tests.
+ */
+export async function drivesHere(read: () => Promise<Drive[]> = drives, known: () => Drive[] = drivesKnown): Promise<Drive[]> {
+  if (!known().length) return read().catch(() => []);
+  void read().catch(() => []);
+  return known();
 }
 
 async function pcsNow(): Promise<PcStorage[]> {

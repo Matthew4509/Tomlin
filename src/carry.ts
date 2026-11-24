@@ -150,6 +150,8 @@ export interface NetPlace {
   copy: boolean;
   /** Why not, in plain words ('' when it can). */
   why: string;
+  /** Kept on a Backups only PC: copied to this PC first, never straight to another linked PC. */
+  backup?: boolean;
 }
 
 export interface NetRow {
@@ -180,11 +182,13 @@ export function networkList(pcs: NetPc[], here: { chatFiles: string[]; pictures:
   const rows = new Map<string, NetRow>();
   const chatHere = new Set(here.chatFiles.map(f => basename(f.replace(/\\/g, '/')).toLowerCase()));
   for (const pc of pcs) {
-    for (const m of pc.models) {
+    // A Backups only PC runs no work, but the models it keeps can be copied from it (its owner's "Sharing of models" tick).
+    const kept = pc.backupsOnly ? (pc.held ?? []).filter(h => !pc.models.some(m => m.id === h.id)) : [];
+    for (const m of [...pc.models, ...kept]) {
       const key = modelKey(m.kind, m.id);
       const row = rows.get(key) ?? { key, name: m.name, kind: m.kind, bytes: m.bytes, here: m.kind === 'image' ? here.pictures.includes(m.id) : chatHere.has(key.slice(5)), on: [] };
       const why = copyWhy(pc, m.id);
-      row.on.push({ pc: pc.id, pcName: pc.name, model: m.id, copy: !why, why });
+      row.on.push({ pc: pc.id, pcName: pc.name, model: m.id, copy: !why, why, ...(kept.includes(m) ? { backup: true } : {}) });
       rows.set(key, row);
     }
   }

@@ -207,6 +207,15 @@ test('the server starts on an empty home, serves the page, and the stops answer 
     assert.equal((await post('/api/chat/layers', { chatId: chatA, on: false })).status, 200);
     assert.equal(((await (await fetch(`${base}/api/chat?id=${chatA}`)).json()) as { chat: { layersOff?: boolean } }).chat.layersOff, true);
     assert.equal((await post('/api/chat/layers', { chatId: chatA, on: true })).status, 200);
+    // Fold summaries: off unless ticked, the tick kept on the chat; a summary is changed or deleted only by him here.
+    assert.equal(((await (await fetch(`${base}/api/chat?id=${chatA}`)).json()) as { chat: { foldSums?: boolean } }).chat.foldSums, undefined, 'off unless ticked');
+    assert.equal((await post('/api/chat/foldsums', { chatId: chatA, on: true })).status, 200);
+    assert.equal(((await (await fetch(`${base}/api/chat?id=${chatA}`)).json()) as { chat: { foldSums?: boolean } }).chat.foldSums, true);
+    assert.equal((await post('/api/chat/foldsums', { chatId: chatA, on: false })).status, 200);
+    assert.equal((await post('/api/chat/foldsums', { chatId: 'gone-chat', on: true })).status, 404);
+    assert.deepEqual(((await (await fetch(`${base}/api/chat/log?chat=${chatA}`)).json()) as { sums: unknown[] }).sums, []);
+    assert.equal((await post('/api/chat/sum', { chatId: chatA, action: 'delete', id: 'nope' })).status, 400);
+    assert.equal((await post('/api/chat/sum', { chatId: chatA, action: 'add', text: 'x' })).status, 400, 'a summary is never added from the page');
     assert.equal((await post('/api/chat/fold', { chatId: chatA })).status, 200);
     const found = (await (await fetch(`${base}/api/chat/find?chat=${chatA}&q=teal`)).json()) as { found: unknown[]; older: number };
     assert.deepEqual(found, { found: [], older: 0 }, 'nothing has left the word-for-word part yet');

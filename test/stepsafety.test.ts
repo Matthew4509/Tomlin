@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { useDeps } from '../src/jobrun/shared.ts';
 import { jobRoot } from '../src/jobrun/jobfiles.ts';
 import { acceptStep, textHash } from '../src/jobrun/steps.ts';
-import { usePairNonce } from '../src/jobrun/node.ts';
+import { keepPairNonces, usePairNonce } from '../src/jobrun/node.ts';
 import type { Job } from '../src/jobs.ts';
 
 const top = await mkdtemp(join(tmpdir(), 'sm-stepsafety-'));
@@ -49,7 +49,17 @@ test('a file changed since the step read it is not overwritten', async () => {
 });
 
 test('a link request is answered once', () => {
-  assert.equal(usePairNonce('abc'), true);
-  assert.equal(usePairNonce('abc'), false);
+  assert.equal(usePairNonce('abcdefgh12'), true);
+  assert.equal(usePairNonce('abcdefgh12'), false);
   assert.equal(usePairNonce(''), false);
+  assert.equal(usePairNonce('two\nlines'), false, 'only a nonce as the link sends it is kept');
+});
+
+test('a link request answered before a restart is still refused after it', async () => {
+  const file = join(top, 'link-asks-seen.txt');
+  keepPairNonces(file);
+  assert.equal(usePairNonce('Q2hhdEJvb2tzLW5vbmNl'), true);
+  keepPairNonces(file);
+  assert.equal(usePairNonce('Q2hhdEJvb2tzLW5vbmNl'), false, 'read back from the disk');
+  assert.equal(usePairNonce('another-nonce-1234'), true);
 });

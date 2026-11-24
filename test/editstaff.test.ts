@@ -21,7 +21,8 @@ test('no tabs: one settings page, its parts in this order: Who, Works on, How th
   assert.doesNotMatch(team, /'Staff settings'|'PC settings'/);
   const edit = fn('drawEdit');
   // On screen: the parts, then Memory (its list loads into its place), then the foot.
-  const order = ["section('Who'", "section('Works on'", 'writingSection(m, section, { software: false })', '...body.filter(Boolean), memory, footer(m)'];
+  // The tone sits under Role in Who (toneLine), not in a part of its own.
+  const order = ["section('Who'", 'toneLine(m)', "section('Works on'", '...body.filter(Boolean), memory, footer(m)'];
   let last = -1;
   for (const part of order) {
     const at = edit.indexOf(part);
@@ -31,18 +32,20 @@ test('no tabs: one settings page, its parts in this order: Who, Works on, How th
   assert.ok(edit.includes("app.notebookList?.(`staff:${m.id}`, 'Memory', nbHint)"), 'Memory is their notebook');
   assert.ok(edit.includes('memory.replaceChildren(nb)'), 'it loads into its place before the foot');
   // Works on: the PC, the models, and the speed folded under one line (its chart and Find the fastest setup inside).
-  // The models sit in the tile of the PC they work on (pcPicker), or under the tiles when that PC is not in the list.
-  assert.match(edit, /const models = modelOptions\(m\);\r?\n  const pcs = pcPicker\(m, sub, models\);/);
+  // The models sit under the PC they work on (workPart); moving them is the Hire staff window, folded behind one line.
+  assert.match(edit, /const models = modelOptions\(m\);\r?\n  const pcs = workPart\(m, models\);/);
   assert.match(edit, /models\.parentNode \? null : sub\('Models', models\)/);
-  assert.match(fn('pcPicker'), /if \(here\) body = el\('div', \{ class: 'pc-pick-here' \}, el\('p', \{ class: 'hint', text: `\$\{first\} works here now\.` \}\), theirModels \?\? null\);/);
+  assert.match(fn('workPart'), /el\('summary', \{ text: 'Move to another PC, see more models' \}\)/);
+  assert.match(fn('workPart'), /onclick: \(\) => app\.openMove\?\.\(m, at\)/);
   assert.match(edit, /el\('details', \{ class: 'sub profile-speed-fold' \}/);
 });
 
-test('How they write keeps only the tone on this page (the software is under Works on, once)', () => {
-  const w = fn('writingSection');
-  assert.match(w, /function writingSection\(m, section, \{ software = true \} = \{\}\)/);
-  assert.match(w, /return section\(software \? 'Software and tone' : 'How they write'/);
-  assert.match(w, /software && brainChoices\(m\)\.length \?/);
+test('Tone for writing: one line under Role, only for a chat hire with a role (a Default hire is sent no instructions)', () => {
+  assert.doesNotMatch(team, /writingSection|'How they write'/);
+  const t = fn('toneLine');
+  assert.match(t, /if \(!tones\.length \|\| m\.kind === 'image' \|\| m\.role === 'default'\) return null;/);
+  assert.match(t, /el\('label', \{ class: 'tone-line'/);
+  assert.match(t, /el\('span', \{ text: 'Tone for writing' \}\)/);
 });
 
 test('the foot: tokens folded ("Tokens used"), and Fire beside them, not on the left under Talk', () => {

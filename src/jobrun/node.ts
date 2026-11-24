@@ -1,12 +1,12 @@
 // This PC as a node for other PCs: its share settings and its worker door. Linking other PCs to this one is
 // linking.ts; giving way to its owner ("I need to use the pc") is giveway.ts.
 import { execFile } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { TooLarge, readBody } from '../bodyread.ts';
 import { callWords, cleanWebAsk, WEB_ROUNDS, WEB_TOOLS, WebTurn } from '../webtools.ts';
 import { webGuard } from '../promptscan.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { networkInterfaces, uptime } from 'node:os';
+import { cpus, networkInterfaces, totalmem, uptime } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as jobs from '../jobs.ts';
@@ -37,6 +37,10 @@ import * as update from '../update.ts';
 import { POWER_DOOR, USED_MINUTES, powerOffSide, shutdownArgs } from '../poweroff.ts';
 import { PERM_CAN, PERM_DOOR, PERM_KEYS, permSetSide, type PermKey } from '../permset.ts';
 import * as hostpin from '../hostpin.ts';
+import * as adminkey from '../adminkey.ts';
+import * as usbnode from '../usbnode.ts';
+import * as usbadmin from '../usbadmin.ts';
+import { startScreen } from '../usbscreen.ts';
 import { lastStart } from '../worker.ts';
 import { loads } from '../loadlog.ts';
 import { cleanRid, GUEST_KEPT, HOST_KEPT, Outbox, replayOf, type Follower, type Kept, type Lock } from '../outbox.ts';
@@ -88,12 +92,51 @@ async function chatCharsHere(): Promise<number> {
 }
 /** The bytes of a chat request for that many characters: sealed (base64), JSON-escaped, and up to 3 bytes a character. */
 const chatBytesFor = (chars: number) => Math.max(600_000, chars * 4 + 65_536);
-/** Link-request nonces already answered while this app runs (the newest 500): a request sent twice is refused. */
+/**
+ * Link-request nonces already answered (the newest PAIR_NONCES_KEPT): a request sent twice is refused. Kept on the disk
+ * too (keepPairNonces), so a guest's link request recorded on the network cannot be sent again after a restart: a guest
+ * pass is not used up by a link, so that copy would otherwise still pass and push the guest's working link off.
+ */
 const pairNonces = new Set<string>();
+export const PAIR_NONCES_KEPT = 2000;
+let pairFile: string | null = null;
+let pairLines = 0;
+/** Keeps the nonces in `file` from now on, and takes back the ones kept there. */
+export function keepPairNonces(file: string): void {
+  pairFile = file;
+  pairNonces.clear();
+  try {
+    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) if (isPairNonce(line.trim())) pairNonces.add(line.trim());
+  } catch {
+    // No file yet: none answered before.
+  }
+  while (pairNonces.size > PAIR_NONCES_KEPT) pairNonces.delete(pairNonces.values().next().value!);
+  writePairNonces();
+}
+const isPairNonce = (n: string) => /^[\w+/=-]{8,64}$/.test(n);
+function writePairNonces(): void {
+  if (!pairFile) return;
+  try {
+    writeFileSync(`${pairFile}.new`, [...pairNonces].map(n => `${n}\n`).join(''));
+    renameSync(`${pairFile}.new`, pairFile);
+    pairLines = pairNonces.size;
+  } catch {
+    // The disk refused: they are still held here while this app runs.
+  }
+}
 export function usePairNonce(nonce: string): boolean {
-  if (!nonce || pairNonces.has(nonce)) return false;
+  if (!isPairNonce(nonce) || pairNonces.has(nonce)) return false;
   pairNonces.add(nonce);
-  if (pairNonces.size > 500) pairNonces.delete(pairNonces.values().next().value!);
+  if (pairNonces.size > PAIR_NONCES_KEPT) pairNonces.delete(pairNonces.values().next().value!);
+  if (pairFile) {
+    try {
+      // Kept before the link is made, so a crash right after cannot let it be sent again.
+      appendFileSync(pairFile, `${nonce}\n`);
+      if (++pairLines > PAIR_NONCES_KEPT * 2) writePairNonces();
+    } catch {
+      // Held here while this app runs.
+    }
+  }
   return true;
 }
 
@@ -197,6 +240,16 @@ function nodePairKey(): Promise<Buffer> {
   const pin = shareState.pinOn ? shareState.pin : '';
   if (!pairKeyNow || pairKeyNow.code !== shareState.code || pairKeyNow.pin !== pin) pairKeyNow = { code: shareState.code, pin, key: link.pairKey(shareState.code, pin) };
   return pairKeyNow.key;
+}
+
+/**
+ * What a minted node adds to its whoami (Bootable USB): the tags of its admin keys (never the keys), that it runs from a
+ * stick, and its hardware in one line, so the admin's scan lists its own nodes and can say which kind each is.
+ */
+export function whoamiExtra(): Record<string, unknown> {
+  // The stick's id is not a secret: it names the stick on its admin's list, and only the stick's own key proves it.
+  if (!usbStick && !shareState.usbNode) return {};
+  return { admin: usbStick ? [adminkey.keyTag(usbStick.adminPub)] : [], ...(usbStick ? { stick: usbStick.stick.id } : {}), usb: true, os: process.platform };
 }
 
 /**
@@ -374,6 +427,18 @@ setInterval(() => { if (line.stuck().length) lineKick(); }, 30_000).unref();
 
 /** Where a link's restore points and pushed update are kept here (see share.ts `keep`). */
 const keepOf = (who: share.ShareState['paired'][number]) => who.keep ?? who.from ?? who.hash.slice(0, 16);
+
+/**
+ * A PC started from a Bootable USB stick has no app lock (nobody sits at it; its screen is not TOMLIN's). There, a link
+ * made with the admin key stands for the app lock PIN: the admin PC that holds the key may update its permissions, take
+ * a host PIN and turn it off. Any other link, and every PC with an app lock, is asked as before.
+ */
+function usbAdminCheck(check: (pin: unknown, who: string, host?: { pin: unknown; link: string | undefined }) => Promise<{ ok: true } | { status: number; error: string }>) {
+  return (pin: unknown, who: string, host?: { pin: unknown; link: string | undefined }) => {
+    if (usbStick && !d.appLockOn() && shareState.paired.some(x => x.byKey === true && keepOf(x) === who)) return Promise.resolve({ ok: true as const });
+    return check(pin, who, host);
+  };
+}
 
 // ---- A3 + A4 (src/owner.ts): whose backups a folder here holds, and a new PC asking for them ----
 
@@ -860,11 +925,51 @@ async function runnerSetHere(b: Record<string, unknown>, by: string): Promise<{ 
 }
 
 /**
+ * How long the cache door watches a load of the model it set: a load already under way read the old settings. `graceMs`:
+ * a load that read them just before the save may not show as loading for a moment, so it is watched that long anyway.
+ */
+export const cacheWatch = { stepMs: 500, graceMs: 5_000, watchMs: 20 * 60_000 };
+
+/** A load of `id` under way here: loading, or held by the speed finder (a test, or the reload after Go with this config or Undo). */
+const loadingNow = (id: string) => d.runnerFor(id)?.view.state === 'loading' || d.finderTesting?.() === id;
+
+/**
+ * After the cache door saved, a load of `id` that started before the save carries the old cache. Once that load is done,
+ * the model loaded, not answering and not keeping its context as saved, it is let go, so its next answer starts with the
+ * saved setting. True when it was let go. A model answering is left as it is (it uses the setting from its next load).
+ */
+export async function cacheAfterLoad(id: string): Promise<boolean> {
+  const t0 = Date.now();
+  let saw = false;
+  for (;;) {
+    if (loadingNow(id)) saw = true;
+    else {
+      const p = d.runnerFor(id);
+      if (p && p.view.state === 'connected') {
+        if (d.busy(p) || lending.has(id)) return false;
+        const want = d.runOf(await d.store.settings(), id);
+        const on = d.runOn(p);
+        // q8_0 loaded where f16 is saved is the load's own pick when f16 crowds the card (src/runset.ts autoCache): kept.
+        if ((on.cache === want.cache || (want.cache === 'f16' && on.cache === 'q8_0' && !want.kvRam)) && !!on.kvRam === !!want.kvRam) return false;
+        await p.disconnect();
+        noted(`${p.view.modelName ?? id} was loading with its old context setting when it was changed, so it was let go: its next answer starts it with a ${runset.cacheWords(want.cache, want.kvRam === true)}.`);
+        return true;
+      }
+      // The load ended with nothing loaded (it failed, or was let go): the next load reads the saved setting.
+      if (saw || Date.now() - t0 >= cacheWatch.graceMs) return false;
+    }
+    if (Date.now() - t0 >= cacheWatch.watchMs) return false;
+    await sleep(cacheWatch.stepMs);
+  }
+}
+
+/**
  * How one of this PC's models keeps its context, for a linked PC: the cache type (f16, q8_0, q4_0) and whether it is in
  * RAM or on the card (src/runset.ts cacheSetAsk). Kept in this PC's own settings, as if set at its own Model settings;
- * a model loaded here and not answering is let go, so its next answer starts with it.
+ * a model loaded here and not answering is let go, so its next answer starts with it. A model loading now (the speed
+ * finder's reload, say) read the old setting: it is let go once loaded, so the setting is not lost (cacheAfterLoad).
  */
-async function cacheSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
+export async function cacheSetHere(b: Record<string, unknown>, by: string): Promise<{ status: number; json: Record<string, unknown> }> {
   const ask = runset.cacheSetAsk(b, d.chatList());
   if ('error' in ask) return { status: ask.status, json: { error: ask.error } };
   const s = await d.store.settings();
@@ -878,10 +983,12 @@ async function cacheSetHere(b: Record<string, unknown>, by: string): Promise<{ s
   const words = runset.cacheWords(cache, kvRam);
   noted(`"${by}" set the context of ${ask.model.name} on this PC to a ${words}.`);
   const p = d.runnerFor(ask.model.id);
-  const letGo = !!p && p.view.state === 'connected' && !d.busy(p);
+  const loading = loadingNow(ask.model.id);
+  const letGo = !loading && !!p && p.view.state === 'connected' && !d.busy(p);
   if (letGo) await p!.disconnect();
-  const when = letGo ? 'It was loaded there and not answering, so it was let go: its next answer starts it with this.' : p ? 'It is answering there now: it uses this from its next load.' : 'It uses this from its next load.';
-  return { status: 200, json: { said: `${ask.model.name} on "${shareState.name}": ${words}. ${when}`, cache, kvRam, letGo } };
+  else void cacheAfterLoad(ask.model.id).catch(e => log.info('node', `The context setting of ${ask.model.name} could not be checked after its load: ${(e as Error).message}`));
+  const when = letGo ? 'It was loaded there and not answering, so it was let go: its next answer starts it with this.' : loading ? 'It is loading there now with the setting it had: once that load is done, and it is not answering, it is let go, so its next answer starts with this.' : p ? 'It is answering there now: it uses this from its next load.' : 'It uses this from its next load.';
+  return { status: 200, json: { said: `${ask.model.name} on "${shareState.name}": ${words}. ${when}`, cache, kvRam, letGo, ...(loading ? { loading: true } : {}) } };
 }
 
 /**
@@ -1257,10 +1364,12 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // A guest pass (src/guestpass.ts) needs no PIN: while a live pass is here, a PC that typed none may be a guest, so
       // its code is tried (and a wrong one counted) before it is told about the PIN. With no pass here, as before.
       const passHere = () => (shareState.passes ?? []).filter(x => guestpass.passUsable(shareState, x));
-      if (shareState.pinOn && b.pinGiven !== true && !passHere().length) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
+      // A request signed with an admin key (Bootable USB): checked only against the admin this stick was minted by.
+      const adminAsk = typeof b.adminSig === 'string';
+      if (!adminAsk && shareState.pinOn && b.pinGiven !== true && !passHere().length) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
-      if (!shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
+      if (!adminAsk && !shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
       // Looked at again now the body is here, and the try counted before the check, so tries sent side by side (each
       // holding its body back until all are in) cannot all slip under the wrong-try limit; a right one clears the count.
       if (tooMany()) return;
@@ -1269,9 +1378,18 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const me = { id: shareState.id, name: shareState.name };
       // The setup code (with the PIN when this PC asks for one), then each live guest pass (no PIN): each a cheap check
       // of the key already made, so trying them all costs no more than one.
-      const setupKey = await nodePairKey();
-      let got = shareState.pinOn && b.pinGiven !== true ? null : link.nodeAnswer(setupKey, b, me, token);
+      let got: { keys: Buffer; answer: unknown } | null = null;
       let pass: guestpass.GuestPass | undefined;
+      // The admin this stick was minted by (Bootable USB): its PC links with no setup code or PIN, proven by a signature
+      // only its private key can make. Nothing on the stick can make it, so a copied stick links to nobody.
+      let byAdminKey = false;
+      if (adminAsk) {
+        got = usbStick ? link.adminNodeAnswer(usbStick.adminPub, usbStick.stick, b, me, token) : null;
+        if (!got) return workerJson(res, 403, { error: usbStick ? 'this PC was minted by another admin PC (or the request is too old: check both clocks). Only that admin can link it; mint the stick again to make it yours.' : 'this PC was not started from a Bootable USB stick, so an admin key does not link it. Use its setup code.' });
+        byAdminKey = true;
+      } else {
+        got = shareState.pinOn && b.pinGiven !== true ? null : link.nodeAnswer(await nodePairKey(), b, me, token);
+      }
       if (!got && b.pinGiven !== true) {
         for (const x of passHere()) {
           got = link.nodeAnswer(Buffer.from(x.key, 'base64url'), b, me, token);
@@ -1305,10 +1423,13 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const name = String(b.name ?? '').replace(/[^\w .'-]/g, '').trim().slice(0, 40) || 'A manager PC';
       // Ten links at most: the oldest goes, and the owner is told which. A guest's link never pushes one out (three per
       // pass at most, its own oldest goes: src/guestpass.ts addLink).
-      const added = guestpass.addLink(kept, { ...(from ? { from } : {}), keep, name, hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString(), ...(pass ? { role: 'guest' as const, passId: pass.id, expires: pass.expires } : {}) });
+      const added = guestpass.addLink(kept, { ...(from ? { from } : {}), keep, name, hash: share.hashToken(token), key: link.keysText(got.keys), at: new Date().toISOString(), ...(pass ? { role: 'guest' as const, passId: pass.id, expires: pass.expires } : {}), ...(byAdminKey ? { byKey: true } : {}) });
       const dropped = added.dropped;
       shareState.paired = added.paired;
-      if (pass) {
+      if (byAdminKey) {
+        // The admin key is not used up: the setup code shown here stays as it was.
+        shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
+      } else if (pass) {
         // A pass is not used up: its owner made it for this PC, and its end date (or Remove) ends it.
         pass.uses += 1;
         pass.lastSeen = new Date().toISOString();
@@ -1318,12 +1439,12 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
       }
       await saveShare();
-      log.info('link', `"${name}" linked to this PC${pass ? ` with the guest pass "${pass.label}"` : ''}.${dropped ? ` The oldest link, "${dropped}", was removed.` : ''}`);
+      log.info('link', `"${name}" linked to this PC${pass ? ` with the guest pass "${pass.label}"` : byAdminKey ? ' with its admin key' : ''}.${dropped ? ` The oldest link, "${dropped}", was removed.` : ''}`);
       d.onLinked?.(name, dropped, pass?.label);
       return workerJson(res, 200, got.answer);
     }
     // Only enough to be found on the home network: that this is TOMLIN, its name, whether it asks for a PIN.
-    if (req.method === 'GET' && p === '/worker/whoami') return workerJson(res, 200, { app: 'smart-manager', name: shareState.name, version: d.version, pin: shareState.pinOn, link: link.LINK_VERSION });
+    if (req.method === 'GET' && p === '/worker/whoami') return workerJson(res, 200, { app: 'smart-manager', name: shareState.name, version: d.version, pin: shareState.pinOn, link: link.LINK_VERSION, ...whoamiExtra() });
     // The link is named by its token's fingerprint: the token itself never crosses the network after linking.
     const named = /^Link ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1];
     const who = share.pairedByHash(shareState, named);
@@ -1388,7 +1509,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // long it has been up, or when its owner is at it: only whether it is busy. Its own tally is at /worker/usage.
       const asGuest = <T extends Record<string, unknown>>(h: T) => {
         // A host's link may give this PC a host PIN (src/hostpin.ts): it is told so, and whether it holds one here now.
-        if (!guest) return { ...h, can: [...(h.can as string[]), hostpin.CAN], hostPin: d.hostPinHeld(who.hash), hostKey: d.hostKeyHeld(who.hash) };
+        if (!guest) return { ...h, can: [...(h.can as string[]), hostpin.CAN], hostPin: d.hostPinHeld(who.hash), hostKey: d.hostKeyHeld(who.hash), ...(usbStick ? { usb: true } : {}) };
         const pass = guestpass.passOf(shareState, who);
         const busy = !!away || line.running().length > 0 || line.waiting().length > 0;
         return { ...h, state: h.state === 'away' ? 'busy' : h.state, busy, away: null, memory: null, meter: null, up: null, installed: null, restarts: false, runner: null, speed: null, can: (h.can as string[]).filter(c => GUEST_CAN.includes(c)), allow: { ...carry.NO_ALLOW, give: allow.give, off: false }, plainLinks: false, ask: null, lentTo: null, cluster: null, disk: null, drives: [], modelsDrive: '', cpu: null, passAsks: [], guest: { label: pass?.label ?? '', expires: pass ? guestpass.linkEnds(who, pass) : who.expires ?? null, caps: nodeline.cleanCaps(shareState.guestCaps) } };
@@ -1810,7 +1931,8 @@ async function applyNow(): Promise<void> {
   shareError = '';
   if (!shareState.on) return;
   // A node must have the app lock (F7 E3): other PCs reach it, so it is never open without one. Without its PIN (the file deleted), the node does not listen.
-  if (!d.appLockOn()) {
+  // A Bootable USB node has none: nobody sits at it, its screen is not TOMLIN's, and the admin key guards its link.
+  if (!d.appLockOn() && !usbStick) {
     shareError = 'a node must have the app lock. Set a PIN with the padlock (top right) and the node starts again.';
     return;
   }
@@ -1832,7 +1954,14 @@ async function applyNow(): Promise<void> {
 
 export async function startShare() {
   try {
-    shareState = { ...share.DEFAULT_SHARE, ...(await d.store.readJson<Partial<share.ShareState>>('share.json', {})) };
+    const saved = await d.store.readJson<Partial<share.ShareState> | null>('share.json', null);
+    shareState = { ...share.DEFAULT_SHARE, ...(saved ?? {}) };
+    // Started from a Bootable USB stick: node mode on and the admin key from the stick (src/usbnode.ts).
+    const stick = usbnode.readStick();
+    if (stick) {
+      shareState = usbnode.applyStick(shareState, stick, !saved);
+      usbStick = stick;
+    }
     // Guest passes as kept (src/guestpass.ts): one that is not whole is dropped.
     shareState.passes = guestpass.cleanPasses(shareState.passes);
     shareState.passAsks = guestpass.keepAsks(guestpass.cleanAsks(shareState.passAsks));
@@ -1855,16 +1984,35 @@ export async function startShare() {
   }
   claims = owner.cleanClaims(await d.store.readJson<unknown>(CLAIMS_FILE, []).catch(() => []));
   // Each PC has its own setup code, made the first time and kept.
-  if (!shareState.code || !/^[0-9a-f]{8}$/.test(shareState.id)) {
+  if (!shareState.code || !/^[0-9a-f]{8}$/.test(shareState.id) || usbStick) {
     shareState.code ||= share.newCode();
     if (!/^[0-9a-f]{8}$/.test(shareState.id)) shareState.id = randomBytes(4).toString('hex');
     await saveShare();
   }
   autostart = await d.autostart.on().catch(() => false);
   if (shareState.on) await applyShare();
+  // A Bootable USB node: its own screen on tty1 (src/usbscreen.ts), since the PC has no desktop.
+  if (usbStick && process.env.TOMLIN_SCREEN) {
+    const stick = usbStick;
+    const hw = usbadmin.hardwareKind({ cpu: { name: cpus()[0]?.model ?? '' }, ramBytes: totalmem() }).label;
+    startScreen(process.env.TOMLIN_SCREEN, () => {
+      const lent = lendView() as { to?: string } | null;
+      return {
+        name: shareState.name, version: d.version, admin: stick.admin, tag: adminkey.keyTag(stick.adminPub), hardware: hw, now: new Date(),
+        addresses: lanList().map(n => `${n.address}:${shareState.port}`),
+        linked: shareState.paired.filter(x => !x.role).map(x => x.name),
+        models: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => m.name),
+        lending: lent?.to ? `card and memory lent to "${lent.to}"` : '',
+        fault: shareError,
+      };
+    });
+  }
   // A node in use (a model loaded for a linked PC, or a request running) asks Windows to stay awake; idle, it may sleep and be woken (src/keepawake.ts).
   setInterval(() => awake.set(shareState.on && nodeBusy({ linkedModels: loadedForPc.size + (pictureFor ? 1 : 0), requests: serving.size + lending.size + (drawing ? 1 : 0) })), 15_000).unref();
 }
+
+/** The stick this PC started from (Bootable USB), or null. */
+export let usbStick: usbnode.StickConfig | null = null;
 
 /** "Start TOMLIN when this PC starts" is ticked (read at start and after each change). */
 let autostart = false;
@@ -2090,6 +2238,7 @@ export function startNode(): void {
   slotsLib.slotWant.want = () => (shareState.on ? slotsLib.cleanAtOnce(shareState.atOnce) : 1);
   // The requests taken on the link are kept on the disk too, so none can be sent again after a restart (src/link.ts).
   taken.keepIn(join(d.store.dir, 'link-seen.txt'));
+  keepPairNonces(join(d.store.dir, 'link-asks-seen.txt'));
   // A guest's link may keep only a few answers here; a host's own many (src/outbox.ts).
   box = new Outbox(join(d.store.dir, 'outbox'), owner => (shareState.paired.some(l => l.role === 'guest' && keepOf(l) === owner) ? GUEST_KEPT : HOST_KEPT));
   // The weight cache is brought down to its limit at every start and once an hour, even on a PC that never lends again
@@ -2149,6 +2298,8 @@ export function startNode(): void {
     pcName: () => shareState.name,
     restarts: d.update.restarts,
     pinCheck: (pin, who, host) => d.updatePinCheck(pin, who, false, host),
+    // A Bootable USB node runs the TOMLIN on its stick (Linux): a Windows copy sent here could not start.
+    blocked: () => (usbStick ? `"${shareState.name}" runs TOMLIN from a Bootable USB stick, so it is updated by minting the stick again (Settings, Bootable USB, Mint) and starting it from the stick again.` : null),
     // A restart cuts what is running: someone at this PC, or work for a linked PC, finishes first.
     busy: nodeBusyNow,
     done: async (dir, version, by, pulled) => {
@@ -2169,17 +2320,19 @@ export function startNode(): void {
       const p = offPresence.now() ?? (await offPresence.first(4000));
       return p && !nobodyThere(p, USED_MINUTES) ? presenceWords(p) : null;
     },
-    pinCheck: (pin, who, host) => d.updatePinCheck(pin, who, 'power', host),
-    supported: process.platform === 'win32',
+    pinCheck: usbAdminCheck((pin, who, host) => d.updatePinCheck(pin, who, 'power', host)),
+    // A stick node (Linux) turns off with systemd; the service is let do it by polkit's rule for its user (start.sh).
+    supported: process.platform === 'win32' || !!usbStick,
     run: (seconds, by) => {
       noted(`"${by}" turned this PC off: it shuts down in ${seconds} seconds.`);
-      execFile('shutdown.exe', shutdownArgs(seconds, by), { windowsHide: true }, () => undefined);
+      if (process.platform === 'win32') execFile('shutdown.exe', shutdownArgs(seconds, by), { windowsHide: true }, () => undefined);
+      else setTimeout(() => execFile('systemctl', ['poweroff'], () => undefined), seconds * 1000).unref();
     },
   });
   permNode = permSetSide({
     allowed: () => carry.cleanAllow(shareState.allow).tune,
     pcName: () => shareState.name,
-    pinCheck: (pin, who, host) => d.updatePinCheck(pin, who, 'perms', host),
+    pinCheck: usbAdminCheck((pin, who, host) => d.updatePinCheck(pin, who, 'perms', host)),
     current: () => {
       const a = carry.cleanAllow(shareState.allow);
       return Object.fromEntries(PERM_KEYS.map(k => [k, k === 'plainLinks' ? shareState.plainLinks === true : a[k] === true])) as Record<PermKey, boolean>;

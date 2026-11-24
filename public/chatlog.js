@@ -212,15 +212,76 @@
       e.preventDefault();
       if (add.value.trim() && (await act({ action: 'add', kind: pick.value, text: add.value }))) add.value = '';
     });
+    // ---- Fold summaries: the model sums up what a fold lets go (off unless ticked), each one his to change or delete ----
+    const sumTick = el('input', { type: 'checkbox', id: 'fold-sums-on' });
+    sumTick.checked = !!l.sums;
+    const sumAbout = el('p', { class: 'hint', text: 'At each fold the model reads the messages that leave and sums them up in a few lines, sent above the latest messages from then on. A fold then takes a little longer (that read and about 300 words written). Off: they leave with only this log to keep what matters.' });
+    const sumList = el('ul', { class: 'nb-lines' });
+    const sumBox = el('div', { class: 'chat-sums', hidden: !l.on });
+    sumTick.addEventListener('change', async () => {
+      say(null);
+      try {
+        await api('/api/chat/foldsums', { chatId: r.chat, on: sumTick.checked });
+        $('#notebook').close();
+        $('#notebook-open').click();
+      } catch (e) {
+        sumTick.checked = !sumTick.checked;
+        say(e.message);
+      }
+    });
+    const when = t => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+    async function sumAct(body) {
+      say(null);
+      try {
+        const got = await api('/api/chat/sum', { chatId: r.chat, ...body });
+        drawSums(got.sums);
+        l.waiting = true;
+        drawWaiting();
+        return got;
+      } catch (e) {
+        say(e.message);
+        return null;
+      }
+    }
+    function drawSums(sums) {
+      sumList.replaceChildren();
+      sumList.hidden = !sums.length && !l.sums;
+      if (!sums.length) {
+        if (l.sums) sumList.append(el('li', { class: 'hint nb-empty', text: 'No summaries yet: the model writes one at the next fold.' }));
+        return;
+      }
+      for (const s of sums) {
+        const text = el('span', { class: 'nb-text sum-text', text: s.text });
+        const from = el('span', { class: 'nb-from', text: `Summed up by ${s.by || 'the model'} · ${num(s.n)} message${s.n === 1 ? '' : 's'} · ${when(s.at)}` });
+        const edit = el('button', { class: 'link', type: 'button', text: 'Edit' });
+        const del = el('button', { class: 'link', type: 'button', text: 'Delete' });
+        const row = el('li', { class: 'nb-line' }, el('span', { class: 'nb-body' }, text, from), el('span', { class: 'nb-acts' }, edit, del));
+        edit.addEventListener('click', () => {
+          const box = el('textarea', { rows: '6', maxlength: '1500', 'aria-label': 'Change this summary' });
+          box.value = s.text;
+          const save = el('button', { class: 'btn primary', type: 'button', text: 'Save' });
+          const cancel = el('button', { class: 'btn quiet', type: 'button', text: 'Cancel' });
+          save.addEventListener('click', () => sumAct({ action: 'edit', id: s.id, text: box.value }));
+          cancel.addEventListener('click', () => drawSums(sums));
+          row.replaceChildren(el('span', { class: 'nb-edit sum-edit' }, box, save, cancel));
+          box.focus();
+        });
+        del.addEventListener('click', () => sumAct({ action: 'delete', id: s.id }));
+        sumList.append(row);
+      }
+    }
+    sumBox.append(el('label', { class: 'check' }, sumTick, ' Sum up what a fold lets go'), sumAbout, sumList);
     const fresh = el('button', { class: 'btn quiet', type: 'button', text: 'Start a fresh chat from this' });
     fresh.addEventListener('click', () => {
       $('#notebook').close();
       app.writeHandoff?.();
     });
-    box.append(el('label', { class: 'check' }, tick, ' Short, mid and long memory in this chat'), about, waiting, list, undo, fault, form,
+    box.append(el('label', { class: 'check' }, tick, ' Short, mid and long memory in this chat'), about, waiting, list, undo, form, sumBox, fault,
       el('div', { class: 'team-actions' }, fresh), el('p', { class: 'hint', text: 'A fresh chat starts from a handoff the model writes now, with this log; this chat stays as it is.' }));
     try {
-      draw((await api(`/api/chat/log?chat=${encodeURIComponent(r.chat)}`)).lines);
+      const got = await api(`/api/chat/log?chat=${encodeURIComponent(r.chat)}`);
+      draw(got.lines);
+      drawSums(got.sums ?? []);
     } catch (e) {
       say(e.message);
     }

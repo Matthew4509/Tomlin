@@ -158,7 +158,8 @@ export async function copyFrom(b: Record<string, unknown>) {
   const kind = b.kind === 'image' ? 'image' : 'chat';
   const model = String(b.model ?? '');
   const pc = (await netPcs()).find(x => x.id === r.id)!;
-  const shared = pc.models.find(m => m.id === model && m.kind === kind);
+  // A Backups only PC's kept models can be copied from it too (src/carry.ts networkList).
+  const shared = [...pc.models, ...(pc.backupsOnly ? pc.held ?? [] : [])].find(m => m.id === model && m.kind === kind);
   const why = !shared ? `"${r.name}" no longer shares that model.` : carry.copyWhy(pc, model);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.`.replace(/\.\.$/, '.') } };
   const w = wireFor(r);
@@ -503,7 +504,8 @@ export async function runSetOn(b: Record<string, unknown>) {
   try {
     if (cacheAsk) {
       const a = await wireFor(r).ask('/worker/run-set', { model: String(b.model ?? ''), ...(runset.CACHE_TYPES.some(c => c === b.cache) ? { cache: b.cache } : {}), ...(typeof b.kvRam === 'boolean' ? { kvRam: b.kvRam } : {}) });
-      return { status: 200, body: { said: String(a.said ?? 'Saved there.'), letGo: a.letGo === true } };
+      // `loading`: that PC was loading the model with the old setting, and lets it go once that load is done.
+      return { status: 200, body: { said: String(a.said ?? 'Saved there.'), letGo: a.letGo === true, ...(a.loading === true ? { loading: true } : {}) } };
     }
     // A runner (the crash notice's "Use this runner") or a guessing model: only ids cross, that PC checks them.
     const a = await wireFor(r).ask('/worker/run-set', typeof b.runner === 'string' || typeof b.fallback === 'boolean' ?{ model: String(b.model ?? ''), ...(typeof b.runner === 'string' ? { runner: b.runner.slice(0, 40) } : {}), ...(typeof b.fallback === 'boolean' ? { fallback: b.fallback } : {}) } : { model: String(b.model ?? ''), draft: String(b.draft ?? '') });

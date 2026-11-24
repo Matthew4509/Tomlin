@@ -199,3 +199,19 @@ export function tuneWhy(pc: { name: string; ok: boolean; away: string | null; ca
   if (!pc.can.includes('tune')) return `"${pc.name}" runs an older TOMLIN that cannot change how its models run from here: update it there first`;
   return '';
 }
+
+/**
+ * The context cache a load uses: an f16 cache that would take more than half of the cards' memory is started as q8_0
+ * instead (answers stay as good). Measured 25 Nov 2026 on the Z820's 12 GB card, Qwen3-Coder-30B at 131,072: f16 (about
+ * 12 GB of cache) wrote 0.65 tok/s half full and 0.33 at 90%; q8_0 wrote 11.5 and 8.7. A cache kept in RAM, a run on
+ * the CPU, and a cache somebody set smaller are left as they are. Returns the run and why it changed ('' when it did not).
+ */
+export function autoCache<R extends { cache: 'f16' | 'q8_0' | 'q4_0'; kvRam?: boolean; fa?: 'on' | 'off' }>(run: R, o: { f16Bytes: number; cardBytes: number }): { run: R; why: string } {
+  if (run.cache !== 'f16' || run.kvRam || o.cardBytes <= 0 || o.f16Bytes <= o.cardBytes / 2) return { run, why: '' };
+  const { fa, ...rest } = run;
+  const gb = (n: number) => (n / 2 ** 30).toFixed(1);
+  return {
+    run: { ...rest, cache: 'q8_0', ...(fa === 'on' ? { fa } : {}) } as R,
+    why: `the f16 context cache would take ${gb(o.f16Bytes)} GB of the card's ${gb(o.cardBytes)} GB, so it starts with q8_0 (${gb(o.f16Bytes * 17 / 32)} GB, answers as good)`,
+  };
+}

@@ -74,7 +74,7 @@ test('Night is neutral grey, so blue can mean one thing; navy and sky blue are g
   assert.match(night, /--accent: #7ea6ff;/);
   for (const navy of ['#050d1a', '#0a1a2f', '#38bbff', '#11324e']) assert.ok(!css.includes(navy), navy);
   // The Colours page says what Night now is, not the old navy.
-  assert.match(read('index.html'), /> Night: dark grey and soft blue<\/label>/);
+  assert.match(read('index.html'), /<span class="theme-tile-name">Night<\/span><span class="theme-tile-about">Dark grey and soft blue<\/span>/);
   assert.doesNotMatch(read('index.html'), /deep navy|sky blue/);
 });
 
@@ -82,8 +82,9 @@ test('one filled button per screen: list Downloads, Manage staff and the later s
   const models = read('models.js');
   assert.doesNotMatch(models, /class: 'btn primary', type: 'button', text: `Download/);
   assert.doesNotMatch(models, /class: 'btn primary', type: 'button', text: r\.zips/);
-  // The Hire staff tile: two ordinary buttons, Hire and Manage (the Staff menu between them is gone).
-  assert.match(read('homeview.js'), /tileButton\('Hire', TILE_PLUS, \(\) => \{ asPage\.fromMenu = true; app\.openHire\(\{ page: true, fromMenu: true \}\); \}\),\n\s+tileButton\('Manage', TILE_LIST, \(\) => \{ asPage\.fromMenu = true; app\.seeAllStaff\(\); \}\)/);
+  // The Hire staff tile: two ordinary buttons, New and Manage (the Staff menu between them is gone); Models the same.
+  assert.match(read('homeview.js'), /tileButton\('New', TILE_PLUS, \(\) => app\.openModels\(\)\), tileButton\('Manage', TILE_LIST, \(\) => openThisPc\(\)\)/);
+  assert.match(read('homeview.js'), /tileButton\('New', TILE_PLUS, \(\) => \{ asPage\.fromMenu = true; app\.openHire\(\{ page: true, fromMenu: true \}\); \}\),\n\s+tileButton\('Manage', TILE_LIST, \(\) => \{ asPage\.fromMenu = true; app\.seeAllStaff\(\); \}\)/);
   assert.doesNotMatch(read('index.html'), /id="staff-menu"|id="sm-manage"/);
   const home = read('homeview.js');
   assert.match(home, /const next = steps\.indexOf\(false\);/);
@@ -102,7 +103,10 @@ test('Network, This PC and Manage updates are rows in white cards; Enable this P
     assert.match(p, /<section class="set-part[^"]*"[^>]*>\n\s*<h3[^>]*>[^<]+<\/h3>\n\s*<div class="set-card">/, `${id}: a heading, then a card`);
   }
   assert.match(page('nodes'), /<label class="set-sw"><input type="checkbox" role="switch" id="node-on" aria-labelledby="node-on-label"><i aria-hidden="true"><\/i><\/label>/);
-  assert.match(page('nodes'), /<details class="set-row" id="link-help">/);
+  // The link helper moved with Find other PCs to the Add another PC page.
+  const addPc = html.slice(html.indexOf('id="settings-addpc"'), html.indexOf('\n</section>\n', html.indexOf('id="settings-addpc"')));
+  assert.match(addPc, /<details class="set-row" id="link-help">/);
+  assert.doesNotMatch(page('nodes'), /id="link-help"/);
   assert.match(page('updates-page'), /<section class="set-part" id="node-install"/, 'the section the My PC window borrows keeps its id');
   assert.match(css, /\.set-card > \.node-setup \{ margin: 0;/);
 });

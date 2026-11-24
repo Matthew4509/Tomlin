@@ -202,22 +202,24 @@ test('a hire given another model: their old one on this PC is the one to unload,
   assert.equal(modelLeft(was, { model: null }, []), 'Mistral-NeMo-12B.gguf');
 });
 
-test('a new first choice picked in Team ends an older switch, so the chat uses the new one', async () => {
-  const { nowModel } = await import('../src/staff.ts');
+test('one model each: a hire saved with other models, or switched onto one, is back on their selected model', async () => {
+  const { nowModel, modelsOf } = await import('../src/staff.ts');
   const dir = await mkdtemp(join(tmpdir(), 'staff-'));
   try {
-    // Switched (by a linked PC, or Wake on that model) to Qwen3.6, which is in their list; its file was deleted since.
+    // Saved before: a list of other models, and switched (by a linked PC, or Wake) onto one of them.
     await writeFile(join(dir, 'staff.json'), JSON.stringify({ staff: [{ id: 'qwen', name: 'Qwen', role: 'coder', level: 'senior', model: 'GLM-4.7-Flash-UD-Q4_K_XL.gguf', group: ['Qwen3.6-35B-A3B-UD-Q4_K_S.gguf'], active: 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf' }], auditions: {} }));
     const s = await Staff.load(dir);
-    assert.equal(nowModel(s.get('qwen')!), 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf');
-    const m = (await s.change('qwen', { model: 'Qwen3.8-Flash-Next-Gyro-L-abliterated-TQ3_0.gguf' }))!;
-    assert.equal(m.active, null);
-    assert.equal(nowModel(m), 'Qwen3.8-Flash-Next-Gyro-L-abliterated-TQ3_0.gguf');
-    // A switch made on its own (Wake on another of their models) still holds, and the same first choice saved again keeps it.
-    await s.change('qwen', { group: ['Qwen3.6-35B-A3B-UD-Q4_K_S.gguf'], active: 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf' });
-    assert.equal(nowModel(s.get('qwen')!), 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf');
-    await s.change('qwen', { model: 'Qwen3.8-Flash-Next-Gyro-L-abliterated-TQ3_0.gguf' });
-    assert.equal(nowModel(s.get('qwen')!), 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf');
+    const q = s.get('qwen')!;
+    assert.equal(q.group, undefined, 'the other models are not kept');
+    assert.equal(q.active, null, 'the switch onto one of them ends');
+    assert.equal(nowModel(q), 'GLM-4.7-Flash-UD-Q4_K_XL.gguf');
+    assert.deepEqual(modelsOf(q), ['GLM-4.7-Flash-UD-Q4_K_XL.gguf']);
+    // A list sent in a change is not kept either; a switch to a model that is not theirs is dropped.
+    const m = (await s.change('qwen', { group: ['Qwen3.6-35B-A3B-UD-Q4_K_S.gguf'], active: 'Qwen3.6-35B-A3B-UD-Q4_K_S.gguf' }))!;
+    assert.equal(m.group, undefined);
+    assert.equal(nowModel(m), 'GLM-4.7-Flash-UD-Q4_K_XL.gguf');
+    // A new model picked in Edit staff is the one they use.
+    assert.equal(nowModel((await s.change('qwen', { model: 'Qwen3.8-Flash-Next-Gyro-L-abliterated-TQ3_0.gguf' }))!), 'Qwen3.8-Flash-Next-Gyro-L-abliterated-TQ3_0.gguf');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

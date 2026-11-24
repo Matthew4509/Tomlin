@@ -14,6 +14,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readData, writeAtomic } from './atomic.ts';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
+import { onExit } from './exithook.ts';
 
 export interface Tally {
   /** Prompt tokens read new. */
@@ -107,7 +108,7 @@ export function dayOf(now = new Date()): string {
 
 // Stores with a change not written yet: written at once when the process ends.
 const pendingKept = new Set<{ writeNowSync(): void }>();
-process.on('exit', () => { for (const k of pendingKept) k.writeNowSync(); });
+onExit(() => { for (const k of pendingKept) k.writeNowSync(); });
 
 /** A small JSON file kept in memory and written a few seconds after a change (an answer ends many times a minute). */
 class Kept<T> {

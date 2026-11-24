@@ -15,6 +15,7 @@ import { readFile, stat } from 'node:fs/promises';
 import type { ToolDef } from './webtools.ts';
 import * as ws from './workspace.ts';
 import { checkSave } from './rules.ts';
+import { withheldWhy } from './filetools.ts';
 import { pdfPages, MAX_DOC_BYTES } from './docs.ts';
 import { csvTable, docxText, officeKind, xlsxSheets, type DocPiece } from './officefiles.ts';
 import { calculate, csvRows, parseWhere, tableStats } from './sums.ts';
@@ -216,7 +217,17 @@ export class ResearchTurn {
     return got;
   }
 
+  /** A file's pieces, or why not: keys and passwords are withheld here as read_file withholds them (withheldWhy, audit P6). */
   private async readFile(path: string): Promise<DocPiece[] | { error: string }> {
+    const named = withheldWhy(path, null);
+    if (named) return { error: named };
+    const got = await this.readPieces(path);
+    if ('error' in got) return got;
+    const why = withheldWhy(path, got.map(p => p.text).join('\n'));
+    return why ? { error: why } : got;
+  }
+
+  private async readPieces(path: string): Promise<DocPiece[] | { error: string }> {
     if (!this.o.root) return { error: 'This chat has no folder to read files from. Give a page\'s address instead.' };
     const kind = officeKind(path);
     if (!kind || kind === 'csv') {
@@ -315,6 +326,8 @@ export class ResearchTurn {
           if (!this.o.root) return done(false, path, 'no folder', 'This chat has no folder to read files from. Give the table as CSV text instead.');
           const r = await ws.read(this.o.root, path);
           if ('error' in r) return done(false, path, 'not read', r.error);
+          const withheld = withheldWhy(r.path, r.text);
+          if (withheld) return done(false, path, 'withheld', withheld);
           rows = csvRows(r.text);
         } else {
           const sheets = await this.file(path);

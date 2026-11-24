@@ -194,7 +194,8 @@ export const HOSTING = 'bridge/hosting';
 /** And the Bridge's run logs (a project's program output goes straight there, with no cap): they are not data to put back. */
 export const BRIDGE_LOGS = 'bridge/logs';
 /** Never in a restore point sent from here (since 2.0.5x): a brought-back one that carries them was made elsewhere. */
-const NEVER_SENT = ['share.json', 'app-lock.json'];
+// usb.json holds the Bootable USB admin key, which links to every stick minted with it with no code or PIN.
+const NEVER_SENT = ['share.json', 'app-lock.json', 'usb.json'];
 /**
  * Left out of a restore point kept on another PC (Back up to a linked PC), with the keys to the linked PCs in
  * settings.json: this PC's sharing code and paired links, its PIN and recovery codes, and the backup claims waiting on

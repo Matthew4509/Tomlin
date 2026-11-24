@@ -22,7 +22,7 @@ test('what changed is said in plain words, and nothing when nothing did', () => 
 
 test('this PC is read again in place, a linked PC through its own door (a host\'s only), an older one named as such', () => {
   const core = read('src/server/core.ts');
-  assert.match(core, /const now = await readHardware\(\);[\s\S]{0,400}?Object\.assign\(hardware, now\);\n\s+return hardwareChanges\(was, now\);/);
+  assert.match(core, /const now = await readHardware\(\);[\s\S]{0,700}?Object\.assign\(hardware, now\);\n\s+return hardwareChanges\(was, now\);/);
   const node = read('src/jobrun/node.ts');
   assert.match(node, /if \(p === '\/worker\/hardware-rescan'\) \{\n\s+const changes = d\.rescanHardware \? await d\.rescanHardware\(\) : \[\];/);
   assert.equal(node.match(/'models-where', 'cache-set', 'hardware-rescan'\]/g)?.length, 2, 'said in both hellos');
@@ -45,4 +45,36 @@ test('Network has Scan for hardware changes left of Fast update (Linked PCs); Ma
   const home = read('public/home.js');
   assert.match(home, /\$\('#net-push-updates'\)\.addEventListener\('click', \(\) => updateAllLinked\(\)\);/);
   assert.match(home, /const r = await api\('\/api\/network\/hardware-scan', \{\}\);/);
+});
+
+test('a card swapped for another make is seen; only a missing nvidia-smi answer keeps the old reading', () => {
+  const amd = { ...base, gpus: [{ name: 'Radeon RX 6600', vendor: 'amd', total: 8 * GB, integrated: false } as HardwareInfo['gpus'][number]], nvidiaDriver: null };
+  assert.deepEqual(hardwareChanges(base, amd), ['graphics RTX 3060 (12 GB) → Radeon RX 6600 (8 GB)', 'NVIDIA driver 560.94 → none'], 'the NVIDIA card and its driver really went');
+  assert.deepEqual(hardwareChanges(base, { ...base, gpus: [...base.gpus], nvidiaDriver: null }), [], 'the card still listed: nvidia-smi only did not answer');
+  const core = read('src/server/core.ts');
+  assert.match(core, /const smiUnread = !!was\.nvidiaDriver && !now\.nvidiaDriver && now\.gpus\.some\(g => g\.vendor === 'nvidia'\);/);
+});
+
+test('a scan in progress shows: the button says Scanning…, a spinning ring before the line, the label back after', () => {
+  const home = read('public/home.js');
+  assert.match(home, /b\.textContent = 'Scanning…';\n\s+said\.hidden = false;\n\s+said\.replaceChildren\(el\('span', \{ class: 'net-spin', 'aria-hidden': 'true' \}\), 'Reading the hardware/);
+  assert.match(home, /b\.textContent = label;\n\s+b\.disabled = false;/);
+  const manage = read('public/manage.js');
+  assert.match(manage, /scan\.textContent = 'Scanning…';\n\s+scanSaid\.replaceChildren\(el\('span', \{ class: 'net-spin', 'aria-hidden': 'true' \}\), 'Reading the hardware/);
+  assert.match(manage, /scan\.textContent = 'Scan now';\n\s+scan\.disabled = false;/);
+});
+
+test('Fast update and Update all say Updating… with a spinning ring from the press until every PC has started', () => {
+  const home = read('public/home.js');
+  // Every Update all button and the lines under them, while the run asks each PC and its PIN.
+  assert.match(home, /function updateAllBusy\(buttons, words\) \{[\s\S]*?'net-spin'[\s\S]*?'Updating…'/);
+  assert.match(home, /updateAllBusy\(busy, 'Asking the linked PCs which can update…'\)/);
+  assert.match(home, /updateAllBusy\(buttons, `Starting the update on "\$\{p\.name\}"…`\)/);
+  // Put back however the run ends; a refresh meanwhile leaves Updating… alone.
+  assert.match(home, /\} finally \{\s*updatingAll = false;\s*busy\.forEach\(\(x, i\) => x\.replaceChildren\(\.\.\.labels\[i\]\)\);/);
+  assert.match(home, /if \(updatingAll\) return;/);
+  // The left panel's button is Manage, not this run: greyed out only, never relabelled.
+  assert.match(home, /const busy = buttons\.filter\(x => x\.id !== 'rail-fast-update'\);/);
+  const manage = read('public/manage.js');
+  assert.match(manage, /up\.replaceChildren\(el\('span', \{ class: 'net-spin', 'aria-hidden': 'true' \}\), 'Updating…'\);/);
 });

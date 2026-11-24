@@ -89,6 +89,23 @@ export function chooseLoader(members: LoaderFacts[]): { loader: LoaderFacts; not
 }
 
 /**
+ * Said on the Cluster page before "This PC takes part" is switched off ('' when nothing is missing): one plain line when
+ * the switch would be refused only because the PCs in the cluster are not linked to each other at the PCs themselves.
+ * It names the strongest member that could load the model but for its links, and the PCs to link on it. Other reasons
+ * (off, Wi-Fi, an older TOMLIN) stay with the switch's own refusal and the member tiles.
+ */
+export function linksNeeded(members: LoaderFacts[]): string {
+  if (members.length < 2 || !('why' in chooseLoader(members))) return '';
+  const ready = (m: LoaderFacts) => !m.backupsOnly && !m.guest && m.answering && !m.away && !!m.cluster && wireOf(m.cluster.via) !== 'wifi';
+  const m = strongestFirst(members).find(ready);
+  if (!m) return '';
+  const missing = members.filter(x => x.id !== m.id && !m.cluster!.borrows.includes(x.id)).map(x => x.name);
+  if (!missing.length) return '';
+  const one = missing.length === 1;
+  return `To switch this off, the PCs in the cluster must be linked to each other at the PCs themselves: on "${m.name}", link ${quoted(missing)} under Network with ${one ? 'its' : 'their own'} setup code${one ? '' : 's'}, and tick "Allow to be used as part of a cluster" on ${one ? 'it' : 'each of them'}.`;
+}
+
+/**
  * Why the loader cannot answer for the cluster now ('' when it can): the same checks as the choice, for a loader already
  * chosen. Read again at every look, so a loader that went off or lost a link is said at once.
  */

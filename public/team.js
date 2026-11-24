@@ -175,14 +175,19 @@ function brainChoices(m) {
 // Their first choice is named as the server decides it (m.use, src/hiremodel.ts), the same on every screen.
 const brainName = (m, ref) => (m.use && (ref ?? null) === (m.model ?? null) ? m.use.text : ref ? brainChoices(m).find(c => c.id === ref)?.name.split(' · ')[0] ?? 'a model no longer here' : m.kind === 'image' ? 'the picture model connected here' : 'the model connected here');
 
+/** The PC a hire works on: '' for this PC, else the linked PC's id (as the left panel places them). */
+const hirePcOf = m => homeRowOf(m)?.pcId ?? (String(m.model ?? '').startsWith('remote:') ? String(m.model).split(':')[1] : '');
+/** Whether a model choice is on that PC: this PC's own models, or the models of that one linked PC. */
+const onPcOf = pc => c => (pc ? c.id === `remote:${pc}` || c.id.startsWith(`remote:${pc}:`) : !String(c.id).startsWith('remote:'));
+
 /**
- * One of a hire's model lists ('model' = first choice, 'fallback'): changing it saves at once. A hidden model is offered
- * once "Show hidden" is ticked, or while it is this person's pick.
+ * A hire's model ('model'): changing it saves at once. Only the models on the PC they work on are offered (moving them
+ * to another PC is Works on). A hidden model is offered once "Show hidden" is ticked, or while it is this person's pick.
  */
 function modelPick(m, key, label, none) {
   // A first choice no longer here shows as itself (not as None) until another is picked.
   const gone = key === 'model' && m.use?.state === 'missing' && m.model ? el('option', { value: m.model, disabled: true, text: m.use.text }) : null;
-  const sel = el('select', { 'aria-label': `${label} for ${m.name}`, 'data-pick': key }, el('option', { value: '', text: none }), gone, ...visibleModels(brainChoices(m), m[key]).filter(c => c.id !== gone?.value).map(c => el('option', { value: c.id, text: c.name })));
+  const sel = el('select', { 'aria-label': `${label} for ${m.name}`, 'data-pick': key }, el('option', { value: '', text: none }), gone, ...visibleModels(brainChoices(m).filter(onPcOf(hirePcOf(m))), m[key]).filter(c => c.id !== gone?.value).map(c => el('option', { value: c.id, text: c.name })));
   sel.value = m[key] ?? '';
   sel.addEventListener('change', async () => {
     // A pick saves at once, with no Save button: it says so beside the list (the page is drawn again after it, so the
@@ -202,76 +207,36 @@ function modelPick(m, key, label, none) {
 /** The last model pick that was saved (which hire, which list, when): its "Saved" shows for a few seconds. */
 let savedPick = null;
 
-/** Beside First choice when they cannot answer on it as it is (m.use.pick): what is wrong, in one line. */
+/** Beside Select model when they cannot answer on it as it is (m.use.pick): what is wrong, in one line. */
 function modelWarning(m) {
   if (!m.use?.pick) return null;
   const first = m.name.split(/\s+/)[0];
   const text = m.use.state === 'none'
     ? `${first} has no model of their own and no model is loaded here, so ${first} cannot answer. Pick one below.`
-    : `First choice: ${m.use.text}. ${first} cannot answer until you pick another below.`;
+    : `${m.use.text.replace(/, (no longer)/, ' is $1')}. ${first} cannot answer until you pick another model below.`;
   return el('p', { class: 'model-warn', role: 'status' }, el('span', { class: 'model-warn-mark', 'aria-hidden': 'true', text: '!' }), ` ${text}`);
 }
 
 function modelOptions(m) {
   const box = el('div', { class: 'team-models' });
-  const choices = brainChoices(m);
+  const choices = brainChoices(m).filter(onPcOf(hirePcOf(m)));
   const warn = modelWarning(m);
   if (warn) box.append(warn);
   if (!choices.length) {
-    box.append(el('p', { class: 'hint' }, 'No models are installed yet. Any model you add later, or a linked PC, can be given to this person. ',
+    box.append(el('p', { class: 'hint' }, 'No model is on the PC this person works on yet. Get one there, or move them to another PC under Works on. ',
       el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(); } }), '.'));
     return box;
   }
   const image = m.kind === 'image';
   const select = (key, label, none) => modelPick(m, key, label, none);
-  // One model each: no fallback is kept (src/staff.ts sound()). When it cannot answer, the chat says why and asks.
+  // One model each: no fallback and no other models are kept (src/staff.ts sound()). When it cannot answer, the chat says why and asks.
   box.append(el('div', { class: 'team-pick' },
-    select('model', 'First choice', image ? 'No model picked' : 'None: the model connected here')), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
+    select('model', 'Select model', image ? 'No model picked' : 'None: the model connected here')), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
   if (image) {
     const st = el('select', { 'aria-label': `Preferred style for ${m.name}` }, el('option', { value: '', text: 'Any: as the words ask' }), ...(m.styles ?? []).map(s => el('option', { value: s.id, text: s.name })));
     st.value = m.style ?? '';
     st.addEventListener('change', () => teamAct({ action: 'change', id: m.id, style: st.value || null }));
     box.append(el('label', { class: 'field' }, el('span', { text: 'Preferred style (used when the words name none; a linked PC picks its own model for it)' }), st));
-  }
-  const group = groupOptions(m);
-  if (group) box.append(group);
-  return box;
-}
-
-/**
- * Related models on this PC this person may also use (backup chat models), the first choice being the default (a linked PC's
- * wake can load one of them). Those likely to fit this PC's memory now come first, under their own heading, then the
- * others. Only for a first choice on this PC: otherwise there is nothing to tick, and nothing is shown.
- */
-function groupOptions(m) {
-  if (!m.model || String(m.model).startsWith('remote:')) return null;
-  const image = m.kind === 'image';
-  const here = visibleModels(m.models, ...(m.group ?? [])).filter(x => (!image || x.installed) && x.id !== m.model);
-  const box = el('fieldset', { class: 'pick-set team-group' }, el('legend', { text: `Other models ${m.name} may use` }));
-  box.append(el('p', { class: 'hint', text: 'Their default is the first choice above. A backup chat model is optional, and can allow for fast switching if required.' }));
-  if (!here.length) box.append(el('p', { class: 'hint' }, image ? 'No other picture model is downloaded here. ' : 'No other chat model is on this PC. ',
-    el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(); } }), '.'));
-  const list = new Set(m.group ?? []);
-  const tickFor = x => {
-    const tick = el('input', { type: 'checkbox', checked: list.has(x.id) });
-    tick.addEventListener('change', () => {
-      if (tick.checked) list.add(x.id);
-      else list.delete(x.id);
-      teamAct({ action: 'change', id: m.id, group: [...list] });
-    });
-    return el('label', { class: 'check' }, tick, ` ${x.name.split(' · ')[0]} · about ${x.sizeB}${x.unit}${FIT[x.fit] ?? ''}`);
-  };
-  // Likely to fit this PC (its memory now, as Hire staff's cards say) first, then the others; each lot in the server's
-  // order. These are always this PC's own models (a first choice on a linked PC shows no list).
-  const likely = here.filter(x => x.fit !== 'no');
-  const others = here.filter(x => x.fit === 'no');
-  if (likely.length && others.length) box.append(el('p', { class: 'team-group-head', text: 'Likely to fit this PC' }));
-  box.append(...likely.map(tickFor));
-  if (others.length) box.append(el('p', { class: 'team-group-head', text: likely.length ? 'Others' : 'Others (none of these is likely to fit this PC now)' }), ...others.map(tickFor));
-  if (m.active && m.active !== m.model) {
-    const name = m.models.find(x => x.id === m.active)?.name ?? 'another of their models';
-    box.append(el('p', { class: 'hint' }, `A linked PC switched ${m.name} to ${name}. `,
-      el('button', { class: 'link', type: 'button', text: 'Back to the default', onclick: () => teamAct({ action: 'change', id: m.id, active: null }) })));
   }
   return box;
 }
@@ -362,7 +327,7 @@ function staffCard(m) {
     el('div', { class: 'staff-card-go' }, pickButton(m), use, edit));
 }
 
-/** "Pick a model" on a hire who cannot answer as they are (m.use.pick): Edit staff opens at their First choice. */
+/** "Pick a model" on a hire who cannot answer as they are (m.use.pick): Edit staff opens at Select model. */
 function pickButton(m) {
   if (!m.use?.pick) return null;
   return el('button', { class: 'btn pick-model', type: 'button', text: 'Pick a model', title: `Give ${m.name} a model to answer on`, onclick: () => openProfile(m.id, { pick: true }) });
@@ -531,14 +496,6 @@ function profileFault(message) {
   $('#profile-fault').hidden = !message;
 }
 
-/** Mute, without a right-click (a touch screen has none): the same window as the left panel's. */
-function muteButton(m) {
-  const key = `staff:${m.id}`;
-  const muted = app.mutedBy?.([key]);
-  return el('button', { class: 'btn quiet', type: 'button', onclick: () => app.openMute?.(key, m.name) },
-    app.bellIcon?.(!!muted) ?? '', muted ? ` Muted ${muted.text}` : ' Mute');
-}
-
 /** Rename: their chats, notebook and photo stay theirs (they are kept by id, not by name). */
 function renameForm(m) {
   const box = el('input', { type: 'text', maxlength: '30', value: m.name, autocomplete: 'off', required: true });
@@ -556,7 +513,7 @@ function renameForm(m) {
 async function openProfile(id, { pick = false } = {}) {
   editId = id;
   teamFault(null);
-  // "Pick a model": straight to their First choice, after the page has taken the focus to its heading (home.js
+  // "Pick a model": straight to Select model, after the page has taken the focus to its heading (home.js
   // focusPage, a timeout queued before this one; not a frame: a window in the background draws none).
   const toPick = () => {
     if (pick) setTimeout(() => {
@@ -719,16 +676,18 @@ function drawProfile() {
 
 /** Edit Staff: one hire of this PC, like a profile page on a jobs site, on the right of the Staff window. */
 /** A chat hire's own tone for a letter, article or post (until one is picked, the host's, from the chat's gear). */
-function writingSection(m, section, { software = true } = {}) {
+/**
+ * Tone for writing, on one line with its list, under Role (Edit staff, Who). Only where it is used: a chat hire with a
+ * role (a Default hire is sent no instructions, so a tone would do nothing). Used when they write a letter, article,
+ * post or message.
+ */
+function toneLine(m) {
   const tones = app.models?.tones ?? [];
-  if (!tones.length) return null;
-  const first = m.name.split(/\s+/)[0];
-  // The tone, with their software beside it unless the page shows it already (Edit staff: under Works on, Models).
-  return section(software ? 'Software and tone' : 'How they write',
-    el('div', { class: 'profile-line' },
-      software && brainChoices(m).length ? modelPick(m, 'model', 'Software', 'None: the model connected here') : null,
-      el('label', { class: 'field' }, el('span', { text: 'Tone for writing' }), pick(tones, m.tone ?? app.models.settings?.tone ?? tones[0].id, v => teamAct({ action: 'change', id: m.id, tone: v })))),
-    el('p', { class: 'hint', text: m.role === 'default' ? `${first} has the Default role, so is sent no instructions and the tone is not used. It is kept for when you give ${first} a role.` : `Used when you ask ${first} for a letter, article, post or message in a chat.` }));
+  if (!tones.length || m.kind === 'image' || m.role === 'default') return null;
+  const first = m.name.split(/s+/)[0];
+  return el('label', { class: 'tone-line', title: `Used when you ask ${first} for a letter, article, post or message in a chat.` },
+    el('span', { text: 'Tone for writing' }),
+    pick(tones, m.tone ?? app.models.settings?.tone ?? tones[0].id, v => teamAct({ action: 'change', id: m.id, tone: v })));
 }
 
 /**
@@ -838,7 +797,7 @@ function drawPerson(m) {
       personFigures(m),
       pencilBtn),
     pcCard(m, now),
-    el('div', { class: 'person-actions' }, use, muteButton(m)));
+    el('div', { class: 'person-actions' }, use));
 }
 
 /** Under their role: how fast they answer (a picture hire: nothing). The tokens are folded at the foot of the page. */
@@ -951,67 +910,28 @@ function pcCard(m, now) {
 }
 
 /**
- * Works on, first: each PC, with the software it has for this hire. Moving them is giving them one of that PC's
- * models (as dragging them onto a PC in the left panel does).
+ * Works on: the PC they work on now with Select model (their models there), then, folded, "Move to another PC, see
+ * more models": the Hire staff window for this hire (hire.js app.openMove), where a PC and a model are picked as when
+ * hiring, and a model on another PC or a Backups only PC is installed first.
  */
-function pcPicker(m, section, theirModels) {
-  const row = homeRowOf(m);
-  const at = row?.pcId ?? '';
-  const first = m.name.split(/\s+/)[0];
-  const s = row ?? { ...m, pcId: at };
-  const fault = el('p', { class: 'fault', hidden: true });
-  // Their model now, and the memory it needs (the same figure Hire staff uses).
-  const mine = (team.data?.hireChoices?.[m.kind === 'image' ? 'image' : 'chat'] ?? []).find(c => c.id === m.model);
-  const mineName = String(mine?.label ?? row?.modelName ?? '').replace(/ on ".*$/, '');
-  const cards = pcChoices().map(x => {
-    const here = x.id === at;
-    const shut = x.backupsOnly || x.activity === 'offline' || x.activity === 'owner';
-    const models = here || shut ? [] : deskModels(s, x.id);
-    const head = el('div', { class: 'pc-pick-head' },
-      el('strong', { text: x.name }),
-      el('span', { class: 'hint', text: [x.mem, pcState(x)].filter(Boolean).join(' · ') }));
-    // Would the model they use now fit this PC? Said before anything else: a 35B model does not go on an 8 GB PC.
-    const fits = here || shut ? null : fitOn(mine?.need, x.ram, x.vram);
-    const fitLine = !fits || fits === 'ok' || !mineName ? null : el('p', { class: `pc-pick-fit fit-${fits}` },
-      el('span', { class: 'pc-pick-fit-mark', 'aria-hidden': 'true', text: fits === 'no' ? '✕' : '!' }),
-      fits === 'no' ? ` ${mineName} would not fit here: it needs about ${gb(mine.need)}, and ${x.name} has ${x.mem}.`
-        : ` ${mineName} would be tight here: it needs about ${gb(mine.need)}, and ${x.name} has ${x.mem}. It may load slowly or fail.`);
-    let body;
-    // The PC they work on carries their models, as every other PC's tile carries its own (they were at the foot of
-    // Works on, a scroll away from the tile they belong to).
-    if (here) body = el('div', { class: 'pc-pick-here' }, el('p', { class: 'hint', text: `${first} works here now.` }), theirModels ?? null);
-    else if (x.backupsOnly) body = el('p', { class: 'hint', text: 'Set to Backups only: it takes no staff.' });
-    else if (shut) body = el('p', { class: 'hint', text: x.activity === 'owner' ? 'Its owner is using it just now: try again later.' : 'It is not answering just now: switch it on, then try again.' });
-    else if (!models.length) body = el('p', { class: 'hint', text: x.id ? `It has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet: send one there from Models.` : `This PC has no ${m.kind === 'image' ? 'picture' : 'chat'} models yet.` });
-    else {
-      const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
-      // Each model there says whether it fits there; one too big for that PC cannot be picked.
-      const fitOf = c => (typeof c.fit === 'string' ? c.fit : c.fit?.level) ?? null;
-      const sel = el('select', { 'aria-label': `The software ${first} runs on ${x.name}` }, ...models.map(c => el('option', { value: c.id, disabled: fitOf(c) === 'no', text: `${c.name.replace(/ on ".*?"/, '')}${FIT_TAG[fitOf(c)] ?? ''}` })));
-      const same = models.find(c => short(c.name) === short(row?.modelName) && fitOf(c) !== 'no');
-      const usable = models.find(c => fitOf(c) !== 'no');
-      if (same || usable) sel.value = (same ?? usable).id;
-      const go = el('button', { class: 'btn primary', type: 'button', text: `Move ${first} here`, disabled: !usable });
-      go.addEventListener('click', async () => {
-        go.disabled = true;
-        fault.hidden = true;
-        try {
-          team.data = await api('/api/staff', { action: 'change', id: m.id, model: sel.value });
-          await refresh();
-          if (dlg.open && editId === m.id) drawEdit();
-        } catch (e) {
-          fault.textContent = `${first} was not moved: ${e.message}`;
-          fault.hidden = false;
-          go.disabled = false;
-        }
-      });
-      body = el('div', { class: 'pc-pick-move' }, el('label', { class: 'field' }, el('span', { text: 'Software there' }), sel), go,
-        usable ? null : el('p', { class: 'hint', text: `None of the models there fits ${x.name}'s memory.` }));
-    }
-    return el('li', { class: `pc-pick${here ? ' is-here' : ''}` }, head, fitLine, body);
-  });
-  return section(`Which PC ${first} works on`, el('p', { class: 'hint', text: `Pick a PC and the software ${first} runs there. Their chats and memory stay as they are.` }), fault, el('ul', { class: 'pc-pick-list' }, ...cards));
+function workPart(m, theirModels) {
+  const first = m.name.split(/s+/)[0];
+  const at = hirePcOf(m);
+  const x = pcChoices().find(p => p.id === at);
+  const now = el('div', { class: 'pc-pick-here' },
+    el('p', { class: 'hint', text: `${first} works on ${x?.name ?? staffPc(m)}${x?.mem ? ` (${x.mem})` : ''}.` }), theirModels);
+  const fold = el('details', { class: 'sub move-fold' },
+    el('summary', { text: 'Move to another PC, see more models' }),
+    el('p', { class: 'hint', text: `Pick a PC, then a model on it, as when hiring. A model kept on another PC, or on a Backups only PC, can be installed there first. ${first}'s chats and memory stay as they are.` }),
+    el('div', { class: 'team-actions' }, el('button', { class: 'btn', type: 'button', text: 'Choose a PC and model', onclick: () => app.openMove?.(m, at) })));
+  return el('div', { class: 'work-part' }, now, fold);
 }
+
+/** Moved (hire.js, move mode): the lists are read again and Edit staff shows where they work now. */
+app.afterMove = async () => {
+  if (typeof refresh === 'function') await refresh().catch(() => undefined);
+  if (dlg.open) drawEdit();
+};
 
 function drawEdit() {
   const d = team.data;
@@ -1071,9 +991,9 @@ function drawEdit() {
   // Their models are drawn inside the tile of the PC they work on; on a PC that is not in the list (no longer linked)
   // they keep a part of their own under the tiles.
   const models = modelOptions(m);
-  const pcs = pcPicker(m, sub, models);
+  const pcs = workPart(m, models);
   const body = [
-    section('Who', el('div', { class: 'profile-line' }, renameForm(m), rolePick), roleAsk),
+    section('Who', el('div', { class: 'profile-line' }, renameForm(m), rolePick), toneLine(m), roleAsk),
     section('Works on',
       pcs,
       models.parentNode ? null : sub('Models', models),
@@ -1082,7 +1002,6 @@ function drawEdit() {
         el('summary', { text: `Speed: ${speed ? app.speedWords(speed, true) : 'not measured yet'}` }),
         el('div', { class: 'profile-speed' }, app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true }),
           m.model ? el('div', { class: 'team-actions' }, app.finderButton(m.model)) : null))),
-    image ? null : writingSection(m, section, { software: false }),
     SHOW_AUDITION ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),
       run?.error ? el('p', { class: 'fault', text: run.error }) : run?.result ? auditionView(run.result) : null) : null,
   ];

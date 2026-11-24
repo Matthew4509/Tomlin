@@ -178,7 +178,7 @@ app.onStatus.push(s => {
 app.drawClaims = list => {
   const box = $('#node-claims');
   if (!box) return;
-  box.replaceChildren(...(list?.length ? [el('p', { class: 'hint', text: 'Waiting for you: new PCs asking for backups kept here.' }), ...list.map(c => el('div', { class: 'job-remote' },
+  box.replaceChildren(...(list?.length ? [el('p', { class: 'hint', text: 'Urgent: new PCs asking for backups kept here.' }), ...list.map(c => el('div', { class: 'job-remote' },
     el('span', { text: `${c.name} wants their backups on a new PC (${c.pc}, linked ${ownerAgo(c.linkedAt)}).` }),
     el('button', { class: 'btn primary', type: 'button', text: 'Allow', onclick: () => app.answerClaim(c.id, true) }),
     el('button', { class: 'btn', type: 'button', text: 'Don\'t allow', onclick: () => app.answerClaim(c.id, false) })))] : []));

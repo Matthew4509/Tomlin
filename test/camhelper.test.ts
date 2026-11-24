@@ -164,7 +164,7 @@ test('one answer\'s use: cut to the room, a secret withheld, a fault said plainl
   assert.match(await down.run('cam_menus', '{}'), /did not answer.*Is the laptop on/s);
 });
 
-test('the laptop\'s script parses, and the helper needs only four files there', { skip: process.platform !== 'win32' && 'Windows only' }, () => {
+test('the laptop\'s script parses, and the helper needs only five files there', { skip: process.platform !== 'win32' && 'Windows only' }, () => {
   assert.doesNotMatch(CAM_PS1, /\$\{/);
   assert.doesNotMatch(CAM_PS1, /SendInput|SetCursorPos|keybd_event|mouse_event|InvokePattern|ExpandCollapse|\.Invoke\(\)|SetForegroundWindow|PostMessage|SendMessage/, 'the laptop\'s script has nothing that clicks, types, opens or runs');
   const dir = mkdtempSync(join(tmpdir(), 'tomlin-cam-'));
@@ -179,6 +179,7 @@ test('the laptop\'s script parses, and the helper needs only four files there', 
   const loads = (file: string) => [...readFileSync(file, 'utf8').matchAll(/^import (?!type )[^;]*? from '(\.[^']+)';/gm)].map(m => m[1]);
   assert.deepEqual(loads('tools/cam-helper.ts'), ['../src/camhelper.ts']);
   assert.deepEqual(loads('src/camhelper.ts').sort(), ['./link.ts', './share.ts']);
-  assert.deepEqual(loads('src/link.ts'), []);
+  assert.deepEqual(loads('src/link.ts'), ['./adminkey.ts']);
+  assert.deepEqual(loads('src/adminkey.ts'), []);
   assert.deepEqual(loads('src/share.ts'), []);
 });

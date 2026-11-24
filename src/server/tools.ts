@@ -27,7 +27,7 @@ async function myId(): Promise<string> {
 }
 
 /** The newer tools for one answer here, or null when this chat is offered none of them. */
-export async function kitFor(o: { perms: Permissions; gate: Gate; perCall: number; root: string | null; web: boolean; webUses: () => ToolUse[]; page?: KitOpts['page']; second?: KitOpts['second']; canQueue?: boolean }): Promise<Kit | null> {
+export async function kitFor(o: { perms: Permissions; gate: Gate; perCall: number; root: string | null; web: boolean; webUses: () => ToolUse[]; page?: KitOpts['page']; second?: KitOpts['second']; canQueue?: boolean; saved?: () => string[] }): Promise<Kit | null> {
   const linked = await helpers();
   return makeKit({
     perms: o.perms,
@@ -45,6 +45,7 @@ export async function kitFor(o: { perms: Permissions; gate: Gate; perCall: numbe
     page: o.page,
     second: o.second,
     canQueue: o.canQueue,
+    saved: o.saved,
     log: a => logAction(ACTION_DIR, a),
   });
 }

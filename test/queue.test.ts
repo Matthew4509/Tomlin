@@ -199,3 +199,15 @@ test('two queued items with the same words are two messages; an answer to a late
   const hisAnswer = { role: 'assistant', content: 'Sure.', at: '2026-10-10T10:10:00.000Z' };
   assert.deepEqual(Q.runAgain([a, stoppedA, his, hisAnswer], 'Go on', since, 'qa'), [0, 1]);
 });
+
+test('Home says Lets go! is the way into the queue: its tip, the empty Queue panel and Help', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (p: string) => readFileSync(new URL(`../public/${p}`, import.meta.url), 'utf8');
+  assert.match(read('index.html'), /id="home-go"[^>]*title="Adds the project to the Queue beside this/);
+  const empty = /Nothing waiting\. Lets go! adds a project here; so does Add to the queue in an artist's pictures, and a message sent while its PC is busy\./;
+  assert.match(read('queue.js'), empty);
+  // The Jobs window is hidden from the menu now, so nothing sends people there for the queue.
+  assert.doesNotMatch(read('queue.js'), /a project from Jobs/);
+  assert.match(read('help/queue.html'), /Work goes in three ways: <b>Lets go!<\/b> on Home/);
+  assert.doesNotMatch(read('help/queue.html'), /in Jobs beside LETS GO!!!/);
+});

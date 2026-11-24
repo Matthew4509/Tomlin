@@ -6,6 +6,8 @@ import { rm, stat } from 'node:fs/promises';
 import * as jobs from '../jobs.ts';
 import type { Job } from '../jobs.ts';
 import * as ws from '../workspace.ts';
+import { ownedByTomlin } from '../folders.ts';
+import { withheldWhy } from '../filetools.ts';
 import { syntaxCheck, type CheckResult } from '../checks.ts';
 import { checkMessage, REFUSAL } from '../filter.ts';
 import { roleOf, levelOfHire, type StaffMember } from '../staff.ts';
@@ -112,6 +114,9 @@ async function runStep(job: Job, i: number, send: Send, signal: AbortSignal, own
     const r = await ws.read(root, f);
     // There but not readable here (over 1 MB): "does not exist yet" would have the worker write a new file over it.
     if ('error' in r && (await thereOnDisk(root, f))) return { error: `Step ${i + 1} names ${f}, which is there but cannot be used by a step: ${r.error} Nothing was changed. Take it out of the step's files, or make the file smaller.` };
+    // Keys and passwords are never given to a model, here as in a chat's tools (withheldWhy, audit P6).
+    const withheld = withheldWhy(f, 'error' in r ? null : r.text);
+    if (withheld) return { error: `Step ${i + 1} names ${f}, which a step cannot use: ${withheld.replace(/^Not read: /, '').replace(/ Tell the person;.*$/, '')} Nothing was changed. Take it out of the step's files.` };
     texts[f] = 'error' in r ? null : r.text;
     size += texts[f]?.length ?? 0;
   }
@@ -258,6 +263,8 @@ export async function acceptStep(job: Job, i: number, files: { path?: unknown; t
   for (const f of files) {
     const path = ws.cleanPath(f?.path);
     if (!path || !step.files.includes(path) || typeof f.text !== 'string') return { status: 400, error: `This step may not write ${String(f?.path)}.` };
+    // A plan that names TOMLIN's own files (a planted plan.json) never gets them written (audit P5).
+    if (ownedByTomlin(path)) return { status: 400, error: `${path}: a step never writes TOMLIN's own files (project plans, rules and cards, the person's notes). Nothing was saved.` };
   }
   const root = await jobRoot(job);
   // Every file is checked before any is saved, and each one's text now is kept: a later file that fails puts the earlier

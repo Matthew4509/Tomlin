@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { answered } from '../engine.ts';
 import { cleanFault, fallbackPick, faultHook, makeFault, modelFileGone, orderTries, runnerTesting, RunHistory, tryOptions, type FaultRecord, type TryOption } from '../faults.ts';
 import { log } from '../log.ts';
+import { onExit } from '../exithook.ts';
 import { Pane, type PaneFault } from '../pane.ts';
 import { crashedHere, pinOfRunner, pinWhy, type Device, type HeldRunner } from '../runtimes.ts';
 import { runnerSetAsk } from '../runset.ts';
@@ -16,12 +17,13 @@ import { shareState } from '../jobrun/node.ts';
 import { checkBusy, tryRunner, unsafeWhy, type Row } from './runnercheck.ts';
 import { finderBusy } from './finder.ts';
 import { answeringBusy } from './answering.ts';
-import { chatList, connectChat, main, runOf, runnerFor, runners } from './panes.ts';
+import { chatList, connectChat, main, maxRunOf, maxSpeeds, runOf, runnerFor, runners } from './panes.ts';
+import { MaxSpeeds } from '../maxmode.ts';
 
 export const history = new RunHistory(join(HOME.data, 'run-history.json')).loadSync();
 // Successes are written a few seconds late, together: those still waiting are written as TOMLIN closes (a restart
 // right after an answer lost them, and a runner could stay marked as failing).
-process.on('exit', () => history.saveNow());
+onExit(() => history.saveNow());
 
 /** This PC by the name it goes by on the network, as linked PCs see it. */
 export const thisPc = (): string => (shareState.name && shareState.name !== 'Worker PC' ? shareState.name : 'This PC');
@@ -76,7 +78,22 @@ export async function keepFault(p: PaneFault): Promise<FaultRecord> {
   const f = makeFault({ pc: thisPc(), model: p.model, modelName: p.modelName, runner: p.pin, runnerName: runtimes.pins[p.pin]?.name ?? '', device: p.device as Device | '', kind: p.kind, tail: p.tail, ...(gone ? { gone } : {}) });
   log.error('runner fault', `${f.modelName} on ${f.runnerName || 'an unknown runner'}: ${f.fault}`);
   const fb = await fallBack(f).catch(e => ({ fallbackSaid: `The automatic fallback could not be saved: ${(e as Error).message}` }));
-  return history.failure({ ...f, ...fb });
+  const ep = p.kind === 'crash' && !f.gone ? epCrashKept(p, f.modelName) : '';
+  return history.failure({ ...f, ...fb, ...(ep ? { fallbackSaid: [fb.fallbackSaid, ep].filter(Boolean).join(' ') } : {}) });
+}
+
+/**
+ * A runner that crashed while it held its model by expert parallel (Max mode or Cluster's borrowing): the crash is kept
+ * for that model and build (src/maxmode.ts MaxSpeeds.epCrashed), so expert parallel is not used for it again until Max is
+ * switched on again or a newer expert runner is installed, and no load of it starts by itself until the person loads it.
+ * Gives the words for the notice ('' when the runner was not an expert-parallel one).
+ */
+export function epCrashKept(p: Pick<PaneFault, 'model' | 'pin'>, name: string, pane = runners.find(x => x.view.model === p.model)): string {
+  if (!pane || maxRunOf(pane)?.engine !== 'experts') return '';
+  const c = maxSpeeds.epCrashed(p.model, { name, build: runtimes.buildOfPin(p.pin), stamp: runtimes.expertStamp(), when: 'loaded' });
+  const words = `${MaxSpeeds.crashWords(c).replace(/^Max mode: e/, 'E')}. ${name} is not loaded again by itself: load it when you want it, and it loads without expert parallel.`;
+  log.info('max', words);
+  return words;
 }
 
 /** Set once, when the server starts: faults and whole answers on this PC go to the run history. */

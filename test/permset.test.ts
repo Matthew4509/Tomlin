@@ -97,7 +97,9 @@ test('the node has the door, says it can, and a guest link never reaches it', ()
   const nodeTs = read('src', 'jobrun', 'node.ts');
   assert.match(nodeTs, /if \(p === PERM_DOOR\) \{\s*const a = await permNode\(body/);
   assert.equal((nodeTs.match(/'power-off', PERM_CAN, 'peers'/g) ?? []).length, 2, 'both hellos say perm-set');
-  assert.match(nodeTs, /allowed: \(\) => carry\.cleanAllow\(shareState\.allow\)\.tune,\s*pcName: \(\) => shareState\.name,\s*pinCheck: \(pin, who, host\) => d\.updatePinCheck\(pin, who, 'perms', host\)/);
+  // The PIN check, except on a Bootable USB node with no app lock, where the admin key's link stands for it.
+  assert.match(nodeTs, /allowed: \(\) => carry\.cleanAllow\(shareState\.allow\)\.tune,\s*pcName: \(\) => shareState\.name,\s*pinCheck: usbAdminCheck\(\(pin, who, host\) => d\.updatePinCheck\(pin, who, 'perms', host\)\)/);
+  assert.match(nodeTs, /if \(usbStick && !d\.appLockOn\(\) && shareState\.paired\.some\(x => x\.byKey === true && keepOf\(x\) === who\)\)/);
   assert.match(nodeTs, /permChanges\.unshift\(\{ said, at/);
   assert.match(nodeTs, /runChanges, permChanges, lend/);
   assert.ok(!GUEST_DOORS.includes(PERM_DOOR));

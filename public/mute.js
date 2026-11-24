@@ -1,7 +1,7 @@
 // Mute: quiet, not stopped. Mute a chat or a staff member (right-click its row in the left panel, or the
 // chat's … menu), or everything (the bell in the top bar), for 1 hour, until
 // tomorrow morning or until unmuted. A muted row shows a bell with a line and "Muted until …"; its number becomes a
-// grey dot. Work carries on and still lands in Waiting for you. The server keeps the mutes (/api/mute, src/mute.ts)
+// grey dot. Work carries on and still lands in Urgent on Home. The server keeps the mutes (/api/mute, src/mute.ts)
 // and words the times. Uses app.js's helpers (el, api, $) and home.js's (homeUi, drawRail, refresh).
 'use strict';
 
@@ -91,8 +91,8 @@ async function openMute(key, label) {
   muteDlg.replaceChildren(el('div', { class: 'help-body' },
     el('h2', { id: 'mute-title', text: key === 'all' ? 'Mute all' : `Mute ${label}` }),
     el('p', { class: 'hint', text: key === 'all'
-      ? 'Quiet, not stopped: everyone keeps working, and what comes back still waits in "Waiting for you" on Home. The numbers, sounds and Windows notifications stop (a grey dot shows instead).'
-      : `Quiet, not stopped: ${key.startsWith('room:') ? 'the job keeps going' : key.startsWith('chat:') ? 'the chat keeps its answers' : `${label} keeps working`}, and what comes back still waits in "Waiting for you" on Home. Its number, sound and Windows notification stop (a grey dot shows instead).` }),
+      ? 'Quiet, not stopped: everyone keeps working, and what comes back still waits in "Urgent" on Home. The numbers, sounds and Windows notifications stop (a grey dot shows instead).'
+      : `Quiet, not stopped: ${key.startsWith('room:') ? 'the job keeps going' : key.startsWith('chat:') ? 'the chat keeps its answers' : `${label} keeps working`}, and what comes back still waits in "Urgent" on Home. Its number, sound and Windows notification stop (a grey dot shows instead).` }),
     now ? el('p', { class: 'mute-now' }, bellIcon(true), ` Muted ${now.text}.`) : null,
     fault,
     el('div', { class: 'team-actions' }, btn('For 1 hour', 'hour', !now), btn('Until tomorrow morning', 'morning'), btn('Until I unmute', 'forever'), now ? btn('Unmute', 'off', true) : null),

@@ -46,6 +46,8 @@ export interface KitOpts {
   /** With no node free, the subagent's check may be queued to run on this PC after the answer (Kit.after). */
   canQueue?: boolean;
   log?: (a: Action) => void;
+  /** The files this answer saved in the chat's folder (src/filetools.ts FileTurn.saved): a run after one is asked. */
+  saved?: () => string[];
   exec?: Exec;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }
@@ -74,6 +76,12 @@ export interface Kit {
   after?(final: string): { system: string; user: string } | null;
 }
 
+/** Why a run at Allowed is still asked on a card ('' when it is not): text that looked like orders, or files saved this answer. */
+export function runAskWhy(held: string, saved: string[]): string {
+  const n = new Set(saved).size;
+  return [held ? 'this answer read text that looked like orders for an AI' : '', n ? `this answer saved ${n} file${n === 1 ? '' : 's'} in the folder, which the command may run` : ''].filter(Boolean).join('; ');
+}
+
 /** The kit for one answer, or null when this chat is offered none of the newer tools. */
 export function makeKit(o: KitOpts): Kit | null {
   const p = o.perms;
@@ -86,7 +94,7 @@ export function makeKit(o: KitOpts): Kit | null {
   const helper = tier.machine !== 'never' ? (o.helpers ?? []).find(h => h.tools.length) : undefined;
   const machine = helper && o.me ? new MachineTurn({ helper, me: o.me, perCall: o.perCall, get: o.fetch }) : null;
   const code = p.coding && o.root && tier.git !== 'never' && codingFolder(o.root, p.folders, o.dataDir)
-    ? new CodeTurn({ root: o.root, perCall: o.perCall, run: tier.run, extra: p.commands, confirm: confirm('run'), exec: o.exec, log: o.log })
+    ? new CodeTurn({ root: o.root, perCall: o.perCall, run: tier.run, extra: p.commands, confirm: confirm('run'), mustAsk: () => runAskWhy(o.gate.held, o.saved?.() ?? []), exec: o.exec, log: o.log })
     : null;
   const notes = p.research && o.web && o.root && tier.notes !== 'never' ? new NoteTurn({ root: o.root, sources: o.sources ?? (() => []) }) : null;
   // The research tools go with the research role: with Web on (pages to look in) or a folder (files to read).

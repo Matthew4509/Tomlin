@@ -231,6 +231,12 @@ test('the same two introduced again get new keys; the old ones end on both', asy
     const p = await pairNow();
     return p.a.sync === 'latest' && p.b.sync === 'latest';
   }, 20_000, 300);
+  // Both were already "latest" before this introduction, so that alone can pass before the nodes have saved it: the
+  // old links ending on both is waited for as well (a busy PC saves a moment later).
+  await until('the old links ended on both nodes', async () => [OFFICE.home, BACKUP.home].every(home => {
+    const s = shareOf(home);
+    return live(s.peers.in).length === 1 && live(s.peers.out).length === 1 && live(s.peers.in)[0].scopes.join() === 'copy';
+  }), 20_000, 300);
   for (const home of [OFFICE.home, BACKUP.home]) {
     const s = shareOf(home);
     assert.equal(live(s.peers.out).length, 1);

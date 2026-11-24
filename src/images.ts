@@ -1,6 +1,8 @@
 // The image pane: one stable-diffusion.cpp worker (sd-server) per loaded model, kept loaded between pictures, and the
 // picture pipeline around it: size from the prompt, mode presets, drafts with the fast decoder (TAESD) and finals
 // with the full one, resizing, background removal, WebP, .ico, the gallery, and help from the chat model.
+import { freeOn, pictureRoomLine } from './lowdisk.ts';
+import { driveOf } from './cleanup.ts';
 import { request, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -867,7 +869,9 @@ export class Images {
       const q = (url.searchParams.get('q') ?? '').slice(0, 200);
       // ?chat=<id>: only that chat's pictures; no chat given: every picture.
       const chat = url.searchParams.get('chat');
-      return send(res, 200, await this.gallery.list(offset, Math.min(200, Number(url.searchParams.get('limit')) || 60), shelf as Shelf, q, chat === null ? undefined : chat.slice(0, 40))), true;
+      const list = await this.gallery.list(offset, Math.min(200, Number(url.searchParams.get('limit')) || 60), shelf as Shelf, q, chat === null ? undefined : chat.slice(0, 40));
+      // Under 2 GB free where pictures are kept: a quiet line in the pane, no limit (src/lowdisk.ts pictureRoomLine).
+      return send(res, 200, { ...list, lowDisk: pictureRoomLine(await freeOn(this.gallery.dir), driveOf(this.gallery.dir)) }), true;
     }
     if (p === '/api/downloads') return send(res, 200, { image: this.list(), helpers: this.helpers() }), true;
     if (p === '/api/images/plan') {

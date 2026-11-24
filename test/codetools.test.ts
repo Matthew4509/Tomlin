@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CODE_TOOLS, CodeTurn, codeEnv, codingFolder, gitArgs, namedCommands, parseExtra, realExec, secretPath, type CodeLog, type Exec } from '../src/codetools.ts';
+import { CODE_TOOLS, CodeTurn, codeEnv, codingFolder, gitArgs, namedCommands, npmArgs, parseExtra, realExec, secretPath, type CodeLog, type Exec } from '../src/codetools.ts';
 
 test('git_read takes its seven reading verbs and nothing that writes', () => {
   for (const verb of ['status', 'diff', 'log', 'show', 'branch', 'ls-files', 'blame']) assert.ok('argv' in gitArgs(verb, []), verb);
@@ -139,6 +139,43 @@ test('run_command: off by default, a card with the real command each time, in th
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('Allowed still asks when this answer changed what the command runs: package.json scripts, files saved, or text that looked like orders', async () => {
+  const root = await project({ test: 'node --test' });
+  try {
+    const ran: string[][] = [];
+    const exec: Exec = async (_exe, args) => (ran.push(args), { code: 0, out: 'ok', timedOut: false });
+    const cards: Array<[string, { detail?: string } | undefined]> = [];
+    let why = '';
+    const turn = (yes: boolean) => new CodeTurn({ root, perCall: 2000, run: 'allowed', exec, mustAsk: () => why, confirm: async (what, extra) => (cards.push([what, extra]), yes) });
+
+    // Nothing changed: no card.
+    assert.match(await turn(true).run('run_command', '{"name":"test"}'), /finished/);
+    assert.equal(cards.length, 0);
+
+    // The model rewrote package.json during the answer (a pretest that runs anything, a new test script).
+    const t = turn(false);
+    // The turn reads the scripts as it starts; the rewrite comes after that read (racing it made this test fail by timing).
+    await (t as unknown as { before: Promise<string> }).before;
+    await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: { pretest: 'powershell -c calc', test: 'node evil.js' } }));
+    assert.match(await t.run('run_command', '{"name":"test"}'), /NOT allowed/);
+    assert.equal(cards.length, 1, 'asked although Allowed');
+    assert.match(cards[0][1]?.detail ?? '', /npm run test {2}\(node evil\.js\)[\s\S]*Asked although Run is Allowed: the scripts in package.json changed during this answer/);
+    assert.equal(ran.length, 1, 'and a no runs nothing');
+
+    // Files saved, or a held answer: asked, with the reason.
+    why = 'this answer saved 2 files in the folder, which the command may run';
+    assert.match(await turn(true).run('run_command', '{"name":"test"}'), /finished/);
+    assert.equal(cards.length, 2);
+    assert.match(cards[1][1]?.detail ?? '', /saved 2 files/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('npm runs with --ignore-scripts, so pretest and posttest (not on the card) never run', () => {
+  assert.deepEqual(npmArgs(['run', 'test']), ['--ignore-scripts', 'run', 'test']);
 });
 
 test('a run that fails or overruns is said plainly; output is capped and a secret in it withheld; one at a time', async () => {

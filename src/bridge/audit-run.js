@@ -9,7 +9,7 @@ const { fork } = require('child_process');
 const CHILD = path.join(__dirname, 'audit-child.js');
 const LIMIT_MS = 15 * 60000; // a live comparison paces its requests 5 s apart: minutes, never this long
 const children = new Set();
-process.on('exit', () => { for (const c of children) try { c.kill(); } catch {} });
+require('../exithook.ts').onExit(() => { for (const c of children) try { c.kill(); } catch {} });
 
 // opts must survive JSON (what is passed is what lib/audit-store.js builds: lists, strings, numbers).
 // hooks.onStart(pid): for the tests.

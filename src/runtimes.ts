@@ -163,6 +163,26 @@ export class Runtimes {
     return this.exePin(this.id(engine, device), engine);
   }
 
+  /**
+   * Which expert-parallel runner is installed now (the patched llama.cpp in the folder TOMLIN_EXPERT_RUNNER names, else
+   * llama-cuda-experts in the home's runtime folder, then the app's; src/jobrun/epload.ts expertRunner looks in the same
+   * order): its llama.dll's size and time, '' when there is none. A crash with it is kept against this, so installing
+   * another build lets expert parallel be tried again (src/maxmode.ts MaxSpeeds.epCrash).
+   */
+  expertStamp(said = process.env.TOMLIN_EXPERT_RUNNER ?? ''): string {
+    for (const dir of [said.trim(), join(this.kept, 'llama-cuda-experts'), join(this.dir, 'llama-cuda-experts')].filter(Boolean)) {
+      const exe = exeIn(dir, 'llama');
+      if (!exe) continue;
+      try {
+        const s = statSync(join(dirname(exe), 'llama.dll'));
+        return `${s.size}:${Math.round(s.mtimeMs)}`;
+      } catch {
+        // No llama.dll beside it: not the patched runner, the next place is looked in.
+      }
+    }
+    return '';
+  }
+
   installedPin(id: string): boolean {
     return this.exePin(id) !== null;
   }

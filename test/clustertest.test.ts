@@ -11,9 +11,10 @@ import * as share from '../src/share.ts';
 import * as link from '../src/link.ts';
 import { NO_ALLOW } from '../src/carry.ts';
 import type { Presence, RpcProgram } from '../src/maxlend.ts';
-import { CLUSTER_TEST_DOOR, clusterTestUpgrade, readAsk, testEnds, TEST_MAX_MINUTES, TEST_MINUTES, type DoorDeps } from '../src/cluster/testdoor.ts';
-import { openTestWire, testBridge, type StreamNews } from '../src/cluster/testwire.ts';
+import { CLUSTER_TEST_DOOR, clusterTestUpgrade, dllamaFile, lasted, noAvx2, readAsk, SHORT_MS, shortStream, testEnds, TEST_MAX_MINUTES, TEST_MINUTES, type DoorDeps } from '../src/cluster/testdoor.ts';
+import { openTestWire, testBridge, wireWords, type StreamNews } from '../src/cluster/testwire.ts';
 import { probe } from '../src/cluster/harness.ts';
+import { safeAppPath } from '../src/update.ts';
 import { findPc, testSummary } from '../tools/cluster-test.ts';
 import type { Remote } from '../src/store.ts';
 
@@ -30,12 +31,14 @@ interface Rig {
   said: string[];
   stops: number;
   rpcServer: Server | null;
+  /** The stand-in distributed-llama worker (null: this copy has none). */
+  dllama: ((threads: number) => Promise<{ port: number; stop: () => void }>) | null;
   url: string;
   close: () => Promise<void>;
 }
 
 /** `old`: the door answers the "why" request as TOMLIN 2.0.89 does (it does not know it, so it refuses it). */
-async function rig(o: { old?: boolean } = {}): Promise<Rig> {
+async function rig(o: { old?: boolean; shortMs?: number } = {}): Promise<Rig> {
   const r: Rig = {
     state: { ...share.DEFAULT_SHARE, on: true, name: 'Big PC', paired: [{ name: 'Main PC', hash: share.hashToken(token), at: '', key: keysText }], allow: { ...NO_ALLOW, lend: true }, lendIdle: 5 },
     presence: NOBODY,
@@ -44,6 +47,7 @@ async function rig(o: { old?: boolean } = {}): Promise<Rig> {
     said: [],
     stops: 0,
     rpcServer: null,
+    dllama: null,
     url: '',
     close: async () => undefined,
   };
@@ -63,7 +67,9 @@ async function rig(o: { old?: boolean } = {}): Promise<Rig> {
       r.rpcServer = s;
       return { port: (s.address() as { port: number }).port, stop: () => { r.stops++; s.close(); } };
     },
+    startDllama: threads => r.dllama?.(threads) ?? null,
     say: line => r.said.push(line),
+    shortMs: o.shortMs ?? 0,
   };
   const http: HttpServer = httpServer((_req, res) => res.writeHead(404).end());
   http.on('upgrade', (req, socket, head) => {
@@ -191,6 +197,52 @@ test('the RPC target: this PC\'s runner of the build asked for, stopped when the
   }
 });
 
+test('the dllama target: a fresh worker for the stream, stopped when it ends; refused where the copy has none', async () => {
+  const nonce = randomBytes(16).toString('base64url');
+  const a = readAsk({ nonce, target: 'dllama', threads: 8 });
+  assert.ok(typeof a !== 'string');
+  assert.deepEqual([a.target, a.threads], ['dllama', 8]);
+  const r = await rig();
+  try {
+    await assert.rejects(openTestWire(remote(r.url), { target: 'dllama', plain: true }), /"Big PC" does not have distributed-llama \(it comes with TOMLIN 2\.1\.17 or newer\)/);
+    let starts = 0;
+    let threads = -1;
+    r.dllama = async t => {
+      starts++;
+      threads = t;
+      const s = createServer(c => c.pipe(c)).listen(0, '127.0.0.1');
+      await new Promise(res => s.once('listening', res));
+      return { port: (s.address() as { port: number }).port, stop: () => { r.stops++; s.close(); } };
+    };
+    for (const plain of [true, false]) {
+      const { server, port } = await testBridge(remote(r.url), { target: 'dllama', plain, threads: 6 });
+      assert.equal((await probe('127.0.0.1', port, 128, 5)).length, 5);
+      server.close();
+    }
+    for (let t = 0; t < 50 && r.stops < 2; t++) await new Promise(res => setTimeout(res, 50));
+    assert.deepEqual([starts, threads, r.stops], [2, 6, 2], 'one worker per stream, each stopped');
+    assert.ok(r.said.some(l => /a distributed-llama worker \(6 threads\), NOT encrypted/.test(l)));
+    assert.ok(r.said.some(l => /a distributed-llama worker \(6 threads\), sealed/.test(l)));
+    // It never opens while someone uses the PC (the same lending rules as the RPC target).
+    r.presence = SOMEONE;
+    await assert.rejects(openTestWire(remote(r.url), { target: 'dllama', plain: true }));
+    assert.equal(starts, 2);
+  } finally {
+    await r.close();
+  }
+});
+
+test('the dllama program: the AVX build for Xeon E5 v1 and v2, AVX2 for the rest', () => {
+  assert.equal(noAvx2('Intel(R) Xeon(R) CPU E5-2670 0 @ 2.60GHz'), true);
+  assert.equal(noAvx2('Intel(R) Xeon(R) CPU E5-2670 v2 @ 2.50GHz'), true);
+  assert.equal(noAvx2('Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz'), false);
+  assert.equal(noAvx2('Intel(R) Core(TM) i7-4790 CPU @ 3.60GHz'), false);
+  assert.equal(dllamaFile('Intel(R) Xeon(R) CPU E5-2640 0 @ 2.50GHz'), 'tools/dllama/dllama-avx.exe');
+  assert.equal(dllamaFile('Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz'), 'tools/dllama/dllama-avx2.exe');
+  // In a folder every older node takes in an update (2.1.16 put it in runtime/dllama, and nodes refused the update).
+  assert.ok(safeAppPath(dllamaFile('x')) && safeAppPath('tools/dllama/LICENSE.txt'), 'it reaches a node by Fast update and is in the zip');
+});
+
 test('a running test ends when someone starts using the PC', async () => {
   const r = await rig();
   try {
@@ -309,6 +361,53 @@ test('a refusal on the first stream gives the reason and one plain summary line'
     assert.match(testSummary(news[0]), /^The test did not run: someone is using "Big PC"/);
     assert.equal(testSummary({ stream: 2, kind: 'open', reason: '', byNode: false }), '');
     server.close();
+  } finally {
+    await r.close();
+  }
+});
+
+test('a dropped network says what the system said, how long the stream ran and how much it carried', () => {
+  const e = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+  assert.equal(wireWords(e, 134_000, 31 * 2 ** 20, 58 * 2 ** 20), 'the network connection to the linked PC was reset (it dropped, or that PC closed it hard) (ECONNRESET), after 2 min 14 s, 31.0 MB in and 58.0 MB out');
+  assert.match(wireWords(Object.assign(new Error('x'), { code: 'ETIMEDOUT' }), 5_000, 0, 0), /timed out .*\(ETIMEDOUT\), after 5 s/);
+  assert.match(wireWords(new Error('odd'), 0, 0, 0), /failed: odd \(no code\)/);
+  assert.equal(lasted(59_400), '59 s');
+  assert.equal(lasted(61_000), '1 min 1 s');
+});
+
+test('short streams the asking PC closes (llama.cpp checking a server) are counted once a minute, not two lines each', async () => {
+  const said: string[] = [];
+  for (let i = 0; i < 40; i++) shortStream(l => said.push(l), 'Main PC', 50);
+  assert.equal(said.length, 0);
+  await new Promise(res => setTimeout(res, 120));
+  assert.deepEqual(said, ['Cluster test for "Main PC": 40 short streams (under 5 s each, closed by that PC: llama.cpp checking the server) in the last minute, not written one by one.']);
+  assert.equal(SHORT_MS, 5_000);
+});
+
+test('a stream the asking PC closes quickly is counted as a check only when it carried next to nothing', async () => {
+  const r = await rig({ shortMs: 5_000 });
+  try {
+    // A real session that fails fast: data moved, so it is written in full.
+    const w = await openTestWire(remote(r.url), { target: 'echo', plain: true });
+    const sent = randomBytes(4096);
+    await new Promise<void>(res => {
+      let got = 0;
+      w.socket.on('data', b => {
+        got += b.length;
+        if (got >= sent.length) res();
+      });
+      w.socket.write(sent);
+    });
+    w.socket.destroy();
+    for (let i = 0; i < 100 && !r.said.some(l => / ended: /.test(l)); i++) await new Promise(res => setTimeout(res, 20));
+    assert.equal(r.said.filter(l => /an echo, NOT encrypted/.test(l)).length, 1, r.said.join(' | '));
+    assert.match(r.said.find(l => / ended: /.test(l)) ?? '', /ended: the asking PC closed the stream/);
+    // A check that opens and closes: nothing written one by one.
+    const before = r.said.length;
+    const c = await openTestWire(remote(r.url), { target: 'echo', plain: true });
+    c.socket.destroy();
+    await new Promise(res => setTimeout(res, 300));
+    assert.equal(r.said.length, before, r.said.join(' | '));
   } finally {
     await r.close();
   }

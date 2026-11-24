@@ -49,6 +49,8 @@ export interface Sent {
   upper: string;
   /** The log as it was at the fold (a change since waits for the next one). */
   logText: string;
+  /** The fold summaries as they were at the fold (absent: none were sent). */
+  sumText?: string;
   ctx: number;
   at: string;
   parts: Part[];
@@ -59,6 +61,117 @@ export interface Sent {
 export interface ChatLogFile {
   lines: LogLine[];
   sent: Sent | null;
+  /** What the model summed up at each fold (oldest first), when the chat's "Sum up what a fold lets go" is on. */
+  sums: SumBlock[];
+}
+
+// ---- Fold summaries: the model sums up what a fold lets go (off unless the chat's tick is on) ----
+
+/**
+ * One fold's summary: the messages that stopped being sent word for word, summed up by the model just before they
+ * left. Kept apart from his log (a model never writes that), labelled as the model's, and his to change or delete.
+ */
+export interface SumBlock {
+  id: string;
+  /** When it was written. */
+  at: string;
+  /** The first and last message it sums up (their times), and how many. */
+  from: string;
+  to: string;
+  n: number;
+  text: string;
+  /** The model that wrote it (as the chat's "ran on" line says it). */
+  by: string;
+}
+
+/** The summaries sent at most: about 2,000 tokens, like the log. The oldest leave first (Memory still shows them). */
+export const SUM_MAX_TOKENS = 2000;
+export const SUM_CHARS = SUM_MAX_TOKENS * CHARS_PER_TOKEN;
+/** One summary at most (characters) and the most the model may write for it (tokens). */
+export const SUM_BLOCK_CHARS = 1500;
+export const SUM_ANSWER_TOKENS = 700;
+/** Most of the leaving messages the model reads for one summary: a share of the chat's room (characters). */
+export const sumInputRoom = (room: number) => Math.max(3000, Math.floor(room * 0.6));
+const SUM_TITLE = 'Earlier in this chat (summed up by the model at each fold, oldest first; the person may have changed these):';
+
+export const SUM_ASK = 'These are older messages from a chat that are about to stop being sent word for word. Sum them up for the rest of the chat: what was asked, what was decided, what was done, and the names, numbers, file names and settings that matter. Short plain lines starting with "- ", at most about 12 lines. Only what these messages say: invent nothing, and say plainly when something was left unsure. Write the lines only, with no heading.';
+
+/** The summaries as sent: newest kept, the oldest left out when they come to more than SUM_CHARS. */
+export function sumsText(sums: SumBlock[]): { text: string; ids: string[]; dropped: number } {
+  const kept: SumBlock[] = [];
+  let n = SUM_TITLE.length;
+  for (let i = sums.length - 1; i >= 0; i--) {
+    const add = blockText(sums[i]).length + 1;
+    if (n + add > SUM_CHARS) break;
+    kept.unshift(sums[i]);
+    n += add;
+  }
+  return { text: kept.length ? `${SUM_TITLE}\n${kept.map(blockText).join('\n')}` : '', ids: kept.map(s => s.id), dropped: sums.length - kept.length };
+}
+const blockText = (s: SumBlock) => `(${s.n} message${s.n === 1 ? '' : 's'}, ${s.from.slice(0, 10)}${s.to.slice(0, 10) !== s.from.slice(0, 10) ? ` to ${s.to.slice(0, 10)}` : ''})\n${s.text}`;
+
+/**
+ * The messages this fold lets go: from where the last fold started sending (the start when there was none) to where
+ * this one starts. Empty when nothing leaves (the first turn, "Send them now" that keeps the same start, a start that moved back).
+ * `summedTo`: when the newest summary ends (its `to`); nothing up to then is summed again, even when the last start's
+ * message was deleted or the start moved back and forward (a different context on another PC).
+ */
+export function leaving(history: ChatLine[], was: Sent | null, now: number, summedTo?: string): ChatLine[] {
+  const lines = sentLines(history);
+  let from = was ? Math.max(0, startIn(lines, was)) : 0;
+  if (summedTo) from = Math.max(from, lines.filter(l => l.at <= summedTo).length);
+  return now > from ? lines.slice(from, now) : [];
+}
+
+/**
+ * What the model is asked for one summary: the leaving messages as a transcript (the newest that fit `max`
+ * characters), and the ask. `n`, `from`, `to`: the messages it covers; `skipped`: older ones left out for size.
+ */
+export function sumAsk(lines: ChatLine[], name: string, max: number): { turns: ChatTurn[]; n: number; from: string; to: string; skipped: number } | null {
+  const rows = lines.map(l => ({ l, text: `${l.role === 'user' ? 'They' : name}: ${l.content.trim()}` }));
+  const kept: typeof rows = [];
+  let n = 0;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (n + rows[i].text.length + 2 > max) break;
+    kept.unshift(rows[i]);
+    n += rows[i].text.length + 2;
+  }
+  // One message bigger than the room on its own: its start, so a long paste still gets summed up.
+  if (!kept.length && rows.length) kept.push({ ...rows[rows.length - 1], text: `${rows[rows.length - 1].text.slice(0, Math.max(0, max - 20))}…` });
+  if (!kept.length) return null;
+  return {
+    turns: [{ role: 'system', content: SUM_ASK }, { role: 'user', content: `${kept.map(r => r.text).join('\n\n')}\n\n(End of the messages. Sum them up now.)` }],
+    n: kept.length,
+    from: kept[0].l.at,
+    to: kept[kept.length - 1].l.at,
+    skipped: rows.length - kept.length,
+  };
+}
+
+/** The model's summary made fit to keep: thinking and headings dropped, lines tidied, cut to SUM_BLOCK_CHARS. '' when nothing is left. */
+export function cleanSum(text: string): string {
+  const lines = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*<\/think>/i, '')
+    .split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l && !/^#+\s/.test(l) && !/^(summary|here is|here's)\b.*:$/i.test(l))
+    .map(l => (/^[-*•]\s*/.test(l) ? `- ${l.replace(/^[-*•]\s*/, '')}` : /^\d+[.)]\s+/.test(l) ? `- ${l.replace(/^\d+[.)]\s+/, '')}` : `- ${l}`));
+  return fitSum(lines);
+}
+
+/** Whole lines up to SUM_BLOCK_CHARS; a first line longer than that on its own is cut, not lost. */
+function fitSum(lines: string[]): string {
+  let out = '';
+  for (const l of lines) {
+    if (out.length + l.length + 1 > SUM_BLOCK_CHARS) {
+      if (!out) out = `${l.slice(0, SUM_BLOCK_CHARS - 1)}…`;
+      break;
+    }
+    out += `${out ? '\n' : ''}${l}`;
+  }
+  return out;
+}
+
+/** A summary as the user edited it: their own words kept (only blank lines and spaces at the ends taken out), cut to SUM_BLOCK_CHARS. */
+export function cleanEditedSum(text: string): string {
+  return fitSum(text.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean));
 }
 
 /**
@@ -148,6 +261,8 @@ export interface LayerInput extends ChatInput {
   readPerSecond: number;
   foldMinutes: number;
   now?: string;
+  /** The fold summaries, when the chat's "Sum up what a fold lets go" is on (absent: off, none are sent). */
+  sums?: SumBlock[];
 }
 
 export interface Layered extends ChatContext {
@@ -187,6 +302,7 @@ export function buildLayered(x: LayerInput): Layered {
   const from = (i: number) => sizes.slice(i).reduce((t, s) => t + s, 0) + x.message.length;
   const topic = `${x.message} ${[...x.history].reverse().find(l => l.role === 'user')?.content ?? ''}`;
   const log = logText(x.log);
+  const sums = x.sums ? sumsText(x.sums) : null;
 
   /** The notebooks, the opening handoff and the log as they are now (what a fold puts in). */
   const fresh = (): { text: string; parts: Part[] } => {
@@ -215,6 +331,10 @@ export function buildLayered(x: LayerInput): Layered {
       out.push(log.text);
       parts.push(part('log', 'Chat log', log.text, log.dropped ? 'cut' : 'whole', `${log.ids.length} line${log.ids.length === 1 ? '' : 's'}${log.dropped ? `; ${log.dropped} done or learned line${log.dropped === 1 ? '' : 's'} left out for size` : ''}`));
     } else parts.push(part('log', 'Chat log', '', 'none', 'empty: "Add to log" under a message puts a line here'));
+    if (sums?.text) {
+      out.push(sums.text);
+      parts.push(part('sums', 'Summed up at the folds (by the model)', sums.text, sums.dropped ? 'cut' : 'whole', `${sums.ids.length} summar${sums.ids.length === 1 ? 'y' : 'ies'}${sums.dropped ? `; ${sums.dropped} older one${sums.dropped === 1 ? '' : 's'} left out for size` : ''}`));
+    } else if (sums) parts.push(part('sums', 'Summed up at the folds (by the model)', '', 'none', 'none yet: the model sums up what the next fold lets go'));
     return { text: out.join('\n\n'), parts };
   };
   /** The documents, inside what the top leaves (two fifths of the room at most), as in buildChat. */
@@ -254,7 +374,7 @@ export function buildLayered(x: LayerInput): Layered {
     // system message ("roles must alternate", measured on Ministral). One answer more leaves instead.
     start = userFrom(history, s);
     // Saved where sending starts, so the next turn trusts it (a record on an answer would fold again every turn).
-    sent = { from: history[start]?.at ?? '', n: start, upper: up.text, logText: log.text, ctx, at: x.now ?? new Date().toISOString(), parts: up.parts };
+    sent = { from: history[start]?.at ?? '', n: start, upper: up.text, logText: log.text, ...(sums?.text ? { sumText: sums.text } : {}), ctx, at: x.now ?? new Date().toISOString(), parts: up.parts };
   }
   const top = sent!;
   const docs = docsFor(top.upper.length);
@@ -268,12 +388,12 @@ export function buildLayered(x: LayerInput): Layered {
     else talk.push({ ...t });
   }
   const system = [head, top.upper, docs.text].filter(Boolean).join('\n\n');
-  const waiting = log.text !== top.logText;
+  const waiting = log.text !== top.logText || (sums?.text ?? '') !== (top.sumText ?? '');
   const parts: Part[] = [x.card ? part('card', 'Who they are', x.card, 'whole') : part('card', 'Who they are', '', 'none', 'Default role: no instructions are sent')];
-  parts.push(...top.parts.map(p => (p.key === 'log' && waiting ? { ...p, note: [p.note, 'your changes since the last fold go in at the next one'].filter(Boolean).join('; ') } : p)));
+  parts.push(...top.parts.map(p => ((p.key === 'log' || p.key === 'sums') && waiting ? { ...p, note: [p.note, 'your changes since the last fold go in at the next one'].filter(Boolean).join('; ') } : p)));
   if (docs.text) parts.push(docs.whole ? part('docs', 'Documents in this chat (whole)', docs.text, 'whole') : part('docs', 'Documents in this chat (the matching parts)', docs.text, docs.text.length < (x.docs?.length ?? 0) ? 'cut' : 'whole'));
   parts.push(start
-    ? part('older', 'Older messages', '', 'left out', `${start} older message${start === 1 ? '' : 's'}, not sent word for word: the chat log keeps what matters, and Find in this chat brings one back`)
+    ? part('older', 'Older messages', '', 'left out', `${start} older message${start === 1 ? '' : 's'}, not sent word for word: the chat log keeps what matters${sums ? ', the fold summaries what the model saw in them,' : ''} and Find in this chat brings one back`)
     : part('older', 'Older messages', '', 'none', 'the whole chat is sent word for word'));
   const recentText = recent.map(l => l.content).join('\n');
   const speed = x.readPerSecond > 0 ? `, reading ${n(Math.round(x.readPerSecond))} tokens a second here` : ', read speed not measured yet';
@@ -327,7 +447,8 @@ function cleanFile(raw: unknown): ChatLogFile {
   const lines = Array.isArray(r.lines) ? r.lines.filter((l): l is LogLine => !!l && typeof l.id === 'string' && isKind(l.kind) && typeof l.text === 'string' && typeof l.at === 'string') : [];
   const s = (r.sent && typeof r.sent === 'object' ? r.sent : null) as Sent | null;
   const sent = s && typeof s.from === 'string' && Number.isInteger(s.n) && typeof s.upper === 'string' && typeof s.logText === 'string' && typeof s.ctx === 'number' && typeof s.at === 'string' && Array.isArray(s.parts) ? s : null;
-  return { lines, sent };
+  const sums = Array.isArray(r.sums) ? r.sums.filter((b): b is SumBlock => !!b && typeof b.id === 'string' && typeof b.at === 'string' && typeof b.from === 'string' && typeof b.to === 'string' && Number.isInteger(b.n) && typeof b.text === 'string' && typeof b.by === 'string') : [];
+  return { lines, sent, sums };
 }
 
 export class ChatLogs {
@@ -396,6 +517,33 @@ export class ChatLogs {
     });
   }
 
+  /** A fold's summary, kept (oldest first). At most NOTEBOOK_MAX_LINES on disk: the oldest go first there too. */
+  async addSum(id: string, b: Omit<SumBlock, 'id' | 'at'>, now = new Date().toISOString()): Promise<SumBlock | null> {
+    const text = cleanSum(b.text);
+    if (!text) return null;
+    const block: SumBlock = { ...b, text, id: randomBytes(5).toString('hex'), at: now };
+    return this.change<SumBlock>(id, f => ({ next: { ...f, sums: [...f.sums, block].slice(-NOTEBOOK_MAX_LINES) }, out: block }));
+  }
+
+  /** A summary's words changed by him (kept as he wrote them, cut to size). */
+  async editSum(id: string, sumId: unknown, text: unknown): Promise<SumBlock | { error: string }> {
+    const clean = cleanEditedSum(String(text ?? ''));
+    if (!clean) return { error: 'A summary cannot be empty: press Delete to take it out.' };
+    return this.change<SumBlock | { error: string }>(id, f => {
+      const was = f.sums.find(b => b.id === sumId);
+      if (!was) return { out: { error: 'That summary is not there any more. It may have been deleted in another window.' } };
+      const b = { ...was, text: clean };
+      return { next: { ...f, sums: f.sums.map(x => (x === was ? b : x)) }, out: b };
+    });
+  }
+
+  async removeSum(id: string, sumId: unknown): Promise<boolean> {
+    return this.change<boolean>(id, f => {
+      const rest = f.sums.filter(b => b.id !== sumId);
+      return rest.length === f.sums.length ? { out: false } : { next: { ...f, sums: rest }, out: true };
+    });
+  }
+
   /** What a fold sent, kept for the turns after it. */
   async setSent(id: string, sent: Sent | null): Promise<void> {
     await this.change(id, f => ({ next: { ...f, sent }, out: null }));
@@ -409,7 +557,7 @@ export class ChatLogs {
   /** A chat carried on from this one (the handoff) starts with the same log, and its own record of what was sent. */
   async copy(from: string, to: string): Promise<void> {
     const { lines } = await this.read(from);
-    if (lines.length) await this.change(to, () => ({ next: { lines, sent: null }, out: null }));
+    if (lines.length) await this.change(to, () => ({ next: { lines, sent: null, sums: [] }, out: null }));
   }
 
   /** The chat was emptied or deleted: its log goes with it. */

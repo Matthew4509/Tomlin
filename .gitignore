@@ -18,3 +18,4 @@ test/scene.test.ts
 retest-*/
 speedrun-*.jsonl
 slotspeed-*.jsonl
+tools/dllama/

@@ -54,7 +54,8 @@ test('successes still waiting are written when TOMLIN closes', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  assert.match(read('src/server/faults.ts'), /process\.on\('exit', \(\) => history\.saveNow\(\)\);/);
+  // Through the one shared exit hook (src/exithook.ts), not a listener of its own.
+  assert.match(read('src/server/faults.ts'), /onExit\(\(\) => history\.saveNow\(\)\);/);
 });
 
 test('an answer collected after the link dropped keeps its crash notice', () => {

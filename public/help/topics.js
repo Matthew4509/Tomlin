@@ -34,6 +34,7 @@ globalThis.TOMLIN_HELP = {
 
     { id: 'network-roles', group: 'network', title: 'Admin PC, node and storage', blurb: 'What each PC can be, and where models and backups are kept.' },
     { id: 'adding-pc', group: 'network', title: 'Adding a PC', blurb: 'Turn on the node, find it, type its setup code; the link helper when it will not link.' },
+    { id: 'bootable-usb', group: 'network', title: 'Bootable USB', blurb: 'A USB stick that starts any PC as a linked node, the admin key, and best settings per kind of PC.' },
     { id: 'linked-pcs', group: 'network', title: 'Linked PCs', blurb: 'Using a node\'s models, two PCs on one node, what a linked PC card shows.' },
     { id: 'sharing-permissions', group: 'network', title: 'Sharing and cluster permissions', blurb: 'Each tick a node owner can give a linked host, and the host PIN.' },
     { id: 'guest-passes', group: 'network', title: 'Guest passes', blurb: 'Let another PC use chosen models, for a day, a week or no limit.' },

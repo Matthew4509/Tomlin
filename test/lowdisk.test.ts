@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { diskStep, drivesOf, freeOn, LOW_DISK, LowDiskWatch, VERY_LOW_DISK } from '../src/lowdisk.ts';
+import { diskStep, drivesOf, freeOn, LOW_DISK, LowDiskWatch, PICTURE_ROOM, pictureRoomLine, VERY_LOW_DISK } from '../src/lowdisk.ts';
 
 const GB = 2 ** 30;
 const HOUR = 3600_000;
@@ -103,4 +103,20 @@ test('the watch: says it in the log and tells once a day per drive, even across 
   // The real reading of a folder that is there, and of one that is not.
   assert.ok(((await freeOn(dir)) ?? 0) > 0);
   assert.equal(await freeOn(join(dir, 'missing', 'deeper')), null);
+});
+
+test('the picture pane reminds under 2 GB free where pictures are kept, and is quiet with room or when it cannot read', () => {
+  assert.equal(PICTURE_ROOM, 2 * GB);
+  assert.equal(pictureRoomLine(1.6 * GB, 'C:'), 'Drive C: has 1.6 GB free. Pictures still save; free up space soon.');
+  assert.equal(pictureRoomLine(0, ''), 'The drive the gallery is on has 0.0 GB free. Pictures still save; free up space soon.');
+  assert.equal(pictureRoomLine(2 * GB, 'C:'), '');
+  assert.equal(pictureRoomLine(50 * GB, 'D:'), '');
+  assert.equal(pictureRoomLine(null, 'C:'), '');
+});
+
+test('the picture pane has a place for the reminder and shows it only when the gallery answer has one', () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<p class="hint img-lowdisk" id="img-lowdisk" role="status" hidden><\/p>/);
+  const js = readFileSync(new URL('../public/images.js', import.meta.url), 'utf8');
+  assert.match(js, /\$\('#img-lowdisk'\)\.hidden = !g\.lowDisk;/);
 });

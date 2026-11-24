@@ -10,7 +10,7 @@ import * as memory from '../memory.ts';
 import * as seats from '../seats.ts';
 import type { StaffMember } from '../staff.ts';
 import { writeAtomic } from '../atomic.ts';
-import { projectBlock, readProjectRules } from '../rules.ts';
+import { projectBlock, projectRulesForModel } from '../rules.ts';
 import { type NewEvent, d } from './shared.ts';
 import { teamOf, teamWords } from './sizing.ts';
 import type { Brain, StepResult } from '../jobrun.ts';
@@ -95,6 +95,8 @@ export const clearBeforeRepair = async (id: string) => rm(await beforeFile(id), 
 
 // ---- The job's events: appended by code as things happen; the job room is replayed from them ----
 
+/** The most one job's events file holds (it is a record, kept with the job). */
+export const MAX_EVENTS_BYTES = 20 * 2 ** 20;
 const eventsFile = async (id: string) => join(await d.workspaceDir(), 'jobs', id, 'events.jsonl');
 
 export async function loadEvents(id: string): Promise<home.JobEvent[]> {
@@ -112,13 +114,63 @@ export async function loadEvents(id: string): Promise<home.JobEvent[]> {
   return out;
 }
 
+/**
+ * A full events file cut to about half the cap: its first line (the plan), every note someone has not yet been given,
+ * and the newest lines that fit, in their order. Job logic reads this file (which notes are still to be passed on, the
+ * last event), so refusing new events at the cap would lose notes and the results that mark them used; keeping the
+ * newest keeps both, and a note still waiting is never dropped however old it is.
+ */
+export function trimEvents(text: string, max = MAX_EVENTS_BYTES): string {
+  const lines = text.split('\n').filter(l => l.trim());
+  const parsed = lines.map(l => {
+    try {
+      return JSON.parse(l) as home.JobEvent;
+    } catch {
+      return null;
+    }
+  });
+  const events = parsed.filter((e): e is home.JobEvent => !!e && typeof e.type === 'string');
+  const roles = new Set(events.flatMap(e => (e.type === 'note' && Array.isArray(e.to) ? e.to.map(t => t.role ?? '') : [])));
+  const waiting = new Set<string>();
+  for (const role of roles) for (const n of home.pendingNotes(events.map(e => ((e.type === 'result' || e.type === 'review') && !Array.isArray(e.notes) ? { ...e, notes: [] } : e)), role)) waiting.add(n.id);
+  const keep = new Set<number>(lines.length ? [0] : []);
+  parsed.forEach((e, i) => {
+    if (e?.type === 'note' && waiting.has(e.id)) keep.add(i);
+  });
+  let room = max / 2 - [...keep].reduce((n, i) => n + Buffer.byteLength(lines[i]) + 1, 0);
+  for (let i = lines.length - 1; i > 0; i--) {
+    if (keep.has(i)) continue;
+    room -= Buffer.byteLength(lines[i]) + 1;
+    if (room < 0) break;
+    keep.add(i);
+  }
+  return lines.filter((_, i) => keep.has(i)).map(l => `${l}\n`).join('');
+}
+
+/** Each job's writes go one after another, so a cut never races an append. */
+const writing = new Map<string, Promise<void>>();
+
 /** Adds one event. A failure to write it never stops the job: the room is a record, the plan file is the state. */
-export async function addEvent(id: string, e: NewEvent): Promise<void> {
+export function addEvent(id: string, e: NewEvent, max = MAX_EVENTS_BYTES): Promise<void> {
+  const run = (writing.get(id) ?? Promise.resolve()).then(() => writeEvent(id, e, max));
+  writing.set(id, run);
+  void run.then(() => {
+    if (writing.get(id) === run) writing.delete(id);
+  });
+  return run;
+}
+
+async function writeEvent(id: string, e: NewEvent, max: number): Promise<void> {
   try {
     const file = await eventsFile(id);
     await mkdir(join(file, '..'), { recursive: true });
     const full = { at: new Date().toISOString(), ...e };
-    await appendFile(file, `${JSON.stringify(full)}\n`);
+    const line = `${JSON.stringify(full)}\n`;
+    // One job's record never grows past the cap (a job stuck in a loop must not fill the drive): when full, the oldest
+    // lines go and the newest stay, so every new event is still kept.
+    const size = await stat(file).then(x => x.size, () => 0);
+    if (size + Buffer.byteLength(line) > max) await writeAtomic(file, trimEvents(await readFile(file, 'utf8').catch(() => ''), max) + line);
+    else await appendFile(file, line);
     d.onEvent?.(id, full as home.JobEvent);
   } catch {
     // ignored on purpose (see above)
@@ -234,7 +286,7 @@ export async function packetFront(id: string, ctx: number, hire: StaffMember | n
   const [c, team, own] = await Promise.all([cards !== undefined ? cards : jobCards(id), d.notebooks.read('team'), hire ? d.notebooks.read(`staff:${hire.id}`) : null]);
   const front = memory.jobFront(ctx, c, team, own, topic, hire ? `${hire.name.split(/\s+/)[0]}'s memory` : undefined);
   // The project's own rules (src/rules.ts), fitted to the model: a small context gets the first lines only.
-  const mine = projectBlock(await readProjectRules(await d.workspaceDir(), id));
+  const mine = projectBlock((await projectRulesForModel(await d.workspaceDir(), id)).text);
   if (!mine) return front;
   const text = memory.fitLines(mine, ctx <= 4096 ? 500 : 1500);
   return { text: front.text ? `${front.text}

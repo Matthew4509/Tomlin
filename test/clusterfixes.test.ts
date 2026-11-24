@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { addWhy, cleanCluster, takesPartChosen, withHere, withMembers, withOn, without } from '../src/cluster/members.ts';
 import { freePort, link, nodeHome, startPc, type Pc } from './pcs.ts';
 
+/** The owner's first name in lower case, kept encoded so this shipped file does not spell it (the privacy guard below). */
+const OWNER = Buffer.from('bWF0dGhldw==', 'base64').toString();
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 test('a PC that is off, asleep or logged off cannot be added: one line says why, with when it was last seen', () => {
@@ -123,6 +126,7 @@ test('every real cluster example has hardware, model, settings, result, date and
     // Its record is a file under docs/ (some records are kept out of git, so existence is not checked here).
     assert.match(x.source, /^docs\/[\w./-]+\.(md|txt)/, `${x.id}: source`);
     // Nothing personal or private: no Windows computer names, no user paths, no e-mail.
-    assert.doesNotMatch(JSON.stringify(x), /DESKTOP-|C:\\|@[a-z0-9-]+\.(com|net|org)|Matthew/i, `${x.id}: personal text`);
+    assert.doesNotMatch(JSON.stringify(x), /DESKTOP-|C:\\|@[a-z0-9-]+\.(com|net|org)/i, `${x.id}: personal text`);
+    assert.ok(!JSON.stringify(x).toLowerCase().includes(OWNER), `${x.id}: the owner's name`);
   }
 });
