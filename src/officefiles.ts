@@ -18,6 +18,8 @@ export const COLUMNS_MOST = 16_384;
  * empty cells, and one naming column ZZZZZZ asked for 308 million.
  */
 export const TEXT_MOST = 8 * 2 ** 20;
+/** The longest one Word or Excel file may take to read, so a file made to be slow to read cannot hold the app. */
+export const OFFICE_TIME_MS = 10_000;
 
 export interface DocPiece { label: string; text: string }
 
@@ -78,8 +80,72 @@ const xmlText = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').rep
 const cell = (s: string) => s.replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
 const utf8 = (u: Uint8Array | undefined) => (u ? Buffer.from(u.buffer, u.byteOffset, u.byteLength).toString('utf8') : '');
 
+/** Throws in plain words once a file has taken longer than its time to read. */
+function clock(ms: number): () => void {
+  const until = performance.now() + ms;
+  let n = 0;
+  return () => {
+    if ((++n & 255) === 0 && performance.now() > until) throw new Error(`it took longer than ${Math.round(ms / 1000)} seconds to read, so its reading was stopped`);
+  };
+}
+
+/**
+ * Each <name ...>...</name> (or <name ... />) in the XML, in one pass from start to end: an opening tag never reaches
+ * past the next "<", and once no closing tag is left none is looked for again. A pattern like <row>([\s\S]*?)</row>
+ * read the rest of the file again for every row left open, so a few kilobytes of open rows took minutes.
+ */
+function* elements(xml: string, name: string, tick: () => void = () => undefined): Generator<{ attrs: string; inner: string }> {
+  const open = `<${name}`;
+  const close = `</${name}>`;
+  const rest = /[^<>]*>/y;
+  let at = 0;
+  for (;;) {
+    tick();
+    const start = xml.indexOf(open, at);
+    if (start < 0) return;
+    at = start + open.length;
+    const after = xml.charCodeAt(at);
+    // <row> or <row r="1">, not <rows>.
+    if (!(after === 62 || after === 47 || after === 32 || after === 9 || after === 10 || after === 13)) continue;
+    rest.lastIndex = at;
+    if (!rest.test(xml)) continue;
+    const tagEnd = rest.lastIndex;
+    const attrs = xml.slice(at, tagEnd - 1);
+    if (attrs.endsWith('/')) {
+      at = tagEnd;
+      yield { attrs: attrs.slice(0, -1), inner: '' };
+      continue;
+    }
+    const end = xml.indexOf(close, tagEnd);
+    if (end < 0) return;
+    at = end + close.length;
+    yield { attrs, inner: xml.slice(tagEnd, end) };
+  }
+}
+
+/** The text of every <t> in a piece of XML, joined. */
+function tTexts(xml: string, tick?: () => void): string {
+  let out = '';
+  for (const t of elements(xml, 't', tick)) if (!t.inner.includes('<')) out += xmlText(t.inner);
+  return out;
+}
+
+/** A piece of XML with each <rPh>...</rPh> (a reading guide over Japanese words) taken out. */
+function withoutRph(xml: string): string {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const start = xml.indexOf('<rPh', at);
+    const end = start < 0 ? -1 : xml.indexOf('</rPh>', start);
+    if (end < 0) return out + xml.slice(at);
+    out += xml.slice(at, start);
+    at = end + 6;
+  }
+}
+
 /** A Word file's text: paragraphs a line each, a table as rows of "a | b | c". */
-export function docxText(bytes: Uint8Array): string {
+export function docxText(bytes: Uint8Array, ms = OFFICE_TIME_MS): string {
+  const tick = clock(ms);
   const xml = utf8(unzip(bytes, n => n === 'word/document.xml').get('word/document.xml'));
   if (!xml) throw new Error('it has no document text in it (is it a Word .docx file?)');
   const lines: string[] = [];
@@ -87,8 +153,10 @@ export function docxText(bytes: Uint8Array): string {
   let inText = false;
   // Tables may sit inside tables: each level keeps its own row and cell.
   const tables: Array<{ row: string[]; cell: string[] }> = [];
-  const tag = /<(\/?)w:(tbl|tr|tc|tab|br|cr|p|t)\b[^>]*?(\/?)>|([^<]+)/g;
+  // A tag's inside never holds "<", so a tag left open is given up at the next one, not read to the end of the file.
+  const tag = /<(\/?)w:(tbl|tr|tc|tab|br|cr|p|t)\b[^<>]*?(\/?)>|([^<]+)/g;
   for (let m = tag.exec(xml); m; m = tag.exec(xml)) {
+    tick();
     if (m[4] !== undefined) {
       if (inText) para += xmlText(m[4]);
       continue;
@@ -131,32 +199,33 @@ const colOf = (ref: string): number => {
 };
 
 /** An Excel file's sheets, each as rows of "a | b | c" (the cells' values as stored: a date is its number, a sum its last result). */
-export function xlsxSheets(bytes: Uint8Array): DocPiece[] {
+export function xlsxSheets(bytes: Uint8Array, ms = OFFICE_TIME_MS): DocPiece[] {
+  const tick = clock(ms);
   const files = unzip(bytes, n => n === 'xl/workbook.xml' || n === 'xl/_rels/workbook.xml.rels' || n === 'xl/sharedStrings.xml' || /^xl\/worksheets\/[^/]+\.xml$/.test(n));
   const book = utf8(files.get('xl/workbook.xml'));
   if (!book) throw new Error('it has no workbook in it (is it an Excel .xlsx file?)');
-  const shared = [...utf8(files.get('xl/sharedStrings.xml')).matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(m => [...m[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([^<]*)<\/t>/g)].map(t => xmlText(t[1])).join(''));
+  const shared = [...elements(utf8(files.get('xl/sharedStrings.xml')), 'si', tick)].map(si => tTexts(withoutRph(si.inner), tick));
   const attr = (tagText: string, name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(tagText)?.[1] ?? '';
-  const rels = new Map([...utf8(files.get('xl/_rels/workbook.xml.rels')).matchAll(/<Relationship\b[^>]*>/g)].map(m => [attr(m[0], 'Id'), attr(m[0], 'Target')] as const));
+  const rels = new Map([...elements(utf8(files.get('xl/_rels/workbook.xml.rels')), 'Relationship', tick)].map(m => [attr(m.attrs, 'Id'), attr(m.attrs, 'Target')] as const));
   const out: DocPiece[] = [];
   let rowsLeft = ROWS_MOST;
   let charsLeft = TEXT_MOST;
-  for (const [i, s] of [...book.matchAll(/<sheet\b[^>]*>/g)].entries()) {
-    const target = rels.get(attr(s[0], 'r:id')) ?? `worksheets/sheet${i + 1}.xml`;
+  for (const [i, s] of [...elements(book, 'sheet', tick)].entries()) {
+    const target = rels.get(attr(s.attrs, 'r:id')) ?? `worksheets/sheet${i + 1}.xml`;
     const xml = utf8(files.get(`xl/${target.replace(/^\/?xl\//, '').replace(/^\//, '')}`));
     const lines: string[] = [];
     let cut = false;
-    for (const r of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    for (const r of elements(xml, 'row', tick)) {
       if (rowsLeft-- <= 0 || charsLeft <= 0) { cut = true; break; }
       const cells: string[] = [];
       // Counted as the row is made, so one row of long shared words in every column cannot get past the cap either.
       let rowChars = 0;
-      for (const c of r[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-        const at = colOf(attr(c[1], 'r'));
-        if (at >= COLUMNS_MOST) throw new Error(`it names a column past Excel's last one (${attr(c[1], 'r').slice(0, 12)}), so it is not a real workbook`);
-        const type = attr(c[1], 't');
-        const v = /<v\b[^>]*>([^<]*)<\/v>/.exec(c[2] ?? '')?.[1] ?? '';
-        const text = type === 's' ? shared[Number(v)] ?? '' : type === 'inlineStr' ? [...(c[2] ?? '').matchAll(/<t\b[^>]*>([^<]*)<\/t>/g)].map(t => xmlText(t[1])).join('') : type === 'b' ? (v === '1' ? 'TRUE' : 'FALSE') : xmlText(v);
+      for (const c of elements(r.inner, 'c', tick)) {
+        const at = colOf(attr(c.attrs, 'r'));
+        if (at >= COLUMNS_MOST) throw new Error(`it names a column past Excel's last one (${attr(c.attrs, 'r').slice(0, 12)}), so it is not a real workbook`);
+        const type = attr(c.attrs, 't');
+        const v = /<v\b[^<>]*>([^<]*)<\/v>/.exec(c.inner)?.[1] ?? '';
+        const text = type === 's' ? shared[Number(v)] ?? '' : type === 'inlineStr' ? tTexts(c.inner, tick) : type === 'b' ? (v === '1' ? 'TRUE' : 'FALSE') : xmlText(v);
         const place = at >= 0 ? at : cells.length;
         rowChars += Math.max(0, place - cells.length) * 3 + text.length + 3;
         if (rowChars > charsLeft) {
@@ -173,7 +242,7 @@ export function xlsxSheets(bytes: Uint8Array): DocPiece[] {
       }
     }
     const said = charsLeft <= 0 ? `\n[cut here: only the first ${(TEXT_MOST / 2 ** 20).toFixed(0)} million characters are read]` : `\n[cut here: only the first ${ROWS_MOST.toLocaleString('en-GB')} rows are read]`;
-    out.push({ label: `sheet "${xmlText(attr(s[0], 'name')) || `Sheet ${i + 1}`}"`, text: lines.join('\n') + (cut || charsLeft <= 0 ? said : '') });
+    out.push({ label: `sheet "${xmlText(attr(s.attrs, 'name')) || `Sheet ${i + 1}`}"`, text: lines.join('\n') + (cut || charsLeft <= 0 ? said : '') });
   }
   return out;
 }

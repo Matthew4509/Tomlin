@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatTurn } from './engine.ts';
-import { CHARS_PER_TOKEN, chatRoom, cleanNote, docRoom, fitLines, keywords, NOTEBOOK_MAX_LINES, pickLines, userFrom, type ChatContext, type ChatInput, type NoteLine, type Part } from './memory.ts';
+import { bookNote, bookText, CHARS_PER_TOKEN, chatRoom, cleanNote, docRoom, fitLines, keywords, NOTEBOOK_MAX_LINES, pickLines, userFrom, type ChatContext, type ChatInput, type NoteLine, type Part } from './memory.ts';
 import type { ChatLine, Store } from './store.ts';
 
 /** The smallest context that gets layers: under it a chat is too small for them and works as before. */
@@ -313,11 +313,11 @@ export function buildLayered(x: LayerInput): Layered {
       if (!lines) return;
       if (!lines.length) return void parts.push(part(key, label, '', 'none', 'empty'));
       const got = pickLines(lines, topic, Math.max(0, Math.min(free, Math.floor(room / 5))));
-      if (!got.lines.length) return void parts.push(part(key, label, '', 'left out', `${lines.length} line${lines.length > 1 ? 's' : ''}, no room`));
-      const text = `${title}\n${got.lines.map(l => `- ${l.text}`).join('\n')}`;
+      if (!got.lines.length) return void parts.push(part(key, label, '', 'left out', `${lines.length} entr${lines.length > 1 ? 'ies' : 'y'}, no room`));
+      const text = bookText(title, got.lines);
       out.push(text);
       free -= text.length + 2;
-      parts.push(part(key, label, text, got.left ? 'cut' : 'whole', got.left ? `${got.lines.length} of ${lines.length} lines, the ones on the topic at the last fold` : `${lines.length} line${lines.length > 1 ? 's' : ''}`));
+      parts.push(part(key, label, text, got.left || got.cut ? 'cut' : 'whole', bookNote(got, lines.length, 'the ones on the topic at the last fold')));
     };
     book('team', 'Team memory', 'Team notebook (facts the whole team keeps; the person wrote these):', x.team);
     book('own', `${x.name}'s memory`, 'Your notebook (what the person asked you to remember):', x.own);

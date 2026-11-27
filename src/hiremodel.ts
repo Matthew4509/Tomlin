@@ -24,6 +24,10 @@ export interface HireModel {
 export interface HireModelFacts {
   /** A picture hire (picture models), else a chat hire. */
   picture?: boolean;
+  /** A Videographer (video models, src/videomodels.ts): said as "video model". */
+  video?: boolean;
+  /** Models of that kind that can be downloaded here but are not (the video list): one of them is "not downloaded yet". */
+  known?: { id: string; name: string }[];
   /** This PC's models of that kind, by id, with their short names. */
   here: { id: string; name: string }[];
   /** The linked PCs: the models of that kind each lends (null: not known yet), and what it has loaded. */
@@ -37,7 +41,7 @@ export const fileStem = (id: string) => (id.split(/[\\/]/).pop() ?? id).replace(
 
 /** What model a hire with `ref` as their first choice uses, and whether it is here. */
 export function hireModel(ref: unknown, f: HireModelFacts): HireModel {
-  const kind = f.picture ? 'picture model' : 'model';
+  const kind = f.video ? 'video model' : f.picture ? 'picture model' : 'model';
   const b = parseRef(ref);
   if (b.kind === 'none') {
     return f.connected
@@ -59,6 +63,8 @@ export function hireModel(ref: unknown, f: HireModelFacts): HireModel {
     return { state: 'pc', name, pc: pc.name, text: `${name} on "${pc.name}"`, pick: false };
   }
   const m = f.here.find(x => x.id === b.id);
+  const listed = m ? undefined : f.known?.find(x => x.id === b.id);
+  if (listed) return { state: 'missing', name: listed.name, pc: 'this PC', text: `${listed.name}, not downloaded on this PC yet`, pick: true };
   if (!m) return { state: 'missing', name: fileStem(b.id), pc: 'this PC', text: `${fileStem(b.id)}, no longer on this PC`, pick: true };
   return { state: 'here', name: m.name, pc: 'this PC', text: m.name, pick: false };
 }

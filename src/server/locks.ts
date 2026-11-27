@@ -257,10 +257,25 @@ export async function appLockAction(req: IncomingMessage, res: ServerResponse, b
     const secret = newSecret(kind);
     if (!secret) return;
     appGuard.wrong('local');
-    if (!(await codes.use(b.code))) return wrong('That recovery code is not right, or it was used already.');
+    // The new lock is saved in the code's turn, before the code is crossed off: when it cannot be saved, the code stays
+    // unused and the lock stays as it was.
+    let pinSaved = false;
+    let right: boolean;
+    try {
+      right = await codes.use(b.code, async () => {
+        await save(kind, secret);
+        pinSaved = true;
+      });
+    } catch (e) {
+      appGuard.right('local');
+      const said = (e as Error).message.split('\n')[0].slice(0, 160);
+      return json(res, 500, { error: pinSaved
+        ? `The new ${word(kind)} is set, but the use of the recovery code could not be saved (${said}), so this browser was not opened. Type the new ${word(kind)} to open it.`
+        : `The new ${word(kind)} could not be saved (${said}), so nothing changed and the recovery code was not used. Try again in a moment.` });
+    }
+    if (!right) return wrong('That recovery code is not right, or it was used already.');
     appGuard.right('local');
     codesChanged();
-    await save(kind, secret);
     appLock.close();
     appCookie(res, appLock.open());
     return json(res, 200, appLockView(req, true));
@@ -302,7 +317,7 @@ export async function appLockAction(req: IncomingMessage, res: ServerResponse, b
     if (wait) return tooMany();
     if (!(await currentOk(b.current))) return wrongPin();
     if (b.action === 'off') {
-      if (jobRoutes.shareOn()) return json(res, 409, { error: 'This PC is a node, and a node must have the app lock. Turn the node off first (Network), then turn the lock off.' });
+      if (jobRoutes.shareOn()) return json(res, 409, { error: 'This PC is a node, and a node must have the app lock. Turn the node off first (This PC), then turn the lock off. To run the node with no PIN, tick "I refuse to have a PIN" when you turn it on again.' });
       await rm(join(store.dir, APP_LOCK_FILE), { force: true });
       appFile = null;
       appLock.close();

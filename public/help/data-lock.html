@@ -22,15 +22,15 @@
 <p>Settings, <b>Data and lock</b>: where your chats and staff are kept, how they are backed up, and who can open TOMLIN. It holds three parts: where things are kept, the lock, and notifications.</p>
 <h2 id="help-pins">The app lock PIN</h2>
 <p>The app lock PIN (the padlock in the top bar; Settings) locks the whole app. It is also what a linked PC must type to update this one, turn it off or delete a model on it; with the same PIN on every PC of a cluster, <b>Update all linked PCs</b> asks for it once.</p>
-<p>A host can instead give this PC its <b>host PIN</b>: one PIN for all its linked PCs. This PC takes it once, with its own PIN typed on the host, keeps only a scrambled copy, and takes it from that host only (never from another PC or a guest); the ticks under <b>Sharing and cluster permissions</b> are still needed. Network lists the hosts that hold one, under the PCs linked to this one, each with <b>Take it away</b>.</p>
-<p>Wrong PINs typed on other PCs, this PC's own or a host PIN, are counted even across a restart: after 5 from one PC, it waits 10 minutes, then 1 hour, 6 hours and 24 hours each time after, until a right one.</p>
+<p>The admin PC that links to this one gives it its <b>admin key</b> instead: this PC takes it once, with its own PIN typed on that PC, keeps only a scrambled copy, and takes it from that PC only (never from another PC or a guest). From then on that PC, while it is unlocked, needs no PIN here; the ticks under <b>Sharing and cluster permissions</b> are still needed. Network lists the admin PCs that hold one, under the PCs linked to this one, each with <b>Take it away</b>. (A host PIN an older admin PC gave is listed and works the same way.)</p>
+<p>Wrong PINs typed on other PCs, this PC's own or an admin key, are counted even across a restart: after 5 from one PC, it waits 10 minutes, then 1 hour, 6 hours and 24 hours each time after, until a right one.</p>
 <p>Lost it? Close TOMLIN and delete <code>app-lock.json</code> from <code>TOMLIN\data</code> in your user folder: the PIN is gone and the chats stay.</p>
 <p>Picture models: while TOMLIN is locked, a picture model you loaded is unloaded once it has had nothing to draw for 2 minutes (a linked PC drawing here loads one for its pictures, kept 10 minutes after its last one). While TOMLIN is open, a loaded picture model can be used by any program on this PC: its runner takes no key, so TOMLIN cannot lock it. Chat models take a key.</p>
 <p>The padlock in the top bar locks the app at once; <b>Lock by itself</b> locks it after 5, 10, 15, 30 or 60 minutes without use, or never (only the padlock).</p>
 <h2>Backups and restore points</h2>
 <p>Your chats, staff and settings are backed up on this PC, and <b>Put back</b> brings one of those backups back. A restore point kept on another PC is brought into this PC's backups first: see <a href="backups.html">Backups and restore points</a>.</p>
 <h2>Web search</h2>
-<p>The search engine a chat with Web on uses is chosen here too: see <a href="tool-permissions.html">Permissions</a> and <a href="web.html">Web</a>.</p>
+<p>The search engine a chat with Web on uses is chosen here too: see <a href="tool-permissions.html">Chat permissions</a> and <a href="web.html">Web</a>.</p>
 <h2>Notifications</h2>
 <p>Sounds and Windows notifications are set here, and can be muted for a while.</p>
 </article>

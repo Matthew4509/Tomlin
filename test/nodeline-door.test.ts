@@ -191,7 +191,7 @@ test('a guest\'s answer length is capped and a prompt over the cap is refused, s
   assert.equal(asked.find(x => x.text === 'short')!.max <= 300, true, JSON.stringify(asked));
   assert.ok(asked.find(x => x.text === 'host asks')!.max > 300, JSON.stringify(asked));
   const hello = node.shareView();
-  assert.deepEqual(hello.guestCaps, { answer: 300, prompt: 1000 });
+  assert.deepEqual(hello.guestCaps, { answer: 300, prompt: 1000, web: true, tools: true });
 });
 
 /** One sealed request on a link at any door: its status and the answer opened. */
@@ -232,7 +232,18 @@ test('a model not on the guest\'s pass is refused at /worker/run and /worker/dra
   const draw = await knock(G2, '/worker/draw', { prompt: 'a red boat', model: 'not-on-the-pass', line: true });
   assert.equal(draw.status, 403, draw.text);
   assert.equal(draw.json.guest, 'scope');
+  // With reference pictures (about 1 MB each, as base64): taken in and checked like any draw, not refused as too large.
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(1 << 20)]).toString('base64');
+  const withRefs = await knock(G2, '/worker/draw', { prompt: 'Ember on a red boat', model: 'not-on-the-pass', line: true, refImages: [png, png] });
+  assert.equal(withRefs.status, 403, withRefs.text);
+  assert.equal(withRefs.json.guest, 'scope');
   assert.deepEqual(node.shareView().line, { running: [], waiting: [] });
+});
+
+test('a node says it takes reference pictures with a picture (draw-refs), to a guest too', async () => {
+  const hello = await knock(G2, '/worker/hello', {});
+  assert.equal(hello.status, 200, hello.text);
+  assert.ok(hello.json.can.includes('draw-refs'), hello.text);
 });
 
 test('one guest cannot read or stop another link\'s kept answer', async () => {

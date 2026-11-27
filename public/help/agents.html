@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents: standing jobs - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="agents">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-staff">Staff and chats</a></li><li aria-current="page">Agents: standing jobs</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Agents: standing jobs</h1>
+<p class="lead">An Agent works alone on a timer or a trigger, with only the tools you approve, and writes a report.</p>
+<p>A standing job is work that comes back: check five product pages every weekday morning, sum up a folder when a new file lands in it, write a short note every six hours. An <b>Agent</b> is a hire with the Agent role (Hire staff, role Agent). It works alone: nobody is there to ask, so it uses only the tools you approved for that job, and it says plainly in its report what it could not do.</p>
+<p>The <b>Agents</b> page (Settings, under Staff and models) lists every standing job on this PC and on each linked PC, with its next run on that PC's own clock, its last result, and <b>Run now</b>, <b>Pause</b>, <b>Stop</b>, <b>Edit</b>, <b>Copy recipe</b> and <b>Delete</b>. With no job yet, the <b>Starters</b> come first; with no Agent yet, <b>Hire an Agent</b> opens Hire staff at that role.</p>
+
+<h2 id="agents-new">A new standing job</h2>
+<p><b>New standing job</b> opens a short form: <b>Name</b>, <b>Agent</b> (a drop-down of your Agents), <b>When</b> and <b>Task</b>. The rest of the job keeps its usual tools and limits. <b>Edit as text</b> shows the whole job as its <b>recipe</b>, to change anything in it. You can also start from one of the <b>Starters</b> (each opens as a filled recipe: put in your own pages and topics), or press <b>Write a recipe with a chatbot</b>: it gives you a prompt to copy to any chatbot, and you paste the recipe it writes back in, as text.</p>
+
+<h2 id="agents-recipe">The recipe</h2>
+<p>A recipe is plain text, one <code>Field: value</code> per line. A line with no field carries on the one above, so a long task can take several lines. It is data, never code: TOMLIN runs it with its own tools, and nothing in it is run as a script. The fields:</p>
+<ul>
+<li><b>Name</b>: a short name for the job. Its results folder is named after it unless you give one.</li>
+<li><b>Agent</b>: the hire who runs it. It must be a hire with the Agent role.</li>
+<li><b>Runs on</b>: This PC (to run a job on a linked PC, see <a href="#agents-node">On a linked PC</a>).</li>
+<li><b>When</b>: one or more of, with <code>;</code> between them (at most 6): <code>Every weekday at 07:00</code>, <code>Every day at 18:00</code>, <code>Every Monday at 09:00</code>, <code>Every 6 hours</code> (counted from midnight), <code>Once on 2026-12-01 at 08:00</code>, <code>When a file lands in inbox</code> (a folder in the Agent's results, looked at every minute), <code>When a page changes (every 2 hours)</code> (see <a href="#agents-watch">Page watch</a>), <code>After</code> another job's run (by its name or its Agent's), or <code>By hand</code> (only Run now). Times are this PC's own clock: a daylight-saving change moves nothing.</li>
+<li><b>Task</b>: what to do each run, in plain words (4,000 characters at most; keep anything longer in the Agent's memory).</li>
+<li><b>Pages</b>: the web addresses it may open, with commas between them (40 at most; 5 at most for a page watch, which watches them). A page on this PC or your home network is never allowed.</li>
+<li><b>Watch for</b> (a page watch only, and not needed): words a changed line must hold for the change to count, such as <code>price, in stock</code>.</li>
+<li><b>Reads</b> (with the <b>read reports</b> tool): your other standing jobs whose last report it reads, such as <code>Robin's price watch, Website check</code>. Each must be a job on this PC, or one whose reports are collected here.</li>
+<li><b>Tools</b>: the tools it may use: <b>web pages</b> (the pages listed, and links on pages it read that run), <b>web search</b>, <b>read files</b> (in its results folder), <b>save files</b> (into that run's own folder; nothing is deleted or written over), <b>working notes</b>, <b>calculate</b>, <b>read reports</b> (the last report of each job in Reads, from the last 24 hours only) and <b>calendar</b> (your events from the start of today for up to 7 days, read-only: see <a href="#agents-settings">Settings</a>).</li>
+<li><b>Results</b>: the folder its reports go in, and how many runs are kept (<code>folder "price-check"; keep 30 runs</code>).</li>
+<li><b>Stop after</b>: rounds, minutes and words read in one run (<code>20 rounds, 15 minutes, 40,000 words read</code>). There are ceilings in code whatever it says: 60 rounds, 120 minutes, 200,000 words.</li>
+<li><b>Wait at most</b>: how long a run waits for its PC to be free. A run that waits longer is skipped, and says why.</li>
+<li><b>Memory</b>: <code>no</code>, or <code>may propose lines (Inbox)</code>: up to 3 lines a run, which wait in the Agent's <a href="memory.html">memory</a> Inbox until you keep or drop them.</li>
+</ul>
+
+<h2 id="agents-check">Check, and approving its tools</h2>
+<p><b>Check</b> reads the recipe as code and names every problem in plain words: no name, an Agent who is not one of yours, a <b>When</b> it cannot read, a page on the home network, a tool it does not have. Put them right and press Check again. Below, it shows the job <b>as TOMLIN read it</b>.</p>
+<p>When nothing is wrong, the card lists every tool the job will have, with what each lets it do, and the things an Agent is never given whatever the recipe says: a shell or running commands, deleting files, sending a message or an email, paying or buying, changing settings, clicking or typing on the screen, and opening a page on this PC or the home network. A task that reads like orders for an AI (a recipe copied from the internet) is warned of. <b>Approve and save</b> is the only permission the job has: nothing runs until you press it, and any change to the recipe needs approving again.</p>
+
+<h2 id="agents-held">Holds</h2>
+<p>Anything the job wants that is not in its approved tools is <b>held</b>, never asked: a page not on its list, a file outside its run folder, what a page said that looked like orders for an AI. The run carries on without it, ends as <b>Done, held some</b>, and lists each hold in its report and on its card. <b>Allow next time</b> beside a hold adds that tool to the recipe; your press approves it from the next run. A run is also held when the drive has less than 2 GB free.</p>
+
+<h2 id="agents-reports">Reports</h2>
+<p>Each run writes <code>report.md</code> in the workspace, in <code>agents\&lt;Agent&gt;\&lt;results folder&gt;\&lt;date and time&gt;</code>, beside any files it saved. It says what the run did, what changed since the last run, what was held, what it could not check, and what it read: words it quotes are looked for in what it read, and any that are not there are marked. Only the last runs the recipe keeps are kept. <b>Read the report</b> opens it on the page, and <b>Recent runs</b> lists the last 40 with how each ended: Done, Done, held some, Used its budget (what is left is in the report), Did not finish, Skipped or Stopped. A finished run also puts a line on Home, and a silent Windows notification when TOMLIN is not in front (a run that found nothing new raises none). The Morning brief starter reads your other jobs' reports and your calendar each weekday morning; its line comes first on Home that day.</p>
+<p><b>Ask about this</b> (on a report, and on its line on Home) opens a new chat with the Agent who wrote it, with the report added to the chat as a document and the first line filled in. It is an ordinary chat, with your own permissions: it starts no run. <b>Next run, also…</b> keeps a short note (600 characters at most) for the job's next run only; it is shown on the job's card until that run has had it. It does not change the recipe, so nothing needs approving again.</p>
+
+<h2 id="agents-watch">Page watch</h2>
+<p><code>When a page changes (every 2 hours)</code> looks at the recipe's pages with TOMLIN's own code, one at a time and politely, and loads no model until one of them has changed: a price watch that finds nothing new costs nothing. Every 30 minutes is the most often; once a day the least. What changes on every load (clock times, "updated 5 minutes ago", session codes) is not a change. The first look only keeps the page as it is. When a page changed, the run starts with the lines that changed (as page text, never as orders), and <b>Watch for</b> words, when given, must be in one of those lines. A page that does not open three looks in a row is said once on Home. The job's card shows each page's last look.</p>
+
+<h2 id="agents-settings">Settings</h2>
+<p><b>Settings</b> on the Agents page has three parts.</p>
+<ul>
+<li><b>While you use this PC</b>: with <b>Agents may run while I use this PC</b> off, a timed run waits while a game or another full-screen program is in front, while another program keeps the graphics card busy, or for some minutes after a key or mouse press (10 unless you change it). It is skipped, with the reason, after its Wait at most. Chats and pictures you start yourself never wait for it. It is off unless the PC is a node. TOMLIN reads only whether a full-screen program is in front, how busy the graphics card is and when a key was last pressed, never a window's or program's name.</li>
+<li><b>Agent summaries to my phone</b>: a finished run's one-line summary, with the Agent's and the job's names, goes to your phone through ntfy (a free app for phone notifications), for each job where you tick <b>Send its summary to my phone</b>. TOMLIN sends it, never the Agent; never the report, a page, a file or memory. Give the server (<code>https://ntfy.sh</code>, or your own ntfy server, which keeps it on your network) and the topic your phone's ntfy app subscribes to. <b>Only when something changed</b> leaves out runs that found nothing new. At most 30 an hour. The topic is kept secret: shown masked, never in a backup sent to another PC.</li>
+<li><b>Calendar</b>: your calendar's secret iCal address (Google, Outlook or Apple give one) for jobs with the calendar tool. TOMLIN fetches it itself and gives the job only the events: the Agent never sees the address, and nothing can add, change or answer an event. Kept secret like the topic.</li>
+</ul>
+
+<h2 id="agents-node">On a linked PC</h2>
+<p>Each linked PC with standing jobs has its own part on the Agents page, with its clock. <b>New standing job on</b> that PC writes a job that is kept and run there, on its own clock and models; the recipe is checked there, and an Agent of the name you give is hired there if it has none. On a node, its jobs are set from the admin PC: there, only Pause, Run now and Stop work. A linked PC that is off or not answering keeps its jobs. Its reports are collected into this PC's workspace, under <code>agents\from &lt;PC&gt;</code>, every 10 minutes (or now, with <b>Collect reports</b>), so two PCs with an Agent of the same name never mix.</p>
+<p>A standing job's tools are its own: <a href="tool-permissions.html">Chat permissions</a> is for chats and gives a standing job nothing more.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="tool-permissions.html" rel="prev"><span>&larr; Previous</span><b>Chat permissions: what a chat may do</b></a><a class="next" href="office.html" rel="next"><span>Next &rarr;</span><b>The office (Staff overview)</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

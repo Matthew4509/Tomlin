@@ -145,6 +145,10 @@ export const HOST_ONLY_DOORS: readonly string[] = [
   '/worker/git-files', '/worker/git-get', '/worker/git-have', '/worker/git-log', '/worker/git-commit', '/worker/git-put',
   '/worker/max-open', '/worker/cluster-test', '/worker/passes-put', '/worker/peer-put', '/worker/peer-hello', '/worker/peer-ping', '/worker/peer-copy', '/worker/pass-ask', '/worker/pass-answer', '/worker/power-off', '/worker/perm-set',
   '/worker/host-pin-set', '/worker/host-pin-drop', '/worker/drive-jobs', '/worker/models-where', '/worker/hardware-rescan',
+  // A clip for a linked PC (src/videolink.ts): a host's only; a guest makes none.
+  '/worker/video-make', '/worker/video-state', '/worker/video-get', '/worker/video-stop', '/worker/video-drop',
+  // The admin PC sets and reads this PC's agents, and collects their reports (src/server/agents.ts).
+  '/worker/agents',
 ];
 
 export interface Refusal {

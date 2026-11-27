@@ -9,7 +9,7 @@ const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'u
 
 test('a hire\'s model reads the model lists once per turn, not once per hire', () => {
   const js = read('src/server/people.ts');
-  assert.match(js, /const here = modelsHere\(picture\);/);
+  assert.match(js, /const here = modelsHere\(picture, video\);/);
   assert.match(js, /if \(!hereNow\) \{\n\s+hereNow = \{\};\n\s+setImmediate\(\(\) => \{ hereNow = null; \}\);/);
   assert.doesNotMatch(js.slice(js.indexOf('export function hireModelOf')), /^\s+\? images\.list\(\)\.filter\(x => x\.installed\)/m, 'not read again inside hireModelOf');
 });
@@ -54,7 +54,11 @@ test('All chats draws 60 tiles, then 60 more as the end scrolls into view; dates
 
 test('New chat opens at once with the people known, reads fresh after; a search box past 6 staff', () => {
   const js = read('public/chats.js');
-  assert.match(js, /if \(!chatUi\.people\.length\) await loadChats\(\);\n\s+drawPeople\(\);\n\s+if \(!\$\('#new-chat'\)\.open\) \$\('#new-chat'\)\.showModal\(\);/);
+  // The people are read first (only when none are known yet), drawn, and then the window opens; the project picker's
+  // lines may sit between, but nothing that waits on the server does.
+  const opener = js.match(/if \(!chatUi\.people\.length\) await loadChats\(\);\n([\s\S]*?)\n\s+drawPeople\(\);\n\s+if \(!\$\('#new-chat'\)\.open\) \$\('#new-chat'\)\.showModal\(\);/);
+  assert.ok(opener, 'New chat reads the people, draws them, then opens');
+  assert.doesNotMatch(opener[1], /await /);
   assert.match(js, /\$\('\.new-chat-find'\)\.hidden = chatUi\.people\.length <= 6;/);
   assert.match(read('public/index.html'), /<input id="new-chat-search" type="search"/);
 });

@@ -22,6 +22,9 @@ test('a picture model moved to the CPU while drawing for a linked PC is still th
   assert.equal(pictureVerdict({ ...v, state: 'disconnected', drawing: true }), 'keep', 'restarting on the CPU part-way');
   assert.equal(pictureVerdict({ ...v, state: 'connected', drawing: false, idleMs: 11 * MIN }), 'drop');
   assert.equal(pictureVerdict({ ...v, state: 'connected', drawing: false, model: 'other' }), 'gone');
+  // Q3: restarted after a Cancel (not drawing), the same model is still theirs, so that PC's "Free its memory" lets it go.
+  assert.equal(pictureVerdict({ ...v, state: 'disconnected', drawing: false }), 'wait');
+  assert.equal(pictureVerdict({ ...v, state: 'disconnected', drawing: false, idleMs: 11 * MIN }), 'gone', 'unloaded for good');
 });
 
 test('the node looks after them by these rules, and the finder says what it is testing', () => {

@@ -187,7 +187,7 @@ export function cacheSetAsk(b: Record<string, unknown>, list: Listed[]): { model
 export const cacheWords = (cache: CacheType, kvRam: boolean) => `${cache} cache ${kvRam ? 'in RAM' : 'on the card'}`;
 
 /** The node's answer when its owner has not ticked it: where to tick it. */
-export const tuneRefused = (pcName: string) => `"${pcName}" does not let linked PCs change how its models run. Its owner can tick "${TUNE_TICK}" there, under Network, Sharing permissions.`;
+export const tuneRefused = (pcName: string) => `"${pcName}" does not let linked PCs change how its models run. Its owner can tick "${TUNE_TICK}" there, on This PC.`;
 
 /**
  * Why this PC cannot ask that linked PC now ('' when it can). The tick is not checked here: the node checks its own and

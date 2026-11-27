@@ -6,7 +6,7 @@
 // The admin keeps how each pool keeps its files (drive-pools.json): Spread (each file once, every drive's room adds up)
 // or Mirror (two copies of each file, always on two different PCs, so half the room). Nothing is copied into a pool
 // yet: the queue fills them later. Here the pools are set up, measured and warned about. Tested in test/drivejobs.test.ts.
-import { readFileSync } from 'node:fs';
+import { readFileSync, renameSync } from 'node:fs';
 import { writeAtomicSync } from './atomic.ts';
 
 export const JOBS = ['store', 'backups'] as const;
@@ -50,6 +50,29 @@ const readJson = (file: string): unknown => {
   }
 };
 
+/**
+ * The read a change is made from: a file that is not there is null, but one that cannot be read now (a virus scanner
+ * holding it, a permission set wrong) throws, so the change is refused and nothing is saved over the jobs it holds.
+ * A file that is there but damaged is set aside beside itself, never written over.
+ */
+function readForChange(file: string): unknown {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
+  }
+  try {
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch {
+    const keptAs = `${file}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    renameSync(file, keptAs);
+    console.error(`${file} could not be read and was set aside as ${keptAs}.`);
+    return null;
+  }
+}
+
 let jobsFile = '';
 let poolsFile = '';
 /** Where this PC keeps its drive jobs and its pools (set once at start from the home: src/server/core.ts). */
@@ -63,7 +86,7 @@ export const jobsHere = (): Record<string, Job[]> => (jobsFile ? cleanJobs(readJ
 
 /** Sets one of this PC's drives' jobs (an empty list: no job). */
 export function setJobsHere(drive: string, jobs: unknown): Record<string, Job[]> {
-  const all = jobsHere();
+  const all = jobsFile ? cleanJobs(readForChange(jobsFile)) : {};
   const d = drive.toUpperCase();
   const list = cleanJobList(jobs);
   if (list.length) all[d] = list;
@@ -75,7 +98,7 @@ export function setJobsHere(drive: string, jobs: unknown): Record<string, Job[]>
 export const poolsHere = (): Pools => cleanPools(poolsFile ? readJson(poolsFile) : null);
 
 export function setPoolMode(pool: Job, mode: Mode): Pools {
-  const all = poolsHere();
+  const all = cleanPools(poolsFile ? readForChange(poolsFile) : null);
   all[pool] = { mode };
   if (poolsFile) writeAtomicSync(poolsFile, JSON.stringify(all, null, 2));
   return all;
@@ -83,8 +106,8 @@ export function setPoolMode(pool: Job, mode: Mode): Pools {
 
 /** Why a linked PC may not give one of this PC's drives a job: the owner's tick for that job is off ('' when it may). */
 export function jobRefused(jobs: Job[], allow: { receive: boolean; backup: boolean }, name: string): string {
-  if (jobs.includes('store') && !allow.receive) return `"${name}" does not accept models from linked PCs: its owner can turn on "Accept models from linked PCs" under Network › Sharing permissions, then its drive can be part of Main model storage`;
-  if (jobs.includes('backups') && !allow.backup) return `"${name}" does not keep backups for linked PCs: its owner can turn on "Enable backups" under Network › Sharing permissions, then its drive can be part of Backup storage`;
+  if (jobs.includes('store') && !allow.receive) return `"${name}" does not accept models from linked PCs: its owner can turn on "Accept models from linked PCs" on This PC, then its drive can be part of Main model storage`;
+  if (jobs.includes('backups') && !allow.backup) return `"${name}" does not keep backups for linked PCs: its owner can turn on "Enable backups" on This PC, then its drive can be part of Backup storage`;
   return '';
 }
 

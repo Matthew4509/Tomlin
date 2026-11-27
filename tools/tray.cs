@@ -12,6 +12,9 @@
 //    and ends, instead of starting a second copy that would stop at once;
 //  - starts it again when it ends with 75 (an import or a restore), and starts the newer copy named in next-copy.txt
 //    when it ends with 76 (an update pushed from a linked PC), writing current.txt so the next start runs it too;
+//  - starts it again when it ends by itself with a fault after running a minute or more (at most 3 times in a row
+//    with no hour of clean running between; never after Task Manager or a command ended it, nor while Windows signs
+//    out or shuts down; each said in TOMLIN's log), so a crash does not leave a PC that serves others stopped;
 //  - "--quiet": no window at the start (Start with Windows); "--uninstall": runs the uninstaller in a window;
 //    "--repair": runs Repair install in a window.
 // Written for the old C# 5 compiler (no string interpolation). Only the job object needs Windows calls.
@@ -39,6 +42,14 @@ static class TomlinTray
     static int port = 8740;
     static Process child;
     static bool quitting;
+    /** How many times in a row the server was started again after a fault (AutoRestart): back to 0 after an hour's clean run. */
+    static int faultRestarts;
+    /** The most restarts in a row: after that it stays stopped and says so. */
+    const int MostRestarts = 3;
+    /** When Windows last asked to sign out, restart or shut down (an end then is not a fault to start again from). */
+    static DateTime sessionEndingAt = DateTime.MinValue;
+    /** When the server now running was started (one that ends within a minute never started properly: not started again). */
+    static DateTime childStarted;
     /** The copy that ran before an update pushed from a linked PC, until the new one has answered once (null after). */
     static string previousDir;
     static NotifyIcon icon;
@@ -112,6 +123,8 @@ static class TomlinTray
         // Signing out, a restart or a shutdown ends this program and TOMLIN with it: said first, while there is time.
         // SessionEnded, not SessionEnding: Ending only asks whether Windows may end the session (a restart that is then
         // cancelled, or another program that says no, left TOMLIN ended with the icon still there).
+        // Asked only: a fault seen in the next minutes is Windows ending it, not one to start again from (AutoRestart).
+        Microsoft.Win32.SystemEvents.SessionEnding += delegate { sessionEndingAt = DateTime.Now; };
         Microsoft.Win32.SystemEvents.SessionEnded += delegate (object s, Microsoft.Win32.SessionEndedEventArgs e)
         {
             if (child != null) LogLine("TOMLIN is being ended because Windows is " + (e.Reason == Microsoft.Win32.SessionEndReasons.Logoff ? "signing out." : "shutting down or restarting."));
@@ -181,6 +194,7 @@ static class TomlinTray
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
         child = proc;
+        childStarted = DateTime.Now;
         icon.Text = "TOMLIN: starting";
         ThreadPool.QueueUserWorkItem(delegate
         {
@@ -200,7 +214,9 @@ static class TomlinTray
             host.BeginInvoke((MethodInvoker)delegate
             {
                 if (child != proc || !whole) return;
-                // The new copy answered and finished starting: the one before it is no longer needed to go back to.
+                // The new copy answered and finished starting: the next start (Start with Windows, the Start menu) runs
+                // it too, and the one before it is no longer needed to go back to.
+                if (previousDir != null) try { WriteCurrent(copyDir); } catch { }
                 previousDir = null;
                 icon.Text = "TOMLIN";
                 if (openWhenReady) OpenWindow();
@@ -244,8 +260,8 @@ static class TomlinTray
             {
                 previousDir = copyDir;
                 copyDir = next;
-                // The next start (Start with Windows, the Start menu) runs the new copy too.
-                WriteCurrent(next);
+                // current.txt keeps naming the copy before it until the new one has answered and finished starting
+                // (Start), so a kill or a power cut meanwhile starts the copy that worked, not the untried one.
                 icon.ShowBalloonTip(5000, "TOMLIN", "TOMLIN was updated: starting the new version.", ToolTipIcon.Info);
                 Start(false);
                 return;
@@ -267,8 +283,51 @@ static class TomlinTray
             Start(false);
             return;
         }
+        // Ended by itself with a fault after running a while (Node out of memory, a crash; never 0, a close it chose, and
+        // never one that ended within a minute of starting, which would only fail again): started again, at most 3 times
+        // in a row, so a PC left running keeps serving its linked PCs. Said in the log each time.
+        if (DateTime.Now - childStarted > TimeSpan.FromHours(1)) faultRestarts = 0;
+        if (code != 0 && DateTime.Now - childStarted > TimeSpan.FromMinutes(1) && !EndedFromOutside(proc.Id, code) && AutoRestart())
+        {
+            LogLine("TOMLIN (process " + proc.Id + ") ended by itself (code " + code + "); the program by the clock started it again (" + faultRestarts + " of " + MostRestarts + " in a row). Its last lines are in last-run.txt in " + installDir + ".");
+            icon.ShowBalloonTip(8000, "TOMLIN", "TOMLIN ended by itself, so it was started again. Its last lines are in last-run.txt.", ToolTipIcon.Warning);
+            Start(false);
+            return;
+        }
         icon.Text = "TOMLIN: stopped";
         Say("TOMLIN stopped (code " + code + "). Its last lines are in last-run.txt in " + installDir + ". Click here to repair the install, or use \"Start it again\" in this icon's menu.", true);
+    }
+
+    /** True when one more start after a fault fits: fewer than 3 in a row (an hour's clean run starts the count again). Counts it. */
+    static bool AutoRestart()
+    {
+        if (faultRestarts >= MostRestarts)
+        {
+            LogLine("TOMLIN ended with a fault again after being started again " + MostRestarts + " times in a row, so it was left stopped.");
+            return false;
+        }
+        faultRestarts++;
+        return true;
+    }
+
+    /**
+     * Ended on purpose from outside, or by Windows: not a fault to start again from. Windows is signing out or shutting
+     * down (asked in the last 5 minutes); or code 1 with TOMLIN's running mark still there (src/lastwords.ts): TOMLIN
+     * removes it as it ends with a fault it saw, so code 1 with the mark left is Task Manager or a command (taskkill).
+     * A crash inside Node (out of memory) ends with another code, and is started again.
+     */
+    static bool EndedFromOutside(int pid, int code)
+    {
+        if (DateTime.Now - sessionEndingAt < TimeSpan.FromMinutes(5)) return true;
+        if (code != 1) return false;
+        try
+        {
+            string data = Environment.GetEnvironmentVariable("TOMLIN_DATA");
+            if (string.IsNullOrEmpty(data)) data = Path.Combine(HomeDir(), "data");
+            string mark = File.ReadAllText(Path.Combine(data, "logs", "running-now.json"));
+            return mark.Contains("\"pid\":" + pid + ",") || mark.Contains("\"pid\":" + pid + "}");
+        }
+        catch { return false; }
     }
 
     /** The last message said it did not start: clicking it runs Repair install. */

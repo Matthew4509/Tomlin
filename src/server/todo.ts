@@ -27,7 +27,8 @@ async function projectOf(v: unknown): Promise<{ ref: string; name: string } | nu
 }
 
 const itemId = (v: unknown) => (typeof v === 'string' && /^[0-9a-f]{8,16}$/.test(v) ? v : null);
-const say = (res: ServerResponse, r: Result) => (r.ok ? json(res, 200, r) : json(res, 400, { error: [r.fault, r.reason, r.wayOut].filter(Boolean).join(' '), ...r }));
+// A row changed in another window since this one opened it answers 409, as a memory line does.
+const say = (res: ServerResponse, r: Result) => (r.ok ? json(res, 200, r) : json(res, r.changed ? 409 : 400, { error: [r.fault, r.reason, r.wayOut].filter(Boolean).join(' '), ...r }));
 const notThere = { error: 'That project is not in TOMLIN or on the Projects page any more. Reload the page, then pick it again.' };
 
 /** The To Do with every project it can name (for + Add), TOMLIN's first. */
@@ -50,7 +51,7 @@ export const todoPost: Routes = {
     if (r.ok && (b.every === 'week' || b.every === 'month')) await todo.setCheck(p.ref, b.every, p.name);
     return say(res, r);
   },
-  '/api/todo/set': async ({ res, b }) => say(res, await todo.set(itemId(b.item), { size: b.size, note: b.note })),
+  '/api/todo/set': async ({ res, b }) => say(res, await todo.set(itemId(b.item), { size: b.size, note: b.note, was: b.was })),
   '/api/todo/move': async ({ res, b }) => say(res, await todo.move(itemId(b.item), b.zone, itemId(b.before))),
   '/api/todo/done': async ({ res, b }) => say(res, await todo.done(itemId(b.item), b.done !== false)),
   '/api/todo/remove': async ({ res, b }) => say(res, await todo.remove(itemId(b.item))),

@@ -13,6 +13,7 @@ const grab = (re: RegExp) => re.exec(home)![0];
 const GB = 2 ** 30;
 
 const src = [
+  grab(/const workOf = .*\n/),
   grab(/function deskModels\(s, pc\) \{[\s\S]*?\n\}\n/),
   grab(/function deskFit\(s, pc\) \{[\s\S]*?\n\}\n/),
   grab(/const moveFit = .*\n/),

@@ -27,6 +27,7 @@ import * as nodestaff from '../nodestaff.ts';
 import { assignedTo } from '../assigned.ts';
 import type { Place } from '../runners.ts';
 import * as carry from '../carry.ts';
+import { VIDEO_MODELS } from '../videomodels.ts';
 import { driveOf, driveReportNow } from '../modelhome.ts';
 import { cleanJobList, jobRefused, jobsHere, setJobsHere } from '../drivejobs.ts';
 import * as runnerpush from '../runnerpush.ts';
@@ -53,6 +54,7 @@ import { brainForRef, localBrain } from './who.ts';
 import { actionBusy } from './actions.ts';
 import { askAnswered, comeBack, goAway } from './giveway.ts';
 import { awake, nodeBusy } from '../keepawake.ts';
+import { agentDoor } from '../agentdoor.ts';
 import { endLoan, lendingTo, lendView, lentTo, loanBusyNow, maxUpgrade } from './maxnode.ts';
 import { maxPcs } from './maxhost.ts';
 import { clusterTestUpgrade, isClusterTest } from '../cluster/testdoor.ts';
@@ -60,8 +62,12 @@ import { checkSpeed, forHello, speedNow } from '../speedtest.ts';
 import { nodeTestDeps } from '../cluster/testdoornode.ts';
 import { CACHE_LIMIT as maxlendLimit, PresenceReader, cacheDirOf, cleanLendIdle, nobodyThere, presenceWords, pruneCache } from '../maxlend.ts';
 import { oncePerFile } from '../models.ts';
+import { VIDEO_DOORS, VIDEO_MAKE, VIDEO_MAKE_BODY, VideoNode } from '../videolink.ts';
+import { DRAW_BODY, DRAW_REFS_CAN, cleanRefImages } from '../drawrefs.ts';
+import { PROMPT_MOST } from '../cards.ts';
 import { adapterKind } from '../linkhelp.ts';
 import { startDiskLog } from '../disklog.ts';
+import { startReadings } from '../worklog.ts';
 
 /** A change a linked PC made here, or one made for it, that the owner may want to read later: in the window and the log. */
 const noted = (line: string) => {
@@ -77,6 +83,8 @@ let shareError = '';
 const guard = new share.PinGuard();
 /** Bytes of sealed requests being read before their seal is checked (S4): per link and in all. */
 const bodies = new share.BodyBudget();
+/** The same for requests that did not prove their link first (a host too old to send the proof): a smaller room apart. */
+const unprovenBodies = new share.BodyBudget(40 << 20, 48 << 20);
 /**
  * The most characters of a whole chat this PC takes in one request (src/brains.ts chatCharsFor): from the largest context
  * it runs a chat model with, as loaded now or as set. Said in its hello, so a host fits a chat to it before it sends.
@@ -166,7 +174,7 @@ function clusterHello(local: string | undefined): { borrows: string[]; via: stri
 export const shareListening = () => !!shareServer;
 
 export function shareView() {
-  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash, role, passId, expires }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12), ...(role === 'guest' ? { guest: true, passId, expires: expires ?? null } : {}) })), passes: guestpass.passView(shareState.passes, Date.now(), shareState.paired), passNodes: passHooks.nodes(), passesMade: !!shareState.passGen, passLastLength: shareState.passLastLength ?? 'week', peerLinks: peerHooks.view(), peersHere: peersHereView(), renewLengths: guestpass.RENEW_LENGTHS, line: line.view(id => d.chatList().find(m => m.id === id)?.name ?? pictureName(d.pictureModels().find(m => m.id === id)) ?? id), guestCaps: nodeline.cleanCaps(shareState.guestCaps), hostFirst: shareState.hostFirst !== false, atOnce: slotsLib.cleanAtOnce(shareState.atOnce), slotsNow: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => ({ name: m.name, slots: d.slotsOf?.(m.id) ?? 1, note: d.slotNote?.(m.id) ?? '' })), passAsks: [...ownAsks(), ...(passHooks.asks() as object[])], away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, permChanges, lend: lendView(), plainLinks: shareState.plainLinks === true, shareable: [...oncePerFile(d.chatList()).map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
+  return { claims: claimsWaiting(), on: shareState.on, listening: !!shareServer, error: shareError, linkPaused: guard.pausedFor(), port: shareState.port, name: shareState.name, code: shareState.code, pinOn: shareState.pinOn, pin: shareState.pinOn ? shareState.pin : '', addresses: lanList().map(n => ({ address: `${n.address}:${shareState.port}`, via: n.via, kind: adapterKind(n.via) })), paired: shareState.paired.map(({ name, at, key, hash, role, passId, expires }) => ({ name, at, old: !key, id: String(hash ?? '').slice(0, 12), ...(role === 'guest' ? { guest: true, passId, expires: expires ?? null } : {}) })), passes: guestpass.passView(shareState.passes, Date.now(), shareState.paired), passNodes: passHooks.nodes(), passesMade: !!shareState.passGen, passLastLength: shareState.passLastLength ?? 'week', peerLinks: peerHooks.view(), peersHere: peersHereView(), renewLengths: guestpass.RENEW_LENGTHS, line: line.view(id => d.chatList().find(m => m.id === id)?.name ?? pictureName(d.pictureModels().find(m => m.id === id)) ?? id), guestCaps: nodeline.cleanCaps(shareState.guestCaps), hostFirst: shareState.hostFirst !== false, atOnce: slotsLib.cleanAtOnce(shareState.atOnce), slotsNow: d.chatList().filter(m => d.runnerFor(m.id)?.view.state === 'connected').map(m => ({ name: m.name, slots: d.slotsOf?.(m.id) ?? 1, note: d.slotNote?.(m.id) ?? '' })), passAsks: [...ownAsks(), ...(passHooks.asks() as object[])], away: shareState.away?.since ?? null, autostart, appLock: d.appLockOn(), allow: carry.cleanAllow(shareState.allow), kept: keptNow, projects: projectsNow.map(({ key, name, at, files, backups, folder }) => ({ key, name, at, files, backups, folder })), restarts: d.update.restarts, updated: shareState.updated?.version === d.version ? shareState.updated : null, noPin: !d.appLockOn() && !!shareState.noPin, lastLinked: shareState.lastLinked ?? null, inUse: linkedUse(), runChanges, permChanges, lend: lendView(), plainLinks: share.NODE_PLAIN_LINKS, shareable: [...oncePerFile(d.chatList()).map(m => ({ id: m.id, name: m.name, bytes: m.bytes, kind: 'chat' })), ...d.pictureModels().filter(m => m.installed).map(m => ({ id: m.id, name: pictureName(m), bytes: m.bytes ?? 0, kind: 'image' }))] };
 }
 
 /** Requests for more time from guests on passes made here (the node's own), for this PC's page. */
@@ -273,7 +281,7 @@ export const passHooks: { changed: () => void; nodes: () => unknown[]; asks: () 
 };
 
 /** What a guest's hello says this PC can do (src/guestpass.ts GUEST_DOORS): using its pass's models and pulling updates. */
-const GUEST_CAN = ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'outbox', 'usage', 'web', 'give', 'tooltalk'];
+const GUEST_CAN = ['turns', 'draw', 'draw-outbox', DRAW_REFS_CAN, 'stats', 'models', 'draw-models', 'think', 'outbox', 'usage', 'web', 'give', 'tooltalk'];
 /** A guest asking for a model its pass does not name. */
 const notOnPass = () => ({ error: `your guest pass on "${shareState.name}" does not include that model. Its owner can make a pass that does.`, guest: 'scope' });
 
@@ -467,7 +475,7 @@ function claimView(c: owner.Claim) {
 
 /** A3: a linked PC's backup name, backup PIN (a hash) and recovery codes (hashes), kept beside its restore points. */
 async function ownerSet(b: Record<string, unknown>, who: share.ShareState['paired'][number]): Promise<{ status: number; json: Record<string, unknown> }> {
-  if (!carry.cleanAllow(shareState.allow).backup) return { status: 403, json: { error: `"${shareState.name}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network).` } };
+  if (!carry.cleanAllow(shareState.allow).backup) return { status: 403, json: { error: `"${shareState.name}" does not keep backups for other PCs now (its owner ticks "Enable backups" on This PC).` } };
   const keep = keepOf(who);
   const owners = await owner.readOwners(d.carry.keptRoot);
   const mine = owners.find(o => o.keep === keep);
@@ -537,7 +545,8 @@ let runnerNode: ReturnType<typeof runnerpush.runnerSide>;
 function runnerHello(): runnerpush.RunnerHello {
   const s = runnerNode?.state('llama-cuda') ?? { state: 'none' as const, said: '' };
   const rt = d.runner.runtimes;
-  const pins = Object.fromEntries(rt.idsOf('llama', 'cuda').map(id => [id, { state: runnerNode?.state(id).state ?? 'none', why: d.runner.why(id, shareState.name) }]));
+  // The picture and video runner's CUDA build too (sd-cuda), so a linked PC can send it here for a Videographer.
+  const pins = Object.fromEntries([...rt.idsOf('llama', 'cuda'), ...rt.idsOf('sd', 'cuda')].map(id => [id, { state: runnerNode?.state(id).state ?? 'none', why: d.runner.why(id, shareState.name) }]));
   const best = rt.order('llama', 'cuda')[0];
   const said = Object.keys(pins).map(id => runnerNode?.state(id).said ?? '').find(Boolean) ?? s.said;
   return { nvidia: d.runner.nvidia(), driver: d.runner.driver(), why: d.runner.why('llama-cuda', shareState.name), cuda: s.state, pins, ...(best ? { best } : {}), ...(d.rpcBuilds ? { rpc: d.rpcBuilds() } : {}), ...(d.runner.options ? { can: d.runner.options() } : {}), ...(d.runner.check ? { check: d.runner.check() } : {}), said, last: lastStart ? { ...lastStart, lines: [...lastStart.lines] } : null, loads: loads.recent(5) };
@@ -837,6 +846,12 @@ function keptDiskNow(): { total: number; free: number } | null {
   }
   return keptDisk;
 }
+
+/**
+ * The video models downloaded here (each whole), told in the hello as their own list: `models` holds chat and picture
+ * models only, and an older main PC reads any other kind there as a chat model. Not told to a guest.
+ */
+const videosNow = (): string[] => VIDEO_MODELS.filter(m => !!d.carry.videoFiles(m.id)).map(m => m.id);
 
 /** The models linked PCs may use (all of them), as they stand now (asked fresh each hello). */
 async function sharedNow(): Promise<nodestaff.SharedModel[]> {
@@ -1229,18 +1244,33 @@ async function modelChat(b: Record<string, unknown>, turns: ChatTurn[] | null, a
 export let drawing = false;
 
 /**
+ * Clips for linked PCs (src/videolink.ts): none while its owner uses this PC ("I need to use the pc") or while a picture is
+ * being drawn (a locked TOMLIN still makes them, as it draws pictures for linked PCs). Its video runner is given with videoNode.setRunner.
+ */
+export const videoNode = new VideoNode({
+  name: () => shareState.name,
+  away: () => shareState.away ?? null,
+  busy: () => (drawing || d.imageBusy() ? 'it is drawing a picture' : null),
+});
+
+/**
  * A picture for a linked PC. With `model`: one of the picture models this PC lets linked PCs use, loaded first when it
  * is not (in place of the picture model loaded here, when that one is not drawing), drawn as asked. Without (an older
  * PC): on the picture model connected here, or another of this PC's own for the style. One picture at a time: a second
  * PC is told busy and asks again.
  */
 async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc: string, link: string, keep: KeepAt | null = null, may: (id: string) => boolean = () => true) {
-  const prompt = String(b.prompt ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+  // Up to the whole prompt with its cards' words (src/cards.ts PROMPT_MOST), as the PC that asked allows.
+  const prompt = String(b.prompt ?? '').replace(/\s+/g, ' ').trim().slice(0, PROMPT_MOST);
   if (!prompt) return workerJson(res, 400, { error: 'no prompt was sent.' });
   if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
+  // A clip being made for a linked PC holds the card (src/videolink.ts).
+  if (videoNode.working()) return workerJson(res, 409, { error: 'that PC is making a clip for a linked PC now. Try again when it is done.', busy: true });
   const style = brains.isStyle(b.style) ? b.style : null;
   const size = (n: unknown) => (Number.isInteger(n) && (n as number) >= 64 && (n as number) <= 2048 ? (n as number) : undefined);
   const choices = nodestaff.drawChoices(b);
+  // A character's or a location's ticked pictures, sent as data (src/drawrefs.ts): checked, then given to the runner.
+  const refData = cleanRefImages(b.refImages);
   const models = d.pictureModels();
   const want = typeof b.model === 'string' && b.model ? b.model : null;
   if (want && !may(want)) return workerJson(res, 403, notOnPass());
@@ -1249,7 +1279,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
     const busy = drawing || d.imageBusy() || (v.state === 'loading' && v.model !== want);
     const why = nodestaff.modelRefusal(want, { onPc: x => pictureName(models.find(m => m.id === x && m.installed)), busy, pcName: shareState.name });
     if (why) return workerJson(res, why.busy ? 409 : 403, why.busy ? { ...why, error: why.error.replace('is answering something else', 'is drawing something else') } : why);
-    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height), ...choices }, res, forPc, link, keep);
+    return drawShared(models.find(m => m.id === want)!, { prompt, style, width: size(b.width), height: size(b.height), ...choices, ...(refData.length ? { refData } : {}) }, res, forPc, link, keep);
   }
   const v = d.imagePane.view;
   if (v.state !== 'connected') return workerJson(res, 409, { error: 'no picture model is connected on that PC. Its owner connects one in an artist\'s chat there; nothing loads by itself.' });
@@ -1268,7 +1298,7 @@ async function workerDraw(b: Record<string, unknown>, res: ServerResponse, forPc
         send('progress', { state: 'starting', text: `Switching to ${plan.use.name.replace(/\s*\(.*\)$/, '')} for the style` });
         if (!(await d.swapImage(plan.use.id))) throw new Error(`${plan.use.name} did not load there. Its owner can connect it in an artist's chat there.`);
       }
-      const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices }, p => send('progress', p), signal);
+      const r = await d.draw({ prompt, mode: style ? brains.modeOfStyle(style) : 'custom', width: size(b.width), height: size(b.height), forPc, ...choices, ...(refData.length ? { refData } : {}) }, p => send('progress', p), signal);
       if ('error' in r) throw new Error(r.error);
       send('picture', { png: r.png.toString('base64'), modelName: r.modelName, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, made: r.made, note: [plan.note, r.note ? `says: ${r.note}` : ''].filter(Boolean).join('; ') });
     } catch (e) {
@@ -1315,9 +1345,20 @@ const pictureName = (m: brains.PictureModel | undefined) => (m ? m.name.replace(
  * already in the prompt). A picture model loaded for a linked PC is dropped by itself 10 minutes after its last picture
  * (src/picturelock.ts PICTURE_DROP_MS): long enough for pictures one after another, short while the PC is locked.
  */
-async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number; quality?: string; seed?: number; negative?: string }, res: ServerResponse, forPc: string, link: string, keep: KeepAt | null) {
+async function drawShared(model: brains.PictureModel, ask: { prompt: string; style: brains.Style | null; width?: number; height?: number; quality?: string; seed?: number; negative?: string; refData?: string[] }, res: ServerResponse, forPc: string, link: string, keep: KeepAt | null) {
   const name = pictureName(model)!;
   drawFor(res, keep, `Drawing for ${forPc}`, async (send, signal) => {
+    // What happens to this picture goes in this PC's log (26 Nov: two pictures stopped part-way with nothing logged).
+    const what = `Picture for "${forPc}" (${name}${ask.quality ? `, ${ask.quality}` : ''})`;
+    const t0 = Date.now();
+    log.info('picture', `${what}: started${keep ? '' : ' (an older PC: closing the link stops it)'}.`);
+    const stopReadings = startReadings(what, line => log.info('picture', line));
+    let lastNote = '';
+    const noted = (p: Record<string, unknown>) => {
+      if (typeof p.note === 'string' && p.note && p.note !== lastNote) log.warn('picture', `${what}: ${(lastNote = p.note)}`);
+      send('progress', p);
+    };
+    signal.addEventListener('abort', () => log.warn('picture', `${what}: stopped after ${Math.round((Date.now() - t0) / 1000)} s (${keep ? 'Stop was pressed on that PC' : 'that PC closed the link'}).`), { once: true });
     try {
       const v = d.imagePane.view;
       const fresh = !(v.model === model.id && v.state === 'connected');
@@ -1325,17 +1366,21 @@ async function drawShared(model: brains.PictureModel, ask: { prompt: string; sty
         // Chat models loaded here for linked PCs make way when it does not fit, in RAM or on the card.
         const made = await chatsMakeWay(model.id);
         send('progress', { state: 'starting', text: `${made.length ? `Unloaded ${made.join(' and ')} there to make room. ` : ''}${v.state === 'connected' && v.model ? `Switching to ${name} there` : `Loading ${name} there`}` });
-        if (!(await d.loadImage(model.id))) throw new Error(`${name} did not load on "${shareState.name}" (its owner may have started a picture there, or it is too big for that PC's memory now).`);
+        if (!(await d.loadImage(model.id, signal))) throw new Error(signal.aborted ? 'Stopped.' : `${name} did not load on "${shareState.name}" (its owner may have started a picture there, or it is too big for that PC's memory now).`);
         pictureFor = { id: model.id, by: new Set([forPc]), links: new Set([link]), at: Date.now() };
       } else if (pictureFor?.id === model.id) {
         pictureFor.by.add(forPc);
         pictureFor.links.add(link);
       }
-      const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed, negative: ask.negative }, p => send('progress', p), signal);
+      const r = await d.draw({ prompt: ask.prompt, mode: ask.style ? brains.modeOfStyle(ask.style) : 'custom', width: ask.width, height: ask.height, forPc, quality: ask.quality, seed: ask.seed, negative: ask.negative, ...(ask.refData?.length ? { refData: ask.refData } : {}) }, p => noted(p as Record<string, unknown>), signal);
       if ('error' in r) throw new Error(r.error);
+      log.info('picture', `${what}: done in ${Math.round((Date.now() - t0) / 1000)} s (${r.seconds} s drawing).`);
       send('picture', { png: r.png.toString('base64'), modelName: r.modelName || name, modelPrompt: r.modelPrompt, mode: r.mode, seconds: r.seconds, made: r.made, note: r.note ? `says: ${r.note}` : '' });
     } catch (e) {
+      log.error('picture', `${what}: failed after ${Math.round((Date.now() - t0) / 1000)} s: ${(e as Error).message}`);
       send('error', { text: (e as Error).message });
+    } finally {
+      stopReadings();
     }
   }, () => {
     if (pictureFor?.id === model.id) pictureFor.at = Date.now();
@@ -1354,7 +1399,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         const locked = guard.lockedFor(ip);
         if (locked) return workerJson(res, 429, { error: `Too many wrong PINs from this PC. Try again in ${locked} minute${locked > 1 ? 's' : ''}.` }), true;
         const paused = guard.pausedFor();
-        if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (Network).` }), true;
+        if (paused) return workerJson(res, 429, { error: `linking to this PC is paused for ${paused} minute${paused > 1 ? 's' : ''}: too many wrong setup codes were typed from your home network. Wait, then link again; if nobody here typed them, make a new setup code on that PC (This PC).` }), true;
         return false;
       };
       if (tooMany()) return;
@@ -1366,7 +1411,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       const passHere = () => (shareState.passes ?? []).filter(x => guestpass.passUsable(shareState, x));
       // A request signed with an admin key (Bootable USB): checked only against the admin this stick was minted by.
       const adminAsk = typeof b.adminSig === 'string';
-      if (!adminAsk && shareState.pinOn && b.pinGiven !== true && !passHere().length) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown under Network there. Type it and link again.', needPin: true });
+      if (!adminAsk && shareState.pinOn && b.pinGiven !== true && !passHere().length) return workerJson(res, 403, { error: 'this PC also asks for its 6-digit link PIN, shown on This PC there. Type it and link again.', needPin: true });
       // A PIN typed when this PC asks for none (often its app lock PIN) would change the key and read as a wrong setup
       // code: said plainly, and not counted as a wrong try.
       if (!adminAsk && !shareState.pinOn && b.pinGiven === true) return workerJson(res, 400, { error: 'this PC does not ask for a link PIN: leave the PIN box empty and link again. (Its app lock PIN is never typed here.)', noPin: true });
@@ -1400,8 +1445,8 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         }
       }
       if (!got) {
-        if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'that is not a guest pass of this PC, and it also asks for its 6-digit link PIN, shown under Network there. Type the setup code and the PIN and link again.', needPin: true });
-        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC under Network.' : 'wrong setup code. Type the code shown on that PC under Network (8 letters and numbers).' });
+        if (shareState.pinOn && b.pinGiven !== true) return workerJson(res, 403, { error: 'that is not a guest pass of this PC, and it also asks for its 6-digit link PIN, shown on This PC there. Type the setup code and the PIN and link again.', needPin: true });
+        return workerJson(res, 403, { error: shareState.pinOn ? 'wrong setup code or PIN. Type the code and the PIN shown on that PC, on This PC.' : 'wrong setup code. Type the code shown on that PC, on This PC (8 letters and numbers).' });
       }
       // Each link request carries a fresh random nonce: one seen before is a recording sent again, which would push a
       // working link off the end of the list. A real retry from the main PC makes a new one. Checked before the wrong-try
@@ -1439,6 +1484,9 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
         shareState.lastLinked = { name, at: new Date().toISOString(), ...(dropped ? { dropped } : {}) };
       }
       await saveShare();
+      // The same PC linked again (it proved the old keys): the answers kept for it move to the new keys, so it still collects them.
+      const oldKeys = proven ? link.keysOf(old!.key) : null;
+      if (oldKeys && box) await box.reseal(keep, lockOf(oldKeys), lockOf(got.keys)).catch(() => 0);
       log.info('link', `"${name}" linked to this PC${pass ? ` with the guest pass "${pass.label}"` : byAdminKey ? ' with its admin key' : ''}.${dropped ? ` The oldest link, "${dropped}", was removed.` : ''}`);
       d.onLinked?.(name, dropped, pass?.label);
       return workerJson(res, 200, got.answer);
@@ -1460,13 +1508,17 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (req.method !== 'POST') return workerJson(res, 405, { error: 'this PC only takes sealed messages. Update TOMLIN on the main PC.' });
     // A piece of a file (a model or a restore point sent here): the request rides in a header, the piece is the body.
     const putDoor = p === '/worker/carry-put' || p === '/worker/backup-put' || p === '/worker/update-put' || p === '/worker/git-put' || p === '/worker/runner-put';
-    // A project backup's file list and the ids asked about are long (up to 100,000 files).
-    const limit = p === '/worker/run' || p === '/worker/tool-result' ? chatBytesFor(await chatCharsHere()) : p === '/worker/update-offer' ? 4 << 20 : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' || p === '/worker/passes-put' || p === '/worker/peer-put' ? 1 << 20 : 16_384;
+    // A project backup's file list and the ids asked about are long (up to 100,000 files); a clip's job may carry its start picture.
+    const limit = p === '/worker/run' || p === '/worker/tool-result' ? chatBytesFor(await chatCharsHere()) : p === '/worker/update-offer' ? 4 << 20 : p === VIDEO_MAKE ? VIDEO_MAKE_BODY : p === '/worker/draw' ? DRAW_BODY : p === '/worker/git-commit' ? 32 << 20 : p === '/worker/git-have' || p === '/worker/passes-put' || p === '/worker/peer-put' ? 1 << 20 : 16_384;
     // Read whole before the seal can be checked: refused at once when it says it is larger than this door takes, or when
     // this link (or all of them) already has that much being read (S4). A piece is read only after its header opens.
     const declared = Number(req.headers['content-length']);
     if (!putDoor && declared > limit) return workerJson(res, 400, { error: 'that request is too large for this PC to take at once, so it was refused.' });
-    const giveBack = putDoor || limit <= 16_384 ? () => undefined : bodies.take(who.hash, declared >= 0 && declared <= limit ? declared : limit);
+    // The room comes from this link's own budget only when the request proves the link's keys first (link.BODY_PROOF):
+    // the fingerprint alone (seen on the network) cannot hold it. A host too old to send the proof draws on a small room
+    // of its own, kept apart, so holding that never refuses an up-to-date host.
+    const wants = declared >= 0 && declared <= limit ? declared : limit;
+    const giveBack = putDoor || limit <= 16_384 ? () => undefined : link.bodyProven(keys, req.headers[link.BODY_PROOF], p, taken) ? bodies.take(who.hash, wants) : unprovenBodies.take(who.hash, wants);
     if (!giveBack) return workerJson(res, 429, { error: 'this PC is taking in other large requests from linked PCs now. Try again in a minute.' });
     let sent: Record<string, unknown> | { box: string };
     try {
@@ -1529,11 +1581,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // Its processor: name, cores and threads, for the host's Cluster page (not told to a guest: asGuest).
       const cpu = d.cpu?.() ?? null;
       // build: what code this copy is (src/update.ts buildId), so the main PC tells one version with other files apart.
-      if (away) return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', PERM_CAN, 'peers', 'peer-copy', 'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan'], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), allow, plainLinks: shareState.plainLinks === true, chatChars: await chatCharsHere(), restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length } }));
+      if (away) return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), model: null, ctx: d.runNow().ctx, state: 'away', away: away.since, ask: null, memory: d.memory(), can: ['models', 'draw-models', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', PERM_CAN, 'peers', 'peer-copy', 'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan', 'video-carry', DRAW_REFS_CAN], image: null, models: models.map(x => ({ ...x, loaded: false, busy: false })), videos: guest ? [] : videosNow(), allow, plainLinks: share.NODE_PLAIN_LINKS, chatChars: await chatCharsHere(), restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length } }));
       // The connected models are named (every model here is lent; to a guest, only its pass's).
       const lent = (id: string | null | undefined) => !!id && onThisPc().includes(id) && may(id);
       const img = imageHello();
-      return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', PERM_CAN, 'peers', 'peer-copy', 'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan'], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, away: null, allow, plainLinks: shareState.plainLinks === true, chatChars: await chatCharsHere(), restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length }, cluster: guest ? null : clusterHello(req.socket.localAddress), addrs: guest ? [] : lanList().map(n => n.address) }));
+      return workerJson(res, 200, asGuest({ name: shareState.name, version: d.version, build: d.build(), ask: share.askPending(shareState.ask), model: v.state === 'connected' && lent(v.model) ? v.modelName : null, ctx: d.runNow().ctx, state: v.state, memory: d.memory(), can: ['turns', 'draw', 'draw-outbox', 'stats', 'models', 'draw-models', 'think', 'carry', 'update', 'outbox', 'usage', 'git', 'fetch', 'runner', 'tune', 'max', 'web', 'receive', 'model-remove', 'ctx-set', 'update-pin', 'give', 'tooltalk', 'carry-sum', 'model-staff', 'passes', 'power-off', PERM_CAN, 'peers', 'peer-copy', 'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan', 'video-carry', DRAW_REFS_CAN], image: lent(img.model) ? img : { ...img, model: null, name: null, styles: [] }, models, videos: guest ? [] : videosNow(), away: null, allow, plainLinks: share.NODE_PLAIN_LINKS, chatChars: await chatCharsHere(), restarts: d.update.restarts, up, meter: d.meter(), installed, disk, drives, modelsDrive, runner: runnerHello(), cpu, lentTo: lentTo(), speed: forHello(speedNow()), passAsks, line: { running: line.running().length, waiting: line.waiting().length }, cluster: guest ? null : clusterHello(req.socket.localAddress), addrs: guest ? [] : lanList().map(n => n.address) }));
     }
     // An expired guest asks its host for more (src/guestpass.ts): only a guest link whose pass expired gets here (the
     // check above), one request waiting at a time, 10 minutes apart, 5 a day, plain text of 200 characters at most.
@@ -1631,7 +1683,10 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     if (p === '/worker/stats') {
       // A guest keeps loaded only a model its pass names.
       if (!guest || (typeof body.model === 'string' && may(body.model))) nodestaff.keepChat(loadedForPc, keepOf(who), typeof body.model === 'string' ? body.model : '', Date.now());
-      return workerJson(res, 200, d.stats());
+      // What is loaded here now, by name (a guest hears only of its pass's models), so the asking PC's bar is true.
+      // A guest is told how busy the processor is, never this PC's memory or its graphics card (as hello leaves them out).
+      const meters = d.stats();
+      return workerJson(res, 200, { ...meters, ...(guest ? { ram: null, gpu: null } : {}), loaded: nodestaff.loadedOf((await sharedNow()).filter(m => may(m.id))) });
     }
     // The main PC's answer to "I need to use the pc, please log out for N hours": yes logs out here for those hours.
     if (p === '/worker/ask-answer') {
@@ -1656,6 +1711,17 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       return c ? workerJson(res, 200, claimView(c)) : workerJson(res, 404, { error: 'no request from this PC was made there.' });
     }
     const carryDoor = p.startsWith('/worker/carry-') || p.startsWith('/worker/backup-') || p.startsWith('/worker/update-') || p.startsWith('/worker/git-');
+    // A clip for a linked PC (src/videolink.ts): its own refusals for the owner's use and lock, its own sealed answers.
+    if (VIDEO_DOORS.includes(p)) {
+      return await videoNode.handle(p, body, { key: keepOf(who), name: who.name }, {
+        json: (status, value) => workerJson(res, status, value),
+        stream: () => followerOf(res),
+        piece: bytes => {
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+          res.end(link.sealBytes(link.toHost(keys), bytes, `piece|${opened.id}`));
+        },
+      });
+    }
     // Work asked before with a request id is handed back first: followed while it still runs, or given at once when it
     // is kept (src/outbox.ts). Also while this PC's owner uses it, or a speed test runs: it is done (or being done)
     // already, so a host that was away gets what it is owed whatever this PC is doing now.
@@ -1802,8 +1868,12 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     const lined = p === '/worker/run' || p === '/worker/draw';
     // A guest's prompt over the cap here is refused before it joins the line (src/nodeline.ts).
     if (p === '/worker/run' && guest) {
-      const no = nodeline.promptRefusal(body, nodeline.cleanCaps(shareState.guestCaps));
+      const caps = nodeline.cleanCaps(shareState.guestCaps);
+      const no = nodeline.promptRefusal(body, caps);
       if (no) return workerJson(res, 400, { error: no });
+      // What the owner does not let guests use is taken out here: web through this PC, the tools of its own app.
+      if (!caps.web) delete body.web;
+      if (!caps.tools) delete body.tools;
     }
     // A guest asking for a model its pass does not name is refused before it joins the line, so it never makes room.
     if (lined && guest && typeof body.model === 'string' && body.model && !may(body.model)) return workerJson(res, 403, notOnPass());
@@ -1835,7 +1905,7 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
       // A guest's answer is capped here (the cap is in its hello).
       const maxTokens = guest ? nodeline.capAnswer(asked, nodeline.cleanCaps(shareState.guestCaps)) : asked;
       // What a guest's tools may give back: the room left under its prompt cap.
-      const guestRoom = guest ? nodeline.cleanCaps(shareState.guestCaps).prompt - nodeline.promptSize(b) : null;
+      const guestRoom = guest ? nodeline.guestRoomOf(nodeline.cleanCaps(shareState.guestCaps), nodeline.promptSize(b)) : null;
       if (b.staff !== undefined) return workerJson(res, 410, { error: nodestaff.RETIRED_NODE_HIRE });
       if (typeof b.model === 'string' && b.model && !may(b.model)) return workerJson(res, 403, notOnPass());
       if (typeof b.model === 'string' && b.model) return await modelChat(b, turns, { system, user }, maxTokens, res, who.name, keep, keepOf(who), guestRoom);
@@ -1892,6 +1962,11 @@ async function workerRoute(req: IncomingMessage, res: ServerResponse) {
     // This PC's log, its last lines: today's, or one of the days kept (day), only those with a word in them (find). A test
     // across PCs is checked from the main PC (3 Nov: Max mode's refusals were only on this PC). The log holds no chat's
     // words, prompts or file text (src/log.ts).
+    // This PC's agents (src/server/agents.ts): only the admin PC sets them on a node (D6), and collects their reports.
+    if (p === '/worker/agents') {
+      const got = await agentDoor.handle(body);
+      return workerJson(res, got.status, got.body);
+    }
     if (p === '/worker/log') {
       const got = askLog({ lines: body.lines, day: body.day, find: body.find });
       return workerJson(res, 'error' in got ? 400 : 200, got);
@@ -1932,7 +2007,8 @@ async function applyNow(): Promise<void> {
   if (!shareState.on) return;
   // A node must have the app lock (F7 E3): other PCs reach it, so it is never open without one. Without its PIN (the file deleted), the node does not listen.
   // A Bootable USB node has none: nobody sits at it, its screen is not TOMLIN's, and the admin key guards its link.
-  if (!d.appLockOn() && !usbStick) {
+  // Nor one whose owner refused a PIN at this PC and acknowledged the risks (shareState.noPin).
+  if (!d.appLockOn() && !usbStick && !shareState.noPin) {
     shareError = 'a node must have the app lock. Set a PIN with the padlock (top right) and the node starts again.';
     return;
   }
@@ -2008,7 +2084,8 @@ export async function startShare() {
     });
   }
   // A node in use (a model loaded for a linked PC, or a request running) asks Windows to stay awake; idle, it may sleep and be woken (src/keepawake.ts).
-  setInterval(() => awake.set(shareState.on && nodeBusy({ linkedModels: loadedForPc.size + (pictureFor ? 1 : 0), requests: serving.size + lending.size + (drawing ? 1 : 0) })), 15_000).unref();
+  // An agent's run keeps it awake too, node or not (src/agentdoor.ts).
+  setInterval(() => awake.set((shareState.on && nodeBusy({ linkedModels: loadedForPc.size + (pictureFor ? 1 : 0), requests: serving.size + lending.size + (drawing ? 1 : 0) })) || agentDoor.running > 0), 15_000).unref();
 }
 
 /** The stick this PC started from (Bootable USB), or null. */
@@ -2067,11 +2144,24 @@ export async function setShare(b: Record<string, unknown>) {
   // What the link part listens with, before this change: it restarts only when one of them changes (below).
   const was = { on: shareState.on, port: shareState.port };
   await shareLoaded;
-  if (turningOn && !d.appLockOn()) return { status: 409, body: { error: 'A node must have a pin code to lock the app.', needAppLock: true } };
+  // A copy between two linked PCs, and whether two linked PCs reach each other: orders to those PCs, nothing of this PC's
+  // own settings changes, so no PIN is asked (as for Send a copy or an update from here; the app lock already opened it).
+  if (b.peerCopy && typeof b.peerCopy === 'object') {
+    const r = await peerHooks.copy(b.peerCopy as Record<string, unknown>);
+    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
+  }
+  if (b.peerCheck && typeof b.peerCheck === 'object') {
+    const r = await peerHooks.check(b.peerCheck as Record<string, unknown>);
+    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
+  }
+  // Or its owner, here, refuses one and acknowledges the risks (the tick on This PC): only with the switch turned on.
+  const refusing = turningOn && !d.appLockOn() && b.refusePin === true;
+  if (turningOn && !d.appLockOn() && !refusing && !shareState.noPin) return { status: 409, body: { error: 'A node must have the app lock: set a PIN first (Settings, Data and lock), or refuse one and acknowledge the risks.', needAppLock: true } };
   // Checked before anything is changed, so a refused port never leaves half of the other changes made.
   const port = 'port' in b ? Math.floor(Number(b.port)) : shareState.port;
   if ('port' in b && (!(port >= 1024 && port <= 65535) || port === Number(process.env.TOMLIN_PORT ?? 8740))) return { status: 400, body: { error: 'Use a port number from 1024 to 65535, not TOMLIN\'s own.' } };
-  const pinChecked = shareState.on || turningOn;
+  // A node with no PIN (refused) has none to type: its changes are made by whoever is at this PC.
+  const pinChecked = (shareState.on || turningOn) && !(!d.appLockOn() && (refusing || !!shareState.noPin));
   // What the file holds now: a change the disk refuses to save (a full disk) is undone here too, so it never shows as
   // made, and is never saved later by another change.
   const asSaved = structuredClone(shareState);
@@ -2081,15 +2171,6 @@ export async function setShare(b: Record<string, unknown>) {
   }
   // A guest pass (src/guestpass.ts) lets another PC in: made or removed only with the app lock PIN when there is one,
   // whether or not this PC is a node itself (a host makes passes for the nodes it is linked to).
-  // Whether two introduced PCs reach each other now (each is asked to ping the other): nothing changes.
-  if (b.peerCopy && typeof b.peerCopy === 'object') {
-    const r = await peerHooks.copy(b.peerCopy as Record<string, unknown>);
-    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
-  }
-  if (b.peerCheck && typeof b.peerCheck === 'object') {
-    const r = await peerHooks.check(b.peerCheck as Record<string, unknown>);
-    return r.status === 200 ? { status: 200, body: { ...shareView(), ...r.body } } : r;
-  }
   const removeHere = typeof b.peerRemoveHere === 'string' && !!b.peerRemoveHere;
   const peerChange = (!!b.peerIntroduce && typeof b.peerIntroduce === 'object') || (!!b.peerRemove && typeof b.peerRemove === 'object') || removeHere;
   const passChange = peerChange || (b.passMake && typeof b.passMake === 'object') || (typeof b.passRemove === 'string' && !!b.passRemove) || (!!b.passAnswer && typeof b.passAnswer === 'object');
@@ -2213,7 +2294,14 @@ export async function setShare(b: Record<string, unknown>) {
     if (gone.hash) await d.hostPinDrop(gone.hash).catch(() => false);
   }
   shareState.paired = guestpass.dropEnded(shareState.paired);
+  // The first time this PC becomes a node, its permissions start as "Allow all" (the seven ticks that box sets, turning
+  // it off as before, and letting PCs its host introduces connect directly): nothing can link yet, as a PC needs the
+  // setup code just made, and the owner can untick any of them on This PC. A node that had its own ticks keeps them.
+  if (turningOn && shareState.allow === undefined && !('allow' in b)) {
+    shareState.allow = carry.cleanAllow({ pull: true, backup: true, update: true, tune: true, receive: true, give: true, lend: true, off: true, peer: true });
+  }
   if ('on' in b) shareState.on = b.on === true;
+  if (refusing) shareState.noPin = new Date().toISOString();
   try {
     await saveShare();
   } catch (e) {
@@ -2266,6 +2354,7 @@ export function startNode(): void {
     get chatDir() { return d.carry.chatDir; },
     chatHas: d.carry.chatHas,
     pictureDest: d.carry.pictureDest,
+    videoDest: d.carry.videoDest,
     // Read each time: the folder other PCs' backups are kept in can be changed while TOMLIN runs (src/server/backuphome.ts).
     get keptRoot() { return d.carry.keptRoot; },
     onProjects: () => void readKept(),

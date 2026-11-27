@@ -156,18 +156,101 @@ function syncSend() {
 /** A message from the Send to card (sendto.js): where it came from, and that Send was the ask to load a model. */
 const sentWith = { from: '', asked: false };
 /** `retry`: the failed answer's bubble when the same message is asked again from its card: it goes, and the message stays once. */
-function send(message, from = '', agree = false, now = false, scanOk = false, room = 0, retry = null) {
+function send(message, from = '', agree = false, now = false, scanOk = false, room = 0, retry = null, picture = null) {
   log.querySelector('.empty')?.remove();
   if (retry) retry.remove();
-  const mine = retry ? null : userBubble(message);
+  const mine = retry ? null : userBubble(message, picture);
   if (mine && from) mine.append(sentLine({ from }));
   if (mine) log.append(mine);
   const out = el('div', { class: 'msg assistant' }, typingNote());
   log.append(out);
   app.chatToEnd();
   large.hidden = true;
-  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(scanOk ? { scanOk: true } : {}), ...(room ? { room } : {}), ...(retry ? { retry: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}), ...(maxOn() ? { max: true } : {}) }, out, message, from);
+  return talk('/api/chat', { ...chatNamed(), message, ...(from ? { from } : {}), ...(agree ? { agree: true } : {}), ...(now ? { now: true } : {}), ...(scanOk ? { scanOk: true } : {}), ...(room ? { room } : {}), ...(retry ? { retry: true } : {}), ...(thinkOn() ? { think: true } : {}), ...(webOn() ? { web: true } : {}), ...(maxOn() ? { max: true } : {}), ...(picture ? { picture } : {}) }, out, message, from);
 }
+
+// ---- A picture for the model to look at (src/askpics.ts): added with the button, pasted or dropped; sent with the next message ----
+/** The largest side a picture is sent at: a model reads a bigger one as many more word-pieces, and sees little more. */
+const PIC_SIDE = 1024;
+/** The largest picture file taken from the PC (it is made smaller before it is sent). */
+const PIC_FILE_MAX = 30 * 1024 * 1024;
+const PIC_KINDS = ['image/png', 'image/jpeg', 'image/webp'];
+/** The picture waiting for the next message: { url (a data: URL), name, why (why it cannot go to this chat's model, or '') }. */
+let pendingPic = null;
+const picBar = $('#chat-pic');
+function drawPic() {
+  picBar.hidden = !pendingPic;
+  if (!pendingPic) return picBar.replaceChildren();
+  const x = el('button', { class: 'link', type: 'button', text: '×', title: 'Take the picture off this message', 'aria-label': 'Take the picture off this message', onclick: () => { pendingPic = null; drawPic(); } });
+  picBar.replaceChildren(el('img', { src: pendingPic.url, alt: `The picture to send: ${pendingPic.name}` }), el('span', { text: pendingPic.why ? pendingPic.name : `${pendingPic.name} goes with your next message` }), x, pendingPic.why ? el('p', { class: 'pic-why', text: pendingPic.why }) : null);
+}
+/** Why a picture cannot go with a message in the chat on screen now ('' when it can), as the server says. */
+async function picWhy() {
+  try {
+    return (await api('/api/chat/sees', { ...chatNamed(), model: panes.chat.model.value ?? '' })).why ?? '';
+  } catch (err) {
+    return err.message;
+  }
+}
+/** A picture as a PNG or JPEG data: URL no wider or taller than PIC_SIDE (a WebP is made a PNG: the model runner cannot read WebP). */
+async function picUrl(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const scale = Math.min(1, PIC_SIDE / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1 && blob.type !== 'image/webp' && blob.size <= 6 * 1024 * 1024) {
+    bitmap.close();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(new Error('That picture could not be read.'));
+      r.readAsDataURL(blob);
+    });
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return blob.type === 'image/jpeg' ? canvas.toDataURL('image/jpeg', 0.9) : canvas.toDataURL('image/png');
+}
+/** Puts a picture on the next message (a file picked, pasted or dropped, or a gallery picture); says why when it cannot go. */
+app.attachPicture = async (blob, name = 'picture') => {
+  if (app.isClipChat?.()) return app.chatNote('A Videographer makes clips from words and a start picture: use Start picture under the box.');
+  if (!PIC_KINDS.includes(blob.type)) return app.chatNote(`${name} is not a picture that can be sent: add a PNG, JPEG or WebP picture.`);
+  if (blob.size > PIC_FILE_MAX) return app.chatNote(`${name} is too large (over ${PIC_FILE_MAX >> 20} MB): add a smaller picture.`);
+  let url;
+  try {
+    url = await picUrl(blob);
+  } catch {
+    return app.chatNote(`${name} could not be read as a picture.`);
+  }
+  pendingPic = { url, name, why: '' };
+  drawPic();
+  const why = await picWhy();
+  if (pendingPic?.url === url) {
+    pendingPic.why = why;
+    drawPic();
+  }
+  input.focus();
+};
+/** A picture sent back to the box (the message was not sent after all). */
+const putPicBack = (url, name = 'picture') => {
+  pendingPic = { url, name, why: '' };
+  drawPic();
+};
+$('#pic-add').addEventListener('click', () => $('#pic-file').click());
+$('#pic-file').addEventListener('change', e => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (file) app.attachPicture(file, file.name);
+});
+// A picture pasted into the message box goes on the next message.
+input.addEventListener('paste', e => {
+  const file = [...(e.clipboardData?.files ?? [])].find(f => PIC_KINDS.includes(f.type));
+  if (!file) return;
+  e.preventDefault();
+  app.attachPicture(file, file.name || 'pasted picture');
+});
+app.isPictureFile = f => PIC_KINDS.includes(f.type);
 
 /**
  * Under an answer with Max on, from a model that fits this PC and is loaded here alone: what a Max load needs and about how
@@ -565,6 +648,7 @@ async function talk(url, body, out, message, from = '') {
           out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
           out.remove();
           if (here()) input.value = message;
+          if (here() && body.picture) putPicBack(body.picture);
           const s = streams.get(key);
           if (s && data.chat) s.liveId = data.chat;
           if (message && here()) {
@@ -583,6 +667,7 @@ async function talk(url, body, out, message, from = '') {
           out.previousElementSibling?.classList.contains('user') && out.previousElementSibling.remove();
           out.remove();
           input.value = message;
+          if (body.picture) putPicBack(body.picture);
           app.openBackup?.(data, message);
         }
       }
@@ -601,7 +686,7 @@ async function talk(url, body, out, message, from = '') {
     // now anyway"): the chat the first try made is taken up first, so the message goes into it, not a second new chat.
     if (again === true || again === 'now' || scanned) {
       await app.afterSend?.(sentTo, chatId, who);
-      send(message, from, again === true, again === 'now', scanned || body.scanOk === true);
+      send(message, from, again === true, again === 'now', scanned || body.scanOk === true, 0, null, body.picture ?? null);
     } else {
       if (again === 'reload') api(chatUrl(chatId)).then(r => { if (here()) showChat(r); }).catch(() => undefined);
       app.afterSend?.(sentTo, chatId, who);
@@ -614,9 +699,12 @@ $('#chat-form').addEventListener('submit', e => {
   // Sent from the Send to card: taken once, so nothing of it is left for the next message typed here.
   const card = { ...sentWith };
   Object.assign(sentWith, { from: '', asked: false });
-  const message = input.value.trim();
+  // A picture with no words is asked about as a whole.
+  const message = input.value.trim() || (pendingPic ? 'What is in this picture?' : '');
   if (!message) return;
   if (streamingHere()) return app.chatNote('This chat is still answering: wait for it, or press Stop, then send.');
+  // A Videographer's chat makes a clip of the words as typed (clips.js), with no chat model.
+  if (app.isClipChat?.()) return void app.makeClip(message);
   // "find: words" opens Find in this chat with them (chatlog.js), where this chat keeps a log; it is not sent.
   if (/^\s*find\s*:\s*\S/i.test(message) && app.findInChat?.(message.replace(/^\s*find\s*:\s*/i, ''))) {
     input.value = '';
@@ -643,6 +731,8 @@ $('#chat-form').addEventListener('submit', e => {
   // The same test as the server's (src/memory.ts rememberCommand): "remember: ...", or "remember that ..." with no question in it.
   const remember = !who.startsWith('node:') && /^\s*remember\s*(for\s+(the\s+)?(whole\s+)?team\s*)?(:|\s-\s|\bthat\b(?![^?]*\?))/i.test(message);
   // A hire answers on their own brain (here or on a linked PC): the server checks it, and says so when it cannot.
+  // A picture goes only to a model that can look at it: asked again now (the model may have changed since it was added).
+  if (pendingPic) return void sendWithPicture(message, card, who, remember);
   if (app.status?.panes.chat.state !== 'connected' && !who.startsWith('node:') && !who.startsWith('staff:') && !remember) {
     connectThenSend(message, card);
     return;
@@ -651,11 +741,28 @@ $('#chat-form').addEventListener('submit', e => {
   send(message, card.from);
 });
 
+/** Send with the picture waiting in the box: only when this chat's model can look at it; else why, and both stay. */
+async function sendWithPicture(message, card, who, remember) {
+  const pic = pendingPic;
+  const why = await picWhy();
+  if (pendingPic !== pic) return;
+  if (why) {
+    pic.why = why;
+    drawPic();
+    return app.chatNote(why);
+  }
+  pendingPic = null;
+  drawPic();
+  if (app.status?.panes.chat.state !== 'connected' && !who.startsWith('node:') && !who.startsWith('staff:') && !remember) return void connectThenSend(message, card, pic);
+  input.value = '';
+  send(message, card.from, false, false, false, 0, null, pic.url);
+}
+
 /**
  * The host with no model loaded: one press loads the model picked beside Connect and sends the
  * message, as a hire's model loads on Send. Nothing loads by itself: the press is the ask.
  */
-async function connectThenSend(message, card = { from: '', asked: false }) {
+async function connectThenSend(message, card = { from: '', asked: false }, pic = null) {
   const p = panes.chat;
   const state = app.status?.panes.chat.state;
   if (state === 'loading' || state === 'unloading') return app.chatNote(`The chat model is ${state === 'loading' ? 'still loading' : 'unloading'}: send again once it says Connected.`);
@@ -671,7 +778,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   const typedIn = chatKey();
   await app.chatModelPicked?.(m.id);
   log.querySelector('.empty')?.remove();
-  const mine = userBubble(message);
+  const mine = userBubble(message, pic?.url);
   const wait = el('div', { class: 'msg system', text: `Loading ${m.name}…` });
   log.append(mine, wait);
   log.scrollTop = log.scrollHeight;
@@ -679,6 +786,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
     mine.remove();
     wait.textContent = text;
     input.value = message;
+    if (pic) putPicBack(pic.url, pic.name);
   };
   try {
     // Max on in this chat: asked for with the load (only a model that fits this PC alone is given Max mode; the server says why not).
@@ -700,7 +808,7 @@ async function connectThenSend(message, card = { from: '', asked: false }) {
   wait.remove();
   // Another chat was opened while the model loaded: the message is not sent into it.
   if (chatKey() !== typedIn) return app.chatNote(`${m.name} is loaded, but your message was typed in another chat, so it was not sent here. Open that chat and send it again: "${message.length > 80 ? message.slice(0, 80) + '…' : message}"`);
-  send(message, card.from);
+  send(message, card.from, false, false, false, 0, null, pic?.url ?? null);
 }
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -808,7 +916,7 @@ function tierCard(data, answerWith) {
       ...(data.each ? [] : [answer('always', 'Allowed: always')]),
       answer('no', 'Don\'t allow')),
     said,
-    el('p', { class: 'hint', text: data.each ? 'Asked for every action of this kind. Change it in Settings, Permissions.' : 'Asked once in each answer. Change it in Settings, Permissions.' }));
+    el('p', { class: 'hint', text: data.each ? 'Asked for every action of this kind. Change it in Settings, Chat permissions.' : 'Asked once in each answer. Change it in Settings, Chat permissions.' }));
   return card;
 }
 

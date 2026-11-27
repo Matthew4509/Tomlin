@@ -261,7 +261,7 @@ export const ACTION_GAP_MS = 500;
 export const ACTIONS_MOST = 30;
 
 export interface ScreenTurnOpts {
-  /** The person's window list (Settings, Permissions). */
+  /** The person's window list (Settings, Chat permissions). */
   windows: string[];
   backend: ScreenBackend;
   /** Characters one look may give the model. */
@@ -278,7 +278,7 @@ export interface ScreenTurnOpts {
   wait?: (ms: number) => Promise<void>;
 }
 
-const NONE = 'No window is on the list of windows you may look at. Tell the person: they can add one in Settings, Permissions, Screen (for example mstsc.exe|192.168.1.20 - *).';
+const NONE = 'No window is on the list of windows you may look at. Tell the person: they can add one in Settings, Chat permissions, Screen (for example mstsc.exe|192.168.1.20 - *).';
 
 /** Pieces of a line that sit apart (a menu bar's words) come out apart, each with its own middle point. */
 function pieces(line: SeenWord[]): Array<{ x: number; y: number; text: string }> {
@@ -396,7 +396,7 @@ export class ScreenTurn {
       }
       // The three that act: off unless the person turned them on, a card for each, a gap between them.
       const tier = name === 'window_focus' ? this.o.focus : this.o.input;
-      if (tier === 'never') return refuse(w.title, name === 'window_focus' ? 'Not done: bringing a window to the front is turned off (Settings, Permissions).' : 'Not done: clicking and typing are turned off (Settings, Permissions, "Let the model click and type").');
+      if (tier === 'never') return refuse(w.title, name === 'window_focus' ? 'Not done: bringing a window to the front is turned off (Settings, Chat permissions).' : 'Not done: clicking and typing are turned off (Settings, Chat permissions, "Let the model click and type").');
       let what: string;
       let act: () => Promise<{ front: boolean }>;
       let extra: CardExtra | undefined;

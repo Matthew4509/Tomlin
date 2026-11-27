@@ -114,6 +114,9 @@ export interface Fetched {
   url: string;
   /** The site's Retry-After, as it sent it (with a 429 or 503). */
   retryAfter?: string;
+  /** The page's ETag and Last-Modified, when the site gave them (a page watch asks with them next time). */
+  etag?: string;
+  lastModified?: string;
 }
 
 export type Fetcher = (url: string, o: { signal: AbortSignal; maxBytes: number; publicOnly: boolean; headers?: Record<string, string> }) => Promise<Fetched>;
@@ -129,9 +132,31 @@ function publicLookup(host: string, opts: { all?: boolean; family?: number }, cb
   });
 }
 
-/** One GET, with no redirects followed: bodies cut at `maxBytes` (decompressed, so a small zip bomb cannot blow up). */
-function getOnce(url: URL, o: { signal: AbortSignal; maxBytes: number; publicOnly: boolean; headers?: Record<string, string> }): Promise<Fetched & { location?: string }> {
-  return new Promise((resolve, reject) => {
+/**
+ * The longest one page may take to come, redirects and all. The 20-second limit is on a quiet wait only: a site that
+ * sends a few bytes every few seconds kept a page (or a site check) reading for ever.
+ */
+export const FETCH_MOST_MS = 30_000;
+/** That, and a second more for each 512 KB it may be, so a big PDF on a slow line still comes (12 MB: 54 seconds in all). */
+export const fetchMostMs = (maxBytes: number) => FETCH_MOST_MS + Math.round((Math.max(0, maxBytes) / (512 * 1024)) * 1000);
+
+/**
+ * One GET, with no redirects followed: bodies cut at `maxBytes` (decompressed, so a small zip bomb cannot blow up).
+ * Given up, with why, once it is still coming at `until`.
+ */
+function getOnce(url: URL, o: { signal: AbortSignal; maxBytes: number; publicOnly: boolean; headers?: Record<string, string> }, until: number): Promise<Fetched & { location?: string }> {
+  return new Promise((resolveNow, rejectNow) => {
+    let late: Error | null = null;
+    let lateTimer: NodeJS.Timeout | undefined;
+    const resolve = (v: Fetched & { location?: string }) => {
+      clearTimeout(lateTimer);
+      if (late) rejectNow(late);
+      else resolveNow(v);
+    };
+    const reject = (e: unknown) => {
+      clearTimeout(lateTimer);
+      rejectNow(late ?? e);
+    };
     const host = url.hostname.replace(/^\[|\]$/g, '');
     if (o.publicOnly && /^[\d.]+$|:/.test(host) && live.isPrivateIp(host)) return reject(new Error(`${url.hostname} is this PC or a home network address, which the web tools never open`));
     const lib = url.protocol === 'https:' ? https : http;
@@ -162,7 +187,7 @@ function getOnce(url: URL, o: { signal: AbortSignal; maxBytes: number; publicOnl
         } catch {
           // Too big once unpacked, or broken: what came is read as it is (and judged unreadable below if it is not text).
         }
-        resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? '').toLowerCase(), body: body.subarray(0, o.maxBytes), url: url.href, ...(res.headers.location ? { location: String(res.headers.location) } : {}), ...(res.headers['retry-after'] ? { retryAfter: String(res.headers['retry-after']) } : {}) });
+        resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? '').toLowerCase(), body: body.subarray(0, o.maxBytes), url: url.href, ...(res.headers.location ? { location: String(res.headers.location) } : {}), ...(res.headers['retry-after'] ? { retryAfter: String(res.headers['retry-after']) } : {}), ...(res.headers.etag ? { etag: String(res.headers.etag).slice(0, 200) } : {}), ...(res.headers['last-modified'] ? { lastModified: String(res.headers['last-modified']).slice(0, 100) } : {}) });
       };
       res.on('end', finish);
       res.on('close', finish);
@@ -170,6 +195,10 @@ function getOnce(url: URL, o: { signal: AbortSignal; maxBytes: number; publicOnl
     });
     req.on('timeout', () => req.destroy(new Error('it took more than 20 seconds to answer')));
     req.on('error', reject);
+    lateTimer = setTimeout(() => {
+      late = new Error(`it was still coming after ${Math.round(fetchMostMs(o.maxBytes) / 1000)} seconds, so it was given up`);
+      req.destroy(late);
+    }, Math.max(0, until - Date.now()));
     req.end();
   });
 }
@@ -177,14 +206,15 @@ function getOnce(url: URL, o: { signal: AbortSignal; maxBytes: number; publicOnl
 /** A GET that follows up to 5 redirects, each address checked the same way (http and https only). */
 export const fetchPublic: Fetcher = async (url, o) => {
   let at = new URL(url);
+  const until = Date.now() + fetchMostMs(o.maxBytes);
   for (let hop = 0; hop <= 5; hop++) {
     if (at.protocol !== 'http:' && at.protocol !== 'https:') throw new Error(`it led to a ${at.protocol.replace(':', '')} address, which the web tools do not open`);
-    const r = await getOnce(at, o);
+    const r = await getOnce(at, o, until);
     if (r.status >= 300 && r.status < 400 && r.location) {
       at = new URL(r.location, at);
       continue;
     }
-    return { status: r.status, type: r.type, body: r.body, url: r.url, ...(r.retryAfter ? { retryAfter: r.retryAfter } : {}) };
+    return { status: r.status, type: r.type, body: r.body, url: r.url, ...(r.retryAfter ? { retryAfter: r.retryAfter } : {}), ...(r.etag ? { etag: r.etag } : {}), ...(r.lastModified ? { lastModified: r.lastModified } : {}) };
   }
   throw new Error('it redirected more than 5 times');
 };
@@ -414,7 +444,7 @@ export async function searchWeb(query: string, s: SearchSetting, signal: AbortSi
 /**
  * How hard this PC may ask the web. A site's firewall can ban an address for a burst of requests, and every PC at home
  * shares one address, so the tools go about as fast as a person clicking through: a page on a site 5 s after the last
- * one there (1 to 5 s at random; Settings, Permissions can turn the wait off), a search 10 s after the last search, other
+ * one there (1 to 5 s at random; Settings, Chat permissions can turn the wait off), a search 10 s after the last search, other
  * sites without a wait (calls in one go run side by side, so pages on two sites take turns). A site that
  * says "too many requests" or "busy" (429, 503) is waited for once, as long as it asks up to a minute (10 s when it does
  * not say). An answer opens at most 6 pages in one go and 20 in all.
@@ -426,7 +456,7 @@ export class Pacer {
   private readonly next = new Map<string, number>();
   readonly gaps: { page: number; jitter: number; search: number };
   private readonly random: () => number;
-  /** The wait between pages on a site (Settings, Permissions: on unless turned off); searches always wait. */
+  /** The wait between pages on a site (Settings, Chat permissions: on unless turned off); searches always wait. */
   delay = true;
 
   constructor(gaps: { page: number; jitter: number; search: number } = PACE, random = Math.random) {

@@ -39,6 +39,11 @@ export interface Scan {
   /** Plain words for what was found, once each. */
   reasons: string[];
   hits: ScanHit[];
+  /**
+   * Set when the text was too long (or too slow) to read all the way: the characters from here on were not read, so
+   * they may hide orders that were not found. What reads the text says so; it is not "nothing found" for that part.
+   */
+  unreadFrom?: number;
 }
 
 interface Rule {
@@ -363,19 +368,22 @@ export function scanText(text: string, o: { long?: boolean } = {}): Scan {
   const body = text.length > SCAN_CHARS ? text.slice(0, SCAN_CHARS) : text;
   const hits: ScanHit[] = [];
   const found = new Map<string, number>();
-  let unread = text.length > SCAN_CHARS;
+  // How far it was read through: a piece cut short by the time limit does not count as read.
+  let readTo = 0;
   for (let from = 0; from < body.length; from += WINDOW - OVERLAP) {
-    if (over()) {
-      unread = true;
-      break;
-    }
+    if (over()) break;
     scanPiece(body.slice(from, from + WINDOW), from, hits, found);
+    if (over()) break;
+    readTo = Math.min(from + WINDOW, body.length);
     if (from + WINDOW >= body.length) break;
   }
-  if ((over() || unread) && o.long !== false) found.set('a message too long or too repetitive to be read all the way through', 2);
+  const unread = readTo < text.length;
+  if (unread && o.long !== false) found.set('a message too long or too repetitive to be read all the way through', 2);
+  // A document or a page: being long is no warning sign in itself, but it is said, as only part of it was read (weight 0).
+  if (unread && o.long === false) found.set(`only the first ${readTo.toLocaleString('en-GB')} of its ${text.length.toLocaleString('en-GB')} characters were read for hidden orders; the rest was not read, so it may hold some`, 0);
   const score = [...found.values()].reduce((n, w) => n + w, 0);
   hits.sort((a, b) => a.start - b.start || b.end - a.end);
-  return { suspect: score >= 3, reasons: [...found.keys()], hits: hits.slice(0, MAX_HITS) };
+  return { suspect: score >= 3, reasons: [...found.keys()], hits: hits.slice(0, MAX_HITS), ...(unread ? { unreadFrom: readTo } : {}) };
 }
 
 // ---- text that did not come from the person: documents, web pages, tool results ----

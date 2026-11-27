@@ -23,7 +23,7 @@ test('the node: refused while its owner is using it, refused without the Accept 
 });
 
 test('the node says it can be asked, in both hellos', () => {
-  assert.equal(node.match(/'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan']/g)?.length, 2);
+  assert.equal(node.match(/'drive-jobs', 'dl-queue', 'models-where', 'cache-set', 'hardware-rescan'(, ('[a-z-]+'|[A-Z_]+))*]/g)?.length, 2);
 });
 
 test('the node picks the drive\'s TOMLIN models folder, or its usual folder when that is on the same drive', () => {

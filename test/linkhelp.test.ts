@@ -49,7 +49,7 @@ test('node side: a healthy node says which address to type, from its home connec
 });
 
 test('node side: off, not listening, no connection, no router address, Public, another firewall and a VPN each get their own line', () => {
-  assert.match(nodeChecklist(node({ on: false })).lines[0].text, /Enable this PC as a node is off/);
+  assert.match(nodeChecklist(node({ on: false })).lines[0].text, /Use this PC as a node is off/);
   assert.match(nodeChecklist(node({ listening: false })).lines[0].text, /could not open port 8741/);
   assert.match(nodeChecklist(node({ adapters: [] })).lines.find(l => l.state === 'bad')!.text, /not connected to a router/);
   const apipa = nodeChecklist(node({ adapters: [{ alias: 'Wi-Fi', address: '169.254.10.20', prefix: 16, dhcp: true, gateway: null, gatewayAnswers: null }] }));
@@ -178,7 +178,7 @@ test('probe results, and devices seen only by a link-local address', () => {
 test('the pages, the installer and Help use it', () => {
   const html = read('public/index.html');
   assert.match(html, /<details class="set-row" id="link-help">/);
-  assert.match(html, /Is TOMLIN open on the other PC, with "Enable this PC as a node" turned on\?/);
+  assert.match(html, /Is TOMLIN open on the other PC, with "Use this PC as a node" turned on\?/);
   assert.match(html, /id="link-help-name"/);
   assert.match(html, /Checks this PC's own settings/);
   const home = read('public/home.js');

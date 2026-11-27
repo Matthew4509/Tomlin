@@ -29,9 +29,9 @@ test('a linked PC\'s model is named by its remote ref', () => {
 
 test('the note names each hire and how; no backup is said', () => {
   const on = assignedTo(hires, BIG);
-  assert.equal(assignedWords(on), 'Assigned to staff: Ann (first choice), Bo (backup), Cy (first choice, no backup), Di (backup) and Ed (on it now, no backup).');
+  assert.equal(assignedWords(on), 'In use by staff Ann, Bo, Cy, Di and Ed.');
   assert.equal(assignedWords([]), '');
-  assert.equal(assignedWords(assignedTo(hires, SMALL).slice(0, 1), '"Z820"'), 'Assigned to staff on "Z820": Ann (backup).');
+  assert.equal(assignedWords(assignedTo(hires, SMALL).slice(0, 1), '"Z820"'), 'In use by staff Ann on "Z820".');
 });
 
 test('the warning says what happens to each: no model, the backup answers, or a lost backup', () => {
@@ -44,7 +44,7 @@ test('the lines for a linked PC\'s model: this PC\'s hires and that PC\'s own; a
   const mine = assignedTo(hires, 'remote:0a1b2c3d:Far.gguf');
   const theirs = [{ name: 'Kit', as: ['first choice'], spare: false }] as never;
   const both = staffLines({ mine, theirs, pcName: 'Z820' });
-  assert.equal(both.note, 'Assigned to staff: Di (first choice). Assigned to staff on "Z820": Kit (first choice, no backup).');
+  assert.equal(both.note, 'In use by staff Di. In use by staff Kit on "Z820".');
   assert.match(both.warning, /^Deleting it affects staff: Di would answer on their backup\. Deleting it affects staff on "Z820": Kit would have no model/);
   const old = staffLines({ mine: [], theirs: null, pcName: 'Z820' });
   assert.equal(old.note, 'Staff on "Z820": not checked (it runs an older TOMLIN that does not say).');

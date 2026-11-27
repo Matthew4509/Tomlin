@@ -114,15 +114,16 @@ export async function maxUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       return no(503, `"${shareState.name}" started lending, but its RPC server did not answer.`);
     }
     const nodeNonce = newNonce();
-    // Unsealed only when the borrower asks for it AND this PC's owner ticked "Allow unencrypted cluster links": the answer
-    // says which, sealed, so the borrower never guesses (an older TOMLIN here sends no `plain`: sealed, as before).
-    const plain = opened.body.plain === true && shareState.plainLinks === true;
+    // Unsealed only when the borrower asks for it: the PC this node works for decides on its Cluster page, and a node has
+    // nothing to tick (share.NODE_PLAIN_LINKS). The answer says which, sealed, so the borrower never guesses (an older
+    // TOMLIN asking sends no `plain`: sealed, as before).
+    const plain = opened.body.plain === true && share.NODE_PLAIN_LINKS;
     const answer = link.sealAnswer(keys, opened.id, 0, { nonce: nodeNonce.toString('base64url'), plain });
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: ${MAX_UPGRADE}\r\nconnection: Upgrade\r\nx-link: ${answer}\r\n\r\n`);
     // A borrower that loses power sends no close: keep-alive ends the stream, and the loan ends after SPARE_MS.
     keepWireAlive(socket as Duplex & { setKeepAlive?: (on: boolean, ms: number) => unknown });
     l.track(socket);
-    if (opened.body.plain === true) log.info('max', plain ? `The stream from "${who.name}" is NOT encrypted: both PCs chose an unencrypted cluster link.` : `"${who.name}" asked for an unencrypted cluster link; it is sealed, because Allow unencrypted cluster links is not ticked here.`);
+    if (opened.body.plain === true) log.info('max', plain ? `The stream from "${who.name}" is NOT encrypted: "${who.name}" chose an unencrypted cluster link on its Cluster page.` : `"${who.name}" asked for an unencrypted cluster link; it is sealed, because this TOMLIN does not take unencrypted cluster links.`);
     void (plain ? plainPipe(rpc, socket, head) : sealedPipe(rpc, socket, streamKeys(keys, hostNonce, nodeNonce, 'node'), 'node', { head })).then(ended => {
       l.untrack(socket);
       if (ended) log.info('max', `A stream from "${who.name}" ended: ${ended}`);

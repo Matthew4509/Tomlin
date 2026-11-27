@@ -101,7 +101,7 @@ function todoAddWindow(project = null, zone = 'today') {
 
 function todoNoteWindow(it) {
   const note = el('input', { type: 'text', maxlength: '120', value: it.note, 'aria-label': 'Note', autocomplete: 'off' });
-  const save = el('button', { class: 'btn primary', type: 'button', text: 'Save', onclick: () => { todoDlg.close(); todoCall('/api/todo/set', { item: it.id, note: note.value }); } });
+  const save = el('button', { class: 'btn primary', type: 'button', text: 'Save', onclick: () => { todoDlg.close(); todoCall('/api/todo/set', { item: it.id, note: note.value, was: it.note }); } });
   note.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
   todoWindow(`Note for ${it.name}`, [todoField('Note (one line, up to 120 letters)', note)], [save, todoCancel()]);
   note.focus();

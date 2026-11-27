@@ -1,9 +1,9 @@
 // This PC and the linked ones: memory now, the Nodes page, reading speeds and the calculator.
-import { readFile, rm, stat } from 'node:fs/promises';
+import { open, readFile, rm, stat } from 'node:fs/promises';
 import { readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { hostname } from 'node:os';
-import { diskOf, modelParts, removeWhy } from '../carry.ts';
+import { diskOf, modelParts, modelRoom, removeWhy } from '../carry.ts';
 import * as cleanup from '../cleanup.ts';
 import { assignedTo, staffLines } from '../assigned.ts';
 import { nowModel } from '../staff.ts';
@@ -15,7 +15,8 @@ import { memoryBar } from '../nodes.ts';
 import * as nodestaff from '../nodestaff.ts';
 import { hereKey, pcKey } from '../speed.ts';
 import { keepBig, type ReadFigure } from '../layers.ts';
-import { DATA_DIR, type Routes, chatModels, modelsHome, hardware, hidden, json, lastUsed, sampler, shortName, speeds, staff, store } from './core.ts';
+import { DATA_DIR, type Routes, byModel, chatModels, modelsHome, hardware, hidden, json, lastUsed, sampler, shortName, speeds, staff, store } from './core.ts';
+import { modelsDone } from '../modelsdone.ts';
 import { drawings } from '../images.ts';
 import { chatList, images, main, runnerFor, runners, watchedPids } from './panes.ts';
 import { answeringBusy, endAnswer, takeChat } from './answering.ts';
@@ -252,7 +253,30 @@ function filesOf(kind: unknown, id: string): { name: string; files: string[] } |
   } catch {
     return { status: 404, error: 'That model\'s folder cannot be read now.' };
   }
-  return { name, files: modelParts(basename(path), names).map(n => join(dirname(path), n)) };
+  return { name, files: partsHere(basename(path), names).map(n => join(dirname(path), n)) };
+}
+
+/**
+ * The files of a chat model on this PC to delete: every part of a split model that is on the disk, also when one is
+ * missing (a download cut off, a part deleted by hand), so no part is left behind to list the model again; else the file.
+ */
+function partsHere(first: string, names: string[]): string[] {
+  const whole = modelParts(first, names);
+  const m = /^(.*)-00001-of-(\d{5})\.gguf$/i.exec(first);
+  if (whole.length > 1 || !m) return whole;
+  const byLower = new Map(names.map(n => [n.toLowerCase(), n]));
+  const found = Array.from({ length: Number(m[2]) }, (_, k) => byLower.get(`${m[1]}-${String(k + 1).padStart(5, '0')}-of-${m[2]}.gguf`.toLowerCase())).filter((n): n is string => !!n);
+  return found.length ? found : [first];
+}
+
+/** True when another program holds the file open (Windows then refuses to open it for writing). */
+async function heldOpen(path: string): Promise<boolean> {
+  try {
+    await (await open(path, 'r+')).close();
+    return false;
+  } catch (e) {
+    return ['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '');
+  }
 }
 
 /** Why a model of this PC cannot be deleted now (hidden, loaded, kept by Ollama, not here); '' when it can. Changes nothing. */
@@ -271,11 +295,24 @@ export async function deleteModelHere(kind: unknown, id: string): Promise<{ stat
   if (hidden.has(id)) return { status: 409, body: { error: 'That model is hidden, which keeps it from being deleted. Press Unhide first, then Delete.' } };
   const got = filesOf(kind, id);
   if ('error' in got) return { status: got.status, body: { error: got.error } };
-  try {
-    for (const f of got.files) await rm(f, { force: true });
-  } catch (e) {
-    chatModels.forget();
-    return { status: 500, body: { error: `${got.name} could not be deleted: ${(e as Error).message}. Close any program using it, then try again.` } };
+  const parts = got.files.length > 1;
+  // A file another program holds open is found before anything goes, so a split model is never left with some parts deleted.
+  const held: string[] = [];
+  for (const f of got.files) if (await heldOpen(f)) held.push(basename(f));
+  if (held.length) return { status: 409, body: { error: `${got.name} was not deleted: ${parts ? `the part${held.length === 1 ? '' : 's'} ${held.join(', ')} ${held.length === 1 ? 'is' : 'are'}` : `${held[0]} is`} open in another program. Close that program, then try again. Nothing was deleted.` } };
+  const gone: string[] = [];
+  for (const f of got.files) {
+    try {
+      await rm(f, { force: true });
+      gone.push(basename(f));
+    } catch (e) {
+      chatModels.forget();
+      const left = got.files.map(x => basename(x)).filter(n => !gone.includes(n));
+      const said = (e as Error).message.split('\n')[0].slice(0, 160);
+      return { status: 500, body: { error: parts && gone.length
+        ? `${got.name} was only partly deleted: the part${gone.length === 1 ? '' : 's'} ${gone.join(', ')} ${gone.length === 1 ? 'was' : 'were'} deleted, and ${left.join(', ')} could not be (${said}). The model cannot be loaded now: close any program using it, then press Delete again to remove the rest.`
+        : `${got.name} could not be deleted: ${said}. Nothing was deleted. Close any program using it, then try again.` } };
+    }
   }
   chatModels.forget();
   lastUsed.forget(id);
@@ -331,11 +368,14 @@ async function cleanupView(pcId: unknown, wanted: { name: string; bytes: number 
     const h = await jobRoutes.hello(r, 3000).catch(() => null);
     const list = (h?.models ?? r.models ?? []) as { id: string; name: string; kind: 'chat' | 'image'; bytes: number; loaded?: boolean; busy?: boolean; hidden?: boolean; usedAt?: number }[];
     inputs = list.map(m => ({ id: m.id, name: shortName(m.name) || m.name, kind: m.kind === 'image' ? 'image' : 'chat', file: m.name, bytes: m.bytes || 0, usedAt: m.usedAt ?? null, installedAt: null, loaded: !!h && !!m.loaded, busy: !!h && !!m.busy, hidden: m.hidden === true, usedBy: [...assignedTo(staff.list(), `remote:${r.id}:${m.id}`), ...((m as { assigned?: { name: string }[] }).assigned ?? [])].map(a => a.name) }));
-    disk = h?.disk ?? null;
+    // The free space of the drive that PC keeps its models on (its hello names it), not its backups drive: `disk` is
+    // that one, and is used only from a PC too old to say its drives.
+    const room = h ? modelRoom(h) : null;
+    disk = room ? { total: room.total, free: room.free } : null;
     // Removed over the link (POST /api/network/model-remove), with that PC's own tick and its app lock PIN, asked when Remove
     // is pressed. Only a real block is said, in one line: off, busy with its owner, too old, or the tick not set there.
     why = !h ? `"${r.name}" is off or not answering: its list is as last seen.`
-      : h.allow && h.can.includes('model-remove') && !h.allow.receive ? `Tick "Accept models from linked PCs" on "${r.name}" (Network) to remove models there.`
+      : h.allow && h.can.includes('model-remove') && !h.allow.receive ? `Tick "Accept models from linked PCs" on "${r.name}" (This PC) to remove models there.`
         : removeWhy({ id: r.id, name: r.name, ok: true, away: h.away, can: h.can, allow: h.allow, models: [] });
     if (why) why = `${why.charAt(0).toUpperCase()}${why.slice(1).replace(/.$/, '')}.`;
     canDelete = !why;
@@ -350,16 +390,29 @@ async function cleanupView(pcId: unknown, wanted: { name: string; bytes: number 
 
 /** GET requests answered here, by path. */
 export const thispcGet: Routes = {
+  // What the models have done in the last 7 days (W2-23): chat answers and time by model and PC, pictures and their
+  // seconds by size, clips and their minutes for 5 s. Read from what is kept already; nothing is measured for it.
+  '/api/models/done': async ({ res }) => {
+    const { clipShelf } = await import('./clips.ts');
+    const { VIDEO_MODELS, shortVideoName } = await import('../videomodels.ts');
+    const remotes = (await store.settings()).remotes;
+    const chat = [{ key: 'here', name: 'This PC' }, ...remotes.map(r => ({ key: r.id, name: r.name }))]
+      .flatMap(p => byModel.top(p.key, 7).map(x => ({ pc: p.name, model: x.model, ms: x.ms, answers: x.answers })));
+    const [pictures, clips] = await Promise.all([images.gallery.all().catch(() => []), clipShelf.all().catch(() => [])]);
+    const videoNames = Object.fromEntries(VIDEO_MODELS.map(m => [m.id, shortVideoName(m)]));
+    return json(res, 200, modelsDone({ pictures, clips, chat, videoNames }));
+  },
   '/api/nodes': async ({ res }) => json(res, 200, await nodesView()),
   '/api/calc': async ({ res }) => json(res, 200, await calcView()),
   '/api/nodes/others': async ({ res }) => json(res, 200, { cluster: jobRoutes.clusterView(), pcs: (await jobRoutes.remoteStatus()).map(r => ({ ...r, speed: r.ok && r.model ? speeds.get(pcKey(r.id, r.model)) : null, updating: jobRoutes.updatingTo(r.id) })) }),
   // The meters of the linked PC an open chat's hire works on (the chat head asks every 3 s while it is on screen). The
-  // hire's model there is named, so that PC keeps only it loaded, not every model it loaded for this PC.
+  // hire's model there is named, so that PC keeps only it loaded, not every model it loaded for this PC. `loaded` is
+  // what that PC says is loaded (null: not known); `chosen` is the hire's model there and `hire` the hire's name.
   '/api/node/stats': async ({ res, url }) => {
     const pc = String(url.searchParams.get('pc') ?? '');
     const who = String(url.searchParams.get('who') ?? '');
     const m = who.startsWith('staff:') ? staff.get(who.slice(6)) : undefined;
-    return json(res, 200, await jobRoutes.nodeStats(pc, nodestaff.statsModel(m ? nowModel(m) ?? m.model : null, pc)));
+    return json(res, 200, { ...(await jobRoutes.nodeStats(pc, nodestaff.statsModel(m ? nowModel(m) ?? m.model : null, pc))), hire: m?.name ?? null });
   },
   // A linked PC's log, its last lines (?pc= its id or name, &lines= up to 1000, &day= one of the 7 days it keeps written
   // 2026-11-17, &find= a word): for tests across PCs and the Log part of its window. A day not in that form is refused.
@@ -390,7 +443,11 @@ export const thispcPost: Routes = {
     const id = typeof b.id === 'string' ? b.id : '';
     const known = b.kind === 'image' ? images.list().some(m => m.id === id) : chatModels.list().some(m => m.id === id);
     if (!known) return json(res, 404, { error: 'That model is not on this PC any more.' });
-    await hidden.set(id, b.hidden === true);
+    try {
+      await hidden.set(id, b.hidden === true);
+    } catch (e) {
+      return json(res, 500, { error: `That could not be saved, so the model is ${hidden.has(id) ? 'still hidden' : 'still shown'}: ${(e as Error).message.split('\n')[0].slice(0, 160)}. Try again in a moment.` });
+    }
     return json(res, 200, { ok: true });
   },
   // Deletes a model's files from this PC (the page asks first, naming the hires who use it).

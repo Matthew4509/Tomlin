@@ -9,6 +9,13 @@ import { timeUpWords } from './loadlimit.ts';
 /** llama-server could not read the chat template inside the model file. */
 export const TEMPLATE_FAULT = /FilterExpression|chat template is not supported|failed to apply template|Unable to generate parser|unknown test|unknown filter/i;
 
+/**
+ * The runner would not open the model's vision add-on (an mmproj made for another model, or one this build cannot read).
+ * llama-server says "failed to load multimodal model" when its vision part (mtmd, clip) fails to start: the model is then
+ * started again without it (src/server/panes.ts), so a bad add-on never stops the model itself from loading.
+ */
+export const VISION_FAULT = /failed to load multimodal model|mtmd_init_from_file: (?:error|fail)|clip_init: failed|unknown projector type/i;
+
 /** The runner's last lines say a PC lending its card (Max mode's RPC) went away. */
 export const maxFault = (tail: string) => /\brpc\b|ggml_backend_rpc|failed to connect to/i.test(tail);
 /** A loaded model stopped because a PC lending its card for it took it back. */
@@ -219,7 +226,7 @@ export interface ChatRun {
    * the experts in that PC's RAM and the rest on its card. `device`: the runner it was worked out for (device names
    * differ per runner). Set with `rpc`, which then holds only the lenders in use.
    */
-  maxPlace?: { device: 'cuda' | 'vulkan'; dev: string[]; split: number[]; override: string[]; /** The layers off this PC's processor (src/layersplit.ts); unset: all. */ ngl?: number };
+  maxPlace?: { device: 'cuda' | 'vulkan' | 'cpu'; dev: string[]; split: number[]; override: string[]; /** The layers off this PC's processor (src/layersplit.ts); unset: all. */ ngl?: number };
   /** Expert parallel (src/jobrun/epload.ts): the patched runner's environment (LLAMA_EXPERT_SPLIT and the rest). */
   env?: Record<string, string>;
   /** Expert parallel: the batch buffers (-b and -ub), small so the card's compute buffer stays small. Unset: the runner's own. */
@@ -231,6 +238,11 @@ export interface ChatRun {
   /** The cards it runs on and its guessing model's card (src/devices.ts names; unset: every card, as llama.cpp picks). */
   cards?: string[];
   draftCard?: string[];
+  /**
+   * The model's vision add-on (an mmproj file beside it, src/capabilities.ts visionPathFor): started with it, the model
+   * can look at a picture sent with a message. Unset: no add-on, or it would not start with it (VISION_FAULT).
+   */
+  mmproj?: string;
 }
 
 /** The most RAM, in MB, the chat runner keeps for the readings of earlier prompts (llama.cpp's own default is 8192). */
@@ -252,7 +264,7 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   // --cache-ram: llama.cpp keeps the reading of each finished prompt in RAM so another chat can pick up where it left
   // off. Left to itself it keeps up to 8 GB, which nothing in the memory check counts: over a long session the runner
   // grew by gigabytes on top of the model. PROMPT_CACHE_MB caps it.
-  const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx * slots), '--no-webui', '--cache-ram', String(PROMPT_CACHE_MB), '-lv', '4', ...(fits ? [] : ['-ngl', device === 'cpu' ? '0' : placed && run.maxPlace!.ngl !== undefined ? String(run.maxPlace!.ngl) : '999'])];
+  const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-c', String(run.ctx * slots), '--no-webui', '--cache-ram', String(PROMPT_CACHE_MB), '-lv', '4', ...(fits ? [] : ['-ngl', placed && run.maxPlace!.ngl !== undefined ? String(run.maxPlace!.ngl) : device === 'cpu' ? '0' : '999'])];
   // llama.cpp's own fit keeps 1024 MB free on each card unless told a smaller margin.
   if (fits && run.fitMargin) args.push('-fitt', String(run.fitMargin));
   if (run.cache !== 'f16') args.push('-fa', 'on', '-ctk', run.cache, '-ctv', run.cache);
@@ -284,5 +296,6 @@ export function chatArgs(model: string, port: number, device: 'cpu' | 'vulkan' |
   else if (run.spec === 'mtp') args.push('--spec-type', 'draft-mtp');
   if ((run.draft || run.spec === 'mtp') && run.draftMax) args.push('--spec-draft-n-max', String(run.draftMax));
   if (slots > 1) args.push('-np', String(slots), ...(run.slotSplit ? ['--no-kv-unified'] : []));
+  if (run.mmproj) args.push('--mmproj', run.mmproj);
   return args;
 }

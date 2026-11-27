@@ -50,13 +50,13 @@ test('two PCs: staff on a model are named in the lists and the confirm, a linked
 
     // The linked PC's list: both are named, with how.
     const window = (await host.get(`/api/pc?id=${pc}`)).body.models.find((m: any) => m.id === GONE);
-    assert.equal(window.staffNote, 'Assigned to staff: Pat Example (first choice, no backup). Assigned to staff on "Test node": Cy Node (first choice, no backup).');
+    assert.equal(window.staffNote, 'In use by staff Pat Example. In use by staff Cy Node on "Test node".');
     assert.equal((await host.get(`/api/pc?id=${pc}`)).body.models.find((m: any) => m.id === OTHER).staffNote, '', 'a model nobody works on says nothing');
 
     // The bin over the link is asked with the same message, with the copies in it.
     const ask = (await host.post('/api/network/copies', { pc, models: [{ kind: 'chat', id: GONE }] })).body.copies[`chat:${GONE}`];
-    assert.match(ask.ask, /^Assigned to staff: Pat Example \(first choice, no backup\)\. Assigned to staff on "Test node": Cy Node \(first choice, no backup\)\. Deleting it affects staff: Pat Example would have no model until you give them another\. Deleting it affects staff on "Test node": Cy Node would have no model until you give them another\. Other copies: on This PC\./);
-    assert.equal(ask.summary, 'Assigned to staff: Pat Example (first choice, no backup). Assigned to staff on "Test node": Cy Node (first choice, no backup). Other copies: on This PC.');
+    assert.match(ask.ask, /^In use by staff Pat Example\. In use by staff Cy Node on "Test node"\. Deleting it affects staff: Pat Example would have no model until you give them another\. Deleting it affects staff on "Test node": Cy Node would have no model until you give them another\. Other copies: on This PC\./);
+    assert.equal(ask.summary, 'In use by staff Pat Example. In use by staff Cy Node on "Test node". Other copies: on This PC.');
 
     // On this PC's own list the model it holds has nobody (Pat is on the node's copy).
     const mine = (await host.get('/api/nodes')).body.models.find((m: any) => m.id === GONE);

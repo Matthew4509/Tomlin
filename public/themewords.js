@@ -10,7 +10,7 @@
 (() => {
   const SILLY = {
     greeting: 'Another fitness app?',
-    'ask-title': 'Let\'s make something brilliant (you always do)',
+    'ask-title': 'Let\'s make something brilliant',
     'ask-go': 'Absolutely, let\'s go',
     'ask-advanced': 'Plan as a job (genius)',
     'ask-goal': 'Describe it. Whatever it is, it\'s a great idea.',

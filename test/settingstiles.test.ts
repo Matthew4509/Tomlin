@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
+const read = (f: string) => readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const html = read('index.html');
 const menu = html.slice(html.indexOf('id="rail-setup-fold"'), html.indexOf('</nav>'));
 const sub = menu.slice(menu.indexOf('id="rail-settings-sub"'));
@@ -26,9 +26,9 @@ test('the left panel has no TOMLIN - HOME or Settings line; only the submenu is 
   assert.match(html, /id="settings-open"/);
 });
 
-test('sixteen lines in the order drawn: Hire staff, Models, This PC; then Add another PC, Bootable USB, Network, Manage, Cluster, Network Storage, Create a guest pass; Theme at the very end', () => {
-  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Models', 'This PC', 'Add another PC', 'Bootable USB', 'Network', 'Manage', 'Cluster', 'Network Storage', 'Create a guest pass', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Permissions', 'Theme']);
-  assert.deepEqual(lines.map(l => l.opens), ['staff', 'models', 'thispc', 'addpc', 'usb', 'nodes', 'manage', 'cluster', 'storage', 'guestpass', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
+test('eighteen lines in the order drawn: Hire staff, Agents, Memory, Models, This PC; then Add another PC, Bootable USB, Network, Manage, Cluster, Network Storage, Create a guest pass; Theme at the very end', () => {
+  assert.deepEqual(lines.map(l => l.name), ['Hire staff', 'Agents', 'Memory', 'Models', 'This PC', 'Add another PC', 'Bootable USB', 'Network', 'Manage', 'Cluster', 'Network Storage', 'Create a guest pass', 'Jobs', 'Files and blog writer', 'Manage updates', 'Data and lock', 'Chat permissions', 'Theme']);
+  assert.deepEqual(lines.map(l => l.opens), ['staff', 'agents', 'memory', 'models', 'thispc', 'addpc', 'usb', 'nodes', 'manage', 'cluster', 'storage', 'guestpass', 'jobs', 'files', 'updates', 'data', 'perms', 'colours']);
 });
 
 test('each has one short sentence', () => {
@@ -38,7 +38,7 @@ test('each has one short sentence', () => {
     assert.match(l.about, /\.$/);
   }
   assert.match(lines.find(l => l.name === 'Data and lock')!.about, /set a PIN and choose alerts/);
-  assert.match(lines.find(l => l.name === 'Permissions')!.about, /may do on its own/);
+  assert.match(lines.find(l => l.name === 'Chat permissions')!.about, /may do on its own/);
 });
 
 test('three groups shown, the same in the submenu and on the tiles page: Staff and models, Your network, This app (Work is hidden)', () => {
@@ -94,7 +94,7 @@ test('Settings opens the tiles; what was on its long page has pages of its own',
 });
 
 test('the two new pages behave like the other Settings pages', () => {
-  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage'];/);
+  assert.match(read('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage', 'cluster', 'agents', 'memory'];/);
   assert.match(read('home.js'), /data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours'/);
   const css = read('style.css');
   assert.match(css, /\.shell:not\(\[data-view="data"\]\) > #settings-data/);
@@ -140,8 +140,8 @@ test('Manage updates is a page of its own: pressing it goes there and marks it, 
 
 test('everywhere else the foot of the left panel shows nothing, and the submenu opens on Settings pages', () => {
   const css = read('style.css');
-  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\) > \.rail #rail-settings-sub \{ display: none; \}/);
-  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\) > \.rail > \.rail-setup \{ display: none; \}/, 'no empty box with a line across it');
+  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\):not\(\[data-view="cluster"\]\):not\(\[data-view="manage"\]\):not\(\[data-view="agents"\]\):not\(\[data-view="memory"\]\) > \.rail #rail-settings-sub \{ display: none; \}/);
+  assert.match(css, /:not\(\[data-view="colours"\]\):not\(\[data-view="usb"\]\):not\(\[data-view="addpc"\]\):not\(\[data-view="cluster"\]\):not\(\[data-view="manage"\]\):not\(\[data-view="agents"\]\):not\(\[data-view="memory"\]\) > \.rail > \.rail-setup \{ display: none; \}/, 'no empty box with a line across it');
 });
 
 test('links to what moved go to its new place, and no words send anyone to "Set up"', () => {
@@ -160,9 +160,22 @@ test('Guest passes has no Add a node; the map\'s + Add a node opens the Add anot
   assert.match(read('home.js'), /app\.addNode = \(\) => app\.openAddPc\(\);/);
 });
 
-test('the bottom of Linked PCs: Guest, Connect to a network as a guest, which opens the address and code boxes', () => {
+test('the bottom of Linked PCs: Join another network as a guest, which opens the address and code boxes', () => {
   const linked = html.slice(html.indexOf('id="node-linked-pcs"'), html.indexOf('</section>', html.indexOf('id="node-linked-pcs"')));
-  assert.match(linked, /<b>Guest:<\/b><span class="set-about">Connect to a network as a guest<\/span>/);
+  assert.match(linked, /<b>Join another network as a guest<\/b><span class="set-about">With a guest pass another PC's owner gave you<\/span>/);
+  assert.doesNotMatch(html, /<b>Guest:<\/b>/);
+  // The guest pass help is a "?" with words, like the others, not a bare "(!)".
+  // Guest passes, as the Node row: a switch with its state line and the ! beside it; the passes open under it when on.
+  assert.match(html, /<b id="pass-on-label">Guest passes<\/b><span class="set-about" id="pass-on-line">Off\. Turn on to let users access your network with a passcode\.<\/span>/);
+  assert.match(html, /<span class="set-side pass-side"><span class="info"><button class="info-mark" type="button" aria-label="About guest passes" aria-describedby="node-pass-tip">!<\/button>/);
+  assert.match(html, /<input type="checkbox" role="switch" id="pass-on" aria-labelledby="pass-on-label">/);
+  assert.match(html, /<div class="set-block" id="pass-area" hidden>/);
+  assert.doesNotMatch(html, /About guest passes<\/summary>/);
+  assert.match(html, /aria-controls="node-pass-new">New guest pass<\/button>/);
+  const home = read('home.js');
+  // It stays on while a pass is listed: turning it off would not end them.
+  assert.match(home, /if \(!e\.target\.checked && passCount > 0\) \{\n\s+e\.target\.checked = true;\n\s+said\.textContent = 'Remove the guest passes below first: turning this off does not end them\.';/);
+  assert.match(home, /passCount = passes\.length;\n\s+drawPassRow\(\);/);
   assert.ok(linked.lastIndexOf('id="net-join-guest"') > linked.indexOf('id="node-update-all"'), 'at the bottom');
   assert.match(read('home.js'), /\$\('#net-join-guest'\)\.addEventListener\('click', \(\) => \{\s+app\.addNode\(\);\s+\$\('#node-addr-box'\)\.open = true;/);
 });
@@ -184,5 +197,30 @@ test('a guest pass names each PC as the left panel does, with its specs, so two 
 
 test('Create a guest pass opens Network on Guest passes with the new-pass form open', () => {
   const view = read('homeview.js');
-  assert.match(view, /else if \(b\.dataset\.setup === 'guestpass'\) \{\s+\/\/[^\n]*\s+openNodes\(\);\s+app\.netSection\('guests'\);\s+if \(\$\('#node-pass-new'\)\.hidden\) \$\('#node-pass-create'\)\.click\(\);/);
+  assert.match(view, /else if \(b\.dataset\.setup === 'guestpass'\) \{\s+\/\/[^\n]*\s+openNodes\(\);\s+app\.netSection\('guests'\);\s+app\.passesOn\?\.\(\);\s+if \(\$\('#node-pass-new'\)\.hidden\) \$\('#node-pass-create'\)\.click\(\);/);
+});
+
+test('the admin PC with no app lock manages nothing and says to set a PIN; there is no switch or typed host PIN', () => {
+  const home = read('home.js');
+  const hp = readFileSync(new URL('../src/jobrun/hostpins.ts', import.meta.url), 'utf8');
+  // The server: the host key is used only while an app lock is set and open; turning it on with none is refused.
+  assert.match(hp, /new hostpin\.HostKey\(raw, f => d\.store\.writeJson\(hostpin\.KEY_FILE, f\), \(\) => d\.appLockOn\(\) && !d\.appLocked\(\)\)/);
+  assert.match(hp, /if \(!d\.appLockOn\(\)\) return \{ status: 409, body: \{ error: 'The admin PC needs an app lock: set a PIN first \(Settings, Data and lock\)\.', needAppLock: true \} \};/);
+  assert.doesNotMatch(hp, /key-off|key-on|OwnHostPin/);
+  assert.match(hp, /unlocked: !d\.appLocked\(\), lock: d\.appLockOn\(\), wasOff: k\.wasOff \}/);
+  // The page: the title and line say so, and Set a PIN opens the App lock window.
+  assert.match(html, /<b id="host-key-title">Admin PC: manages the linked PCs while unlocked<\/b>/);
+  assert.doesNotMatch(html, /host-key-off|host-key-on|host-pin-|node-pin-either/);
+  assert.match(html, /<button class="btn primary" type="button" id="host-key-lock" hidden>Set a PIN…<\/button>/);
+  assert.match(home, /\$\('#host-key-title'\)\.textContent = noLock \? 'Admin PC: needs an app lock' : 'Admin PC: manages the linked PCs while unlocked';/);
+  assert.match(home, /\$\('#host-key-lock'\)\.addEventListener\('click', \(\) => openAppLockNew\(\)\);/);
+});
+
+test('what guests may do: No limit beside each size (sent as 0), Web use and Their own tools ticks', () => {
+  const html = read('index.html');
+  for (const id of ['node-cap-answer-none', 'node-cap-prompt-none', 'node-cap-web', 'node-cap-tools']) assert.match(html, new RegExp(`<input type="checkbox" id="${id}">`), id);
+  assert.match(html, /id="node-cap-web"> Web use: guests may search and read web pages through this PC/);
+  const home = read('home.js');
+  assert.match(home, /answer: \$\('#node-cap-answer-none'\)\.checked \? 0 : Number\(\$\('#node-cap-answer'\)\.value\) \|\| 2000,/);
+  assert.match(home, /web: \$\('#node-cap-web'\)\.checked,\n\s+tools: \$\('#node-cap-tools'\)\.checked,/);
 });

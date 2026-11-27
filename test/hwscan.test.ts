@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { hardwareChanges, type HardwareInfo } from '../src/hardware.ts';
 import { HOST_ONLY_DOORS } from '../src/guestpass.ts';
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const GB = 2 ** 30;
 const base: HardwareInfo = { cpuName: 'Xeon E5-2640', cores: 6, threads: 12, ram: 64 * GB, gpus: [{ name: 'RTX 3060', vendor: 'nvidia', total: 12 * GB, integrated: false } as HardwareInfo['gpus'][number]], nvidiaDriver: '560.94' };
 
@@ -25,12 +25,14 @@ test('this PC is read again in place, a linked PC through its own door (a host\'
   assert.match(core, /const now = await readHardware\(\);[\s\S]{0,700}?Object\.assign\(hardware, now\);\n\s+return hardwareChanges\(was, now\);/);
   const node = read('src/jobrun/node.ts');
   assert.match(node, /if \(p === '\/worker\/hardware-rescan'\) \{\n\s+const changes = d\.rescanHardware \? await d\.rescanHardware\(\) : \[\];/);
-  assert.equal(node.match(/'models-where', 'cache-set', 'hardware-rescan'\]/g)?.length, 2, 'said in both hellos');
+  assert.equal(node.match(/'models-where', 'cache-set', 'hardware-rescan'(, ('[a-z-]+'|[A-Z_]+))*\]/g)?.length, 2, 'said in both hellos');
   assert.ok(HOST_ONLY_DOORS.includes('/worker/hardware-rescan'));
   const scan = read('src/jobrun/hwscan.ts');
   assert.match(scan, /if \(!h\.can\.includes\('hardware-rescan'\)\) return `"\$\{name\}": runs an older TOMLIN, which reads its hardware only when it starts: update it, then scan again\.`;/);
-  assert.match(scan, /filter\(r => r\.role !== 'guest'\)/);
-  assert.match(read('src/jobrun.ts'), /case '\/api\/network\/hardware-scan': reply\(await hardwareScan\(\)\); return true;/);
+  // Every linked PC but a guest link, or (a PC's own window) only that one; this PC is read only for the whole scan.
+  assert.match(scan, /filter\(r => r\.role !== 'guest' && \(!only \|\| r\.id === only\)\)/);
+  assert.match(scan, /const mine = !only && d\.rescanHardware \? await d\.rescanHardware\(\) : \[\];/);
+  assert.match(read('src/jobrun.ts'), /case '\/api\/network\/hardware-scan': reply\(await hardwareScan\(typeof b\.pc === 'string' \? b\.pc : ''\)\); return true;/);
 });
 
 test('Network has Scan for hardware changes left of Fast update (Linked PCs); Manage updates has Push updates to network, which runs Update all', () => {

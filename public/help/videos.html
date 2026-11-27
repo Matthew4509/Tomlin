@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Making videos - TOMLIN Help</title>
+<script src="../theme.js"></script>
+<link rel="stylesheet" href="help.css">
+<script src="topics.js" defer></script>
+<script src="help.js" defer></script>
+</head>
+<body data-topic="videos">
+<header class="top">
+  <a class="brand" href="index.html">TOMLIN Help</a>
+  <form class="search" role="search" action="index.html"><input type="search" id="q" name="q" placeholder="Search Help" aria-label="Search Help" autocomplete="off"><div class="results" id="results" hidden></div></form>
+</header>
+<main>
+<!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-models">Models</a></li><li aria-current="page">Making videos</li></ol></nav><!--/nav-top-->
+<article>
+<h1>Making videos</h1>
+<p class="lead">The Videographer: video models that fit, short clips, the Videos shelf and clips on a linked PC.</p>
+<p>A Videographer is a hire who makes short video clips from what you type. The clips are made with stable-diffusion.cpp and the Wan video models, on the graphics card of this PC or of a linked PC. A clip takes a long time: count in minutes or hours, not seconds.</p>
+
+<h2 id="video-hire">Hire a Videographer</h2>
+<ol>
+  <li>Press <b>Hire staff</b>. Under <b>Role</b>, pick <b>Pictures and video</b>, then <b>Video (Videographer)</b> under Sub-role.</li>
+  <li>Under <b>Assign a PC</b>, pick the PC that makes the clips: this PC, or a linked PC.</li>
+  <li>Pick a video model. Each card shows the fits guide for that PC's graphics card: <b>Fits</b> (with 2 GB to spare), <b>Tight fit</b> (it only just fits) or <b>Not enough memory</b>. The line under it says what the model needs and what the card has. The needs are estimates until they are measured.</li>
+  <li>A video model that is not downloaded on this PC cannot be picked yet. Press <b>Get it on the Models page</b>.</li>
+</ol>
+
+<h2 id="video-models">The video models</h2>
+<ul>
+  <li><b>Wan 2.1 1.3B:</b> the smallest. Short clips at 480p from a prompt. Needs about 8 GB of graphics memory and 16 GB of RAM.</li>
+  <li><b>Wan 2.2 5B Q8:</b> packed to 8 bits so it fits a 12 GB card. Sharper than the 1.3B. Needs about 9 GB of graphics memory and 16 GB of RAM.</li>
+  <li><b>Wan 2.2 5B:</b> full size, the best of the three, and a tight fit on a 12 GB card. Needs about 12 GB of graphics memory and 24 GB of RAM.</li>
+</ul>
+<p>Download one from <b>Models</b> (in the Settings list): pick <b>Video models</b> in the list of kinds, then press <b>Download</b>. Each file is checked by SHA-256. The clips also need the picture and video runner for an NVIDIA card: it is under <b>Model runners</b>.</p>
+
+<h2 id="video-make">Make a clip</h2>
+<ul>
+  <li>Open the Videographer's chat. Under the box you choose the <b>Length</b> (1 to 5 seconds), the <b>Size</b> (Wide 832×480, Tall 480×832 or Square 624×624) and the quality: <b>Draft</b> (a quick look, rougher motion), <b>Normal</b> (what the model is made for) or <b>Best</b> (more steps, slower).</li>
+  <li>Type what the clip should show and press <b>Make clip</b> (Enter does the same). Say what moves, for example "waves rolling onto a beach at sunset".</li>
+  <li>While it is made, the chat shows <b>Clip in progress</b> with a bar and a line: waiting, loading the video model, the frame it is on, then writing the clip file, with the time left.</li>
+  <li><b>Stop</b> ends the clip. Nothing is kept.</li>
+  <li>You can open another chat meanwhile: the clip carries on, and its chat shows it again when you come back.</li>
+  <li>When it is done, the clip plays in the chat, with the PC it was made on and how long it took. Up to 5 clips can wait on one PC.</li>
+</ul>
+
+<h2 id="video-shelf">The Videos shelf</h2>
+<p>Every clip is on the Videos shelf, newest first. Open it with <b>Videos</b> under the chat box, or with <b>Videos</b> in the pictures gallery. Search the prompts to find an older clip. <b>Delete</b> asks once more before a clip goes for good. When there is under 2 GB free where clips are kept, the shelf and the chat say so, and no new clip is made until some space is freed.</p>
+
+<h2 id="video-linked">A Videographer on a linked PC</h2>
+<ul>
+  <li>Hire the Videographer on the linked PC under <b>Assign a PC</b>. The clip is made there, comes back over your home network, is checked, and is kept on this PC's Videos shelf.</li>
+  <li>That PC needs the video model and the NVIDIA picture and video runner. If it has neither, send them from here (below), or its owner downloads them from Models there.</li>
+  <li>The owner of that PC stays in charge. When its owner pressed <b>I need to use the pc</b>, it takes no new clips. Locked, it still makes them, as it draws pictures for linked PCs.</li>
+</ul>
+
+<h2 id="video-send">Send a video model or the runner to a linked PC</h2>
+<ul>
+  <li>In <b>Models</b>, a downloaded video model has <b>Send to</b>: pick the PC and press <b>Send … to</b> that PC. Every file of the model goes, whole, and that PC checks each one by size and SHA-256. Network shows how far it is, with Stop.</li>
+  <li>The PC must have <b>Accept models from linked PCs</b> ticked and room for the model. A PC that cannot take it now says why in the list.</li>
+  <li>The NVIDIA picture and video runner is sent the same way, from its row under <b>Model runners</b>.</li>
+</ul>
+
+<h2 id="video-faults">When a clip is not made</h2>
+<ul>
+  <li><b>The video runner is not installed on this PC yet:</b> download it under Models, Model runners, then ask again.</li>
+  <li><b>The video model for this hire is not on this PC:</b> download it under Models, Video models, or pick another model in Edit staff.</li>
+  <li><b>The graphics card ran out of memory:</b> try a shorter clip, a smaller size or Draft, or a smaller model.</li>
+  <li><b>There is under 2 GB free where clips are kept:</b> free up some space, then ask again.</li>
+  <li><b>The video runner stopped by itself part way:</b> ask again. If it keeps stopping, restart TOMLIN.</li>
+  <li><b>This PC is busy making other clips</b> or <b>5 clips are already waiting:</b> ask again once one of them is done.</li>
+  <li><b>Stopped: no clip was made:</b> Stop was pressed.</li>
+  <li><b>Is being used by its owner for now:</b> the linked PC's owner pressed "I need to use the pc". Try again later, or move the hire to another PC.</li>
+  <li><b>Is already making a clip</b> or <b>is busy:</b> the linked PC is at other work. Try again when it is done.</li>
+  <li><b>Has no video runner installed:</b> send the runner from here, or its owner installs it from Models there.</li>
+  <li><b>Runs an older TOMLIN that cannot make clips:</b> update TOMLIN there.</li>
+  <li><b>Is off or not answering</b> or <b>stopped answering:</b> the linked PC was turned off or left the network. No clip was kept. Pick a backup in the chat, or move the hire to another PC.</li>
+  <li><b>Changed on the way</b> or <b>is not a video:</b> the clip that came back failed its check, so it was not kept. Ask again.</li>
+</ul>
+
+<h2 id="video-times">How long a clip takes</h2>
+<ul>
+  <li><b>Z240, Quadro P2000 (5 GB):</b> a short Wan 2.1 1.3B clip (a 5.1 MB WebM) took 84 minutes, with at most 4.7 GB of the card's memory in use.</li>
+  <li><b>Z820, RTX 3060 (12 GB):</b> the same 3-second clip (832 by 480, Normal) took 11 minutes (10 min 48 s), asked from another PC over the link, and came back as a 1.2 MB WebM. It ran on the Vulkan runner; the faster CUDA one needs a newer NVIDIA driver there.</li>
+</ul>
+<p>Measured with stable-diffusion.cpp, 25 November 2026. Longer, larger or Best clips take longer.</p>
+</article>
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="pictures.html" rel="prev"><span>&larr; Previous</span><b>Getting a good picture</b></a><a class="next" href="hiring.html" rel="next"><span>Next &rarr;</span><b>Hiring staff</b></a></nav><!--/nav-bottom-->
+</main>
+</body>
+</html>

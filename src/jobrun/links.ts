@@ -25,6 +25,7 @@ import { cardFix } from '../pccards.ts';
 import { cleanSpeed } from '../speedtest.ts';
 import { d, sleep } from './shared.ts';
 import { plainNow } from './plainlinks.ts';
+import { DRAW_REFS_CAN } from '../drawrefs.ts';
 import type { Brain, Hello } from '../jobrun.ts';
 
 /** A node's "running since" and how long that PC has been on, as it said (2.0.39 on). */
@@ -68,13 +69,13 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
   await onHomeNetwork(r);
   // Stamped in that PC's own time (link.nodeNow); a refusal for the time teaches its clock, and the request goes once more.
   let req = link.sealRequest(keys, path, payload, link.nodeNow(r.url));
-  let res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
+  let res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json', [link.BODY_PROOF]: link.bodyProof(keys, path, link.nodeNow(r.url)) }, body: JSON.stringify(req), signal });
   link.noteClock(r.url, res.headers.get('date'));
   if (res.status === 403 || res.status === 401 || res.status === 400) {
-    const first = (await res.clone().json().catch(() => ({}))) as { error?: unknown };
+    const first = (await link.readCapped(res.clone(), 64 << 10).then(t => JSON.parse(t)).catch(() => ({}))) as { error?: unknown };
     if (link.clockRefused(first.error)) {
       req = link.sealRequest(keys, path, payload, link.nodeNow(r.url));
-      res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json' }, body: JSON.stringify(req), signal });
+      res = await fetch(`${r.url}${path}`, { method: 'POST', headers: { authorization: `Link ${share.hashToken(r.token)}`, 'content-type': 'application/json', [link.BODY_PROOF]: link.bodyProof(keys, path, link.nodeNow(r.url)) }, body: JSON.stringify(req), signal });
     }
   }
   const id = link.requestId(req.box);
@@ -83,7 +84,22 @@ async function linkFetch(r: Remote, path: string, payload: unknown, signal?: Abo
     return new Response(link.openStream(keys, id, res.body), { status: res.status, headers: { 'content-type': 'text/event-stream' } });
   }
   let cut = false;
-  const data = (await res.json().catch(() => ((cut = true), {}))) as Record<string, unknown>;
+  // Read to at most the largest answer there can be, and given up when it goes quiet (U1).
+  let text = '';
+  try {
+    text = await link.readCapped(res);
+  } catch (e) {
+    if (signal?.aborted) throw new Error('Stopped.');
+    if (e instanceof link.AnswerCut && e.why === 'big') throw new Error(`"${r.name}" sent an answer larger than any it could send, so it was refused.`);
+    cut = true;
+  }
+  let data: Record<string, unknown> = {};
+  try {
+    const v = cut ? {} : (JSON.parse(text) as unknown);
+    data = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    cut = true;
+  }
   if (typeof data.box === 'string') return Response.json(link.openAnswer(keys, id, 0, data.box), { status: res.status });
   // An answer that stopped part way (the network dropped, the PC went to sleep) is not one without the link.
   if (res.ok && cut) throw new Error(`"${r.name}" stopped part way through its answer (the connection was cut or went quiet). Try again.`);
@@ -211,6 +227,8 @@ export async function hello(r: Remote, ms = 4000): Promise<Hello> {
       }
       : null,
     models: nodestaff.cleanShared(data.models),
+    // Its downloaded video models' ids (src/videomodels.ts); absent from a TOMLIN before 2.1.34, which does not say.
+    ...(Array.isArray(data.videos) ? { videos: (data.videos as unknown[]).filter((x): x is string => typeof x === 'string' && /^[\w.-]{1,80}$/.test(x)).slice(0, 40) } : {}),
     away: typeof data.away === 'string' && !Number.isNaN(Date.parse(data.away)) ? data.away : null,
     ask: askOf(data.ask),
     allow: data.allow && typeof data.allow === 'object' ? carry.cleanAllow(data.allow) : null,
@@ -378,7 +396,7 @@ export function remoteBrain(r: Remote, h: Hello, shared?: nodestaff.SharedModel,
         }
         // Nothing came back for a minute or more before the link closed (undici gives up after 5 minutes with "fetch failed"): said as silence.
         if (notAnswering(e) && Date.now() - began >= wake.SILENT_WARN_MS) throw Object.assign(new Error(`${wake.silentWords(r.name, Date.now() - began)} The link then closed. Press Send again once it is awake.`), { unreached: true });
-        throw Object.assign(new Error(`The linked PC "${r.name}" could not be reached at ${r.url} (${(e as Error).message}). Is TOMLIN running there with "Enable this PC as a node" ticked?`), { unreached: true });
+        throw Object.assign(new Error(`The linked PC "${r.name}" could not be reached at ${r.url} (${(e as Error).message}). Is TOMLIN running there with "Use this PC as a node" ticked?`), { unreached: true });
       }
       if (res.ok || res.status !== 409 || !shared) return res;
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -592,7 +610,11 @@ export async function pictureDrawer(refs: string[], anyPc: boolean, why: string[
       if (model || named.length) why.push(backupsOnlyWhy(r.name));
       continue;
     }
-    const h = await hello(r, 3000).catch(() => null);
+    // A PC busy reading a large model from its disk can take longer than 3 s to answer (the Z820 loading a 28 GB model,
+    // 27 Nov, was called off): asked once more, with longer to answer, before it is said to be off.
+    // Only a PC that ran out of time is asked again; one that refused or is not there is off at once.
+    let slow = false;
+    const h = (await hello(r, 3000).catch(e => ((slow = !!(e as { timedOut?: boolean }).timedOut), null))) ?? (slow ? await hello(r, 20_000).catch(() => null) : null);
     if (!h) {
       why.push(`"${r.name}" is off or not answering`);
       continue;
@@ -615,10 +637,14 @@ export async function pictureDrawer(refs: string[], anyPc: boolean, why: string[
  * With `rid` and a PC that keeps pictures (2.0.89 on), a connection lost part-way is collected again with the same id
  * (src/jobrun/pictureback.ts); `taken` then tells that PC it may forget the picture: call it once the picture is saved here.
  */
-export async function drawOn(r: Remote, ask: { prompt: string; style: string | null; width?: number; height?: number; quality?: string; seed?: number; negative?: string; model?: string; queue?: boolean; rid?: string }, progress: (p: Record<string, unknown>) => void, signal: AbortSignal): Promise<Drawn & { taken: () => Promise<void> }> {
-  const { rid: askedRid, ...rest } = ask;
+export async function drawOn(r: Remote, ask: { prompt: string; style: string | null; width?: number; height?: number; quality?: string; seed?: number; negative?: string; model?: string; queue?: boolean; rid?: string; keepMs?: number; refImages?: string[] }, progress: (p: Record<string, unknown>) => void, signal: AbortSignal): Promise<Drawn & { taken: () => Promise<void> }> {
+  // keepMs: how long a cut stream is asked for again (this PC's own wait, not sent).
+  const { rid: askedRid, keepMs, refImages, ...rest } = ask;
   const rid = askedRid && cleanRid(askedRid) && seen.get(r.id)?.can.includes('draw-outbox') ? askedRid : null;
-  const body = rid ? { ...rest, rid } : rest;
+  // Reference pictures go only to a PC that takes them (2.1.33 on): an older one would refuse the larger request.
+  const refsGo = !!refImages?.length && !!seen.get(r.id)?.can.includes(DRAW_REFS_CAN);
+  const refsLeft = !!refImages?.length && !refsGo;
+  const body: Record<string, unknown> = { ...(rid ? { ...rest, rid } : rest), ...(refsGo ? { refImages } : {}) };
   // `line`: waits its turn in that node's line (src/nodeline.ts); an older node ignores it.
   Object.assign(body, { line: true });
   const once = async (): Promise<Response> => {
@@ -647,8 +673,9 @@ export async function drawOn(r: Remote, ask: { prompt: string; style: string | n
   if (rid) signal.addEventListener('abort', stop, { once: true });
   const taken = () => (rid ? workerPost(r, '/worker/taken', { rids: [rid] }, AbortSignal.timeout(5000)).then(() => undefined, () => undefined) : Promise.resolve());
   try {
-    const got = await collectPicture({ name: r.name, rid, ask: once, progress, signal, cutWords: m => nodestaff.cutWords(r.name, m) });
-    return { ...got, taken };
+    const got = await collectPicture({ name: r.name, rid, ask: once, progress, signal, cutWords: m => nodestaff.cutWords(r.name, m), ...(keepMs ? { giveUpMs: keepMs } : {}) });
+    const left = refsLeft ? 'drew it without the reference pictures: it runs an older TOMLIN (update it to send them)' : '';
+    return { ...got, ...(left ? { note: [got.note, left].filter(Boolean).join('; ') } : {}), taken };
   } catch (e) {
     // A fault that PC said has been read: it need not keep it (asking again would only bring the old fault back).
     if (saidOf(e)) void taken();
@@ -781,20 +808,23 @@ export const lastHello = (id: string) => seen.get(id) ?? null;
 /**
  * A paired PC's meters now, for the top bar while a chat with someone on it is open: 'on' with the figures, 'old' when
  * its TOMLIN is from before meters were shared, 'off' when it does not answer in 2.5 s, 'gone' when it is not linked.
- * `model`: the chat model loaded there, as its last hello said (about once a minute), or null. `chatModel`: the model
- * the open chat uses there (its id on that PC, '' for none): the only one the asking keeps loaded there.
+ * `loaded`: what that PC itself says is loaded there (src/nodestaff.ts loadedThere), null when it is not known.
+ * `chatModel`: the model the open chat uses there (its id on that PC, '' for none): the only one the asking keeps
+ * loaded there. `chosen`: that model's name (null for none): the hire's choice, loaded or not.
  */
-export async function nodeStats(pc: string, chatModel = ''): Promise<{ state: 'on'; stats: nodestaff.NodeStats; name: string; model: string | null } | { state: 'old' | 'off' | 'gone'; name: string; model: string | null }> {
+export async function nodeStats(pc: string, chatModel = ''): Promise<{ state: 'on'; stats: nodestaff.NodeStats; name: string; loaded: nodestaff.LoadedThere | null; chosen: string | null } | { state: 'old' | 'off' | 'gone'; name: string; loaded: nodestaff.LoadedThere | null; chosen: string | null }> {
   const r = (await d.store.settings()).remotes.find(x => x.id === pc);
-  if (!r) return { state: 'gone', name: '', model: null };
-  const model = seen.get(pc)?.model ?? null;
+  if (!r) return { state: 'gone', name: '', loaded: null, chosen: null };
+  const h = seen.get(pc);
+  const chosen = chatModel ? (h?.models?.find(m => m.id === chatModel)?.name ?? chatModel) : null;
   try {
     const res = await linkFetch(r, '/worker/stats', { model: chatModel }, AbortSignal.timeout(2500));
-    if (res.status === 404) return { state: 'old', name: r.name, model };
-    const stats = res.ok ? nodestaff.cleanStats(await res.json().catch(() => null)) : null;
-    return stats ? { state: 'on', stats, name: r.name, model } : { state: 'off', name: r.name, model };
+    if (res.status === 404) return { state: 'old', name: r.name, loaded: nodestaff.loadedThere(null, h, Date.now()), chosen };
+    const raw = res.ok ? await res.json().catch(() => null) : null;
+    const stats = nodestaff.cleanStats(raw);
+    return stats ? { state: 'on', stats, name: r.name, loaded: nodestaff.loadedThere(raw, h, Date.now()), chosen } : { state: 'off', name: r.name, loaded: null, chosen };
   } catch {
-    return { state: 'off', name: r.name, model };
+    return { state: 'off', name: r.name, loaded: null, chosen };
   }
 }
 

@@ -22,13 +22,15 @@ globalThis.TOMLIN_HELP = {
     { id: 'models', group: 'models', title: 'Installing models', blurb: 'The Models page, what fits this PC, the model files you have and the runners.' },
     { id: 'model-picks', group: 'models', title: 'Which model to pick', blurb: 'Chat, picture and picture-to-text models, with sizes and measured speeds.' },
     { id: 'pictures', group: 'models', title: 'Getting a good picture', blurb: 'Draft, Mid or High, people, icons, cartoons and weak spots.' },
+    { id: 'videos', group: 'models', title: 'Making videos', blurb: 'The Videographer: video models that fit, short clips, the Videos shelf and clips on a linked PC.' },
 
     { id: 'hiring', group: 'staff', title: 'Hiring staff', blurb: 'A specialist, a model and a PC tied together; roles, levels and looks.' },
     { id: 'saving', group: 'staff', title: 'Chats and saving your work', blurb: 'Projects, Save on code, the whole chat, subjects, scratch pad, snippets and Send to.' },
     { id: 'quick-think', group: 'staff', title: 'Quick or Think', blurb: 'Answer straight away, or work it out first.' },
     { id: 'web', group: 'staff', title: 'Web: searching and reading pages', blurb: 'The Web switch, the search engine, and the pace it reads at.' },
-    { id: 'memory', group: 'staff', title: 'Memory', blurb: 'Lines a person keeps between chats, and the team memory.' },
-    { id: 'tool-permissions', group: 'staff', title: 'Permissions: what a chat may do', blurb: 'Ask first or Auto for files and web, the coding, research and screen roles, standing rules.' },
+    { id: 'memory', group: 'staff', title: 'Memory', blurb: 'The memory editor: the team\'s and each hire\'s notebook, kept as plain .md files.' },
+    { id: 'tool-permissions', group: 'staff', title: 'Chat permissions: what a chat may do', blurb: 'Ask first or Auto for files and web, the coding, research and screen roles, standing rules.' },
+    { id: 'agents', group: 'staff', title: 'Agents: standing jobs', blurb: 'An Agent works alone on a timer or a trigger, with only the tools you approve, and writes a report.' },
     { id: 'office', group: 'staff', title: 'The office (Staff overview)', blurb: 'Your staff at their desks, the thoughts feed, the shop and the awards.' },
     { id: 'todo', group: 'staff', title: 'To Do', blurb: 'Today, This week and This month, My day and quick checks.' },
 
@@ -36,7 +38,7 @@ globalThis.TOMLIN_HELP = {
     { id: 'adding-pc', group: 'network', title: 'Adding a PC', blurb: 'Turn on the node, find it, type its setup code; the link helper when it will not link.' },
     { id: 'bootable-usb', group: 'network', title: 'Bootable USB', blurb: 'A USB stick that starts any PC as a linked node, the admin key, and best settings per kind of PC.' },
     { id: 'linked-pcs', group: 'network', title: 'Linked PCs', blurb: 'Using a node\'s models, two PCs on one node, what a linked PC card shows.' },
-    { id: 'sharing-permissions', group: 'network', title: 'Sharing and cluster permissions', blurb: 'Each tick a node owner can give a linked host, and the host PIN.' },
+    { id: 'sharing-permissions', group: 'network', title: 'Sharing and cluster permissions', blurb: 'Each tick a node owner can give a linked host, and the admin PC.' },
     { id: 'guest-passes', group: 'network', title: 'Guest passes', blurb: 'Let another PC use chosen models, for a day, a week or no limit.' },
     { id: 'direct-links', group: 'network', title: 'Direct links between PCs', blurb: 'Two linked PCs copy a model straight to each other.' },
     { id: 'cluster', group: 'network', title: 'Max mode and Cluster', blurb: 'Borrow linked PCs to run a model too big for one, or to try to raise speed.' },
@@ -45,7 +47,7 @@ globalThis.TOMLIN_HELP = {
 
     { id: 'backups', group: 'backups', title: 'Backups and restore points', blurb: 'Projects and restore points on your other PCs; what is and is not backed up.' },
     { id: 'copying-models', group: 'backups', title: 'Copying models between PCs', blurb: 'Get a copy, send, move, and what a delete asks first.' },
-    { id: 'updates', group: 'backups', title: 'Updates', blurb: 'Check for updates, update via zip, update linked PCs, the host PIN.' },
+    { id: 'updates', group: 'backups', title: 'Updates', blurb: 'Check for updates, update via zip, update linked PCs, the admin PC.' },
     { id: 'data-lock', group: 'backups', title: 'Data and lock', blurb: 'Where your data is, the app lock PIN, restore points and notifications.' },
     { id: 'trouble', group: 'backups', title: 'When something goes wrong', blurb: 'The log, and Report a problem.' },
 

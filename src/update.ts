@@ -31,9 +31,10 @@ export const PARTS = ['src', 'public', 'tools', 'test', 'registry', 'runtime/nod
 // PDF.js (documents in a chat) ships only its Node text reader and its font tables: its drawing add-on
 // (@napi-rs/canvas), the browser builds and the source maps stay out.
 // The private chat's files (partner.ts, scene.ts; taken out of the app) never ship, should an old folder still have them.
+// Test runners' caches in node_modules (.vitest-cache, .vite, .cache) never ship: they hold the building PC's folder paths.
 // The type check's tools (devDependencies: typescript and its program, @types/node and undici-types, the tsc
 // shortcuts) stay on the PC that builds; a test holds this to every "dev" package in package-lock.json.
-export const SKIP = /node_modules[\\/](typescript|@typescript|@types|undici-types)([\\/]|$)|node_modules[\\/]\.bin[\\/]tsc(\.cmd|\.ps1)?$|@napi-rs[\\/]|pdfjs-dist[\\/](build|web|image_decoders|types|wasm|iccs)[\\/]|pdfjs-dist[\\/]legacy[\\/](web|image_decoders)[\\/]|pdfjs-dist[\\/].*\.map$|pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.(sandbox|min|worker\.min)|onnxruntime-node[\\/]bin[\\/]napi-v\d+[\\/](darwin|linux|win32[\\/]arm64)|@img[\\/]sharp-(?!win32-x64|libvips-win32-x64)|src[\\/]partner\.ts$|src[\\/]scene\.ts$|test[\\/]partner\.test\.ts$|test[\\/]scene\.test\.ts$|\.(part|zip)$/i;
+export const SKIP = /node_modules[\\/](typescript|@typescript|@types|undici-types)([\\/]|$)|node_modules[\\/]\.bin[\\/]tsc(\.cmd|\.ps1)?$|@napi-rs[\\/]|pdfjs-dist[\\/](build|web|image_decoders|types|wasm|iccs)[\\/]|pdfjs-dist[\\/]legacy[\\/](web|image_decoders)[\\/]|pdfjs-dist[\\/].*\.map$|pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.(sandbox|min|worker\.min)|onnxruntime-node[\\/]bin[\\/]napi-v\d+[\\/](darwin|linux|win32[\\/]arm64)|@img[\\/]sharp-(?!win32-x64|libvips-win32-x64)|src[\\/]partner\.ts$|src[\\/]scene\.ts$|test[\\/]partner\.test\.ts$|test[\\/]scene\.test\.ts$|node_modules[\\/]\.(vitest-cache|vite|cache)([\\/]|$)|\.(part|zip)$/i;
 /** Folders a node keeps from its old copy when the update has none of them (a host without its own Node.js). */
 export const KEEP_OWN_DIRS = ['runtime/node'];
 
@@ -333,7 +334,7 @@ export function updateSide(d: UpdateNodeDeps) {
   const why = (version: unknown, build?: unknown, here = false): string | null => {
     const blocked = d.blocked?.();
     if (blocked) return blocked;
-    if (!here && !d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`;
+    if (!here && !d.allowed()) return `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" on This PC).`;
     if (!d.restarts) return `TOMLIN on "${d.pcName()}" was not started by its installed program or Start TOMLIN.cmd, so it cannot start the new version by itself. Install it there with Install TOMLIN.cmd (or start it with Start TOMLIN.cmd), then update it again.`;
     if (!isVersion(version)) return 'the update did not say its version.';
     if (newer(version, d.version)) return null;
@@ -356,7 +357,7 @@ export function updateSide(d: UpdateNodeDeps) {
       case '/worker/update-pin': {
         // The sending page's quick check, so a wrong PIN is said at once (the offer checks it again). Not answered
         // while updates from other PCs are not allowed here: the door would only serve to try PINs.
-        if (!here && !d.allowed()) return no(403, `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" under Network).`);
+        if (!here && !d.allowed()) return no(403, `"${d.pcName()}" does not let other PCs update TOMLIN there now (its owner ticks "Allow host to update TOMLIN remotely" on This PC).`);
         const ok = d.pinCheck ? await d.pinCheck(b.appPin, who.key, host) : { ok: true as const };
         return 'error' in ok ? { status: ok.status, json: { error: `"${d.pcName()}" ${ok.error}.`, needPin: true } } : { status: 200, json: { ok: true } };
       }
@@ -516,7 +517,7 @@ export function updateSide(d: UpdateNodeDeps) {
 // ---- The side of a PC that lets linked PCs pull its TOMLIN ----
 
 export const GIVE_TICK = 'Let linked PCs pull TOMLIN updates from here';
-export const giveRefused = (name: string) => `"${name}" does not let linked PCs pull TOMLIN updates from it (its owner ticks "${GIVE_TICK}" under Network)`;
+export const giveRefused = (name: string) => `"${name}" does not let linked PCs pull TOMLIN updates from it (its owner ticks "${GIVE_TICK}" on This PC)`;
 
 export interface GiveDeps {
   /** This copy's app folder and version, as it started. */

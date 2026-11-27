@@ -11,7 +11,20 @@
   /** The two tiles: the pool each one is, its name, and what it is for. */
   const TILES = [
     { job: 'store', name: 'Main model storage', note: 'You can queue models to download directly, and it will download by itself even if all other PCs are off.', about: 'A copy of each model for all your PCs, so none has to download one again. Models run from each PC\'s own drive, set below.' },
-    { job: 'backups', name: 'Backup storage', about: 'Where your PCs keep their backups and restore points.' },
+    { job: 'backups', name: 'Backup storage', about: 'Where your PCs keep their backups and restore points.',
+      // Exactly what goes in, from src/keep.ts (the restore point: a zip of TOMLIN's data folder) and src/gitstore.ts (the
+      // project backups), and what does not.
+      kept: [
+        "Restore points: a zip of everything TOMLIN keeps for you on that PC. Your chats, staff, memory notebooks, settings, the queue, jobs, pictures, video clips, shot lists, Agents' jobs and reports, and the projects in your workspace. Made before each update, and when you make one under Data and lock; on another PC the newest 3 are kept for each PC.",
+        "Project backups: your workspace's projects, and the Bridge projects ticked \"Copy to my nodes\", every few minutes. Every version is kept, as a git repository on the backup PC (git, GitHub Desktop or VS Code can open it).",
+      ],
+      notKept: [
+        "Models: they are in Main model storage, or download again.",
+        "TOMLIN itself: install it again from its zip.",
+        "In a restore point kept on another PC: this PC's keys to its linked PCs, its setup code, PIN and recovery codes, and the Bootable USB admin key. They stay on this PC only, and putting the restore point back keeps this PC's own.",
+        "The Bridge's page-snapshot browser, its hosting connections and run logs, and half-saved files.",
+        "Anything outside TOMLIN's folders, such as your own Documents.",
+      ] },
   ];
   const MODES = [
     { mode: 'mirror', name: 'Duplicate', about: 'Each file is kept twice, on two different PCs: one can fail and nothing is lost. Half the room.' },
@@ -95,6 +108,9 @@
       el('h3', { id: `storage-tile-${t.job}` }, t.name, t.note ? el('button', { class: 'storage-i', type: 'button', text: '!', title: t.note, 'aria-label': `About ${t.name}`, 'aria-expanded': String(st.noteOpen.has(t.job)), onclick: () => { if (!st.noteOpen.delete(t.job)) st.noteOpen.add(t.job); draw(); } }) : null),
       t.note && st.noteOpen.has(t.job) ? el('p', { class: 'set-about storage-note', text: t.note }) : null,
       el('p', { class: 'set-about', text: t.about }),
+      t.kept ? el('div', { class: 'storage-what' },
+        el('h4', { text: 'Backed up' }), el('ul', {}, ...t.kept.map(x => el('li', { text: x }))),
+        el('h4', { text: 'Not backed up' }), el('ul', {}, ...t.notKept.map(x => el('li', { text: x })))) : null,
       seg,
       el('p', { class: 'set-about', text: MODES.find(m => m.mode === mode).about }),
       ...rows, room,

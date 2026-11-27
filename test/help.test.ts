@@ -129,7 +129,7 @@ test('what the old Help said is still said: a spread of its facts, found on the 
   for (const fact of [
     'Qwen 3.5 35B-A3B', 'Realistic Vision 6', 'Florence-2', 'Award employee of the month', 'Energy drinks', 'Sharing and cluster permissions',
     'Allow host to update TOMLIN remotely', 'Allow to be used as part of a cluster', 'Back up projects now', 'Syncthing', 'UrBackup', 'Update by hand (offline)',
-    'Set the host PIN', 'Link helper', 'Max: off', 'Answer now', 'remember: …', 'Find the fastest setup', 'Install TOMLIN.cmd', 'Repair install',
+    'Make a new key', 'Link helper', 'Max: off', 'Answer now', 'remember: …', 'Find the fastest setup', 'Install TOMLIN.cmd', 'Repair install',
     'app-lock.json', 'TOMLIN\\data\\logs', 'Hosted live', 'Push live', 'Scan app (audit)', 'Rescan Hugging Face', 'Add to the queue', 'Lets create a project',
     'Orbital', 'Backups to a drive', 'Copies on my other PCs', 'What leaves this PC', 'settings.damaged-', 'Not found? Type its address instead',
   ]) assert.ok(text.includes(fact), fact);

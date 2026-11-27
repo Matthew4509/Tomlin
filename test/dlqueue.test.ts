@@ -9,7 +9,7 @@ import { storeSpots } from '../src/jobrun/downloads.ts';
 import { HOST_ONLY_DOORS } from '../src/guestpass.ts';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
+const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n');
 const GB = 2 ** 30;
 const SHA = 'a'.repeat(64);
 const item = (id: string, over: Partial<DQ.DlItem> = {}): DQ.DlItem => ({
@@ -94,7 +94,7 @@ test('wired in: Download adds to the list; the list runs at start; a node keeps 
   assert.match(read('src', 'server.ts'), /resumeDownloads\(\);/);
   const node = read('src', 'jobrun', 'node.ts');
   assert.ok(node.includes("['/worker/dl-queue', '/worker/dl-cancel', '/worker/dl-again', '/worker/dl-clear'].includes(p)"));
-  assert.match(node, /'drive-jobs', 'dl-queue'(, '[a-z-]+')*]/);
+  assert.match(node, /'drive-jobs', 'dl-queue'(, ('[a-z-]+'|[A-Z_]+))*]/);
   for (const door of ['/worker/dl-queue', '/worker/dl-cancel', '/worker/dl-again', '/worker/dl-clear']) assert.ok(HOST_ONLY_DOORS.includes(door), door);
   const routes = read('src', 'jobrun.ts');
   for (const r of ['/api/network/downloads', '/api/network/download-line', '/api/network/store-get']) assert.ok(routes.includes(`'${r}'`), r);
@@ -119,4 +119,26 @@ test('the page: the chip opens the downloads window, each line its PC, file, how
   assert.ok(block.length > 100);
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b/i);
   assert.doesNotMatch(block, /font-size: (1[01]|[0-9])px/);
+});
+
+test('Downloads shows copies between PCs as lines ("Downloading to <PC>", how far, about how long), and which PCs must stay on (W2-21)', () => {
+  const chip = read('public', 'dlchip.js');
+  // Nothing is said to be downloading only when nothing is: a copy between PCs counts.
+  assert.match(chip, /!open\.length && !dlCopies\.length \? el\('p', \{ class: 'hint', text: 'Nothing is downloading or waiting\.' \}\) : null,/);
+  assert.match(chip, /text: here \? `Downloading to this PC from \$\{t\.pcName\}` : `Downloading to \$\{t\.pcName\}`/);
+  assert.match(chip, /'This runs in the background\. Other PCs can be used or turned off, as long as these stay on: '/);
+  assert.match(chip, /api\('\/api\/network\/stop', \{ id: t\.id \}\)/);
+  // The two sums, run here on the page's own code.
+  const dlGB = (n: number) => (n >= 2 ** 30 ? `${(n / 2 ** 30).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 2 ** 20))} MB`);
+  const body = (name: string) => chip.slice(chip.indexOf(`function ${name}(`), chip.indexOf('\n}\n', chip.indexOf(`function ${name}(`)) + 2);
+  const dlLeft = new Function('Date', `${body('dlLeft')}; return dlLeft;`)({ now: () => 1_000_000 + 600_000 });
+  // 10 GB of 100 GB in 10 minutes: 90 GB more at the same speed is 90 minutes, said in hours past 90 minutes.
+  assert.equal(dlLeft({ started: 1_000_000, done: 10 * 2 ** 30, bytes: 100 * 2 ** 30 }), 'about 1.5 h left');
+  assert.equal(dlLeft({ started: 1_000_000, done: 50 * 2 ** 30, bytes: 100 * 2 ** 30 }), 'about 10 min left');
+  assert.equal(dlLeft({ started: 1_000_000, done: 0, bytes: 100 }), '');
+  void dlGB;
+  const stay = new Function('dlCopies', `const DL_WHY = { backup: 'backup in progress', projects: 'backup in progress', restore: 'backup in progress', update: 'update in progress', pull: 'update in progress', bring: 'update in progress' };
+    const dlWhy = t => DL_WHY[t.kind] ?? 'copy in progress'; ${body('dlStayOn')}; return dlStayOn;`);
+  const f = stay([{ kind: 'copy', pcName: 'Worker PC' }, { kind: 'backup', pcName: 'Spare PC' }]);
+  assert.deepEqual(f([{ pc: 'abc', pcName: 'Attic PC' }]), ['This PC (copy in progress)', 'Worker PC (copy in progress)', 'Spare PC (backup in progress)', 'Attic PC (download in progress)']);
 });

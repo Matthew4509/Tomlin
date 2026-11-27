@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 import { freeBytes, roomWhy } from '../carry.ts';
 import { missingFiles } from '../installer.ts';
 import { moveSure } from '../keep.ts';
-import { entriesWhy, testStart, unpackedWhy, zipEntries } from '../newcopy.ts';
+import { entriesWhy, testStart, unpackedWhy, uploadLeftovers, uploadPlaces, zipEntries } from '../newcopy.ts';
 import { installRefusal, latestOf, noRelease, repoOf, type SigCode, sigOf, stoppedWhy, WARN, zipCheck, type Latest } from '../release.ts';
 import { appLockOn, appPinCheck } from './locks.ts';
 import * as update from '../update.ts';
@@ -30,8 +30,7 @@ import { jobRoutes } from './jobs.ts';
 const MAX_ZIP = 2 * 1024 ** 3;
 /** Beside this copy, as the new copy will be (the same drive, so the move in is a rename). */
 const PARENT = dirname(ROOT);
-const ZIP = join(PARENT, '.tomlin-upload.zip');
-const STAGING = join(PARENT, '.tomlin-upload');
+const { zip: ZIP, staging: STAGING } = uploadPlaces(PARENT);
 const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 const run = promisify(execFile);
 
@@ -43,8 +42,9 @@ let busy = false;
 /** The signature as the page shows it: signed, or the warning a hand-picked zip gets. */
 const signing = (c: Check) => ({ signed: !c.code, code: c.code, warning: c.code ? `${WARN[c.code]} It may not be from TOMLIN's maker.` : '' });
 
-// An upload left from an earlier run (TOMLIN closed before Update now) is not kept: it is several hundred MB.
-void Promise.all([rm(ZIP, { force: true }), rm(STAGING, { recursive: true, force: true })]).catch(() => undefined);
+// An upload left from an earlier run (TOMLIN closed before Update now) is not kept: it is several hundred MB. Never by
+// a copy started as a test from that upload itself (uploadLeftovers), which would delete itself as it starts.
+void Promise.all(uploadLeftovers(ROOT).map(p => rm(p, { recursive: true, force: true }))).catch(() => undefined);
 
 const restarts = () => process.env.TOMLIN_LOOP === '1';
 const notRestarting = 'This TOMLIN was not started by its installed program or Start TOMLIN.cmd, so it cannot start a new version by itself. Close it, unzip the new version and start it with Install TOMLIN.cmd there.';

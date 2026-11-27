@@ -4,6 +4,7 @@
 // same id it follows the drawing still running, or hands the kept picture over at once: it is never drawn twice. The
 // queue asks with an id made from its item (src/server/queue.ts), so a host started again collects it too.
 // Kept free of the app's state so two copies can be tried against each other in a test (test/hostaway.test.ts).
+import { log } from '../log.ts';
 import { cleanMade, type Made } from '../sources.ts';
 
 export interface Drawn {
@@ -106,6 +107,8 @@ export async function collectPicture(o: CollectOpts): Promise<Drawn> {
       return await readPicture(res, o.name, o.progress, o.quietMs);
     } catch (e) {
       if (o.signal.aborted) throw new Error('Stopped.');
+      // Why the link was cut, in this PC's log (26 Nov: pictures on a node stopped and nothing said why).
+      if (!saidOf(e)) log.warn('picture', `The link to "${o.name}" was cut while it drew: ${(e as Error).message}${o.rid ? ' It keeps drawing there; asked for again.' : ' It had no request id, so the picture is lost.'}`);
       if (!o.rid || saidOf(e)) throw saidOf(e) ? e : new Error(o.cutWords ? o.cutWords((e as Error).message) : (e as Error).message);
       lostAt ||= Date.now();
     }

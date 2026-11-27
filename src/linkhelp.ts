@@ -41,7 +41,7 @@ export interface NodeReport { ok: boolean; lines: Line[]; typeThis: string | nul
 
 export interface LinkFacts {
   own: Own[];
-  /** The person's answer to "Is TOMLIN open on the other PC, with Enable this PC as a node ticked?" (null: not sure). */
+  /** The person's answer to "Is TOMLIN open on the other PC, with Use this PC as a node ticked?" (null: not sure). */
   nodeOn: boolean | null;
   address: string;
   name: string;
@@ -158,7 +158,7 @@ function automaticSteps(alias: string): string[] {
 
 export function nodeChecklist(f: NodeFacts): NodeReport {
   const lines: Line[] = [];
-  if (!f.on) lines.push({ state: 'bad', text: 'Enable this PC as a node is off: other PCs cannot link to it.', steps: ['Tick Enable this PC as a node, at the top of this page.'] });
+  if (!f.on) lines.push({ state: 'bad', text: 'Use this PC as a node is off: other PCs cannot link to it.', steps: ['Turn on Use this PC as a node, above.'] });
   else if (!f.listening) lines.push({ state: 'bad', text: `TOMLIN could not open port ${f.port} for other PCs (another program may be using it).`, steps: ['Under Advanced: port, try another port, such as 8742.', 'Type the same port on your main PC.'] });
 
   const home = f.adapters.filter(a => adapterKind(a.alias, a.description) === 'home');
@@ -210,7 +210,7 @@ export function addressAdvice(raw: string, own: Own[], defaultPort = 8741): { ur
   const ex = `${own[0] ? start(own[0].address) : '192.168.1'}.20:${defaultPort}`;
   const no = (problem: string, suggest: string | null = null) => ({ url: null, problem, suggest, warn: null });
   const typed = String(raw ?? '').trim();
-  if (!typed) return no(`Type the address shown on that PC under Network (for example ${ex}).`);
+  if (!typed) return no(`Type the address shown on that PC, on This PC (for example ${ex}).`);
   let u: URL;
   try {
     u = new URL(/^https?:\/\//i.test(typed) ? typed : `http://${typed}`);
@@ -226,7 +226,7 @@ export function addressAdvice(raw: string, own: Own[], defaultPort = 8741): { ur
       const fixed = typoFix(host);
       if (fixed && own.some(o => o.gateway === fixed)) return no(`${host} is not a home-network address. ${fixed} would be your router (the box that shares the internet), not the other PC. ${readIt}`);
       if (fixed) return no(`${host} is not a home-network address: did you mean ${fixed}?`, `${fixed}:${port}`);
-      return no(`${host} is not on your home network. Use the address shown on that PC under Network (for example ${ex}).`);
+      return no(`${host} is not on your home network. Use the address shown on that PC, on This PC (for example ${ex}).`);
     }
     if (own.some(o => o.gateway === host)) return no(`${host} is your router (the box that shares the internet), not the other PC. ${readIt}`);
     if (own.some(o => o.address === host)) return no(`${host} is this PC's own address. Type the other PC's address, shown on it under Network.`);
@@ -246,7 +246,7 @@ export function addressAdvice(raw: string, own: Own[], defaultPort = 8741): { ur
 export function pinAdvice(pin: string): string | null {
   const digits = String(pin ?? '').replace(/\D/g, '');
   if (!digits || digits.length === 6) return null;
-  return 'A link PIN is 6 digits, shown on that PC under "Also ask for a PIN". This looks like its app lock PIN, which never goes here: leave this box empty unless that PC shows a link PIN.';
+  return 'A link PIN is 6 digits, shown on that PC under "Also ask for a link PIN". This looks like its app lock PIN, which never goes here: leave this box empty unless that PC shows a link PIN.';
 }
 
 // ---- the main PC: the verdict ----
@@ -257,7 +257,7 @@ export function diagnoseLink(f: LinkFacts): Verdict {
   if (!f.own.length) return bad('This PC has no home-network connection, so it cannot reach another PC.', ['Plug in its network cable, or join your home Wi-Fi.', 'Then press Check again.']);
   const here = start(f.own[0].address);
   lines.push({ state: 'info', text: `This PC: ${f.own.map(o => `${o.address} on ${o.alias}`).join(', ')}${f.own[0].gateway ? `, router ${f.own[0].gateway}` : ''}.` });
-  if (f.nodeOn === false) return bad('Start TOMLIN on the other PC first.', ['On the other PC: open TOMLIN (Start menu, TOMLIN).', 'Settings, Network: tick Enable this PC as a node (it asks for an app lock PIN first).', 'Then press Check here again.']);
+  if (f.nodeOn === false) return bad('Start TOMLIN on the other PC first.', ['On the other PC: open TOMLIN (Start menu, TOMLIN).', 'This PC: turn on Use this PC as a node (it asks for an app lock PIN first).', 'Then press Check here again.']);
 
   const advice = f.address ? addressAdvice(f.address, f.own, f.port) : null;
   if (advice?.problem) return bad(advice.problem, advice.suggest ? [`Use ${advice.suggest}, then press Check again.`] : [`On the other PC: TOMLIN, Settings, Network. Its address is under This PC's address: type the one that starts ${here}.`]);
@@ -293,10 +293,10 @@ export function diagnoseLink(f: LinkFacts): Verdict {
   if (f.whoami) {
     if (!f.whoami.tomlin) return bad(`Something else answers at ${at}, not TOMLIN.`, ['Check the port: 8741 unless it was changed on that PC (Network, Advanced: port).']);
     if (!f.whoami.linkOk) return bad(`${at} runs an older TOMLIN (${f.whoami.version || 'before 2.0.26'}), which cannot make the encrypted link.`, ['Update TOMLIN on that PC: copy the newest zip there and run its Install TOMLIN.cmd.', 'Then link again.']);
-    return { state: 'ok', title: `TOMLIN answers at ${at}${f.whoami.version ? ` (${f.whoami.version})` : ''}.`, steps: ['Type its setup code (shown on it under Network) and press Link. Leave Link PIN empty unless it shows one.'], lines };
+    return { state: 'ok', title: `TOMLIN answers at ${at}${f.whoami.version ? ` (${f.whoami.version})` : ''}.`, steps: ['Type its setup code (shown on This PC there) and press Link. Leave Link PIN empty unless it shows one.'], lines };
   }
   if (f.probe === 'open') return bad(`Something answers at ${at}, but not as TOMLIN.`, ['Check the port: 8741 unless it was changed on that PC (Network, Advanced: port).']);
-  if (f.probe === 'refused') return bad(`${target} is there, but TOMLIN's node is not listening on port ${port}.`, [`On ${who}: open TOMLIN, Settings, Network, tick Enable this PC as a node.`, 'If it is ticked, compare its port (Advanced: port) with the one here.']);
+  if (f.probe === 'refused') return bad(`${target} is there, but TOMLIN's node is not listening on port ${port}.`, [`On ${who}: open TOMLIN, This PC, turn on Use this PC as a node.`, 'If it is ticked, compare its port (Advanced: port) with the one here.']);
   if (advice?.warn) {
     v6Line();
     lines.push({ state: 'warn', text: advice.warn });

@@ -1,7 +1,7 @@
 // The Network page's map: how this PC's network connects, drawn as the same PC boxes as Cluster. The PCs this one is a
 // node for (its admins) sit above it, this PC in the middle, the PCs it connects to (its nodes) below, then "Add a node".
 // Each box's buttons open the part of the page that does the work (the role tabs and their sections stay as they were),
-// so nothing here changes a setting by itself except "Set as node" / "Stop being a node", which is the This PC switch.
+// so nothing here changes a setting by itself: this PC's card links to This PC, where its one node switch is.
 // A short overview only: drives and what they keep are on the Storage page (public/storage.js), not on these boxes.
 'use strict';
 
@@ -49,11 +49,12 @@ function drawNetMap() {
   const isNode = !!sh?.on;
   const nodes = pcs.filter(p => p.role !== 'guest');
   const roleTags = [nodes.length ? 'Admin' : null, isNode ? 'Node' : null];
-  const flip = netMapBtn(isNode ? 'Stop being a node' : 'Set as node', () => $('#node-on').click(), !isNode && !nodes.length);
+  // The node switch is on This PC only (one switch, one way to the app lock when there is no PIN): the card links there.
+  const settings = el('button', { class: 'link', type: 'button', text: 'This PC settings \u203a', title: 'Opens This PC, where "Use this PC as a node" is', onclick: () => app.netSection('node') });
   const here = netMapBox({
     name: app.pcLabel('here'), tags: ['This PC', ...roleTags], specs: netMapSpecs(mine), here: true, quiet: !isNode || !admins.length,
     state: isNode ? (admins.length ? `A node for ${admins.map(a => `"${a.name}"`).join(', ')}` : 'A node: no admin has linked to it yet. Type its setup code on the admin PC.') : nodes.length ? '' : 'Not linked to any PC yet.',
-    actions: [flip, isNode ? netMapBtn('Node settings', () => app.netSection('pc')) : null].filter(Boolean),
+    actions: [settings],
   });
 
   // Below: the PCs this one connects to (its nodes, and PCs it is a guest on), then Add a node.

@@ -1,0 +1,59 @@
+{
+  "id": "z-image-turbo",
+  "kind": "image",
+  "name": "Z-Image Turbo (6B, Q8, fast, test)",
+  "about": "Tongyi's fast photo model: 8 steps, sharp photos and readable text. Fits a 12 GB card. Text encoder: Qwen3 4B. Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "z-image",
+  "licence": "Apache-2.0 (model and text encoder; commercial use allowed). FLUX.1 VAE: Apache-2.0.",
+  "quant": "Q8_0 (image) + Q8_0 (text encoder)",
+  "minRamGB": 16,
+  "minVramGB": 6,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1536
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "leejet/Z-Image-Turbo-GGUF",
+      "rev": "c61c0e422dc8b541b7548cf33a4ef8302b0f8085",
+      "path": "z_image_turbo-Q8_0.gguf",
+      "bytes": 6577440704,
+      "sha256": "df1c5baa86d1398c979495a6072dbcee79444fdb884a2445582ba0769c44e9a1"
+    },
+    {
+      "role": "llm",
+      "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+      "rev": "a06e946bb6b655725eafa393f4a9745d460374c9",
+      "path": "Qwen3-4B-Instruct-2507-Q8_0.gguf",
+      "bytes": 4280405600,
+      "sha256": "391c1e410fd9f4cf2de2b510273b56a84c19ce18f4fa3bfb3774031dac4ef068"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/z_image_turbo",
+      "rev": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+      "path": "split_files/vae/ae.safetensors",
+      "saveAs": "flux-ae.safetensors",
+      "bytes": 335304388,
+      "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+    }
+  ],
+  "args": [
+    "--fa",
+    "--vae-tiling"
+  ],
+  "defaults": {
+    "steps": 8,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

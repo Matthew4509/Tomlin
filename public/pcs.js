@@ -188,7 +188,7 @@
       el('div', { class: 'pc-install-row' }, repair, nothingToRepair ? el('span', { class: 'hint', text: 'Nothing to repair' }) : null),
       el('div', { class: 'pc-install-row' }, desk, done(deskThere, 'Already installed')),
       el('div', { class: 'pc-install-row' }, start, done(s.autostart, 'Already on')),
-      // The one place for what linked PCs may do here (cluster use too), on Network: opened from here as well.
+      // The one place for what linked PCs may do here (cluster use too), on This PC: opened from here as well.
       el('div', { class: 'pc-install-row' }, el('button', { class: 'btn', type: 'button', text: 'Sharing and cluster permissions', onclick: () => { dlg.close(); app.openSharePermissions?.(); } }), el('span', { class: 'hint', text: 'What linked PCs may do on this PC' })));
     // Under the buttons: where, when, and the work it has done.
     const out = thisPc?.meter?.total?.out;
@@ -515,6 +515,23 @@
     here.wasMoving = moving;
   }
 
+  /** The short names of what linked PCs may do here (the ticks on This PC), in the order they are shown there. */
+  const PERM_WORDS = [['pull', 'share models'], ['receive', 'accept models'], ['backup', 'backups'], ['update', 'remote updates'], ['tune', 'run settings'], ['off', 'turn this PC off'], ['peer', 'direct links'], ['give', 'give updates'], ['lend', 'cluster']];
+  /** My PC's Permissions row: on or off, and which are on ("3 of 9 on: share models, backups, turn this PC off"). */
+  function permsWords(sh) {
+    if (!sh?.on) return 'Off: this PC is not a node, so linked PCs may do nothing here.';
+    const allow = sh.allow ?? {};
+    const on = PERM_WORDS.filter(([k]) => allow[k] === true).map(([, w]) => w);
+    return on.length ? `On: ${on.length} of ${PERM_WORDS.length} (${on.join(', ')}).` : `On as a node, but every permission is off.`;
+  }
+  app.permsWords = permsWords;
+  /** My PC's role line: "Admin PC; not a node", "Admin PC; a node", "Admin PC; a node and a network backup". */
+  function roleWords(sh) {
+    if (!sh?.on) return 'Admin PC; not a node';
+    return sh.allow?.backup === true ? 'Admin PC; a node and a network backup' : 'Admin PC; a node';
+  }
+  app.roleWords = roleWords;
+
   function paintThis() {
     const sh = here.share;
     const title = el('h3', { id: 'pc-this-title', text: 'This PC is' });
@@ -539,11 +556,15 @@
       return el('label', { class: `pc-role${disabled ? ' pc-role-off' : ''}`, title: about }, el('span', { class: 'set-sw' }, input, el('i', { 'aria-hidden': 'true' })), el('span', { class: 'pc-role-name', text: label }));
     };
     const linked = here.linked === null ? '' : here.linked ? ` · ${here.linked} linked PC${here.linked === 1 ? '' : 's'}` : ' · no PC linked yet (Network)';
-    const roles = el('div', { class: 'pc-roles' },
-      el('span', { class: 'pc-role pc-role-admin', title: 'Any PC becomes an admin when it links other PCs (Network). It can also be a node and a network backup.' }, el('b', { text: 'An admin PC' }), el('span', { class: 'hint', text: linked })),
-      el('span', { class: 'pc-role-bar', 'aria-hidden': 'true' }),
-      role('A node', 'Other PCs can use this PC: its models, its graphics card and RAM (what they may do is under Sharing and cluster permissions).', node, false, on => change({ on })),
-      role('A network backup', 'Other PCs keep their backups and project history here. It listens on the home network like a node, so it needs the node switch.', backup, !node, on => change({ allow: { ...allow, backup: on } })));
+    // The node switch is "Use this PC as a node" on This PC, and only there: here the role is said, not switched. In the
+    // My PC window the role is one line with Change (This PC); on This PC the network backup switch stays beside it.
+    const roles = dlg.open
+      ? el('div', { class: 'pc-roles' }, el('span', { class: 'pc-role', id: 'pc-role-line', text: roleWords(sh) }),
+        el('button', { class: 'link', type: 'button', text: 'Change', title: 'Opens This PC, where the node switch is', onclick: () => { dlg.close(); app.netSection?.('node'); } }))
+      : el('div', { class: 'pc-roles' },
+        el('span', { class: 'pc-role pc-role-admin', title: 'Any PC becomes an admin when it links other PCs (Network). It is a node when "Use this PC as a node" below is on.' }, el('b', { text: node ? 'An admin PC and a node' : 'An admin PC' }), el('span', { class: 'hint', text: linked })),
+        el('span', { class: 'pc-role-bar', 'aria-hidden': 'true' }),
+        role('A network backup', 'Other PCs keep their backups and project history here. It listens on the home network like a node, so it needs "Use this PC as a node" on.', backup, !node, on => change({ allow: { ...allow, backup: on } })));
     const where = (key, name, w, disabled, off) => {
       const shown = el('span', { class: 'pc-store-where' }, w ? `${w.missing ?? w.dir}${w.missing ? ' (not there now)' : w.free !== null ? `, ${GBs(w.free)} free on ${w.drive}` : ''}` : 'not known');
       const open = here.form === key && !disabled;
@@ -566,11 +587,19 @@
       const kept = key === 'backups' && w && !disabled ? el('span', { class: 'hint', text: w.kept ? ` ${w.kept} linked PC${w.kept === 1 ? ' keeps' : 's keep'} backups here now.` : ' No backups kept here yet.' }) : null;
       return el('div', { class: `pc-store-row${disabled ? ' pc-store-off' : ''}` }, el('div', { class: 'pc-store-line' }, el('b', { text: name }), shown, kept, btn), form, said ? el('p', { class: 'hint', role: 'status', text: said }) : null, toMove);
     };
-    here.el.replaceChildren(...[title, roles,
-      here.shareFault || here.fault ? el('p', { class: 'fault-line', role: 'alert', text: here.shareFault || here.fault }) : null,
+    // In the window only (on This PC the ticks are on the page): what linked PCs may do here, and Change opens them.
+    const perms = dlg.open ? el('div', { class: 'pc-perms-row' }, el('b', { text: 'Permissions' }), el('span', { class: 'hint', id: 'pc-perms-said', text: permsWords(sh) }),
+      el('button', { class: 'btn quiet', type: 'button', text: 'Change', title: 'Opens This PC at the sharing and cluster permissions', onclick: () => { dlg.close(); app.openSharePermissions?.(); } })) : null;
+    here.el.replaceChildren(...[title, roles, perms,
+      // A refusal of the backup switch shows beside it, on This PC only: the window has no switch to answer for.
+      (dlg.open ? '' : here.shareFault) || here.fault ? el('p', { class: 'fault-line', role: 'alert', text: (dlg.open ? '' : here.shareFault) || here.fault }) : null,
+      // Each kind of storage under its own heading; the backups part only on a PC that is a network backup (the switch
+      // above turns it on), so a PC that keeps no one's backups shows only its models.
       el('div', { class: 'pc-store' },
+        el('h4', { class: 'pc-store-head', text: 'Model storage (admin PC):' }),
         where('models', 'Models are kept in', here.models, false, ''),
-        where('backups', 'Backups from other PCs are kept in', here.backups, !backup, 'Switch on "A network backup" to keep other PCs\' backups on this PC.'))].filter(Boolean));
+        backup ? el('h4', { class: 'pc-store-head', text: 'Network backup storage (backup PC only):' }) : null,
+        backup ? where('backups', 'Backups from other PCs are kept in', here.backups, false, '') : null)].filter(Boolean));
   }
 
   /** Keeps models or backups in `dir` (null: the usual folder), and says how it went in the row. */
@@ -596,6 +625,8 @@
 
   function thisPcPart() {
     if (!here.el) here.el = el('section', { class: 'pc-part pc-card-part pc-this', 'aria-labelledby': 'pc-this-title' });
+    // A refusal said for a press made before is not carried into the next place this part is shown.
+    here.shareFault = '';
     if (!here.share) paintThis();
     readThis();
     return here.el;
@@ -885,19 +916,36 @@
         fine && !v.here ? el('span', { class: 'pc-head-ok', text: '✓ Up to date' }) : null),
       manage);
 
-    // ---- The actions of a linked PC, under its head: Update (a tick when up to date) and Shut down ----
-    const mark = d => (typeof clusterIcon === 'function' ? clusterIcon(d) : null);
+    // ---- The actions of a linked PC, under its head: Update (Up to date when it is), Scan and Shut down, in the order and
+    // with the marks of Settings, Manage (manage.js), so they are known at a glance ----
+    const mark = which => (typeof app.manageIcon === 'function' ? app.manageIcon(which) : null);
     let actions = null;
     if (!v.here) {
       const upBtn = go ?? el('button', { class: 'btn', type: 'button', disabled: true, title: v.fault ? 'It is not answering, so it cannot be updated now.' : older ? (v.update.why ? `${v.update.why.charAt(0).toUpperCase()}${v.update.why.slice(1)}.` : '') : 'It runs the same TOMLIN as this PC: nothing to update.', text: older ? 'Update' : 'Up to date' });
-      upBtn.prepend(mark('M12 19V5M6.5 10.5 12 5l5.5 5.5') ?? '');
+      upBtn.prepend(mark('update') ?? '');
+      // Scan: that PC reads its processor, RAM and cards again and says what changed (src/jobrun/hwscan.ts).
+      const scanBtn = el('button', { class: 'btn', type: 'button', disabled: !on, title: on ? 'Reads its processor, RAM and graphics cards again, and says what changed. TOMLIN otherwise reads them only when it starts.' : 'It is not answering, so it cannot be scanned now.' }, mark('scan') ?? '', 'Scan');
+      scanBtn.addEventListener('click', async () => {
+        scanBtn.disabled = true;
+        scanBtn.lastChild.textContent = 'Scanning…';
+        say('Reading its hardware…');
+        try {
+          say((await api('/api/network/hardware-scan', { pc: v.id })).said);
+          await load(v.id);
+          if (typeof refreshPcs === 'function') refreshPcs();
+        } catch (e) {
+          say(e.message, true);
+        }
+        scanBtn.lastChild.textContent = 'Scan';
+        scanBtn.disabled = false;
+      });
       let offBtn = null;
       // The question before a shut down, asked in the window (the browser's own confirm box is silently refused in some
       // windows, so the press did nothing).
       const offAsk = el('div', { class: 'pc-off-ask', hidden: true });
       if (v.off?.can) {
-        const why = !v.off.allowed ? 'Its owner has not switched on "Allow host to turn this PC off" (Network, sharing permissions).' : v.off.away ? 'Someone is using it now.' : 'Shuts that PC down. It asks for its PIN (its own, or the host PIN), and stays off until someone switches it on again.';
-        offBtn = el('button', { class: 'btn', type: 'button', title: why, disabled: !v.off.allowed || !!v.off.away }, mark('M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0') ?? '', 'Shut down');
+        const why = !v.off.allowed ? 'Its owner has not switched on "Allow host to turn this PC off" (Network, sharing permissions).' : v.off.away ? 'Someone is using it now.' : "Shuts that PC down. It asks for its PIN unless it holds this admin PC's key, and stays off until someone switches it on again.";
+        offBtn = el('button', { class: 'btn', type: 'button', title: why, disabled: !v.off.allowed || !!v.off.away }, mark('off') ?? '', 'Shut down');
         offBtn.addEventListener('click', async () => {
           if (!(await askHere(offAsk, `Turn off "${title}"? It shuts down about 15 seconds after it answers, and stays off until someone switches it on again. Anything it is doing for you stops.`, `Turn off ${title}`, 'Keep it on'))) return;
           offBtn.disabled = true;
@@ -912,7 +960,7 @@
       }
       // Not answering: perhaps the router gave it another address. Found again over its own link (home.js, src/findagain.ts).
       const findBtn = !on && typeof app.findAgainButton === 'function' ? app.findAgainButton({ id: v.id, name: title }, say, () => load(v.id)) : null;
-      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, findBtn ?? '', upBtn, offBtn ?? '', offAsk);
+      actions = el('div', { class: 'pc-actions', role: 'group', 'aria-label': `Actions for ${title}` }, findBtn ?? '', upBtn, scanBtn, offBtn ?? '', offAsk);
     }
 
     // ---- The strip: TOMLIN, tokens, time worked, power cost ----
@@ -1047,7 +1095,7 @@
     $('#pc-title').textContent = app.pcLabel?.(id || 'here') ?? (id && id !== 'here' ? 'A linked PC' : 'My PC');
     body.replaceChildren(el('p', { class: 'hint', text: 'Reading…' }));
     if (!dlg.open) dlg.showModal();
-    // "Its settings" only in this PC's own window for now (dropped from a linked PC's).
+    // "This PC settings" only in this PC's own window (dropped from a linked PC's).
     $('#pc-more').hidden = !!id && id !== 'here';
     load(id || 'here', true);
   };

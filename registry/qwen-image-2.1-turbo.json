@@ -1,0 +1,61 @@
+{
+  "id": "qwen-image-2.1-turbo",
+  "kind": "image",
+  "name": "Qwen-Image 2.1 Turbo (7B, Q8, 8 steps, test)",
+  "about": "Qwen-Image 2.1 sped up to 8 steps, same text encoder and VAE as Qwen-Image 2.1 (kept once). Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "qwen-image-2.1",
+  "licence": "Qwen RESEARCH LICENSE: NON-COMMERCIAL use only (research or evaluation). Text encoder: Apache-2.0.",
+  "nonCommercial": true,
+  "quant": "Q8_0 (image) + Q4_K_M (text encoder)",
+  "minRamGB": 16,
+  "minVramGB": 6,
+  "recommendedModes": [
+    "blog",
+    "icon",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 512,
+    "mid": 768,
+    "high": 1024
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "unsloth/Qwen-Image-2.1-Turbo-GGUF",
+      "rev": "bd53e520a64472adaff780da0b2f2d7eb1605e30",
+      "path": "qwen-image-2.1-turbo-Q8_0.gguf",
+      "bytes": 7640860480,
+      "sha256": "399d2ddc3636f36456e2f5bfa57187da4e38721bc046430317f42a9eab5b1712"
+    },
+    {
+      "role": "llm",
+      "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+      "rev": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
+      "path": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "bytes": 5027784800,
+      "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "rev": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "saveAs": "qwen_image_2.1_vae_bf16.safetensors",
+      "bytes": 675509688,
+      "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+    }
+  ],
+  "args": [
+    "--offload-to-cpu",
+    "--fa"
+  ],
+  "defaults": {
+    "steps": 8,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

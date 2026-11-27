@@ -3,7 +3,7 @@
 // end it cannot see (the TOMLIN program by the clock closed, which ends it with it; Task Manager; the PC turned off;
 // a crash inside Node) leaves the running mark behind, and the next start writes what it can tell from it: when this
 // run was last seen alive, and whether Windows has started again since. Tested in test/lastwords.test.ts.
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { writeAtomicSync } from './atomic.ts';
@@ -53,6 +53,35 @@ export function silentEndLine(m: Mark, bootAt: number): string {
     : `${head} Windows kept running (up since ${hm(bootAt)}), so it was ended from outside: the TOMLIN program by the clock closed or was ended (it ends TOMLIN with it), Task Manager or a command ended node.exe, or Node itself crashed (out of memory). A line from the program by the clock, if it saw it, is above.`;
 }
 
+/**
+ * Node's own fault report from the run that ended silently, when it wrote one (core.ts turns them on: a fatal error such
+ * as running out of memory cannot be caught, but Node writes a report into the logs folder as it goes). '' when none:
+ * a report is matched by its process number, or else by being written while that run was alive.
+ */
+export function fatalReportLine(logDir: string, m: Mark): string {
+  let names: string[] = [];
+  try {
+    names = readdirSync(logDir).filter(n => /^report\..*\.json$/.test(n));
+  } catch {
+    return '';
+  }
+  for (const name of names.sort().reverse()) {
+    try {
+      const file = join(logDir, name);
+      const at = statSync(file).mtimeMs;
+      const mine = name.includes(`.${m.pid}.`);
+      if (!mine && (at < m.started || at > m.alive + 10 * 60_000)) continue;
+      const r = JSON.parse(readFileSync(file, 'utf8')) as { header?: { event?: string; trigger?: string } };
+      const event = String(r.header?.event ?? r.header?.trigger ?? 'a fatal error').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const words = /heap out of memory|allocation failed/i.test(event) ? 'Node itself ran out of memory' : `Node itself stopped on a fatal error`;
+      return ` ${words} ("${event}"); its report is ${name} in the logs folder.`;
+    } catch {
+      // A report half-written as the process died: the next one, or none.
+    }
+  }
+  return '';
+}
+
 const readMark = (file: string): Mark | null => {
   try {
     const m = JSON.parse(readFileSync(file, 'utf8')) as Mark;
@@ -85,7 +114,7 @@ export function startLastWords(logDir: string, version: string, o: { now?: () =>
   const now = o.now ?? Date.now;
   const file = join(logDir, MARK);
   const before = readMark(file);
-  if (before && before.pid !== process.pid) log.warn('stopped', silentEndLine(before, o.bootAt ?? now() - uptime() * 1000));
+  if (before && before.pid !== process.pid) log.warn('stopped', `${silentEndLine(before, o.bootAt ?? now() - uptime() * 1000)}${fatalReportLine(logDir, before)}`);
   const mark: Mark = { pid: process.pid, version, started: now(), alive: now() };
   const keep = () => {
     mark.alive = now();

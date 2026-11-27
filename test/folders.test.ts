@@ -1,7 +1,7 @@
 // Where work goes in the workspace (src/folders.ts). Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answerPath, chatFolder, firstWords, freeName, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
+import { answerPath, chatFileName, wholeChatPath, chatFolder, firstWords, freeName, keptFromModels, handedIn, handedInLines, moves, notePath, picturePath, saveTo, specialistFolder, stamp, stamped, stampOf, writerHandIn } from '../src/folders.ts';
 import { cleanFiles, cleanProjectFolder, cleanStep, folderStamp } from '../src/jobs.ts';
 import { cleanPath } from '../src/workspace.ts';
 
@@ -113,4 +113,13 @@ test('two pictures of one prompt kept in the same minute: the second is named " 
   assert.equal(freeName('a/b.c/notes', () => false), 'a/b.c/notes');
   assert.equal(freeName('a/b.c/notes', p => p === 'a/b.c/notes'), 'a/b.c/notes 2', 'a dot in a folder name is not an extension');
   assert.throws(() => freeName('x.png', () => true), /no free name/);
+});
+
+test('Save on the whole chat: a project chat into <project>/chats, a Default chat into its own chats folder, stamped, a safe name', () => {
+  const at = new Date(2026, 10, 25, 18, 55);
+  assert.equal(wholeChatPath({ chatFolder: 'chats/2026-11-25-1850', projectFolder: 'Harbour Bakery', title: 'Blog photos' }, at), 'Harbour Bakery/chats/2026-11-25-1855 Blog photos.txt');
+  assert.equal(wholeChatPath({ chatFolder: 'chats/2026-11-25-1850', projectFolder: null, title: 'Plan: the shop?' }, at), 'chats/2026-11-25-1850/2026-11-25-1855 Plan the shop.txt');
+  assert.equal(wholeChatPath({ chatFolder: 'chats/x', projectFolder: '', title: '' }, at), 'chats/2026-11-25-1855 Chat.txt', 'a project kept at the top of the workspace');
+  assert.equal(chatFileName('a/b|c*d'), 'a b c d');
+  assert.equal(chatFileName('x'.repeat(90)).length, 60);
 });

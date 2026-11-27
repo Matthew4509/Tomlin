@@ -4,11 +4,16 @@ import { phasesByWho, type Phase } from '../home.ts';
 import { type ChatLine, DEFAULT_RUN } from '../store.ts';
 import { ANSWER_CEILING, streamChat } from '../engine.ts';
 import { systemFor, toneOf } from '../persona.ts';
-import { nowModel, staffSystem, roleOf, isPlain, type StaffMember } from '../staff.ts';
+import { nowModel, staffSystem, isPlain, drawsPictures, worksAlone, type StaffMember } from '../staff.ts';
+import { refsOf } from '../brains.ts';
 import * as nodestaff from '../nodestaff.ts';
 import * as memory from '../memory.ts';
+import { scanText } from '../promptscan.ts';
+import { parseBook } from '../notebookfile.ts';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildLayered, cleanFoldWait, LAYER_MIN_CTX, layeredFor, layerReadSpeed, type Layered } from '../layers.ts';
-import { HOST_NAME, type Routes, chatLogs, chats, json, notebooks, staff, staffId, store } from './core.ts';
+import { HOST_NAME, type Routes, chatLogs, chats, json, notebooks, shortName, staff, staffId, store } from './core.ts';
 import { chat, lastUsed, main, runOn, runnerSlots } from './panes.ts';
 import { chatPeople, personFor, sendTarget } from './people.ts';
 import { readSpeedsNow } from './thispc.ts';
@@ -198,7 +203,23 @@ async function readingView(q: URLSearchParams): Promise<Record<string, unknown> 
   // The layers of this chat for Memory: on or off, and what a fold costs here. `can`: the tick does something here
   // (16K or more, not a Default hire).
   const layers = { on: !open?.layersOff, sums: !!open?.foldSums, can: layeredFor(ctx, isPlain(member), false), plain: isPlain(member), min: LAYER_MIN_CTX, layered: 'layered' in built, foldMinutes: ask.foldMinutes, readPerSecond: ask.readPerSecond, ...('layered' in built ? { older: built.older, shortTokens: built.shortTokens, foldTokens: built.foldTokens, foldSeconds: built.foldSeconds, waiting: built.logWaiting } : {}) };
-  return { name: books.name, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', ctx: built.ctx, answerTokens: built.answerTokens, room: built.room, used: built.used, parts: built.parts, model: last?.model ?? '', measured: !!last, chat: open?.id ?? '', layers };
+  return { name: books.name, scope: books.own ?? 'team', book: books.own ? `${books.name}'s memory` : 'the team memory', ctx: built.ctx, answerTokens: built.answerTokens, room: built.room, used: built.used, parts: built.parts, model: last?.model ?? '', measured: !!last, chat: open?.id ?? '', layers, ...(member ? { always: await alwaysOnSmallest(member, built.room, built.ctx) } : {}) };
+}
+
+/**
+ * G4: the hire's own "Always send" lines on the smallest model they use (their model and fallback on this PC, by the
+ * context set for each): how many are not sent there. An Agent's run has the room its brief gives (agentBookRoom); a
+ * chat, a fifth of the room, scaled from this model's.
+ */
+async function alwaysOnSmallest(member: StaffMember, room: number, ctx: number): Promise<{ model: string; ctx: number; room: number; agent: boolean; total: number; whole: number; part: number; left: number } | null> {
+  const s = await store.settings();
+  const local = refsOf(member).filter(r => !r.startsWith('remote:') && !r.startsWith('node:'));
+  if (!local.length) return null;
+  const sized = local.map(r => ({ ref: r, ctx: s.run[r]?.ctx ?? DEFAULT_RUN.ctx })).sort((a, b) => a.ctx - b.ctx);
+  const small = sized[0];
+  const bookRoom = worksAlone(member.role) ? memory.agentBookRoom(small.ctx) : Math.floor((room * (small.ctx / Math.max(1, ctx))) / 5);
+  const fit = memory.alwaysFit(await notebooks.read(`staff:${member.id}`).catch(() => []), bookRoom);
+  return fit.total ? { model: shortName(small.ref.split(/[\\/]/).pop()), ctx: small.ctx, room: bookRoom, agent: worksAlone(member.role), ...fit } : null;
 }
 
 /** Asks the connected chat model once, without the chat history (enhance prompt, alt text). */
@@ -212,7 +233,7 @@ export async function askOnce(system: string, message: string, maxTokens = 300, 
 /** The picture specialist chosen in the Images window, if they are still on the team and still draw. */
 export const imageSpecialist = async () => {
   const m = staff.get((await store.settings()).imageAs);
-  return m && roleOf(m.role).kind ? m : null;
+  return m && drawsPictures(m.role) ? m : null;
 };
 
 /**
@@ -231,6 +252,12 @@ export function workOn(res: { once(event: 'close', fn: () => void): unknown }, w
   });
 }
 
+/** A notebook as the Memory page shows it: every entry (withheld ones marked), its groups, what is wrong, how full. */
+async function bookView(scope: string) {
+  const book = await notebooks.book(scope);
+  return { scope, lines: book.entries, groups: book.groups, problems: book.problems, full: memory.bookFull(book.entries), mtime: book.mtime };
+}
+
 // ---- Routes ----
 
 /** GET requests answered here, by path. */
@@ -238,7 +265,37 @@ export const answeringGet: Routes = {
   '/api/memory': async ({ res, url }) => {
     const scope = url.searchParams.get('scope') ?? '';
     if (!memory.isScope(scope) || (scope !== 'team' && !staff.get(scope.slice(6)))) return json(res, 404, { error: 'There is no such memory.' });
-    return json(res, 200, { scope, lines: await notebooks.read(scope) });
+    return json(res, 200, await bookView(scope));
+  },
+  // The notebooks for the Memory page's left side: the team's, then each hire's, with how full each is.
+  '/api/memory/books': async ({ res }) => {
+    const one = async (scope: string, name: string, role: string, plain = false) => {
+      const b = await notebooks.book(scope);
+      return { scope, name, role, plain, full: memory.bookFull(b.entries), inbox: b.entries.filter(e => e.group === memory.INBOX_GROUP).length, problems: b.problems.length };
+    };
+    const books = [await one('team', 'Team', 'read by everyone')];
+    for (const m of staff.list()) books.push(await one(`staff:${m.id}`, m.name, m.role, isPlain(m)));
+    return json(res, 200, { books, folder: join(store.dir, 'memory') });
+  },
+  // The Text view: the file as it is on disk, and its time (sent back with Save, so a change made meanwhile is not lost).
+  '/api/memory/text': async ({ res, url }) => {
+    const scope = url.searchParams.get('scope') ?? '';
+    if (!knownBook(scope)) return json(res, 404, { error: 'There is no such memory.' });
+    return json(res, 200, { scope, ...(await notebooks.text(scope)), file: notebooks.fileOf(scope) });
+  },
+  // Search finds in every notebook: the entries whose text or group holds every word asked.
+  '/api/memory/search': async ({ res, url }) => {
+    const words = (url.searchParams.get('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return json(res, 200, { found: [] });
+    const found: { scope: string; id: string; text: string; group: string }[] = [];
+    for (const scope of ['team', ...staff.list().map(m => `staff:${m.id}`)]) {
+      for (const e of (await notebooks.book(scope)).entries) {
+        const hay = `${e.text}\n${e.group}`.toLowerCase();
+        if (words.every(w => hay.includes(w))) found.push({ scope, id: e.id, text: e.text, group: e.group });
+        if (found.length >= 100) break;
+      }
+    }
+    return json(res, 200, { found });
   },
   '/api/memory/reading': async ({ res, url }) => {
     // ?chat=<id> (or ?chat=&who=<person>): what that chat reads, not the chat another window opened last.
@@ -250,12 +307,72 @@ export const answeringGet: Routes = {
 /** POST requests answered here, by path (the body is read already). */
 export const answeringPost: Routes = {
   '/api/memory': async ({ res, b }) => {
-    // His notebooks: add, change or delete one line. A model never calls this; a suggestion is saved only on his Save.
+    // His notebooks: add, change or delete one line. A model never calls this; a suggestion waits in the Inbox for his Keep.
     const scope = String(b.scope ?? '');
     if (!memory.isScope(scope) || (scope !== 'team' && !staff.get(scope.slice(6)))) return json(res, 404, { error: 'There is no such memory. The person may have left the team.' });
     const from = b.from === 'pin' || b.from === 'suggested' ? b.from : 'owner';
-    const r = b.action === 'delete' ? ((await notebooks.remove(scope, b.id)) ? { ok: true } : { error: 'That line is not there any more.' }) : b.action === 'edit' ? await notebooks.edit(scope, b.id, b.text) : await notebooks.add(scope, b.text, from);
-    if ('error' in r) return json(res, 400, r);
-    return json(res, 200, { line: r, lines: await notebooks.read(scope) });
+    // Memory is sent on every turn, so a pasted "ignore your rules" is worse here than in one message: the same warning
+    // as a chat message's (src/promptscan.ts), and nothing is kept until he has seen it and ticked that he understands.
+    if ((b.action === 'add' || b.action === 'edit') && typeof b.text === 'string' && b.scanOk !== true) {
+      const scan = scanText(memory.cleanEntry(b.text));
+      if (scan.suspect) return json(res, 409, { error: 'This entry looks like it tries to give orders to a model.', scan: { reasons: scan.reasons, hits: scan.hits }, text: memory.cleanEntry(b.text) });
+    }
+    // Kept from the Inbox (moved out of it with its words as the model wrote them): read as a new entry is, since from now
+    // on it is sent on every turn.
+    if (b.action === 'edit' && b.text === undefined && b.group !== undefined && b.group !== memory.INBOX_GROUP && b.scanOk !== true) {
+      const was = (await notebooks.book(scope)).entries.find(e => e.id === b.id);
+      const scan = was && was.group === memory.INBOX_GROUP ? scanText(was.text) : null;
+      if (scan?.suspect) return json(res, 409, { error: 'This suggested line looks like it tries to give orders to a model.', scan: { reasons: scan.reasons, hits: scan.hits }, text: was!.text });
+    }
+    if (b.action === 'text') {
+      // The whole file from the Text view: what is new or changed in it gets the same warning, the rest was seen before.
+      const before = new Set((await notebooks.book(scope)).entries.map(e => e.text));
+      const fresh = typeof b.text === 'string' ? parseBook(b.text).entries.map(e => memory.cleanEntry(e.text)).filter(t => t && !before.has(t)).join('\n\n') : '';
+      const scan = fresh && b.scanOk !== true && !b.check ? scanText(fresh, { long: false }) : null;
+      if (scan?.suspect) return json(res, 409, { error: 'Something new in this text looks like it tries to give orders to a model.', scan: { reasons: scan.reasons, hits: scan.hits }, text: fresh });
+      const t = await notebooks.saveText(scope, b.text, b.mtime, b.check === true);
+      if ('error' in t) return json(res, t.changed ? 409 : 400, t);
+      return json(res, 200, { read: t, ...(b.check === true ? {} : await bookView(scope)) });
+    }
+    if (b.action === 'order') {
+      await notebooks.order(scope, b.ids, b.groups);
+      return json(res, 200, await bookView(scope));
+    }
+    if (b.action === 'group') {
+      const g = await notebooks.group(scope, b.do, b.name, b.to);
+      if ('error' in g) return json(res, 400, g);
+      return json(res, 200, await bookView(scope));
+    }
+    const r = b.action === 'delete' ? ((await notebooks.remove(scope, b.id)) ? { ok: true } : { error: 'That line is not there any more.' }) : b.action === 'edit' ? await notebooks.edit(scope, b.id, b.text, b.group, b.was) : await notebooks.add(scope, b.text, from, b.group);
+    if ('error' in r) return json(res, 'changed' in r && r.changed ? 409 : 400, r);
+    return json(res, 200, { line: r, ...(await bookView(scope)) });
+  },
+  // Open file (Notepad on this PC; without Notepad, Explorer with the file picked) or Open folder (Explorer at memory\).
+  '/api/memory/open': async ({ res, b }) => {
+    const scope = String(b.scope ?? 'team');
+    if (!knownBook(scope)) return json(res, 404, { error: 'There is no such memory.' });
+    // Made first when it is not there yet, so Notepad opens the notebook and not an empty "new file" question.
+    await notebooks.book(scope);
+    const file = notebooks.fileOf(scope);
+    if (!existsSync(file)) await notebooks.saveText(scope, '', 0);
+    const folder = join(store.dir, 'memory');
+    if (process.platform !== 'win32') return json(res, 200, { ok: true, file, said: `The file is ${file}.` });
+    if (b.folder === true) return json(res, (await openOnThisPc('explorer', [folder])) ? 200 : 500, { file, said: `Opened ${folder}.` });
+    if (await openOnThisPc('notepad', [file])) return json(res, 200, { file, said: `Opened in Notepad. Save it there; TOMLIN reads it again before the next answer.` });
+    await openOnThisPc('explorer', [`/select,${file}`]);
+    return json(res, 200, { file, said: `Notepad is not on this PC, so the folder is open with the file picked: ${file}.` });
   },
 };
+
+/** A notebook that is there to show: the team's, or a hire still on the team. */
+const knownBook = (scope: string) => memory.isScope(scope) && (scope === 'team' || !!staff.get(scope.slice(6)));
+
+/** Starts a program on this PC (Notepad, Explorer) without waiting for it; false when Windows could not start it. */
+async function openOnThisPc(program: string, args: string[]): Promise<boolean> {
+  const cp = await import('node:child_process');
+  return new Promise(done => {
+    const child = cp.spawn(program, args, { detached: true, stdio: 'ignore' });
+    child.once('spawn', () => (child.unref(), done(true)));
+    child.once('error', () => done(false));
+  });
+}

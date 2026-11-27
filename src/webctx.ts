@@ -67,6 +67,6 @@ export function webCtxFarWords(from: number, to: number, pc: string): string {
 export function webCtxFarWhy(pc: string, tuneOn: boolean, canAsk: boolean, current: number): string {
   if (current >= WEB_CTX) return '';
   if (!canAsk) return `"${pc}" runs a TOMLIN that cannot change its context for the web: update it there. Its context stays at ${tokens(current)} tokens, so pages will fill it after a page or two.`;
-  if (!tuneOn) return `"${pc}" keeps this model at ${tokens(current)} tokens, so pages will fill it after a page or two. To change that from here, its owner ticks "Allow host to test and change model run settings" under Network there.`;
+  if (!tuneOn) return `"${pc}" keeps this model at ${tokens(current)} tokens, so pages will fill it after a page or two. To change that from here, its owner ticks "Allow host to test and change model run settings" on This PC there.`;
   return '';
 }

@@ -181,8 +181,9 @@ async function loadJobs() {
   const item = j => {
     const name = j.name || j.goal;
     const b = el('button', { class: `file-item${jobUi.job?.id === j.id ? ' current' : ''}`, type: 'button', title: `Last changed ${new Date(j.updated).toLocaleString()}` },
-      el('span', { text: name.length > 90 ? `${name.slice(0, 90)}…` : name }), el('span', { class: 'hint', text: `${j.done} of ${j.steps} steps done${j.skipped ? `, ${j.skipped} skipped` : ''}${j.folder ? ` · folder ${j.folder}` : ''}` }));
-    b.addEventListener('click', () => openJob(j.id));
+      el('span', { text: name.length > 90 ? `${name.slice(0, 90)}…` : name }), el('span', { class: 'hint', text: j.damaged ? j.goal : `${j.done} of ${j.steps} steps done${j.skipped ? `, ${j.skipped} skipped` : ''}${j.folder ? ` · folder ${j.folder}` : ''}` }));
+    // A damaged plan cannot be opened: its line says why and what to do.
+    if (!j.damaged) b.addEventListener('click', () => openJob(j.id));
     return b;
   };
   box.append(...shown.map(item));

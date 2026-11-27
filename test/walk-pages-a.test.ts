@@ -64,7 +64,7 @@ test('the words name what is on screen', () => {
   const homeview = read('public/homeview.js');
   assert.doesNotMatch(homeview, /press Setup staff/, 'there is no Setup staff button');
   assert.match(homeview, /Hire staff first: press Hire staff under the prompt/);
-  assert.match(homeview, /title: `Hire \$\{\/\^\[aeiou\]\/i\.test\(r\.name\) \? 'an' : 'a'\} \$\{r\.name\.toLowerCase\(\)\}/, 'an artist, not a artist');
+  assert.match(homeview, /`Hire \$\{\/\^\[aeiou\]\/i\.test\(r\.name\) \? 'an' : 'a'\} \$\{r\.name\.toLowerCase\(\)\}/, 'an artist, not a artist');
   const project = read('public/project.js');
   assert.doesNotMatch(project, /'Next saves the Scope card/, 'the last step\'s button is Save project');
   assert.match(project, /'Save project puts the Scope card and the design brief in the job folder\.'/);

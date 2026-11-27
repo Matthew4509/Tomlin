@@ -140,11 +140,11 @@ export async function homeNetworkWhy(url: string, look: Lookup = lookupAll): Pro
   try {
     found = await look(host);
   } catch (e) {
-    return `${host} could not be found on your home network (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}). Check the name, or use the address shown on that PC under Network.`;
+    return `${host} could not be found on your home network (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}). Check the name, or use the address shown on that PC, on This PC.`;
   }
   const outside = found.map(f => f.address).filter(a => !isPrivateAddress(a));
-  if (!found.length) return `${host} could not be found on your home network. Use the address shown on that PC under Network.`;
-  return outside.length ? `${host} points to ${outside.join(', ')}, which is not on your home network, so nothing was sent to it. Use the address shown on that PC under Network (for example 192.168.1.20:8741).` : null;
+  if (!found.length) return `${host} could not be found on your home network. Use the address shown on that PC, on This PC.`;
+  return outside.length ? `${host} points to ${outside.join(', ')}, which is not on your home network, so nothing was sent to it. Use the address shown on that PC, on This PC (for example 192.168.1.20:8741).` : null;
 }
 
 /** A worker address as typed ("192.168.1.20", "192.168.1.20:8741", "http://desk.local:8741/") -> "http://host:port", or null. */
@@ -234,9 +234,21 @@ export interface ShareState {
   adminPub?: string;
   /** This PC runs from a Bootable USB stick (Linux, no disk of its own): the scan and the admin's list say so. */
   usbNode?: boolean;
+  /**
+   * When this PC's owner, at this PC, refused an app lock for the node and acknowledged the risks: the node then runs
+   * with no PIN. Linked PCs still cannot update it, turn it off, delete its models or change its permissions (src/hostpin.ts
+   * pinGate asks for a lock). A PIN set later is asked for every change again. Never set from another PC.
+   */
+  noPin?: string;
   /** The last PC that linked here: shown on the Network page with the new setup code; `dropped`: the oldest link it pushed out (10 at most). */
   lastLinked?: { name: string; at: string; dropped?: string } | null;
 }
+
+/**
+ * A node lets the PC it works for choose an unencrypted cluster link: nothing to tick on the node any more (the owner's
+ * choice, 26 Nov). The admin PC's Cluster page decides; a node either joins the cluster or does not.
+ */
+export const NODE_PLAIN_LINKS = true;
 
 export const DEFAULT_SHARE: ShareState = { on: false, port: 8741, name: 'Worker PC', id: '', code: '', pinOn: false, pin: '', paired: [], models: [] };
 

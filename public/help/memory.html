@@ -18,10 +18,37 @@
 <!--nav-top--><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="index.html">Help</a></li><li><a href="index.html#group-staff">Staff and chats</a></li><li aria-current="page">Memory</li></ol></nav><!--/nav-top-->
 <article>
 <h1 id="help-notebooks">Memory</h1>
-<p class="lead">Lines a person keeps between chats, and the team memory.</p>
-    <p>Memory is what a person keeps between chats: lines you write or pin, read before each answer. Each hire has their own; the team memory is read by everyone. Type <code>remember: …</code> in a chat to add a line without a model (<code>remember for the team: …</code> for the team). Memory, under the chat box, shows each line to change or delete; at its foot, "What they read for the next answer" shows how much of the model's room each part takes (instructions, memory lines, the chat so far) and what was left out.</p>
+<p class="lead">The memory editor: the team's and each hire's notebook, kept as plain .md files.</p>
+<p>Memory is what your staff keep between chats: lines you write or pin, read fresh before each answer. Each hire has a notebook of their own, and the <b>team</b> notebook is read by everyone you hire. A hire with the Default role reads no memory. A model never writes memory by itself: it may suggest a line, which waits in the <a href="#memory-inbox">Inbox</a> until you keep it.</p>
+<p>Three quick ways to add a line, with no model: type <code>remember: …</code> in a chat (<code>remember for the team: …</code> for the team notebook), press <b>Pin</b> under a message, or press <b>Add entry</b> in the editor.</p>
+
+<h2 id="memory-editor">The memory editor</h2>
+<p>The editor is a page of its own. Open it from <b>Memory</b> in Settings (under Staff and models), which opens at the team notebook; from <b>Memory</b> on a person's page, at their notebook; or from a chat's Memory window, <b>Open the memory editor</b>, at the notebook that chat reads.</p>
+<ul>
+<li><b>On the left</b>: the notebooks, the team's and each hire's, with how many entries each has and how full it is. A notebook holds up to 200 entries or 100,000 characters.</li>
+<li><b>In the middle</b>: the notebook you picked, as a List or as Text.</li>
+<li><b>On the right</b>: <a href="#memory-gets">what the model gets</a> of it on the next answer.</li>
+<li><b>At the top</b>: Search, Add entry, Add group, List, Text, Open file and Open folder.</li>
+</ul>
+
+<h2 id="memory-list">List and Text</h2>
+<p><b>List</b> shows each entry on its own, in its group, with who wrote it (you, pinned, or suggested by a model) and when. Each has <b>Edit</b>, <b>Move to…</b> another group and <b>Delete</b> (with <b>Undo</b> straight after); drag an entry to put it in another order. An entry can run to several lines, up to 4,000 characters. <b>Add group</b> makes a group, and a group can be renamed, or deleted once it is empty.</p>
+<p>A group called <b>Always send</b> is sent on every turn. The other entries are sent whole when they fit; when they do not, the ones that share the most words with what you asked go first.</p>
+<p><b>Text</b> shows the whole file in one box, as Notepad shows it. <code>## </code> starts a group; each entry is a line starting <code>- </code>, with its other lines indented two spaces, or a block of lines up to a blank line. <b>Save</b> reads it back first and says what it found; a change made in Notepad meanwhile is not written over.</p>
+
+<h2 id="memory-search">Search</h2>
+<p><b>Search</b> looks in every notebook at once as you type, and lists what it found with the notebook and group of each (the first 100). Press one to open its notebook at that entry.</p>
+
+<h2 id="memory-files">The .md files</h2>
+<p>Each notebook is a plain Markdown file in TOMLIN's data folder, in <code>data\memory</code>: <code>team.md</code> for the team, and one <code>staff-….md</code> for each hire. A small file beside each keeps who wrote each entry and when. It knows an entry by its words, so changing an entry's words in the file makes it yours: it then shows as written by you, even if a model suggested it first (its group, such as Always send, stays). <b>Open file</b> opens the notebook in Notepad: change it there and save, and TOMLIN reads it again before the next answer (the editor reads it again when you come back to its window). <b>Open folder</b> opens <code>data\memory</code> in Explorer, so any notes app pointed at the folder can read it too. Whatever is written by hand loads as best it can: no line is refused. An entry that looks like a key or a password is kept in the file but marked, and is never sent to a model.</p>
+
+<h2 id="memory-inbox">The Inbox</h2>
+<p>A model may end an answer with a line it suggests for its memory, and an Agent may propose up to 3 lines a run (when its recipe allows it: see <a href="agents.html">Agents</a>). Each waits in that notebook's <b>Inbox</b> group, at the top of the List, and is never sent to a model while it waits. <b>Keep</b> moves it into the notebook, <b>Edit then keep</b> lets you change it first, and <b>Drop</b> throws it away; tick several to keep or drop them together.</p>
+
+<h2 id="memory-gets">What the model gets</h2>
+<p>The right side says what the hire's model gets of this notebook on the next answer: its model and context size, and the room memory may take (each notebook up to a fifth of the model's room). For each part, the notebook itself, the team memory and Always send, it says whether it is sent whole, in part, or left out for want of room. With nobody hired yet, it says the team notebook is read by everyone you hire. In a chat, the Memory window's <b>What they read for the next answer</b> shows the same for that chat: the instructions, the memory lines and the chat so far.</p>
 </article>
-<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="web.html" rel="prev"><span>&larr; Previous</span><b>Web: searching and reading pages</b></a><a class="next" href="tool-permissions.html" rel="next"><span>Next &rarr;</span><b>Permissions: what a chat may do</b></a></nav><!--/nav-bottom-->
+<!--nav-bottom--><nav class="pager" aria-label="Previous and next topic"><a class="prev" href="web.html" rel="prev"><span>&larr; Previous</span><b>Web: searching and reading pages</b></a><a class="next" href="tool-permissions.html" rel="next"><span>Next &rarr;</span><b>Chat permissions: what a chat may do</b></a></nav><!--/nav-bottom-->
 </main>
 </body>
 </html>

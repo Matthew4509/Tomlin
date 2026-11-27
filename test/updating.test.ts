@@ -69,8 +69,10 @@ test('Network and the PC window say Updating with See progress, not Update it a 
   assert.match(home, /p\.ok && p\.pull && !p\.updating \? el\('div'/);
   assert.match(pcs, /if \(v\.updating\) \{\s*go = el\('button', \{ class: 'btn primary', type: 'button', text: 'See progress'/);
   assert.match(pcs, /if \(older && !v\.update\.why && !v\.updating\) \{/);
-  // The Models on my other PCs window: See progress on an update's row.
-  assert.match(net, /working && \(t\.kind === 'update' \|\| t\.kind === 'pull'\) \? el\('button'[^\n]*text: 'See progress'/);
+  // The Models on my other PCs window: an update shows in its PC's cell of the grid (See progress there, public/pcgrid.js);
+  // a pull (this PC taking an update) keeps its row with See progress.
+  assert.match(net, /const rows = list\.filter\(t => t\.kind !== 'update'\);/);
+  assert.match(net, /working && t\.kind === 'pull' \? el\('button'[^\n]*text: 'See progress'/);
 });
 
 test('Fast update and Update all leave out a PC already being updated', () => {

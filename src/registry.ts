@@ -8,7 +8,8 @@ import { fetchChecked, hfUrl } from './download.ts';
 import { SPARE } from './modelhome.ts';
 
 export interface RegistryFile {
-  role: 'model' | 'diffusion' | 'llm' | 'vae' | 'taesd' | 'lora' | 'onnx' | 'upscaler';
+  /** voice: one of the voice model's voices (src/voice.ts), `name` its id. */
+  role: 'model' | 'diffusion' | 'llm' | 'llm_vision' | 'clip_l' | 't5xxl' | 'vae' | 'taesd' | 'lora' | 'onnx' | 'upscaler' | 'textenc' | 'voice';
   repo?: string;
   rev?: string;
   path?: string;
@@ -23,7 +24,8 @@ export interface RegistryFile {
 
 export interface RegistryModel {
   id: string;
-  kind: 'image' | 'helper';
+  /** video: a Videographer's model (src/videomodels.ts), in a Registry of its own, files in models/video. */
+  kind: 'image' | 'helper' | 'video';
   name: string;
   about: string;
   family?: string;
@@ -32,6 +34,10 @@ export interface RegistryModel {
   quant: string;
   minRamGB: number;
   minVramGB: number;
+  /** A picture model: on a card with less than this (GB) it is known to run out part-way, so Auto draws on the CPU from the start (P4). */
+  cpuBelowGB?: number;
+  /** A picture model that takes reference pictures (Qwen-Image-Edit, FLUX.2 Klein): at most this many are given to it (src/cards.ts). */
+  refs?: number;
   recommendedModes?: string[];
   native?: number;
   /** The side drawn for Draft, Mid and High (src/quality.ts); left out: from `native`. */
@@ -51,6 +57,8 @@ export interface DownloadState {
   checking: boolean;
   error: string | null;
   done: boolean;
+  /** Waits for the picture-model downloads asked for before it to end (one runs at a time). */
+  waiting?: boolean;
 }
 
 const GB = 2 ** 30;
@@ -72,13 +80,20 @@ export class Registry {
   /** Why nothing can be downloaded now (the chosen models folder's drive is not there), or ''. */
   noHome: () => string = () => '';
   private downloads = new Map<string, { state: DownloadState; ac: AbortController }>();
+  /** The last download asked for: the next one starts when it ends (one at a time). */
+  private line: Promise<unknown> = Promise.resolve();
+  /** Downloads running or waiting their turn. */
+  private busy = 0;
   /** models/ folders of other copies of TOMLIN beside this one: a whole file there is used where it is. */
   copies: () => string[] = () => [];
 
-  /** `dir`: where model files go (models/image and models/helpers inside it). */
-  constructor(registryDir: string, dir: string) {
+  /**
+   * `dir`: where model files go (models/image, models/helpers and models/video inside it). `registryDir`: the folder of
+   * registry/*.json, or the models themselves (the video list, src/videomodels.ts).
+   */
+  constructor(registryDir: string | RegistryModel[], dir: string) {
     this.dir = dir;
-    this.models = readdirSync(registryDir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(registryDir, f), 'utf8')) as RegistryModel)
+    this.models = (typeof registryDir !== 'string' ? [...registryDir] : readdirSync(registryDir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(registryDir, f), 'utf8')) as RegistryModel))
       .sort((a, b) => a.files.reduce((n, f) => n + f.bytes, 0) - b.files.reduce((n, f) => n + f.bytes, 0));
   }
 
@@ -90,14 +105,20 @@ export class Registry {
     return f.saveAs ?? (f.path ?? f.url ?? '').split('/').pop()!;
   }
 
+  /** A file's place inside a models folder: image/, image/loras/, helpers/ or video/. */
+  private relPath(model: RegistryModel, f: RegistryFile): string[] {
+    if (f.role === 'lora') return ['image', 'loras', this.fileName(f)];
+    return [model.kind === 'helper' ? 'helpers' : model.kind === 'video' ? 'video' : 'image', this.fileName(f)];
+  }
+
   /** Where a file of `model` goes in this copy's own models folder (a download, or a copy from a linked PC). */
   ownPath(model: RegistryModel, f: RegistryFile): string {
-    return join(this.dir, ...(f.role === 'lora' ? ['image', 'loras', this.fileName(f)] : [model.kind === 'helper' ? 'helpers' : 'image', this.fileName(f)]));
+    return join(this.dir, ...this.relPath(model, f));
   }
 
   /** Where a file of `model` is (or will be). Files shared between models (TAESD) are kept once. */
   filePath(model: RegistryModel, f: RegistryFile): string {
-    const rel = f.role === 'lora' ? ['image', 'loras', this.fileName(f)] : [model.kind === 'helper' ? 'helpers' : 'image', this.fileName(f)];
+    const rel = this.relPath(model, f);
     const own = this.ownPath(model, f);
     if (sizeOf(own) === f.bytes) return own;
     // Only a whole file (the exact size) from another copy; anything else downloads here.
@@ -163,27 +184,45 @@ export class Registry {
     const state: DownloadState = { id, got: 0, bytes: this.bytes(model), checking: false, error: null, done: false };
     const ac = new AbortController();
     this.downloads.set(id, { state, ac });
-    void (async () => {
-      let before = 0;
+    // One model at a time, in the order asked: three big picture models at once each failed their check at the end of
+    // their first large file, and one at a time all passed. The others wait their turn (`waiting`).
+    const before = this.line;
+    if (this.busy) state.waiting = true;
+    this.busy++;
+    const run = (async () => {
+      await before;
+      delete state.waiting;
+      let before2 = 0;
       try {
+        if (ac.signal.aborted) throw new Error('Stopped.');
         for (const f of model.files) {
           const url = f.url ?? hfUrl(f.repo!, f.rev!, f.path!);
           await fetchChecked(url, this.filePath(model, f), f.bytes, f.sha256, p => {
-            state.got = before + p.got;
+            state.got = before2 + p.got;
             state.checking = p.checking;
           }, ac.signal);
-          before += f.bytes;
-          state.got = before;
+          before2 += f.bytes;
+          state.got = before2;
         }
         state.done = true;
       } catch (error) {
         state.error = ac.signal.aborted ? 'Stopped. Press Download to carry on from where it stopped.' : (error as Error).message;
+      } finally {
+        this.busy--;
       }
     })();
+    this.line = run;
     return state;
   }
 
   stop(id: string): void {
-    this.downloads.get(id)?.ac.abort();
+    const d = this.downloads.get(id);
+    if (!d) return;
+    d.ac.abort();
+    // One still waiting its turn says Stopped at once (its turn, when it comes, ends at once too).
+    if (d.state.waiting) {
+      delete d.state.waiting;
+      d.state.error = 'Stopped. Press Download to carry on from where it stopped.';
+    }
   }
 }

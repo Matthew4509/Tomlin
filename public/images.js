@@ -45,13 +45,29 @@ app.imageNote = text => {
 function updatePlan() {
   clearTimeout(planTimer);
   planTimer = setTimeout(async () => {
-    const q = new URLSearchParams({ prompt: promptBox.value, width: $('#img-w').value, height: $('#img-h').value, model: panes.image.model.value, mode: $('#img-mode').value, quality: qualityNow() });
+    const q = new URLSearchParams({ prompt: promptBox.value, width: $('#img-w').value, height: $('#img-h').value, model: panes.image.model.value, mode: $('#img-mode').value, style: styleNow() ?? '', quality: qualityNow(), as: $('#draw-as').value });
     try {
       const p = await api(`/api/images/plan?${q}`);
       drawQualities(p.qualities);
+      hiddenParts = Array.isArray(p.negative) ? p.negative : [];
+      drawChips();
+      // An artist whose way of working sets the style: theirs is drawn, whatever Style says (shown faded).
+      const theirs = p.why === 'their way of working';
+      for (const r of document.querySelectorAll('input[name="img-style"]')) r.closest('label').classList.toggle('off', theirs || $('#img-custom').checked);
+      $('#img-style-tiles').classList.toggle('off', theirs || $('#img-custom').checked);
+      $('#img-style-line').textContent = theirs ? 'Their way of working sets the style.' : $('#img-custom').checked ? 'Custom style is ticked under Advanced: no style words are added.' : '';
+      // The model's own size changed (another model chosen): a Shape is worked out again from it.
+      const mid = p.qualities?.mid?.generated;
+      const side = mid ? Math.round(Math.sqrt(mid.width * mid.height) / 64) * 64 : modelSide;
+      if (side !== modelSide) {
+        modelSide = side;
+        const was = `${$('#img-w').value}x${$('#img-h').value}`;
+        syncForm();
+        if (`${$('#img-w').value}x${$('#img-h').value}` !== was) return void updatePlan();
+      }
       if (!promptBox.value.trim()) return void (detectLine.textContent = '');
       const chosen = $('#img-mode').value;
-      const mode = chosen === 'auto' ? `${MODE_NAME[p.mode]} (${p.why})` : MODE_NAME[chosen];
+      const mode = chosen === 'auto' || theirs ? `${MODE_NAME[p.mode]} (${p.why})` : p.styleName ?? MODE_NAME[chosen];
       const size = p.target ? `${p.target.width}×${p.target.height}, drawn at ${p.generated.width}×${p.generated.height}` : `${p.generated.width}×${p.generated.height}`;
       detectLine.textContent = `${mode} · ${size}${p.drafts > 1 ? ` · ${p.drafts} drafts to pick from` : ''}${p.portrait && !p.size ? ' · square portrait' : ''}${p.group ? ' · wide, for the people asked for' : ''}${p.size ? ' · size taken out of the prompt' : ''}`;
       // The model in use is not made for this mode: say which one is (choose it, or download it, in the list above).
@@ -61,7 +77,7 @@ function updatePlan() {
     }
   }, 250);
 }
-for (const id of ['#img-prompt', '#img-w', '#img-h', '#img-mode']) $(id).addEventListener('input', updatePlan);
+promptBox.addEventListener('input', updatePlan);
 
 // ---- Draft / Mid / High (2.0.65): small and several, the model's own size, its largest. Kept in this browser. ----
 const qualityNow = () => $('input[name="img-quality"]:checked')?.value ?? 'mid';
@@ -81,15 +97,220 @@ function drawQualities(qs) {
 }
 panes.image.model.addEventListener('change', updatePlan);
 
+// ---- The draw form: Leave out chips, Shape, Style and one closed Advanced, kept per artist in this browser ----
+
+const SHAPES = { '1:1': [1, 1], '4:3': [4, 3], '16:9': [16, 9], '9:16': [9, 16] };
+/** Where a hidden "leave out" word comes from, in words (the recipe's is the artist's role, from Draw as). */
+const SOURCE_NAME = { mode: 'style', portrait: 'portrait', model: 'model' };
+const chipList = $('#img-chip-list');
+const chipBox = $('#img-negative');
+const advBox = $('#img-advanced');
+let typedChips = [];
+let droppedWords = [];
+let hiddenParts = [];
+// The side of a square at the model's own size (Mid), from the plan: a Shape keeps that many pixels.
+let modelSide = 512;
+const radioNow = name => document.querySelector(`input[name="${name}"]:checked`)?.value ?? 'auto';
+/** The Style row's values that are modes themselves; every other style rides on Custom with its own words (src/styles.ts). */
+const FORM_MODES = ['auto', 'blog', 'icon', 'cartoon'];
+const modeOfStyle = v => (FORM_MODES.includes(v) ? v : 'custom');
+/** The style sent with a picture: none while Custom style is ticked (no style words at all). */
+const styleNow = () => ($('#img-custom').checked ? undefined : radioNow('img-style'));
+function setRadio(name, value) {
+  const r = document.querySelector(`input[name="${name}"][value="${CSS.escape(String(value))}"]`) ?? document.querySelector(`input[name="${name}"][value="auto"]`);
+  r.checked = true;
+}
+const splitWords = text => String(text ?? '').split(',').map(w => w.trim()).filter(Boolean);
+
+/** What Draw asks for (the hidden fields queue.js reads too): Advanced's exact size, else the Shape at the model's own size. */
+function syncForm() {
+  const w = $('#img-exact-w').value;
+  const h = $('#img-exact-h').value;
+  let size = ['', ''];
+  if (w && h) size = [w, h];
+  else if (SHAPES[radioNow('img-shape')]) {
+    const [a, b] = SHAPES[radioNow('img-shape')];
+    const k = modelSide / Math.sqrt(a * b);
+    size = [String(Math.round((a * k) / 8) * 8), String(Math.round((b * k) / 8) * 8)];
+  }
+  [$('#img-w').value, $('#img-h').value] = size;
+  $('#img-mode').value = $('#img-custom').checked ? 'custom' : modeOfStyle(radioNow('img-style'));
+  $('#img-seed').disabled = $('#img-random').checked;
+  drawAdvSummary();
+}
+
+/** Closed with something set: the summary says what, in a few words ("Advanced: seed 1234, 30 steps"). */
+function drawAdvSummary() {
+  const said = [];
+  const w = $('#img-exact-w').value;
+  const h = $('#img-exact-h').value;
+  if (w && h) said.push(`${w}×${h}`);
+  if ($('#img-fit').value !== 'crop') said.push($('#img-fit').value);
+  if (!$('#img-random').checked && $('#img-seed').value !== '') said.push(`seed ${$('#img-seed').value}`);
+  if ($('#img-steps').value) said.push(`${$('#img-steps').value} steps`);
+  if ($('#img-cfg').value) said.push(`strength ${$('#img-cfg').value}`);
+  if ($('#img-sampler').value) said.push($('#img-sampler').selectedOptions[0].textContent.replace(/^.*\((.*)\)$/, '$1'));
+  if ($('#img-custom').checked) said.push('custom style');
+  if ($('#img-ico').checked) said.push('icon sizes');
+  $('#img-adv-summary').textContent = !advBox.open && said.length ? `Advanced: ${said.join(', ')}` : 'Advanced';
+}
+
+function chip(word, source, onRemove) {
+  return el('span', { class: `chip img-chip${source ? ' img-chip-hidden' : ''}`, role: 'listitem' },
+    el('span', { text: word }),
+    source ? el('small', { text: ` · ${source}` }) : null,
+    el('button', { class: 'chip-drop', type: 'button', text: '×', title: source ? `Stop leaving out "${word}" (added by the ${source})` : `Stop leaving out "${word}"`, 'aria-label': `Stop leaving out ${word}`, onclick: onRemove }));
+}
+
+/** The typed words, then the hidden ones by source (each word once, with every source that adds it). */
+function drawChips() {
+  const role = $('#draw-as').selectedOptions[0]?.dataset.role || 'artist';
+  const seen = new Map();
+  for (const part of hiddenParts) {
+    for (const word of part.words) {
+      const key = word.toLowerCase();
+      if (droppedWords.some(d => d.toLowerCase() === key) || typedChips.some(t => t.toLowerCase() === key)) continue;
+      const name = part.source === 'recipe' ? role : SOURCE_NAME[part.source] ?? part.source;
+      const had = seen.get(key);
+      if (had) { if (!had.names.includes(name)) had.names.push(name); } else seen.set(key, { word, names: [name] });
+    }
+  }
+  chipList.replaceChildren(
+    ...typedChips.map(w => chip(w, '', () => { typedChips = typedChips.filter(x => x !== w); saveForm(); drawChips(); })),
+    ...[...seen.values()].map(h => chip(h.word, h.names.join(', '), () => { droppedWords.push(h.word); saveForm(); drawChips(); })));
+  const back = $('#img-chips-back');
+  back.hidden = !droppedWords.length;
+  back.textContent = `Put back the ${droppedWords.length === 1 ? 'word' : `${droppedWords.length} words`} taken out (${droppedWords.join(', ')})`;
+}
+
+function addChips() {
+  for (const w of splitWords(chipBox.value)) if (!typedChips.some(t => t.toLowerCase() === w.toLowerCase())) typedChips.push(w.slice(0, 80));
+  chipBox.value = '';
+  saveForm();
+  drawChips();
+}
+chipBox.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); addChips(); }
+  else if (e.key === 'Backspace' && !chipBox.value && typedChips.length) { typedChips.pop(); saveForm(); drawChips(); }
+});
+$('#img-chip-add').addEventListener('click', () => { addChips(); chipBox.focus(); });
+$('#img-chips-back').addEventListener('click', () => { droppedWords = []; saveForm(); drawChips(); });
+
+// Kept per staff member (the artist in Draw as, or this PC's own pane), in this browser only.
+const ADV_FIELDS = { w: '#img-exact-w', h: '#img-exact-h', fit: '#img-fit', seed: '#img-seed', steps: '#img-steps', cfg: '#img-cfg', sampler: '#img-sampler' };
+const ADV_CHECKS = { random: '#img-random', custom: '#img-custom', ico: '#img-ico' };
+const ADV_DEFAULT = { w: '', h: '', fit: 'crop', seed: '', steps: '', cfg: '', sampler: '', random: true, custom: false, ico: false };
+const formKey = () => `img-form:${$('#draw-as').value || 'pc'}`;
+let formLoading = false;
+function saveForm() {
+  if (formLoading) return;
+  const kept = { open: advBox.open, chips: typedChips, dropped: droppedWords, shape: radioNow('img-shape'), style: radioNow('img-style') };
+  for (const [k, id] of Object.entries(ADV_FIELDS)) kept[k] = $(id).value;
+  for (const [k, id] of Object.entries(ADV_CHECKS)) kept[k] = $(id).checked;
+  try { localStorage.setItem(formKey(), JSON.stringify(kept)); } catch { /* not kept */ }
+}
+function setAdvanced(v) {
+  for (const [k, id] of Object.entries(ADV_FIELDS)) {
+    const box = $(id);
+    box.value = v[k] ?? ADV_DEFAULT[k];
+    // A value this list does not have (a sampler from an older copy): back to the default.
+    if (box.tagName === 'SELECT' && box.selectedIndex < 0) box.value = ADV_DEFAULT[k];
+  }
+  for (const [k, id] of Object.entries(ADV_CHECKS)) $(id).checked = typeof v[k] === 'boolean' ? v[k] : ADV_DEFAULT[k];
+}
+function loadForm() {
+  let v = {};
+  try { v = JSON.parse(localStorage.getItem(formKey()) ?? '{}') ?? {}; } catch { v = {}; }
+  formLoading = true;
+  setAdvanced(v);
+  typedChips = Array.isArray(v.chips) ? v.chips.filter(w => typeof w === 'string').slice(0, 60) : [];
+  droppedWords = Array.isArray(v.dropped) ? v.dropped.filter(w => typeof w === 'string').slice(0, 100) : [];
+  setRadio('img-shape', v.shape ?? 'auto');
+  setRadio('img-style', v.style ?? 'auto');
+  advBox.open = v.open === true;
+  formLoading = false;
+  syncForm();
+  drawChips();
+  updatePlan();
+  drawStyleTiles();
+}
+
+// ---- The Style picker: a tile per style with its sample for the artist's model (stylepick.js) ----
+
+/** The model the artist in Draw as draws with (this PC's picture model with no artist), and its name. */
+function artistModel() {
+  const a = stylePick.now()?.artists?.find(x => x.id === drawAs.value);
+  if (a) return { model: a.model, modelName: a.modelName || (a.model ? a.model : 'the model loaded on their PC'), artist: a };
+  const opt = panes.image.model.selectedOptions?.[0];
+  return { model: panes.image.model.value || null, modelName: String(opt?.textContent ?? '').replace(/\s*\(.*$/, '').trim() || "this PC's picture model", artist: null };
+}
+function drawStyleTiles() {
+  if (!stylePick.now()) return;
+  const m = artistModel();
+  $('#img-style-tiles').replaceChildren(...stylePick.tiles({ model: m.model, modelName: m.modelName, value: radioNow('img-style'), pick: s => {
+    setRadio('img-style', s.value);
+    // Its shape too, which can still be changed in the Shape row.
+    if (s.shape !== 'auto') setRadio('img-shape', s.shape);
+    syncForm();
+    saveForm();
+    updatePlan();
+    drawStyleTiles();
+  } }));
+  // The styles with no sample yet, said once above the tiles.
+  const none = stylePick.missing(m.model, m.modelName);
+  $('#img-style-none').textContent = none;
+  $('#img-style-none').hidden = !none;
+  const btn = $('#img-style-make');
+  btn.disabled = !m.artist;
+  btn.title = m.artist ? `Queues ${stylePick.count()} pictures for ${m.artist.name}: the same fox, seed ${stylePick.now().seed}, Mid, one per style. Each is kept as that style's sample for their model.` : 'Pick an artist in Draw as first: their model draws the samples, through the queue.';
+}
+$('#img-style-make').addEventListener('click', async () => {
+  const m = artistModel();
+  if (!m.artist) return;
+  try {
+    $('#img-style-said').textContent = await stylePick.make(m.artist.id);
+    watchSamples();
+  } catch (e) {
+    $('#img-style-said').textContent = e.message;
+  }
+});
+/** While style samples are in the queue: the tiles are read again every 20 s, until none is left to draw. */
+let sampleWatch = 0;
+function watchSamples() {
+  clearInterval(sampleWatch);
+  sampleWatch = setInterval(async () => {
+    const q = await api('/api/queue').catch(() => null);
+    await stylePick.load(true);
+    drawStyleTiles();
+    if (!(q?.items ?? []).some(i => i.sample && (i.state === 'waiting' || i.state === 'running'))) clearInterval(sampleWatch);
+  }, 20000);
+}
+app.styleSamplesChanged = () => { drawStyleTiles(); };
+panes.image.model.addEventListener('change', drawStyleTiles);
+$('#img-adv-reset').addEventListener('click', () => {
+  setAdvanced({});
+  syncForm();
+  saveForm();
+  updatePlan();
+});
+advBox.addEventListener('toggle', () => { drawAdvSummary(); saveForm(); });
+for (const id of [...Object.values(ADV_FIELDS), ...Object.values(ADV_CHECKS), '#img-shape', '#img-style']) {
+  for (const box of id === '#img-shape' || id === '#img-style' ? document.querySelectorAll(`input[name="${id.slice(1)}"]`) : [$(id)]) {
+    box.addEventListener(box.type === 'number' ? 'input' : 'change', () => { syncForm(); saveForm(); updatePlan(); });
+  }
+}
+
 // ---- Generate / cancel ----
 
 function options() {
   const num = id => ($(id).value === '' ? undefined : Number($(id).value));
   const random = $('#img-random').checked;
   return {
-    prompt: promptBox.value, negative: $('#img-negative').value, mode: $('#img-mode').value, width: num('#img-w'), height: num('#img-h'), fit: $('#img-fit').value,
+    // The chips, and words typed in the box but not added yet; hidden words taken out are sent one by one.
+    prompt: promptBox.value, negative: [...typedChips, ...splitWords(chipBox.value)].join(', '), negativeDrop: droppedWords.length ? droppedWords : undefined,
+    mode: $('#img-mode').value, style: styleNow(), width: num('#img-w'), height: num('#img-h'), fit: $('#img-fit').value,
     seed: random ? undefined : num('#img-seed'), steps: num('#img-steps'), cfg: num('#img-cfg'), sampler: $('#img-sampler').value || undefined,
-    drafts: num('#img-drafts'), ico: $('#img-ico').checked, as: $('#draw-as').value || undefined,
+    ico: $('#img-ico').checked, as: $('#draw-as').value || undefined,
     quality: $('input[name="img-quality"]:checked')?.value ?? 'mid',
   };
 }
@@ -173,10 +394,6 @@ promptBox.addEventListener('keydown', e => {
   }
 });
 cancelBtn.addEventListener('click', () => api('/api/images/cancel', {}).catch(error => showFault(fault, error.message)));
-$('#img-random').addEventListener('change', () => {
-  $('#img-seed').disabled = $('#img-random').checked;
-});
-$('#img-seed').disabled = true;
 
 // ---- Progress and results ----
 
@@ -197,13 +414,25 @@ function stateText(j) {
   }
 }
 
+/**
+ * Whether the picture being drawn shows as "Picture in progress" in the chat open now: in the chat it was asked from,
+ * else (a queued one, asked from no chat) in its own artist's chats, never in another artist's. This PC's own pictures
+ * pane (no chat open) and a picture drawn for a linked PC show it everywhere. The top bar's chip shows it either way.
+ */
+function progressHere(j, chatId, who) {
+  if (!chatId || j.forPc) return true;
+  if (j.chat) return j.chat === chatId;
+  return !!j.as && who === `staff:${j.as}`;
+}
+
 function drawJob(j) {
   const running = j && RUNNING.includes(j.state);
   // Draw stays pressable: pressed before Connect, it asks to load the picture model first.
   goBtn.title = app.status?.panes.image.state !== 'connected' && !app.awayArtist ? 'Draw asks to load the picture model first (nothing loads by itself)' : 'Enter in the box does the same';
-  cancelBtn.hidden = !running;
+  const here = running && progressHere(j, app.chatId ?? '', typeof chatUi === 'undefined' ? '' : chatUi.open?.who ?? '');
+  cancelBtn.hidden = !here;
   const wasHidden = progress.hidden;
-  progress.hidden = !running;
+  progress.hidden = !here;
   jobChip.hidden = !running;
   if (running) {
     const total = j.count * j.steps;
@@ -220,7 +449,7 @@ function drawJob(j) {
     $('.ip-frame', progress).style.setProperty('--ar', String(shape));
     jobChip.textContent = `Picture ${pct}%${j.etaSeconds != null ? ` · ${j.etaSeconds >= 90 ? `${Math.round(j.etaSeconds / 60)} min` : `${Math.max(1, Math.round(j.etaSeconds))} s`} left` : ''}`;
     jobChip.title = `${stateText(j)} · ${secondsText(j.elapsed)} so far. Click to see it.`;
-    if (wasHidden) progress.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (wasHidden && here) progress.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
   if (!j) return;
   if (j.state === 'failed' && shownJob !== `${j.id}:failed`) {
@@ -281,7 +510,9 @@ const mpImg = $('#mp-img');
 
 /** Add to the gallery, or take back out to Drafts. */
 async function setKept(p, kept) {
-  const np = await api('/api/images/keep', { id: p.id, kept });
+  const { saved, ...np } = await api('/api/images/keep', { id: p.id, kept });
+  // A picture kept in a project's chat is handed in to that project: where it went, or why not, is said under it.
+  if (saved) savedSay = { id: np.id, saved };
   if (mainPic?.id === np.id) mainPic = np;
   galleryDirty = true;
   await drawGallery();
@@ -308,13 +539,97 @@ function showMain(p) {
   mpImg.alt = p.altText ?? p.prompt;
   $('#mp-caption').textContent = `${p.prompt} · ${new Date(p.at).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`;
   const kept = p.kept !== false;
+  const save = saveToProject(p, true, async np => { mainPic = np; await drawGallery().catch(() => undefined); showMain(np); });
+  // Less used, in the … menu: it closes when one is pressed.
+  // Escape, or a press anywhere else, closes it too.
+  const more = el('details', { class: 'mp-more', onkeydown: e => { if (e.key === 'Escape' && more.open) { more.open = false; more.querySelector('summary').focus(); } } }, el('summary', { 'aria-label': 'More for this picture', title: 'Set as profile photo, Make a clip, Delete', text: '…' }));
+  const away = e => { if (!more.isConnected) document.removeEventListener('pointerdown', away); else if (more.open && !more.contains(e.target)) more.open = false; };
+  document.addEventListener('pointerdown', away);
+  const item = (text, title, go) => el('button', { class: 'btn quiet', type: 'button', text, title, onclick: e => { more.open = false; go(e); } });
+  more.append(el('span', { class: 'mp-more-list' },
+    item('Set as profile photo', 'Choose whose photo it becomes', e => app.pickFace(p, e.target)),
+    item('Ask about this picture', 'A chat opens with this picture on your next message, for a model that can look at pictures', () => app.askAboutPicture?.(fileUrl(p.output), p.prompt)),
+    item('Make a clip from this picture', 'A Videographer\'s chat opens with this picture as the start of the clip', () => app.clipFromPicture?.(fileUrl(p.output), { gallery: p.id }, p.prompt)),
+    item('Delete', 'Delete this picture for good (asked first)', () => deletePictures({ ids: [p.id] }, 'this picture'))));
   actions.append(
-    el('button', { class: `btn${kept ? '' : ' primary'}`, type: 'button', text: kept ? 'Move to drafts' : 'Add to gallery', title: kept ? 'Take it out of the gallery; it waits in Drafts' : 'Keep it: it goes into the gallery', onclick: async e => { e.target.disabled = true; try { await setKept(p, !kept); } catch (error) { showFault(fault, error.message); e.target.disabled = false; } } }),
-    el('button', { class: 'btn', type: 'button', text: 'Set as profile photo', title: 'Choose whose photo it becomes', onclick: e => app.pickFace(p, e.target) }),
+    save.buttons,
+    el('button', { class: 'btn', type: 'button', text: kept ? 'Move to drafts' : 'Add to gallery', title: kept ? 'Take it out of the gallery; it waits in Drafts' : 'Keep it: it goes into the gallery', onclick: async e => { e.target.disabled = true; try { await setKept(p, !kept); } catch (error) { showFault(fault, error.message); e.target.disabled = false; } } }),
     el('button', { class: 'btn', type: 'button', text: p.draft ? 'Full quality' : 'Draw again, full quality', title: 'Same seed, more steps and the full-quality decoder; the new one waits in Drafts', onclick: () => start('/api/images/finalise', { id: p.id }) }),
     el('a', { class: 'btn quiet', href: `${fileUrl(p.output)}?download`, text: 'Download' }),
-    el('button', { class: 'btn quiet', type: 'button', text: 'Delete', title: 'Delete this picture for good (asked first)', onclick: () => deletePictures({ ids: [p.id] }, 'this picture') }),
+    more,
+    save.pick,
   );
+  const line = savedLine(p);
+  if (line) actions.append(line);
+}
+
+// ---- Save to project: a copy in a project's specialists\images folder (src/server/places.ts) ----
+
+/** What the last save of a picture said ({id, saved}), shown under that picture. */
+let savedSay = null;
+/** The same cut as the New chat window's project tiles. */
+const projectCut = name => (name.length > 20 ? `${name.slice(0, 20).trimEnd()}…` : name);
+const pageProjects = () => (typeof chatUi === 'undefined' ? [] : chatUi.projects);
+/** The project of the chat a picture was drawn in ('' for Default, or a chat or project that is gone). */
+function chatProjectOf(p) {
+  if (typeof chatUi === 'undefined' || !p.chat) return '';
+  const id = chatUi.list.find(c => c.id === p.chat)?.project ?? '';
+  return pageProjects().some(x => x.id === id) ? id : '';
+}
+
+/**
+ * Save to project for picture `p`: straight into its chat's project, or a picker of projects when the chat has none;
+ * ▾ always picks. Which project is read at the press (the chat list may arrive after the picture is drawn).
+ * `after(picture)` draws the picture again with the line saying where it went.
+ */
+function saveToProject(p, primary, after) {
+  const pick = el('div', { class: 'save-pick', role: 'group', 'aria-label': 'Save to which project', hidden: true });
+  const go = async (project, btn) => {
+    pick.hidden = true;
+    btn.disabled = true;
+    try {
+      const r = await api('/api/images/to-project', { id: p.id, project });
+      savedSay = { id: p.id, saved: r.saved };
+      galleryDirty = true;
+      after(r.picture);
+    } catch (e) {
+      btn.disabled = false;
+      savedSay = { id: p.id, saved: e.data?.saved ?? { error: e.message } };
+      after(e.data?.picture ?? p);
+    }
+  };
+  const openPick = btn => {
+    const all = pageProjects();
+    const own = chatProjectOf(p);
+    pick.replaceChildren(
+      el('span', { class: 'hint', text: all.length ? 'Save to:' : 'No projects yet: make one on Home, or with New chat.' }),
+      ...all.map(x => el('button', { class: 'btn quiet', type: 'button', text: projectCut(x.name), title: x.name, 'aria-pressed': String(x.id === own), onclick: e => go(x.id, e.target) })));
+    pick.hidden = !pick.hidden;
+    btn.setAttribute('aria-expanded', String(!pick.hidden));
+  };
+  const cls = `btn${primary ? ' primary' : ''}`;
+  const main = el('button', { class: cls, type: 'button', text: 'Save to project', title: 'A copy goes into the specialists\\images folder of this chat\'s project, or of the project you pick', onclick: e => {
+    const own = chatProjectOf(p);
+    return own ? go(own, e.target) : openPick(e.target);
+  } });
+  const other = el('button', { class: `${cls} save-other`, type: 'button', text: '▾', title: 'Save to another project', 'aria-label': 'Save to another project', 'aria-expanded': 'false', onclick: e => openPick(e.target) });
+  return { buttons: el('span', { class: 'save-to' }, main, other), pick };
+}
+
+/** The line under a picture after a save: where it went with Open folder, or why not. */
+function savedLine(p) {
+  const s = savedSay?.id === p.id ? savedSay.saved : null;
+  if (!s) return null;
+  if (s.error) return el('p', { class: 'save-line fault-line', text: s.name ? `Not saved to ${s.name}: ${s.error}. It is in the gallery.` : s.error });
+  const file = s.path.split('/').pop();
+  const open = el('button', { class: 'btn quiet', type: 'button', text: 'Open folder', title: 'Opens the folder in Windows Explorer', onclick: async e => {
+    try {
+      await api('/api/images/open-folder', { project: s.project });
+    } catch (error) {
+      e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+    }
+  } });
+  return el('p', { class: 'save-line', title: s.path.replace(/\//g, '\\') }, el('span', { text: `${s.already ? 'Already in' : 'Saved to'} ${s.name}\\specialists\\images\\${file}` }), open);
 }
 
 /** The picture before or after the main one, in the gallery list as it is shown. */
@@ -324,7 +639,14 @@ function stepMain(by) {
   const i = list.findIndex(x => x.id === mainPic?.id);
   const next = i < 0 ? list[0] : list[(i + by + list.length) % list.length];
   showMain(next);
-  document.querySelector(`#gallery .tile[data-id="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // Only the gallery's own scroll box moves to show the tile: never the page, and focus stays where it was.
+  const box = $('#gallery');
+  const t = box.querySelector(`.tile[data-id="${CSS.escape(next.id)}"]`);
+  if (!t) return;
+  const b = box.getBoundingClientRect();
+  const r = t.getBoundingClientRect();
+  if (r.top < b.top) box.scrollTop -= b.top - r.top;
+  else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
 }
 $('#mp-prev').addEventListener('click', () => stepMain(-1));
 $('#mp-next').addEventListener('click', () => stepMain(1));
@@ -355,16 +677,26 @@ function openViewer(p) {
   row('Model', p.modelName);
   row('Ran on', `${p.device}, ${p.seconds} s`);
   row('File', `${p.format.toUpperCase()}, ${Math.round(p.bytes / 1024)} KB${p.transparent ? ', see-through background' : ''}`);
+  row('Left out', p.negative);
   row('Alt text', p.altText ? `${p.altText} (written from ${p.altFrom ?? 'the prompt'})` : null);
   row('Made', new Date(p.at).toLocaleString());
+  row('Saved to', (p.savedTo ?? []).map(s => s.name).join(', '));
   const actions = $('#viewer-actions');
+  const save = saveToProject(p, false, async np => {
+    openViewer(np);
+    await drawGallery().catch(() => undefined);
+    if (mainPic?.id === np.id) showMain(np);
+  });
   actions.replaceChildren(
     el('a', { class: 'btn primary', href: `${fileUrl(p.output)}?download`, text: 'Download' }),
+    save.buttons,
     el('a', { class: 'btn', href: `${fileUrl(p.original)}?download`, text: 'Download original' }),
     el('button', { class: 'btn', type: 'button', text: 'Draw again, same seed', disabled: !!p.settingsUnknown, title: p.settingsUnknown ? 'The seed is not known: it was drawn on a linked PC running an older TOMLIN' : '', onclick: () => { viewer.close(); start('/api/images/again', { id: p.id }); } }),
     el('button', { class: 'btn', type: 'button', text: p.draft ? 'Full quality' : 'Re-run at full quality', disabled: !!p.settingsUnknown, onclick: () => { viewer.close(); start('/api/images/finalise', { id: p.id }); } }),
     el('button', { class: 'btn', type: 'button', text: 'Copy prompt', onclick: async e => { try { await navigator.clipboard.writeText(p.prompt); e.target.textContent = 'Copied'; } catch { promptBox.value = p.prompt; e.target.textContent = 'Put in the prompt box'; } } }),
     el('button', { class: 'btn', type: 'button', text: 'Use this prompt', onclick: () => { promptBox.value = p.prompt; viewer.close(); updatePlan(); promptBox.focus(); } }),
+    el('button', { class: 'btn', type: 'button', text: 'Ask about this picture', title: 'A chat opens with this picture on your next message, for a model that can look at pictures', onclick: () => { viewer.close(); app.askAboutPicture?.(fileUrl(p.output), p.prompt); } }),
+    el('button', { class: 'btn', type: 'button', text: 'Make a clip from this picture', title: 'A Videographer\'s chat opens with this picture as the start of the clip', onclick: () => { viewer.close(); app.clipFromPicture?.(fileUrl(p.output), { gallery: p.id }, p.prompt); } }),
     el('button', { class: 'btn', type: 'button', text: 'Set as profile photo', title: 'Choose whose photo it becomes', onclick: e => { viewer.close(); app.pickFace(p, e.target); } }),
     el('button', { class: 'btn', type: 'button', text: p.kept === false ? 'Add to gallery' : 'Move to drafts', onclick: async () => { try { openViewer(await setKept(p, p.kept === false)); } catch (error) { showFault(fault, error.message); } } }),
   );
@@ -386,6 +718,9 @@ function openViewer(p) {
   } });
   actions.append(alt);
   for (const f of p.icoFiles ?? []) actions.append(el('a', { class: 'btn quiet', href: `${fileUrl(f)}?download`, text: f.split('/').pop() }));
+  actions.append(save.pick);
+  const line = savedLine(p);
+  if (line) actions.append(line);
   if (!viewer.open) viewer.showModal();
 }
 
@@ -530,6 +865,21 @@ async function drawGallery(more = false) {
   for (const b of document.querySelectorAll('.g-scope')) b.setAttribute('aria-pressed', String(b.dataset.scope === scope));
   drawTools();
   const inChat = scope === 'chat' ? `&chat=${encodeURIComponent(app.chatId ?? '')}` : '';
+  // The Videos shelf: clips a Videographer made (clips.js), every chat's (an artist's chat has none of its own), so
+  // This chat and All chats are not offered there.
+  $('.g-scope').parentElement.hidden = shelf === 'videos' || shelf === 'voice';
+  if (shelf === 'videos') {
+    $('#g-more').hidden = true;
+    $('#g-tools').hidden = true;
+    return app.drawClipShelf?.(box, { q });
+  }
+  // The Voice shelf: voice-overs read aloud (voice.js), every chat's, with Speak a line to make another.
+  if (shelf === 'voice') {
+    $('#g-more').hidden = true;
+    $('#g-tools').hidden = true;
+    return app.drawVoiceShelf?.(box, { q, speak: true });
+  }
+  $('#g-tools').hidden = false;
   try {
     const g = await api(`/api/images/gallery?shelf=${shelf}&offset=${more ? galleryList.length : 0}&limit=${PAGE}${q ? `&q=${encodeURIComponent(q)}` : ''}${inChat}`);
     if (turn !== galleryTurn) return;
@@ -589,11 +939,6 @@ $('#g-search').addEventListener('input', () => {
 $('#g-more').addEventListener('click', () => drawGallery(true));
 drawGallery();
 
-// More options stays as it was left.
-const moreBox = $('#more-options');
-try { if (localStorage.getItem('app-more-options') === '1') moreBox.open = true; } catch { /* not kept */ }
-moreBox.addEventListener('toggle', () => { try { localStorage.setItem('app-more-options', moreBox.open ? '1' : '0'); } catch { /* not kept */ } });
-
 // Old drafts: the person's choice (gear), kept on the server.
 const draftDays = $('#draft-days');
 api('/api/models').then(m => { draftDays.value = draftDays.dataset.was = String(m.settings?.draftDays ?? 0); }).catch(() => undefined);
@@ -641,8 +986,37 @@ enhanceBtn.addEventListener('click', async () => {
   }
 });
 
+/**
+ * The other pictures being drawn on linked PCs while the window follows the newest one (T1): one line each, with its
+ * artist, PC, step and its own Cancel, so a picture here or on one PC never hides one going on another.
+ */
+let alsoSig = '';
+function drawAlso(list) {
+  const box = $('#img-also');
+  if (!box) return;
+  const rows = Array.isArray(list) ? list : [];
+  // The time so far is in it by 5 s, so a row starting (its model loading, which can take minutes) does not stand still.
+  const sig = JSON.stringify(rows.map(j => [j.id, j.state, j.step, j.steps, Math.floor((j.elapsed ?? 0) / 5)]));
+  if (sig === alsoSig) return;
+  alsoSig = sig;
+  box.hidden = !rows.length;
+  box.replaceChildren(...rows.map(j => {
+    const pc = app.pcShown?.(j.pc, j.pcName) ?? j.pcName;
+    const where = j.state === 'drawing' && j.steps ? `step ${j.step} of ${j.steps}` : j.state === 'decoding' || j.state === 'finishing' ? 'finishing' : 'starting';
+    return el('div', { class: 'net-row' },
+      el('span', { class: 'net-name' }, el('strong', { text: `Also drawing: ${j.who} on "${pc}"` }), el('br'), el('span', { class: 'hint', text: `${where} · ${secondsText(j.elapsed)} so far · ${j.prompt}` })),
+      el('button', { class: 'btn quiet', type: 'button', text: 'Cancel', onclick: e => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        // A cancel that failed can be pressed again.
+        api('/api/images/cancel', { id: j.id }).catch(error => { b.disabled = false; showFault(fault, error.message); });
+      } }));
+  }));
+}
+
 app.onStatus.push(s => {
   drawJob(s.panes.image.job);
+  drawAlso(s.panes.image.also);
   drawChatHelp(s);
 });
 
@@ -667,11 +1041,19 @@ app.drawAs = async () => {
   const people = d.staff.filter(s => s.kind === 'image');
   $('#draw-as-row').hidden = !people.length;
   drawAs.replaceChildren(el('option', { value: '', text: "No artist: this PC's picture model" }),
-    ...people.map(p => el('option', { value: p.id, text: `${p.name} · ${d.roles.find(r => r.id === p.role)?.name ?? 'Artist'} · ${String(p.model ?? '').startsWith('remote:') ? 'draws on a linked PC' : 'this PC'}` })));
+    ...people.map(p => el('option', { value: p.id, 'data-role': (d.roles.find(r => r.id === p.role)?.name ?? 'Artist').toLowerCase(), text: `${p.name} · ${d.roles.find(r => r.id === p.role)?.name ?? 'Artist'} · ${String(p.model ?? '').startsWith('remote:') ? 'draws on a linked PC' : 'this PC'}` })));
   drawAs.value = people.some(p => p.id === m.settings.imageAs) ? m.settings.imageAs : '';
+  await stylePick.load(true);
+  drawStyleTiles();
+  // The form as this artist (or this PC's pane) last had it.
+  if (formKey() !== shownForm) { shownForm = formKey(); loadForm(); }
   await drawNodeArtist(d);
 };
+let shownForm = formKey();
+loadForm();
 drawAs.addEventListener('change', async () => {
+  shownForm = formKey();
+  loadForm();
   await api('/api/settings', { imageAs: drawAs.value }).catch(() => undefined);
   drawNodeArtist();
 });
@@ -705,18 +1087,21 @@ const sourcesBox = $('#sources');
 /** A source's words and settings into the form, for Draw (which goes wherever the artist chosen draws, a linked PC too). */
 function sourceToForm(s) {
   promptBox.value = s.prompt;
-  $('#img-mode').value = s.mode;
-  $('#img-w').value = s.target.width;
-  $('#img-h').value = s.target.height;
+  const style = ['auto', 'blog', 'icon', 'cartoon'].includes(s.mode) ? s.mode : 'auto';
+  setRadio('img-style', style);
+  $('#img-custom').checked = s.mode === 'custom';
+  $('#img-exact-w').value = s.target.width;
+  $('#img-exact-h').value = s.target.height;
   $('#img-fit').value = ['crop', 'pad', 'stretch'].includes(s.fit) ? s.fit : 'crop';
   const known = s.settings === 'known';
   $('#img-random').checked = !known;
-  $('#img-seed').disabled = !known;
   $('#img-seed').value = known ? s.seed : '';
   $('#img-steps').value = known ? s.steps : '';
   $('#img-cfg').value = known ? s.cfg : '';
   if (known && [...$('#img-sampler').options].some(o => o.value === s.sampler)) $('#img-sampler').value = s.sampler;
-  $('#more-options').open = true;
+  advBox.open = true;
+  syncForm();
+  saveForm();
   sourcesBox.close();
   updatePlan();
   promptBox.focus();

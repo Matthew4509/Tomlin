@@ -262,6 +262,11 @@ app.blogDraw = async (prompt, as) => {
   }
 };
 
+/** Files, opened at `path` (a project page's View code and its writing): the list is read as usual beside it. */
+app.openFileAt = async path => {
+  $('#files-open').click();
+  await openFile(path);
+};
 $('#files-open').addEventListener('click', async () => {
   fileFault(null);
   // The blog writer's own tone, starting from the chat's.

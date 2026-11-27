@@ -75,14 +75,16 @@ test('a project\'s menu in Recent chats: New chat (in that project, with whoever
   assert.match(page, /async function newInProject\(project, who\) \{\s*try \{\s*await showOpened\(await api\('\/api\/chats\/new', \{ who, plain: plainWho\(\), project \}\)\);/);
 });
 
-test('the right-hand panel has no Chats tab: Tools first, and See all opens the All chats page', async () => {
+test('the right-hand panel has no Chats tab: Project | Tools | Office, and See all opens the All chats page', async () => {
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
   const page = readFileSync(new URL('../public/chats.js', import.meta.url), 'utf8');
   assert.doesNotMatch(html, /id="tab-chats"|id="panel-chats"|id="rail-chats"/);
-  assert.match(html, /<h2 id="subjects-title">Tools \| Staff overview<\/h2>/);
-  assert.match(html, /id="tab-tools" aria-controls="panel-tools" aria-selected="true">Tools<\/button>/);
-  assert.match(page, /const sideTabs = \[\$\('#tab-tools'\), \$\('#tab-staff'\)\];/);
+  assert.match(html, /<h2 id="subjects-title">Project \| Tools \| Office<\/h2>/);
+  assert.match(html, /id="tab-project" aria-controls="panel-project" aria-selected="true">Project<\/button>/);
+  assert.match(html, /id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1">Tools<\/button>/);
+  assert.match(html, /id="tab-staff" aria-controls="panel-staff" aria-selected="false" tabindex="-1">Office<\/button>/);
+  assert.match(page, /const sideTabs = \[\$\('#tab-project'\), \$\('#tab-tools'\), \$\('#tab-staff'\)\];/);
   assert.match(page, /const shown = entries\.slice\(0, most\);/);
   assert.match(page, /\$\('#rail-recent-all'\)\.addEventListener\('click', \(\) => app\.openAllChats\(\)\);/);
 });

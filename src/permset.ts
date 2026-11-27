@@ -67,7 +67,7 @@ export function permSetSide(d: PermSetDeps) {
   return async (body: Record<string, unknown>, who: { key: string; name: string; link?: string }): Promise<{ status: number; json: Record<string, unknown> }> => {
     const name = d.pcName();
     // Not answered without the owner's tick: the door would only serve to try PINs.
-    if (!d.allowed()) return { status: 403, json: { error: `"${name}" does not let a host change its permissions (its owner ticks "Allow host to test and change model run settings" there, under Network).` } };
+    if (!d.allowed()) return { status: 403, json: { error: `"${name}" does not let a host change its permissions (its owner ticks "Allow host to test and change model run settings" there, on This PC).` } };
     const set = cleanPermSet(body.set);
     if (typeof set === 'string') return { status: 400, json: { error: `${set.charAt(0).toUpperCase()}${set.slice(1)}.` } };
     const pin = await d.pinCheck(body.appPin, who.key, body.hostPin !== undefined ? { pin: body.hostPin, link: who.link } : undefined);

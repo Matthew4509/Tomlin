@@ -4,12 +4,12 @@
 // tools format and still ignore it. The plain functions are tested in test/capabilities.test.ts.
 import { readdirSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { readHeader } from './gguf.ts';
 
 /** What one model can do. */
 export interface Caps {
-  /** It can read pictures (with its vision add-on): TOMLIN does not send pictures to a chat model yet. */
+  /** It can read pictures (with its vision add-on): a picture added to a chat is sent to it when the add-on is beside it on this PC. */
   images: boolean;
   /** Its chat format has a place for tools (web search, reading pages, files). */
   tools: boolean;
@@ -70,18 +70,39 @@ const quantOf = /[-_.](?:UD[-_])?(?:I?Q\d[\w]*|F16|BF16|F32|MXFP4\w*|NVFP4\w*)$/
 const mmprojCore = (file: string) => file.replace(/\.gguf$/i, '').replace(/mmproj/i, '').replace(quantOf, '').replace(/^[-_.]+|[-_.]+$/g, '').toLowerCase();
 
 /**
- * Whether one of the files beside a model is its vision add-on: an mmproj named for it, or one with a general name
- * ("mmproj-F16.gguf") when the folder holds no other model.
+ * The file beside a model that is its vision add-on: an mmproj named for it, or one with a general name
+ * ("mmproj-F16.gguf") when the folder holds no other model. With several, F16 first, then Q8_0, BF16, the rest, and F32
+ * last (the largest). Null when there is none.
  */
-export function visionFileFor(modelFile: string, folder: readonly string[]): boolean {
+export function visionFileOf(modelFile: string, folder: readonly string[]): string | null {
   const mine = basename(modelFile).replace(/\.gguf$/i, '').toLowerCase();
-  const projs = folder.filter(n => /mmproj/i.test(n));
-  if (!projs.length) return false;
+  const projs = folder.filter(n => /mmproj/i.test(n) && /\.gguf$/i.test(n));
+  if (!projs.length) return null;
   const models = folder.filter(n => /\.gguf$/i.test(n) && !/mmproj/i.test(n) && !/^mtp[-_]/i.test(n));
-  return projs.some(p => {
+  const fits = projs.filter(p => {
     const core = mmprojCore(p);
     return core ? mine.includes(core) || core.includes(mine.replace(quantOf, '')) : models.length <= 1;
   });
+  const rank = (n: string) => [/[-_.]F16\.gguf$/i, /[-_.]Q8_0\.gguf$/i, /[-_.]BF16\.gguf$/i, /[-_.]F32\.gguf$/i].findIndex(r => r.test(n));
+  const order = (n: string) => (rank(n) === 3 ? 9 : rank(n) < 0 ? 5 : rank(n));
+  return fits.sort((a, b) => order(a) - order(b) || a.localeCompare(b))[0] ?? null;
+}
+
+/** Whether one of the files beside a model is its vision add-on (visionFileOf finds one). */
+export function visionFileFor(modelFile: string, folder: readonly string[]): boolean {
+  return visionFileOf(modelFile, folder) !== null;
+}
+
+/** The full path of the vision add-on beside a model file on this PC, or null (none, or its folder cannot be read). */
+export function visionPathFor(modelPath: string): string | null {
+  let folder: string[];
+  try {
+    folder = readdirSync(dirname(modelPath));
+  } catch {
+    return null;
+  }
+  const found = visionFileOf(modelPath, folder);
+  return found ? join(dirname(modelPath), found) : null;
 }
 
 const cache = new Map<string, Promise<Caps | null>>();

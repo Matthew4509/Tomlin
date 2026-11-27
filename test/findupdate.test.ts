@@ -21,7 +21,7 @@ test('the Settings menu has Manage updates of its own, after This PC, opening Up
   assert.match(page('homeview.js'), /b\.dataset\.setup === 'updates'\) app\.openUpdateInstall\?\.\(\)/);
   assert.match(page('home.js'), /app\.openUpdateInstall = \(\) => \{/);
   // A page of its own, so that menu entry is the one marked there.
-  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage'];/);
+  assert.match(page('home.js'), /const SETUP_VIEWS = \['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage', 'cluster', 'agents', 'memory'];/);
 });
 
 test('Update this install has Check git, one function for it, and a download followed on its own page', () => {

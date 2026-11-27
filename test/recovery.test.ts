@@ -83,3 +83,22 @@ test('a new set voids the old one', async () => {
   assert.equal(await set.use(first[0]), false);
   assert.equal(await set.use(second[0]), true);
 });
+
+test('the lock screen asks for a recovery code in two boxes of five with the dash between, and moves between them', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const lock = readFileSync(new URL('../public/lock.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(html, /<input id="applock-code-a"[^>]*maxlength="11"[^>]*>\n\s+<span class="code-dash" aria-hidden="true">-<\/span>\n\s+<input id="applock-code-b"[^>]*maxlength="5"/);
+  assert.doesNotMatch(html, /id="applock-code"/);
+  // Sent as XXXXX-XXXXX; the server reads it without the dash either way.
+  assert.match(lock, /code: recoveryCodeTyped\(\),/);
+  assert.match(lock, /if \(v\.length >= 5\) \{\n\s+codeBoxB\.focus\(\);/);
+  assert.match(lock, /if \(e\.key === 'Backspace' && !codeBoxB\.value\) \{/);
+  // A whole code pasted fills both boxes; the same split the input handler does.
+  const codeChars = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const pasted = codeChars('abcde-fghjk');
+  assert.deepEqual([pasted.slice(0, 5), pasted.slice(5, 10)], ['ABCDE', 'FGHJK']);
+  assert.match(lock, /const codeChars = v => v\.toUpperCase\(\)\.replace\(\/\[\^A-Z0-9\]\/g, ''\);/);
+  const { cleanCode } = await import('../src/recovery.ts');
+  assert.equal(cleanCode('ABCDE-FGHJK'), cleanCode('ABCDEFGHJK'));
+});

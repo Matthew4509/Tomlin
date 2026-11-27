@@ -15,6 +15,7 @@ import * as runnerpush from '../runnerpush.ts';
 import * as runset from '../runset.ts';
 import { WEB_CTX, webCtxFarWords, webCtxFarWhy } from '../webctx.ts';
 import * as brains from '../brains.ts';
+import { VIDEO_MODELS, shortVideoName } from '../videomodels.ts';
 import * as pb from '../projectbackup.ts';
 import { broughtBackWhy, recordBrought, recordSent } from '../keep.ts';
 import { cleanPin, hashSecret } from '../lock.ts';
@@ -136,18 +137,40 @@ export async function network(known = false) {
     free: await carry.freeBytes(d.carry.chatDir).then(n => (Number.isFinite(n) ? n : null)).catch(() => null),
     spare: carry.SPARE,
     rows: carry.networkList(pcs, { chatFiles: chats.map(m => m.id), pictures: pictures.filter(m => m.installed).map(m => m.id) }),
-    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length,
+    pcs: await Promise.all(pcs.map(async pc => ({ id: pc.id, name: pc.name, ok: pc.ok, send: carry.sendWhy(pc), sendVideo: carry.sendVideoWhy(pc), fetch: carry.fetchWhy(pc), fetchCode: carry.fetchCode(pc), backup: carry.backupWhy(pc), projects: carry.projectsWhy(pc), projectsDone: (await projectsDone())[pc.id] ?? null, shares: pc.models.length,
       // Free space on the drive its models go to, as its hello said it (null: not known), for "Insufficient space" on a copy.
       free: carry.modelRoom(pc)?.free ?? null,
+      // Its video models, as its hello says (null: a TOMLIN before 2.1.34 does not say), each marked when this PC has it too.
+      videos: videoList(pc.id),
       // What tells the PCs apart (shown on hover), and when an off one last answered: both from its last hello.
-      specs: specsOf(pc.memory ?? lastHello(pc.id)?.memory), cpu: lastHello(pc.id)?.cpu ?? null, seenAt: lastHello(pc.id)?.at ?? null, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(d.runner.runtimes.idsOf('llama', 'cuda').map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
+      specs: specsOf(pc.memory ?? lastHello(pc.id)?.memory), cpu: lastHello(pc.id)?.cpu ?? null, seenAt: lastHello(pc.id)?.at ?? null, runner: pc.runner ?? null, runnerWhy: runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }), runnerWhys: Object.fromEntries(sendableRunners().map(id => [id, runnerpush.sendRunnerWhy({ ...pc, runner: pc.runner ?? null }, id)])) }))),
     mine: [
       ...chats.filter(m => !m.id.startsWith('ollama:')).map(m => ({ kind: 'chat' as const, id: m.id, name: m.name, bytes: m.bytes })),
       ...pictures.filter(m => m.installed).map(m => ({ kind: 'image' as const, id: m.id, name: m.name.replace(/\s*\(.*\)$/, ''), bytes: m.bytes ?? 0 })),
+      ...videosHere(),
     ],
     transfers: transfers.view(),
   };
 }
+
+/** A linked PC's video models as its last hello said them, or null when it does not say (before 2.1.34). */
+function videoList(pc: string): { id: string; name: string; here: boolean }[] | null {
+  const ids = lastHello(pc)?.videos;
+  if (!ids) return null;
+  return ids.flatMap(id => {
+    const m = VIDEO_MODELS.find(x => x.id === id);
+    return m ? [{ id, name: shortVideoName(m), here: !!d.carry.videoFiles(id) }] : [];
+  });
+}
+
+/** This PC's downloaded video models, for what it can send (each whole: every file here). */
+const videosHere = () => VIDEO_MODELS.flatMap(m => {
+  const files = d.carry.videoFiles(m.id);
+  return files ? [{ kind: 'video' as const, id: m.id, name: shortVideoName(m), bytes: files.reduce((n, f) => n + f.bytes, 0) }] : [];
+});
+
+/** The runner builds that can be sent to a linked PC: the CUDA chat runners, and the CUDA one that makes pictures and video. */
+const sendableRunners = () => [...d.runner.runtimes.idsOf('llama', 'cuda'), ...d.runner.runtimes.idsOf('sd', 'cuda')];
 
 const GBs = (n: number) => (n >= 2 ** 30 ? `${(n / 2 ** 30).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 2 ** 20))} MB`);
 
@@ -200,17 +223,20 @@ export function destFor(kind: 'chat' | 'image', model: string, from: string) {
 export async function sendTo(b: Record<string, unknown>) {
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
   if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Close this window and open it again.' } };
-  const kind = b.kind === 'image' ? 'image' : 'chat';
+  const kind = carry.carryKind(b.kind);
   const model = String(b.model ?? '');
   const pc = (await netPcs()).find(x => x.id === r.id)!;
-  const why = carry.sendWhy(pc);
+  const why = kind === 'video' ? carry.sendVideoWhy(pc) : carry.sendWhy(pc);
   if (why) return { status: 409, body: { error: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` } };
-  const files = kind === 'image' ? d.carry.pictureFiles(model) : d.carry.chatFiles(model);
-  if (!files?.length) return { status: 404, body: { error: 'That model is not on this PC any more (or it is an Ollama model, which cannot be sent).' } };
-  const name = kind === 'image' ? (d.pictureModels().find(m => m.id === model)?.name.replace(/\s*\(.*\)$/, '') ?? model) : (d.chatList().find(m => m.id === model)?.name ?? model);
+  // A video model goes whole only: every file of it, once all of them are downloaded here.
+  const files = kind === 'video' ? d.carry.videoFiles(model) : kind === 'image' ? d.carry.pictureFiles(model) : d.carry.chatFiles(model);
+  if (!files?.length) return { status: 404, body: { error: kind === 'video' ? 'That video model is not all downloaded on this PC (Models), so nothing was sent.' : 'That model is not on this PC any more (or it is an Ollama model, which cannot be sent).' } };
+  const video = kind === 'video' ? VIDEO_MODELS.find(m => m.id === model) : undefined;
+  const name = video ? shortVideoName(video) : kind === 'image' ? (d.pictureModels().find(m => m.id === model)?.name.replace(/\s*\(.*\)$/, '') ?? model) : (d.chatList().find(m => m.id === model)?.name ?? model);
   const w = wireFor(r);
   const t = transfers.start({ kind: 'send', what: name, pc: r.id, pcName: r.name }, async (progress, signal) => {
     const sent = await carry.push(w, { kind, model, name, files, progress, signal });
+    if (kind === 'video') return sent ? `${name} is on "${r.name}" now, checked: a Videographer there can make clips with it once it has the video runner (Models, Model runners).` : `${name} was on "${r.name}" already: nothing was sent.`;
     return sent ? `${name} is on "${r.name}" now. This PC can use it.` : `${name} was on "${r.name}" already: nothing was sent.`;
   });
   return 'error' in t ? { status: 409, body: t } : { status: 200, body: { transfer: t } };
@@ -332,8 +358,8 @@ export async function runnerTo(b: Record<string, unknown>) {
   const id = String(b.id ?? '');
   const pin = d.runner.runtimes.pins[id];
   // A runner that PC pins and this one does not (the crash notice suggests from that PC's own list): this PC has nothing to send.
-  if (!pin && /^llama-cuda\d{0,2}$/.test(id)) return { status: 409, body: { error: `This PC's TOMLIN does not pin ${id}, so it cannot send it: update TOMLIN on this PC first, or download it on that PC (Models, Model runners).` } };
-  if (!pin || pin.device !== 'cuda' || pin.engine !== 'llama') return { status: 400, body: { error: 'Only the NVIDIA (CUDA) chat runner can be sent to a linked PC; the others come with TOMLIN.' } };
+  if (!pin && /^(llama|sd)-cuda\d{0,2}$/.test(id)) return { status: 409, body: { error: `This PC's TOMLIN does not pin ${id}, so it cannot send it: update TOMLIN on this PC first, or download it on that PC (Models, Model runners).` } };
+  if (!pin || pin.device !== 'cuda' || (pin.engine !== 'llama' && pin.engine !== 'sd')) return { status: 400, body: { error: 'Only the NVIDIA (CUDA) runners can be sent to a linked PC; the others come with TOMLIN.' } };
   const r = (await d.store.settings()).remotes.find(x => x.id === b.pc);
   if (!r) return { status: 404, body: { error: 'That PC is not linked to this one any more. Open Network to link it again.' } };
   const pc = (await netPcs()).find(x => x.id === r.id)!;
@@ -388,7 +414,7 @@ export async function removeModelOn(b: Record<string, unknown>) {
 
 /**
  * Changes a linked PC's sharing permissions from here (src/permset.ts): that PC checks its owner's tick "Allow host to test
- * and change model run settings" and its app lock PIN typed here (`nodePin`), or the host PIN it holds (`hostPin`). One PC,
+ * and change model run settings" and its app lock PIN typed here (`nodePin`), or this PC's admin key when it holds it. One PC,
  * one change per call; `set` is { lend: true, plainLinks: false, ... }.
  */
 export async function permSetOn(b: Record<string, unknown>) {
@@ -618,8 +644,7 @@ export async function updatePc(b: Record<string, unknown>) {
   // That PC asks its own app lock PIN for an update (audit X2): typed on this page, checked there at once, so a wrong
   // one is said before anything starts. An older PC asks none.
   const asksPin = Array.isArray(h.can) && h.can.includes('update-pin');
-  // Or the host PIN (src/hostpin.ts), typed once for Update all or in that PC's own PIN window: only to a PC that holds
-  // it from this one.
+  // Or this PC's admin key (src/hostpin.ts HostKey) in its place, with nothing typed, to a PC that holds it from this one.
   const typed = await pinTyped(b, h.can.includes(hostpin.CAN) && h.hostPin === true && !h.hostKey, h.hostKey ?? '');
   const pin = 'appPin' in typed ? typed.appPin : '';
   const hostPin = 'hostPin' in typed ? typed.hostPin : '';

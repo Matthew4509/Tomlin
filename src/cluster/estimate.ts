@@ -65,19 +65,44 @@ export function compositions(k: number, parts: number): number[][] {
  * (a real router is skewed, which is why hot experts may be copied: see the plan). Member i takes `perExpertMs[i]` for
  * each chosen expert it holds, plus `netMs[i]` when it has any (0 for the PC that does the attention: its own experts
  * run while it waits for the others). The layer is done when the slowest member is done.
+ *
+ * Worked out from the chance that the slowest member is done by each possible time (every time a member can take, in
+ * order), not by listing every way the picks can fall: listing them grew with the number of PCs to the power of the
+ * picks, and with 8 PCs and 8 picks the expert planner held the server for seconds. The answer is the same.
  */
 export function expectedLayerMs(owned: number[], k: number, perExpertMs: number[], netMs: number[]): number {
   const experts = owned.reduce((a, b) => a + b, 0);
   const all = choose(experts, k);
   if (!(all > 0)) return 0;
+  const time = (i: number, n: number) => n * perExpertMs[i] + netMs[i];
+  // ways[i][n]: the ways member i can hold n of the picks (n up to k).
+  const ways = owned.map(o => Array.from({ length: Math.min(k, Math.max(0, o)) + 1 }, (_, n) => choose(o, n)));
+  const times: number[] = [];
+  ways.forEach((w, i) => { for (let n = 1; n < w.length; n++) times.push(time(i, n)); });
+  times.sort((a, b) => a - b);
   let sum = 0;
-  for (const n of compositions(k, owned.length)) {
-    let p = 1;
-    for (let i = 0; i < n.length; i++) p *= choose(owned[i], n[i]);
-    if (!p) continue;
-    let worst = 0;
-    for (let i = 0; i < n.length; i++) if (n[i] > 0) worst = Math.max(worst, n[i] * perExpertMs[i] + netMs[i]);
-    sum += (p / all) * worst;
+  let before = 0;
+  const poly = new Float64Array(k + 1);
+  const next = new Float64Array(k + 1);
+  for (let j = 0; j < times.length; j++) {
+    const t = times[j];
+    if (j > 0 && t === times[j - 1]) continue;
+    // The chance every member with picks is done by t: the picks counted with each member held to what it finishes by t.
+    poly.fill(0);
+    poly[0] = 1;
+    for (let i = 0; i < ways.length; i++) {
+      let most = 0;
+      while (most + 1 < ways[i].length && time(i, most + 1) <= t) most++;
+      next.fill(0);
+      for (let a = 0; a <= k; a++) {
+        if (!poly[a]) continue;
+        for (let n = 0; n <= most && a + n <= k; n++) next[a + n] += poly[a] * ways[i][n];
+      }
+      poly.set(next);
+    }
+    const done = poly[k] / all;
+    if (done > before) sum += t * (done - before);
+    before = done;
   }
   return sum;
 }

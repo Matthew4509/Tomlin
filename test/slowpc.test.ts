@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const links = read('src/jobrun/links.ts');
 const node = read('src/jobrun/node.ts');
 

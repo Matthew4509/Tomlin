@@ -17,7 +17,9 @@ async function notebookList(scope, title, hint) {
     fault.hidden = !t;
     fault.textContent = t ?? '';
   };
-  const draw = lines => {
+  // The Inbox (a model's suggestions, not yet kept) is the editor's to show: here only what is read.
+  const draw = all => {
+    const lines = all.filter(l => l.group !== 'Inbox');
     list.replaceChildren();
     if (!lines.length) list.append(el('li', { class: 'hint nb-empty', text: 'Nothing kept yet.' }));
     for (const l of lines) {
@@ -27,12 +29,13 @@ async function notebookList(scope, title, hint) {
       const del = el('button', { class: 'link', type: 'button', text: 'Delete' });
       const row = el('li', { class: 'nb-line' }, el('span', { class: 'nb-body' }, text, from), el('span', { class: 'nb-acts' }, edit, del));
       edit.addEventListener('click', () => {
-        const input = el('input', { type: 'text', maxlength: '300', value: l.text, 'aria-label': 'Change this line' });
+        const input = el('textarea', { rows: String(Math.min(12, Math.max(2, l.text.split('\n').length + 1))), maxlength: String(ENTRY_MAX), 'aria-label': 'Change this entry' });
+        input.value = l.text;
         const save = el('button', { class: 'btn primary', type: 'button', text: 'Save' });
         const cancel = el('button', { class: 'btn quiet', type: 'button', text: 'Cancel' });
-        save.addEventListener('click', () => act({ action: 'edit', id: l.id, text: input.value }));
+        save.addEventListener('click', () => act({ action: 'edit', id: l.id, text: input.value, was: l.text }));
         input.addEventListener('keydown', e => {
-          if (e.key === 'Enter') {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             save.click();
           }
@@ -53,7 +56,7 @@ async function notebookList(scope, title, hint) {
         undo.hidden = false;
         undo.replaceChildren(`Deleted: "${l.text.length > 60 ? `${l.text.slice(0, 60)}…` : l.text}" `, el('button', { class: 'link', type: 'button', text: 'Undo', onclick: async () => {
           undo.hidden = true;
-          await act({ action: 'add', text: l.text, from: l.from });
+          await act({ action: 'add', text: l.text, from: l.from, group: l.group });
         } }));
       });
       list.append(row);
@@ -62,14 +65,20 @@ async function notebookList(scope, title, hint) {
   async function act(body) {
     say(null);
     try {
-      draw((await api('/api/memory', { scope, ...body })).lines);
+      draw((await memApi({ scope, ...body })).lines);
       return true;
     } catch (e) {
-      say(e.message);
+      if (!e.quiet) say(e.message);
       return false;
     }
   }
-  const add = el('input', { type: 'text', maxlength: '300', placeholder: 'A fact to keep, in one line', 'aria-label': `Add a line to ${title}` });
+  const add = el('textarea', { rows: '2', maxlength: String(ENTRY_MAX), placeholder: 'A fact to keep (Ctrl+Enter adds it)', 'aria-label': `Add an entry to ${title}` });
+  add.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
   const addBtn = el('button', { class: 'btn', type: 'submit', text: 'Add' });
   const form = el('form', { class: 'nb-add' }, add, addBtn);
   form.addEventListener('submit', async e => {
@@ -175,38 +184,77 @@ function notebookButtons(chat) {
   }).catch(() => undefined);
 }
 
-/** A Pin under a message: its text (first 300 characters) becomes a line in this chat's notebook. */
+/** The most an entry keeps (src/memory.ts ENTRY_MAX). */
+const ENTRY_MAX = 4000;
+
+/**
+ * A change to a notebook. An entry that looks like orders for a model (src/promptscan.ts, as a chat message is read)
+ * comes back 409 with what was found: the same warning as a chat message's, and it is kept only when he ticks and goes on.
+ */
+async function memApi(body) {
+  try {
+    return await api('/api/memory', body);
+  } catch (e) {
+    if (e.status !== 409 || !e.data?.scan) throw e;
+    const go = await app.scanWarn(e.data.scan, e.data.text ?? String(body.text ?? ''), { title: 'This memory entry looks risky', hint: 'Memory is sent to the model on every turn, so words like these would act on every answer, not only one. Keep it only if you wrote it yourself and know what it does.' });
+    if (!go) throw Object.assign(new Error('Not kept.'), { quiet: true });
+    return api('/api/memory', { ...body, scanOk: true });
+  }
+}
+app.memApi = memApi;
+
+/** A Pin under a message: its text (up to 4,000 characters, his lines kept) becomes an entry in this chat's notebook. */
 app.pinButton = text => {
   const who = String(app.chatWho?.() ?? '');
   if (who.startsWith('node:') || !text?.trim()) return null;
   const b = el('button', { class: 'link pin icon-act', type: 'button', title: 'Pin: keep this in Memory (you can change it there)', 'aria-label': 'Pin: keep this in Memory' }, app.lineIcon(...app.PIN_ICON));
   b.addEventListener('click', async () => {
     try {
+      const whole = text.trim();
+      // Longer than an entry keeps: asked once, never cut without a word.
+      if (whole.length > ENTRY_MAX) {
+        const box = el('div', { class: 'pin-ask', hidden: true });
+        b.after(box);
+        const ok = await askHere(box, `This message has ${whole.length.toLocaleString()} characters; a memory entry keeps ${ENTRY_MAX.toLocaleString()}. Keep the first ${ENTRY_MAX.toLocaleString()} characters?`, 'Keep the first part', 'Cancel', false);
+        box.remove();
+        if (!ok) return;
+      }
       const r = await api(readingAddress(app.chatId, app.chatWho?.()));
-      await api('/api/memory', { action: 'add', scope: r.scope, text, from: 'pin' });
-      // A line keeps at most 300 characters: a longer message is cut, and says so.
-      b.replaceWith(el('span', { class: 'pin-done', text: `Pinned in ${r.book}${text.trim().length > 300 ? ' (its first 300 characters: change the line there)' : ''}` }));
+      await memApi({ action: 'add', scope: r.scope, text: whole.slice(0, ENTRY_MAX), from: 'pin' });
+      b.replaceWith(el('span', { class: 'pin-done', text: `Pinned in ${r.book}${whole.length > ENTRY_MAX ? ` (its first ${ENTRY_MAX.toLocaleString()} characters: change it there)` : ''}` }));
     } catch (e) {
-      app.chatNote?.(e.message);
+      if (!e.quiet) app.chatNote?.(e.message);
     }
   });
   return b;
 };
 
-/** A model's suggestion after an answer: Save writes it to the notebook; No drops it. */
+/**
+ * A model's suggestion after an answer. It waits in the notebook's Inbox (src/server/chat.ts; never sent to a model):
+ * Keep moves it into the notebook, Drop takes it out, and Inbox opens the editor there. One already kept word for word
+ * says nothing. With no Inbox place (the notebook full): Save / No, as before.
+ */
 app.offerMemory = (data, out) => {
-  if (!data.suggest) return;
-  const save = el('button', { class: 'btn', type: 'button', text: 'Save' });
-  const no = el('button', { class: 'btn quiet', type: 'button', text: 'No' });
-  const box = el('div', { class: 'mem-suggest' }, el('span', { text: `Keep this in ${data.book}? "${data.suggest}"` }), save, no);
-  save.addEventListener('click', async () => {
+  if (!data.suggest || data.suggestKept) return;
+  const done = (text, cls = 'hint') => box.replaceChildren(el('span', { class: cls, text }));
+  const run = async (body, said) => {
     try {
-      await api('/api/memory', { action: 'add', scope: data.scope, text: data.suggest, from: 'suggested' });
-      box.replaceChildren(el('span', { class: 'hint', text: `Saved in ${data.book}.` }));
+      await memApi({ scope: data.scope, ...body });
+      done(said);
     } catch (e) {
-      box.replaceChildren(el('span', { class: 'fault', text: e.message }));
+      if (!e.quiet) done(e.message, 'fault');
     }
-  });
-  no.addEventListener('click', () => box.remove());
+  };
+  const box = el('div', { class: 'mem-suggest' });
+  if (data.suggestId) {
+    box.append(el('span', { text: `Suggested for ${data.book}, waiting in its Inbox: "${data.suggest}"` }),
+      el('button', { class: 'btn', type: 'button', text: 'Keep', onclick: () => run({ action: 'edit', id: data.suggestId, group: 'Notes' }, `Kept in ${data.book}.`) }),
+      el('button', { class: 'btn quiet', type: 'button', text: 'Drop', onclick: () => run({ action: 'delete', id: data.suggestId }, 'Dropped.') }),
+      el('button', { class: 'link', type: 'button', text: 'Inbox', title: 'Open the memory editor at the Inbox', onclick: () => app.openMemory?.(data.scope, { inbox: true, back: 'chat' }) }));
+  } else {
+    box.append(el('span', { text: `Keep this in ${data.book}? "${data.suggest}"` }),
+      el('button', { class: 'btn', type: 'button', text: 'Save', onclick: () => run({ action: 'add', text: data.suggest, from: 'suggested' }, `Saved in ${data.book}.`) }),
+      el('button', { class: 'btn quiet', type: 'button', text: 'No', onclick: () => box.remove() }));
+  }
   out.after(box);
 };

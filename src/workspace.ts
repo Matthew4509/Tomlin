@@ -1,6 +1,7 @@
 // Files: open, edit and save plain text files in one workspace folder the person chooses. Nothing outside the folder is
 // touched, nothing is run, nothing is deleted. The plain functions are tested in test/workspace.test.ts.
-import { realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { constants as fsConstants, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeAtomic } from './atomic.ts';
@@ -13,8 +14,14 @@ export const TEXT_EXT = new Set(['.md', '.txt', '.html', '.htm', '.css', '.js', 
   '.java', '.c', '.h', '.cpp', '.cs', '.go', '.rs', '.rb', '.kt', '.swift', '.vue', '.scss', '.ini', '.sh', '.ps1']);
 export const MAX_BYTES = 1 << 20;
 const MAX_LISTED = 500;
-// A project three folders deep keeps its specialists' work two deeper (src/folders.ts): clients/acme/site/specialists/writer.
-const MAX_DEPTH = 5;
+// A project three folders deep keeps its specialists' work two deeper (src/folders.ts): clients/acme/site/specialists/writer,
+// and a character's pictures three deeper: clients/acme/site/specialists/characters/Ember/card.json (seven parts).
+const MAX_DEPTH = 6;
+/**
+ * The longest path inside the workspace: three folders of a project, its characters folder, a 40-letter card name and
+ * a picture's file name fit. Node reads and writes past Windows' old 260-character limit itself.
+ */
+const MAX_PATH_CHARS = 280;
 
 export interface Entry {
   /** Relative to the workspace, with forward slashes. */
@@ -25,10 +32,12 @@ export interface Entry {
 
 /** A relative path inside the workspace, or null when it is not one (absolute, "..", hidden, odd characters, not a text file). */
 const RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+/** Whether this is one of Windows' device names (CON, NUL, COM1 ...), which can never be a file or a folder. */
+export const isDeviceName = (name: string): boolean => RESERVED.test(name.trim());
 
 export function cleanPath(input: unknown, mustBeText = true): string | null {
   const raw = String(input ?? '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
-  if (!raw || raw.length > 200 || /[\0<>:"|?*]/.test(raw)) return null;
+  if (!raw || raw.length > MAX_PATH_CHARS ||/[\0<>:"|?*]/.test(raw)) return null;
   const parts = raw.split('/');
   if (parts.some(p => !p || p === '.' || p === '..' || p.startsWith('.') || /[ .]$/.test(p))) return null;
   if (parts.length > MAX_DEPTH + 1) return null;
@@ -182,7 +191,13 @@ export async function filesUnder(root: string, rel: string): Promise<{ files: st
 
 /** The text files in the workspace, newest first. */
 export async function list(root: string): Promise<Entry[]> {
+  return (await listAll(root)).files;
+}
+
+/** The text files in the workspace, newest first, at most MAX_LISTED; `more` is true when there are others past them. */
+export async function listAll(root: string): Promise<{ files: Entry[]; more: boolean }> {
   const out: Entry[] = [];
+  let more = false;
   const walk = async (dir: string, depth: number): Promise<void> => {
     let names: import('node:fs').Dirent[];
     try {
@@ -191,18 +206,24 @@ export async function list(root: string): Promise<Entry[]> {
       return;
     }
     for (const d of names) {
-      if (out.length >= MAX_LISTED || d.name.startsWith('.') || d.name === 'node_modules') continue;
+      if (more) return;
+      if (d.name.startsWith('.') || d.name === 'node_modules') continue;
       const full = join(dir, d.name);
       if (d.isDirectory()) {
         if (depth < MAX_DEPTH) await walk(full, depth + 1);
       } else if (d.isFile() && TEXT_EXT.has(extname(d.name).toLowerCase())) {
+        // Past the limit, one more file is enough to say there are more: none of them is looked at.
+        if (out.length >= MAX_LISTED) {
+          more = true;
+          return;
+        }
         const s = await stat(full).catch(() => null);
         if (s) out.push({ path: relative(root, full).split(sep).join('/'), bytes: s.size, at: s.mtime.toISOString() });
       }
     }
   };
   await walk(root, 0);
-  return out.sort((a, b) => b.at.localeCompare(a.at));
+  return { files: out.sort((a, b) => b.at.localeCompare(a.at)), more };
 }
 
 export async function read(root: string, rel: unknown): Promise<{ path: string; text: string } | { error: string }> {
@@ -221,8 +242,40 @@ export async function read(root: string, rel: unknown): Promise<{ path: string; 
  */
 export const isProfileScript = (rel: string): boolean => /(^|\/)([\w.-]*_)?profile\.ps1$/i.test(rel);
 
+/**
+ * Told each file a save writes, unless the person typed it (`person`): src/modelsaved.ts remembers it, so a command run
+ * in that folder later asks first. Set by the server; none in the tests unless they set one.
+ */
+let onSaved: ((full: string) => void) | null = null;
+export const setOnSaved = (fn: ((full: string) => void) | null): void => {
+  onSaved = fn;
+};
+
+/**
+ * What the last save TOMLIN made of each file wrote (a hash, by lower-case full path), for as long as the app runs. A
+ * person's save drops the entry. A model's save that finds other text in the file knows the person changed it since.
+ */
+const lastWritten = new Map<string, string>();
+const hashOf = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
+
+/**
+ * Before a model's save overwrites the person's own text, that text is kept as "name.ext.original.bak": the time-stamped
+ * copies are trimmed to the newest few, so after many model saves the person's version would otherwise be gone. It is
+ * kept when the file holds text TOMLIN did not write last (the person edited it), and on a model's first save of the
+ * file since the app started when there is no such copy yet. Never trimmed; the next edit by the person replaces it.
+ */
+async function keepOriginal(full: string): Promise<void> {
+  const k = full.toLowerCase();
+  const was = lastWritten.get(k);
+  const now = await readFile(full).catch(() => null);
+  if (!now || (was !== undefined && hashOf(now) === was)) return;
+  const copy = `${full}.original.bak`;
+  if (was === undefined && (await stat(copy).then(s => s.isFile(), () => false))) return;
+  await copyFile(full, copy).catch(() => undefined);
+}
+
 /** Saves a file (new or changed). The file as it was is kept once as "name.ext.bak" next to it. */
-export async function save(root: string, rel: unknown, text: unknown, mayCreate = true, keepOlder = false): Promise<{ path: string; created: boolean } | { error: string }> {
+export async function save(root: string, rel: unknown, text: unknown, mayCreate = true, keepOlder = false, person = false): Promise<{ path: string; created: boolean } | { error: string }> {
   const full = await inside(root, rel);
   if (!full) return { error: 'Use a plain file name with a text or code ending (.md, .txt, .html, .css, .js, .ts, .py, .php, .sql, .json, .java, .cs, .go and the like), inside the workspace.' };
   if (isProfileScript(cleanPath(rel)!)) return { error: 'A PowerShell profile is not saved here: PowerShell runs it by itself each time it opens. Save the script under another name.' };
@@ -231,12 +284,21 @@ export async function save(root: string, rel: unknown, text: unknown, mayCreate 
   const exists = await stat(full).then(s => s.isFile(), () => false);
   if (!exists && !mayCreate) return { error: 'There is no such file.' };
   await mkdir(dirname(full), { recursive: true });
+  if (exists && keepOlder && !person) await keepOriginal(full);
   // keepOlder (a model's save): the .bak the last save left is not lost to this one, it is kept under a time stamp.
   if (exists && keepOlder && (await stat(`${full}.bak`).then(s => s.isFile(), () => false))) {
-    await copyFile(`${full}.bak`, `${full}.${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}.bak`);
+    // Two saves in one second (one answer can hold both) would share a stamp and lose the older copy: the next free
+    // second is taken instead, so the stamps stay 14 digits and in order.
+    let at = Date.now();
+    const stamped = () => `${full}.${new Date(at).toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}.bak`;
+    while (await stat(stamped()).then(() => true, () => false)) at += 1000;
+    await copyFile(`${full}.bak`, stamped(), fsConstants.COPYFILE_EXCL);
     await trimBaks(full);
   }
   if (exists) await copyFile(full, `${full}.bak`);
   await writeAtomic(full, text);
+  if (person) lastWritten.delete(full.toLowerCase());
+  else lastWritten.set(full.toLowerCase(), hashOf(text));
+  if (!person) onSaved?.(full);
   return { path: cleanPath(rel)!, created: !exists };
 }

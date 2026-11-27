@@ -39,6 +39,9 @@ linked PC that needs it; nothing goes to an AI service in the cloud.
   chat window with no role), Coder, Writer, Project manager, Graphic designer and Artist (the pictures role). A hire's level
   (Junior to Senior) follows the size of its model. Edit staff is one page: who they are, what they work on and where.
   Move a hire to another PC; a model that will not fit that PC's memory is refused, with why.
+- **The Videographer.** A hire that makes short clips (up to 5 seconds) from a prompt with stable-diffusion.cpp and the Wan
+  video models, on the graphics card of this PC or a linked PC; a fits guide says which model suits each card, and every clip
+  lands on the Videos shelf. It is slow: one 3-second clip took 84 minutes on a 5 GB Quadro P2000, and 11 minutes on a 12 GB RTX 3060.
 - **Linked PCs.** Link the other PCs in your home with a setup code (and a PIN, if it has one). Links are encrypted (X25519
   keys, AES-256-GCM) unless both PCs' owners tick that a cluster link may go unencrypted (below). Staff can use the models
   on any linked PC; each PC runs one job at a time, and all the PCs work at once. **The PC's owner stays in charge:** a
@@ -91,7 +94,7 @@ The PCs:
 | Name here | Processor | Memory | Graphics card |
 |---|---|---|---|
 | Main PC | Core i7-6700K (4 cores, 8 threads) | 48 GB DDR4 | Quadro P2000, 5 GB |
-| Small PC | small-form-factor desktop (processor not recorded) | 24 GB DDR3 | Quadro K1200, 4 GB |
+| Small PC | HP EliteDesk 800 G1 small form factor: a standard 4th-generation Intel Core (exact model not recorded) | 24 GB DDR3 | Quadro K1200, 4 GB |
 | Big PC, stage A (10 to about 15 Nov 2026) | one 6-core Xeon | 64 GB DDR3 | RTX 3060 12 GB, from 10 Nov (the first CPU-only runs came before it) |
 | Big PC, stage B (about 16 to 20 Nov) | one 6-core Xeon | 128 GB | RTX 3060 12 GB |
 | Big PC, stage C (from 21 Nov) | two 8-core Xeons | 256 GB DDR3 | RTX 3060 12 GB |
@@ -238,6 +241,22 @@ an ordinary PC with nothing retouched; the files here are only made smaller.
 </table>
 
 Times are for one picture. TOMLIN 2.0.69, 2 November 2026.
+
+**On a 12 GB graphics card.** The same prompt for each, drawn by an artist on a linked PC (GeForce RTX 3060, 12 GB),
+asked from another PC on the home network. Nothing retouched; the files here are only made smaller.
+
+> a red fox walking through deep snow in a pine forest, soft winter light, falling snow, photo, highly detailed
+
+<table>
+<tr><th>Model</th><th>Picture</th><th>Size and time</th></tr>
+<tr><td><b>Qwen-Image 2.1</b> at High<br>(best quality)</td><td><img src="public/samples/fox-snow-qwen-image-high.webp" width="300" alt="A red fox in snow, Qwen-Image 2.1 at High"></td><td>Drawn at 1024×1024, 20 steps, sharpened to 2048×2048<br>3.9 min</td></tr>
+<tr><td><b>Qwen-Image 2.1</b> at Mid</td><td><img src="public/samples/fox-snow-qwen-image-mid.webp" width="300" alt="A red fox in snow, Qwen-Image 2.1 at Mid"></td><td>768×768, 20 steps<br>1.9 min (the first picture also loads the model: about 15 s more)</td></tr>
+<tr><td><b>RealVisXL V5 Lightning</b> at High</td><td><img src="public/samples/fox-snow-realvisxl-high.webp" width="300" alt="A red fox in snow, RealVisXL V5 Lightning at High"></td><td>Drawn at 1024×1024, 5 steps, sharpened to 2048×2048<br>18 s (about 1 min with loading the model)</td></tr>
+</table>
+
+Qwen-Image 2.1 draws the most natural animal and light, and takes about thirteen times as long as RealVisXL.
+Qwen-Image 2.1 is for non-commercial use only (research or evaluation): see its licence in Models before using its
+pictures for a business. TOMLIN 2.1.24, 25 November 2026.
 
 **What did not work, on that same 4 GB card:**
 - **RealVisXL** failed all 7 times, so it is shown above on the CPU instead. Plan on a bigger card or a long wait.

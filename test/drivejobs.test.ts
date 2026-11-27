@@ -93,7 +93,8 @@ test('a hello\'s drives carry their jobs; the door is refused to a guest', () =>
 });
 
 test('the Network map is an overview: no drives or pools on it (they are on the Storage page)', () => {
-  const js = readFileSync(join(ROOT, 'public', 'netmap.js'), 'utf8');
+  // Read as LF: a Windows checkout writes CRLF, which these line-by-line patterns do not allow for.
+  const js = readFileSync(join(ROOT, 'public', 'netmap.js'), 'utf8').replace(/\r\n/g, '\n');
   const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
   const css = readFileSync(join(ROOT, 'public', 'style.css'), 'utf8');
   assert.doesNotMatch(html, /id="net-pools"/);
@@ -112,4 +113,11 @@ test('the Network map is an overview: no drives or pools on it (they are on the 
   // Main model storage's (!): downloads can be queued straight into it, each PC fetching its own copy.
   assert.match(storage, /note: 'You can queue models to download directly, and it will download by itself even if all other PCs are off\.'/);
   assert.match(storage, /class: 'storage-i', type: 'button', text: '!', title: t\.note/);
+});
+
+test('Backup storage says exactly what is backed up and what is not', () => {
+  const js = readFileSync(join(ROOT, 'public', 'storage.js'), 'utf8');
+  for (const bit of ['Restore points: a zip of everything TOMLIN keeps for you on that PC.', 'Project backups: your workspace', 'Models: they are in Main model storage', 'TOMLIN itself: install it again from its zip.', "this PC's keys to its linked PCs", "Anything outside TOMLIN's folders"]) assert.ok(js.includes(bit), bit);
+  assert.match(js, /el\('h4', \{ text: 'Backed up' \}\)/);
+  assert.match(js, /el\('h4', \{ text: 'Not backed up' \}\)/);
 });

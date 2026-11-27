@@ -131,7 +131,7 @@ export async function brainForRef(want: string, forWhat: string, change: string,
     try {
       h = await hello(r);
     } catch (e) {
-      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Enable this PC as a node" ticked (Network), or choose another model for ${forWhat}.`);
+      throw new Error(`The linked PC "${r.name}" did not answer at ${r.url}: ${(e as Error).message}. Check that TOMLIN is running there with "Use this PC as a node" on (This PC), or choose another model for ${forWhat}.`);
     }
     if (b.model) {
       const why = sharedWhy(r, h, b.model);

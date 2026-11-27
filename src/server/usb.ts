@@ -34,14 +34,23 @@ async function saveRecords(r: usbadmin.UsbRecords): Promise<void> {
 /** This PC's name as the stick's screen shows it ("Waiting for ..."). */
 const adminName = () => (shareState.name && shareState.name !== 'Worker PC' ? shareState.name : hostname()).replace(/[^\w .'-]/g, '').slice(0, 40) || 'the admin PC';
 
-// ---- The one long step at a time (a download or Mint): its lines and how far along ----
+// ---- The long steps (a download or Mint): each its lines and how far along ----
+// Three lanes: the ISO and the parts download side by side (each its own button and bar); Mint or Remove on the stick
+// is one at a time, and waits for the parts, which it copies.
 
 interface Task { kind: 'parts' | 'iso' | 'mint' | 'remove'; lines: string[]; got: number; of: number; done: boolean; error: string; at: number }
-let task: Task | null = null;
+type Lane = 'iso' | 'parts' | 'stick';
+const laneOf = (k: Task['kind']): Lane => (k === 'iso' ? 'iso' : k === 'parts' ? 'parts' : 'stick');
+const tasks: Record<Lane, Task | null> = { iso: null, parts: null, stick: null };
+const running = (l: Lane) => !!tasks[l] && !tasks[l]!.done;
 function begin(kind: Task['kind'], run: (t: Task) => Promise<void>): { status: number; body: unknown } {
-  if (task && !task.done) return { status: 409, body: { error: `Wait for "${taskWords(task.kind)}" to finish first.` } };
+  const lane = laneOf(kind);
+  if (running(lane)) return { status: 409, body: { error: `Wait for "${taskWords(tasks[lane]!.kind)}" to finish first.` } };
+  // Mint copies the parts: not while they are downloading, and they are not downloaded again under a Mint.
+  if (kind === 'mint' && running('parts')) return { status: 409, body: { error: 'Wait for "Get the parts" to finish first: Mint copies them onto the stick.' } };
+  if (kind === 'parts' && running('stick') && tasks.stick!.kind === 'mint') return { status: 409, body: { error: 'Wait for "Mint" to finish first: it is copying the parts onto the stick.' } };
   const t: Task = { kind, lines: [], got: 0, of: 0, done: false, error: '', at: Date.now() };
-  task = t;
+  tasks[lane] = t;
   void run(t).catch(e => {
     t.error = (e as Error).message;
   }).finally(() => {
@@ -49,6 +58,7 @@ function begin(kind: Task['kind'], run: (t: Task) => Promise<void>): { status: n
   });
   return { status: 200, body: { started: kind } };
 }
+const taskView = (t: Task | null) => (t ? { kind: t.kind, what: taskWords(t.kind), lines: t.lines.slice(-40), got: t.got, of: t.of, done: t.done, error: t.error } : null);
 const taskWords = (k: Task['kind']) => (k === 'parts' ? 'Get the parts' : k === 'iso' ? 'Get the ISO' : k === 'mint' ? 'Mint' : 'Remove from stick');
 
 // ---- The sticks plugged in ----
@@ -191,7 +201,8 @@ async function view() {
     parts: partsHere(PARTS_DIR, false, pins), cudaParts: partsHere(PARTS_DIR, true, pins).filter(p => p.optional),
     iso: { file: pins.debianIso.file, url: pins.debianIso.url, bytes: pins.debianIso.bytes, sha256: pins.debianIso.sha256, path: iso, here: existsSync(iso) && statSync(iso).size === pins.debianIso.bytes },
     drives, sticks: await sticksView(),
-    task: task ? { kind: task.kind, what: taskWords(task.kind), lines: task.lines.slice(-40), got: task.got, of: task.of, done: task.done, error: task.error } : null,
+    // Each lane's step (running, or the last one): the ISO's and the parts' under step 2, Mint's under step 4.
+    tasks: Object.fromEntries((Object.keys(tasks) as Lane[]).map(l => [l, taskView(tasks[l])])),
     allow: STICK_ALLOW,
   };
 }
@@ -294,7 +305,7 @@ export async function usbAction(b: Record<string, unknown>): Promise<{ status: n
   return { status: 400, body: { error: 'Unknown action.' } };
 }
 
-/** For tests: forget the task. */
+/** For tests: forget the tasks. */
 export const resetTask = () => {
-  task = null;
+  tasks.iso = tasks.parts = tasks.stick = null;
 };

@@ -16,13 +16,13 @@ test('the button sits in the heading row of Linked PCs and is hidden until it is
 
 
 test('it shows only while some linked PC can be updated now, and does what Update all does', () => {
-  const draw = js.slice(js.indexOf('function drawUpdateAll(pcs)'), js.indexOf('// ---- The host PIN: one PIN for the linked PCs'));
+  const draw = js.slice(js.indexOf('function drawUpdateAll(pcs)'), js.indexOf('// ---- The admin PC (src/hostpin.ts HostKey'));
   assert.match(draw, /fast\.hidden = !can\.length/);
   assert.match(draw, /Fast update \(\$\{can\.length\}\)/);
-  // One runner for both buttons (and the left panel's): the host PIN is asked once, a PC without it asks its own PIN.
+  // One runner for both buttons (and the left panel's): a PC without this PC's admin key asks its own PIN.
   assert.match(draw, /b\.onclick = updateAllLinked;\s*if \(fast\) fast\.onclick = updateAllLinked;/);
   const run = js.slice(js.indexOf('async function updateAllLinked()'), js.indexOf('/** The linked PCs this one can update now'));
-  assert.match(run, /askHostPin\(/);
+  assert.doesNotMatch(run, /askHostPin\(|host-pin/, 'no typed host PIN (2.1.31)');
   assert.equal((run.match(/updatePcWithPin\(/g) ?? []).length, 1, 'one update loop, not two copies');
   assert.match(run, /'#rail-fast-update'/);
 });
@@ -39,4 +39,17 @@ test('the left panel\'s Manage: a yellow ! when linked PCs are behind, the count
   const js = readFileSync(new URL('../public/home.js', import.meta.url), 'utf8');
   assert.match(js, /railFast\.replaceChildren\('Manage', \.\.\.\(behind \? \[el\('span', \{ class: 'rail-flag', role: 'img', 'aria-label': toUpdate, title: toUpdate, text: '!' \}\)\] : \[\]\)\);/);
   assert.doesNotMatch(js, /to update\)`/, 'no "(2 to update)" in the label');
+});
+
+test('Update all and Fast update open a window of their own with only the linked PCs, not Models on my other PCs', () => {
+  const run = js.slice(js.indexOf('async function updateAllRun('), js.indexOf('// The top of the Network page'));
+  assert.match(run, /app\.openUpdates\?\.\(\);/);
+  assert.doesNotMatch(run, /app\.openNet/);
+  const dlg = html.slice(html.indexOf('<dialog id="upds-dlg"'), html.indexOf('</dialog>', html.indexOf('<dialog id="upds-dlg"')));
+  assert.match(dlg, /<h2 id="upds-title">Updating linked PCs<\/h2>/);
+  assert.match(dlg, /<h3>Linked PCs<\/h3>\s*<div class="pcg" id="upds-grid"><\/div>/);
+  assert.doesNotMatch(dlg, /Shared by linked PCs|Restore points|net-rows|net-backups/);
+  const net = readFileSync(join(ROOT, 'public', 'network.js'), 'utf8');
+  assert.match(net, /app\.openUpdates = async \(\) => \{/);
+  assert.match(net, /window\.pcGrid\?\.draw\(\$\('#upds-grid'\)/);
 });

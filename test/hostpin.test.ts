@@ -250,45 +250,9 @@ test('the words when there is no app lock, and a host PIN changed with the old o
   assert.equal(await pc.pins.drop('b'), false, 'never by a few characters');
 });
 
-test('the main PC keeps a hash of its own host PIN, and five wrong ones in a row stop the check for a while', async () => {
-  const c = clock();
-  let saved: unknown = null;
-  const own = new hp.OwnHostPin(null, async f => void (saved = f), c.now);
-  assert.equal(own.on, false);
-  await own.set('pin', '246810');
-  assert.equal(own.on, true);
-  assert.doesNotMatch(JSON.stringify(saved), /246810/);
-  assert.equal(await own.check('246810'), '246810');
-  for (let k = 0; k < 5; k++) assert.equal(await own.check('111111'), null);
-  assert.equal(own.lockedFor(), 10);
-  assert.equal(await own.check('246810'), null, 'not even the right one while stopped');
-  c.go(10);
-  const back = new hp.OwnHostPin(saved, async () => undefined, c.now);
-  assert.equal(await back.check('246 810'), '246810');
-  await own.off();
-  assert.equal(saved, null);
-});
-
-test("the host PIN typed in one linked PC's own PIN window is known as the host PIN; a PC's own PIN is not, and never stops the host PIN", async () => {
-  const c = clock();
-  const own = new hp.OwnHostPin(null, async () => undefined, c.now);
-  assert.equal(await own.either('246810'), null, 'none set');
-  await own.set('pin', '246810');
-  assert.equal(await own.either('246 810'), '246810');
-  assert.equal(await own.either('1234'), null, "too short to be a host PIN: a PC's own");
-  for (let k = 0; k < 4; k++) assert.equal(await own.either('111111'), null);
-  own.eitherTaken();
-  for (let k = 0; k < 5; k++) assert.equal(await own.either('111111'), null);
-  assert.equal(await own.either('246810'), null, 'five wrong in a row: sent on as a PC\'s own for a while');
-  assert.equal(own.lockedFor(), 0);
-  assert.equal(await own.check('246810'), '246810', 'the host PIN window still works');
-  c.go(10);
-  assert.equal(await own.either('246810'), '246810');
-});
-
 // ---- The host key: no typed host PIN; unlocking the host is the admin step ----
 
-test('the host key is random, kept whole, never made or used while the host is locked, and can be reset or turned off', async () => {
+test('the host key is random, kept whole, never made or used while the host is locked, and can be reset (no off switch)', async () => {
   let saved: unknown = undefined;
   let open = false;
   const k = new hp.HostKey(null, async f => void (saved = f), () => open);
@@ -312,14 +276,11 @@ test('the host key is random, kept whole, never made or used while the host is l
   assert.equal(back.peek()?.secret, a.secret);
   await k.reset();
   assert.notEqual(k.peek()?.secret, a.secret);
-  await k.turnOff();
-  assert.equal(k.enabled, false);
-  assert.equal(await k.use(), null);
-  assert.deepEqual(saved, { off: true });
-  assert.equal(new hp.HostKey(saved, async () => undefined).enabled, false, 'off survives a restart');
-  await k.turnOn();
-  assert.equal(k.enabled, true);
-  assert.ok(await k.use());
+  // 2.1.31: no off switch. A file an older version wrote as off reads as no key yet, and one is made when needed.
+  assert.equal('turnOff' in k, false, 'no switch to turn it off');
+  const wasOff = new hp.HostKey({ off: true }, async f => void (saved = f), () => true);
+  assert.equal(wasOff.made, false);
+  assert.ok(await wasOff.use(), 'a key turned off before 2.1.31 is made again');
   assert.equal(hp.cleanKeyFile({ key: 'short' }), null, 'a damaged file holds no key');
 });
 

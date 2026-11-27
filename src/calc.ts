@@ -245,3 +245,80 @@ export function testedSpeed(perSecond: number, bytes: number): number {
   const t = Math.max(1 / perSecond - PER_WORD.cpu, 1e-4);
   return Math.round((bytes / GB / t) * 10) / 10;
 }
+
+/** What the fit of a picture model works from: its files and the registry's figures (registry/*.json). */
+export interface PictureFacts {
+  bytes: number;
+  minRamGB: number;
+  minVramGB: number;
+  /** The side it draws best at (512 for SD 1.5, 1024 for the newer models). */
+  native?: number;
+  /** Below a card this size (GB) it draws on the processor from the start (src/images.ts smallCard). */
+  cpuBelowGB?: number;
+  /** Steps for one picture (its defaults). */
+  steps?: number;
+}
+
+export interface PictureFit {
+  /** ok: on the card. tight: part of it waits in RAM while it draws. cpu: it draws on the processor. no: not enough RAM. */
+  level: 'ok' | 'tight' | 'cpu' | 'no';
+  /** A card's few words: "Fits", "Tight fit", "Too big for this PC's card", "No graphics card", "Not enough memory". */
+  word: string;
+  /** For a list (Edit staff, the Images window): '' when it fits, else "tight", "too big for this PC's card: slow: roughly 59 min a picture". */
+  short: string;
+  /** The sentence under it. */
+  line: string;
+  /** Minutes one picture takes on the processor (a rough guess) when it draws there, else null. */
+  minutes: number | null;
+}
+
+/** A registry picture model's facts for pictureFit, with its files' size on disk; null for a model not in the registry. */
+export function pictureFactsOf(r: { minRamGB: number; minVramGB: number; native?: number; cpuBelowGB?: number; defaults?: { steps: number } } | undefined, bytes: number): PictureFacts | null {
+  return r ? { bytes, minRamGB: r.minRamGB, minVramGB: r.minVramGB, native: r.native, cpuBelowGB: r.cpuBelowGB, steps: r.defaults?.steps } : null;
+}
+
+/** This PC for pictureFit: its RAM, its biggest graphics card that is not a built-in chip, its cores. */
+export function picturePcOf(hw: { ram: number; cores: number; gpus: { integrated?: boolean; total?: number | null }[] }): { ram: number; vram: number; cores: number } {
+  return { ram: hw.ram, vram: Math.max(0, ...hw.gpus.filter(g => !g.integrated && g.total).map(g => g.total!)), cores: hw.cores };
+}
+
+/**
+ * Seconds for one picture on the processor, a rough guess: the SD 1.5 figure measured on the HD 520 laptop (42.6 s a
+ * step on 2 cores at 512 px, pictureRow) scaled by the model's size against SD 1.5's 2 GB, the pixels of its own side
+ * and its steps. Z-Image Turbo (10 GB, 1024 px, 8 steps) on 4 cores: about an hour (the HP 800 took 68 minutes).
+ */
+export function pictureCpuSeconds(m: PictureFacts, cores = 4): number {
+  const side = (m.native ?? 512) / 512;
+  return ((42.6 * 2) / Math.max(1, cores)) * Math.max(1, m.bytes / (2 * GB)) * side * side * (m.steps ?? 4);
+}
+
+/**
+ * Whether a picture model fits a PC: its RAM against the registry's minimum (10% let off: a 16 GB PC reports a little
+ * less), then its biggest graphics card (`vram`): under the registry's card size (or its cpuBelowGB) it draws on the
+ * processor, slowly; on a card its files and working room (src/devices.ts pictureWork) overfill, part of it waits in
+ * RAM. Near the Models page's line (src/images.ts hardwareFit), which calls a card tight from 90%. `where`: "this PC", or a linked
+ * PC by name. null when the PC's RAM is not known.
+ */
+export function pictureFit(m: PictureFacts, pc: { ram: number; vram: number; cores?: number }, where = 'this PC'): PictureFit | null {
+  if (!pc.ram) return null;
+  const gb = (n: number) => `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB`;
+  const card = where === 'this PC' ? "this PC's card" : "that PC's card";
+  const minutes = () => Math.max(1, Math.round(pictureCpuSeconds(m, pc.cores) / 60));
+  const slow = (n: number) => `slow: roughly ${timeText(n * 60)} a picture`;
+  if (pc.ram < m.minRamGB * GB * 0.9) return { level: 'no', word: 'Not enough memory', short: 'not enough memory', line: `Needs ${m.minRamGB} GB of RAM; ${where} has ${gb(pc.ram)}.`, minutes: null };
+  const vramGB = pc.vram / GB;
+  if (!pc.vram && m.minVramGB < 4) {
+    const n = minutes();
+    return { level: 'ok', word: 'Fits', short: '', line: `No graphics card on ${where}: it draws on the processor, roughly ${timeText(n * 60)} a picture.`, minutes: n };
+  }
+  if ((m.minVramGB >= 4 && vramGB < m.minVramGB - 0.1) || (!!m.cpuBelowGB && vramGB < m.cpuBelowGB)) {
+    const n = minutes();
+    const made = `Made for a graphics card with ${m.minVramGB} GB or more`;
+    return pc.vram
+      ? { level: 'cpu', word: `Too big for ${card}`, short: `too big for ${card}: ${slow(n)}`, line: `${made}; the card of ${where} has ${gb(pc.vram)}, so it draws on the processor: ${slow(n)}.`, minutes: n }
+      : { level: 'cpu', word: 'No graphics card', short: `no graphics card: ${slow(n)}`, line: `${made}; ${where} has none, so it draws on the processor: ${slow(n)}.`, minutes: n };
+  }
+  const need = m.bytes + ((m.native ?? 512) >= 1024 ? 1.5 : 0.6) * GB;
+  if (need > pc.vram) return { level: 'tight', word: 'Tight fit', short: 'tight', line: `Needs about ${gb(need)} on the card; the card of ${where} has ${gb(pc.vram)}, so part of it waits in RAM while it draws: slower.`, minutes: null };
+  return { level: 'ok', word: 'Fits', short: '', line: `Fits the ${gb(pc.vram)} card of ${where}.`, minutes: null };
+}

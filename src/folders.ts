@@ -5,6 +5,7 @@
 //   <project>\                        the project's own files, and in it:
 //     specialists\writer\             what the writer hands in, each file starting with the date and time
 //     specialists\images\             the artists' and designers' pictures (cover art, illustrations), the same way
+//     specialists\videos\             the Videographer's clips, the same way
 //     admin notes\                    notes saved from the right panel for this project
 //   jobs\<id>\                        each project's plan, cards, handoff cards (named with the date and time) and report
 // The project manager and the auditor read a project's specialists folders for the work handed in, newest first, not
@@ -15,6 +16,8 @@ export const CHATS = 'chats';
 export const NOTES = 'notes';
 export const SPECIALISTS = 'specialists';
 export const ADMIN_NOTES = 'admin notes';
+/** The agents' results: each standing job's runs and reports, agents\<agent id>\<folder>\<run>\report.md. */
+export const AGENTS = 'agents';
 /** Workspace folders kept for these: a project cannot take their names. */
 export const RESERVED = [CHATS, NOTES];
 
@@ -41,13 +44,14 @@ export function keptFromModels(path: string): boolean {
 /**
  * Files TOMLIN itself keeps in the workspace, which no model's save may write: jobs\ (each project's rules, plan, scope,
  * design and cards: a planted rules.md goes into every chat and job of that project, a planted plan.json can switch the
- * web on or add steps) and the person's notes. Refused wherever the chat's folder is, which costs nothing.
+ * web on or add steps), agents\ (each run's report, which the job's next run reads) and the person's notes. Refused
+ * wherever the chat's folder is, which costs nothing.
  */
 export function ownedByTomlin(path: string): boolean {
-  return /^jobs(\/|$)/i.test(path.replace(/\\/g, '/').replace(/^\/+/, '')) || new RegExp(`^${NOTES}/|(^|/)${ADMIN_NOTES}/`, 'i').test(path.replace(/\\/g, '/'));
+  return new RegExp(`^(jobs|${AGENTS})(/|$)`, 'i').test(path.replace(/\\/g, '/').replace(/^\/+/, '')) || new RegExp(`^${NOTES}/|(^|/)${ADMIN_NOTES}/`, 'i').test(path.replace(/\\/g, '/'));
 }
 
-export const OWNED_WHY = (path: string) => `Not saved: ${path} is one of TOMLIN's own files (project plans, rules and cards are under jobs, the person's notes under notes and admin notes), which a model never writes. Save your work under another folder, or tell the person what should change.`;
+export const OWNED_WHY = (path: string) => `Not saved: ${path} is one of TOMLIN's own files (project plans, rules and cards are under jobs, the agents' reports under agents, the person's notes under notes and admin notes), which a model never writes. Save your work under another folder, or tell the person what should change.`;
 
 /** The specialist folder a role hands its work into: the writer's "writer", an artist's or a designer's "images". */
 export function specialistFolder(role: string): string | null {
@@ -107,9 +111,39 @@ export function saveTo(o: { chatFolder: string; projectFolder: string | null; ro
   return sp ? { dir: inProject(o.projectFolder, SPECIALISTS, sp), stamped: true } : { dir: o.projectFolder, stamped: false };
 }
 
+/** A chat's name as a file name: no characters Windows refuses, one line, at most 60 characters ("Chat" when empty). */
+export function chatFileName(title: string): string {
+  return title.replace(/[\\/:*?"<>|\u0000-\u001f…]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60).trim() || 'Chat';
+}
+
+/**
+ * Where Save on the whole chat puts it: a chat in a project into that project's chats folder (<project>\chats\), a
+ * chat in Default into its own chats\<stamp> folder; the file named with the date and time and the chat's name.
+ */
+export function wholeChatPath(o: { chatFolder: string; projectFolder: string | null; title: string }, now = new Date()): string {
+  const name = `${stamp(now)} ${chatFileName(o.title)}.txt`;
+  return o.projectFolder === null ? `${o.chatFolder}/${name}` : inProject(o.projectFolder, CHATS, name);
+}
+
 /** Where an artist's or designer's picture kept in a project chat is handed in: specialists\images\<stamp> <words>.png. */
 export function picturePath(projectFolder: string, prompt: string, ext: string, now = new Date()): string {
   return inProject(projectFolder, SPECIALISTS, 'images', `${stamp(now)} ${firstWords(prompt)}${ext}`);
+}
+
+/** A project's Artist pictures: specialists\images (what the clip picker's This project lists). */
+export const projectImages = (projectFolder: string): string => inProject(projectFolder, SPECIALISTS, 'images');
+
+/** A project's Start frames folder for clips: specialists\videos\Start frames. */
+export const startFrames = (projectFolder: string): string => inProject(projectFolder, SPECIALISTS, 'videos', 'Start frames');
+
+/** Where a clip made in a project chat is handed in: specialistsideos<stamp> <words>.webm. */
+export function clipPath(projectFolder: string, prompt: string, ext: string, now = new Date()): string {
+  return inProject(projectFolder, SPECIALISTS, 'videos', `${stamp(now)} ${firstWords(prompt)}${ext}`);
+}
+
+/** Where a voice-over made from a project chat is handed in: specialists\voice\<stamp> <words>.wav. */
+export function voicePath(projectFolder: string, text: string, ext: string, now = new Date()): string {
+  return inProject(projectFolder, SPECIALISTS, 'voice', `${stamp(now)} ${firstWords(text)}${ext}`);
 }
 
 /** `rel` as it is when it is free, else with " 2", " 3" ... before its extension: never a name `taken` says is used. */

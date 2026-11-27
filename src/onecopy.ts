@@ -81,7 +81,7 @@ export function takeHome(home: string, pid = process.pid, alive = isAlive, check
   mkdirSync(home, { recursive: true });
   const file = join(home, LOCK_FILE);
   let repaired: string | undefined;
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     try {
       writeFileSync(file, String(pid), { flag: 'wx' });
       return repaired ? { ok: true, repaired } : { ok: true };
@@ -95,7 +95,20 @@ export function takeHome(home: string, pid = process.pid, alive = isAlive, check
         repaired = `the lock named process ${held.pid}, which is now another program (TOMLIN had ended without removing it)`;
       }
       // Left by a copy that has ended (closed hard, or the PC turned off), or its number now belongs to another program.
-      unlinkSync(file);
+      // Removed only while it still names the process judged: another start may have repaired it meanwhile (Windows
+      // takes about a second to say what a process is) and now holds the home, and that lock is judged afresh.
+      let still: string | null = null;
+      try {
+        still = String(readHolder(file).pid);
+      } catch {
+        still = null; // gone meanwhile: the next turn tries to take it
+      }
+      if (still !== String(held.pid)) continue;
+      try {
+        unlinkSync(file);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
     }
   }
   return { other: -1 };

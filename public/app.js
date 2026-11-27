@@ -264,7 +264,7 @@ const unreadWhy = chip => `Windows gives no readings for ${chip} (Task Manager s
 
 /**
  * The linked PC the top bar shows while a chat with someone on it is on screen (chats.js asks it every 3 s): the answer
- * of /api/node/stats ({state, name, model, stats}), or null for this PC.
+ * of /api/node/stats ({state, name, stats, loaded, chosen, hire}), or null for this PC.
  */
 app.barPc = null;
 app.showBarPc = r => {
@@ -280,10 +280,19 @@ function drawPcBar(r) {
   const there = ` on "${r.name}"`;
   const meter = (id, ...rest) => meterOf(id.replace(/^m-/, 'n-'), ...rest);
   $('#bar-pc-name').textContent = r.name;
-  $('#bar-pc-model').textContent = r.state === 'old' ? 'Update TOMLIN there to see its meters'
+  // What that PC says is loaded there (r.loaded, null when it did not say), never the hire's choice (r.chosen).
+  const ld = r.loaded;
+  const names = ld ? [...ld.chat, ...(ld.image ? [ld.image] : [])] : [];
+  const mine = r.chosen && ld ? ld.chat.find(n => n === r.chosen || shortModel(n) === shortModel(r.chosen)) : null;
+  const shown = mine ?? names[0];
+  $('#bar-pc-model').textContent = r.state === 'old' && !ld ? 'Update TOMLIN there to see its meters'
     : r.state === 'off' ? 'Not answering just now'
-      : r.model ? shortModel(r.model) : 'No model loaded';
-  $('#bar-pc').title = `The top bar shows "${r.name}" while this chat is open: the answers are written there.${r.model ? ` Loaded there: ${r.model}.` : ''} Home, or a chat on this PC, shows this PC again.`;
+      : !ld ? 'Model loaded there not known'
+        : shown ? `${shortModel(shown)}${names.length > 1 ? ` and ${names.length - 1} more` : ''}` : 'No model loaded';
+  const tip = !ld || r.state === 'off' ? ''
+    : names.length ? ` Loaded there: ${names.join(', ')}.${r.chosen && !mine ? ` ${r.hire || 'This hire'} uses ${r.chosen}: it loads when you send.` : ''}`
+      : r.chosen ? ` ${r.hire || 'This hire'} uses ${r.chosen}: it loads when you send.` : '';
+  $('#bar-pc').title = `The top bar shows "${r.name}" while this chat is open: the answers are written there.${tip} Home, or a chat on this PC, shows this PC again.`;
   const st = r.state === 'on' ? r.stats : null;
   if (!st) {
     const why = r.state === 'old' ? `Its TOMLIN is too old to share its meters: update it.` : `It is not answering just now.`;
@@ -527,6 +536,17 @@ function drawFit(name) {
       : `Too big right now: about ${gb(f.need)} needed, ${gb(f.free)} free.${otherText}`;
 }
 
+/**
+ * The words after a model in a pane's list: not downloaded; a picture model that does not fit this PC's graphics card
+ * (src/calc.ts pictureFit: tight, or too big for the card and slow on the processor); else too big or tight for the
+ * memory free now.
+ */
+function modelTag(m, pane) {
+  if (m.installed === false) return ' (not downloaded)';
+  if (pane === 'image' && m.cardFit?.short) return ` (${m.cardFit.short})`;
+  return m.fit?.level === 'no' ? ' (too big now)' : m.fit?.level === 'tight' ? ' (tight)' : '';
+}
+
 async function loadModels() {
   app.models = await api('/api/models');
   for (const name of ['chat', 'image']) {
@@ -538,8 +558,7 @@ async function loadModels() {
     const tick = hiddenTick(`show-hidden-${name}`, list.some(m => m.hidden));
     if (!tick.isConnected) (p.model.closest('label') ?? p.model).after(tick);
     for (const m of visibleModels(list, keep)) {
-      const extra = m.installed === false ? ' (not downloaded)' : m.fit?.level === 'no' ? ' (too big now)' : m.fit?.level === 'tight' ? ' (tight)' : '';
-      p.model.append(el('option', { value: m.id, text: `${m.name} · ${gb(m.bytes)}${extra}`, disabled: m.installed === false }));
+      p.model.append(el('option', { value: m.id, text: `${m.name} · ${gb(m.bytes)}${modelTag(m, name)}`, disabled: m.installed === false }));
     }
     // Never a blank list: nothing on the PC, or only models that are hidden or not downloaded, is said in the list itself.
     if (![...p.model.options].some(o => o.value && !o.disabled)) {
@@ -1148,7 +1167,7 @@ $('#code-save-form').addEventListener('submit', async e => {
   e.preventDefault();
   codeSaveFault(null);
   try {
-    const r = await api('/api/files/save', { path: $('#code-save-name').value.trim(), text: codeSaving.code, create: true });
+    const r = await api('/api/files/save', { path: $('#code-save-name').value.trim(), text: codeSaving.code, create: true, fromAnswer: true });
     codeDlg.close();
     app.chatNote(`Saved ${r.path}${codeSaving.folder ? ` in ${codeSaving.folder}` : ''}.${r.created ? '' : ` The earlier version is kept as ${r.path}.bak.`} Open it under Settings, Files and blog writer.`);
   } catch (err) {
@@ -1409,23 +1428,21 @@ chatCopy.addEventListener('click', async () => {
 });
 $('#chat-save').addEventListener('click', async () => {
   try {
-    const { text, title } = await wholeChat(true);
-    // "Plan the shop page 2026-10-05.txt": the chat's name (no characters Windows refuses in a file name) and today.
-    const file = `${title.replace(/[\\/:*?"<>|\u0000-\u001f…]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Chat'} ${new Date().toISOString().slice(0, 10)}.txt`;
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-    const a = el('a', { href: url, download: file, hidden: true });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    app.chatNote(`Saved as "${file}" in your Downloads folder.`);
+    const { text } = await wholeChat(true);
+    // Into the workspace: the chat's project's chats folder, or (Default) the chat's own folder (src/server/places.ts).
+    const r = await api('/api/chats/save-whole', { id: app.chatId, text });
+    app.chatNote(`Saved as "${r.path.split('/').pop()}" in ${r.where} (in your workspace folder).`);
   } catch (e) {
     app.chatNote(e.message);
   }
 });
 
-/** A message he sent, with Copy in its top right corner. */
-const userBubble = text => el('div', { class: 'msg user' }, copyButton(text), text);
+/** A picture sent with a message, small; a click opens it full size in a new tab. */
+const sentPic = src => el('a', { class: 'msg-pic', href: src, target: '_blank', rel: 'noopener', title: 'Open full size' }, el('img', { src, alt: 'The picture sent with this message', loading: 'lazy' }));
+/** Where a picture sent in a chat is kept (src/server/chat.ts /api/chat/pic). */
+const sentPicUrl = (chat, file) => `/api/chat/pic?chat=${encodeURIComponent(chat)}&file=${encodeURIComponent(file)}`;
+/** A message he sent, with Copy in its top right corner, and the picture sent with it (a data: URL or its address). */
+const userBubble = (text, pic = null) => el('div', { class: 'msg user' }, copyButton(text), pic ? sentPic(pic) : null, text);
 
 /** Under a message: Pin (into the notebook), Add to log (chatlog.js) and, under an answer, Send to… (hand it on). Any may be missing. */
 function msgActs(text, answer, who) {
@@ -1440,8 +1457,23 @@ function pictureBubble(pic, caption) {
   const link = el('a', { href: pictureUrl(pic.output), target: '_blank', rel: 'noopener', title: 'Open full size' }, img);
   // A picture deleted in the Images pane leaves a plain note here, not a broken image.
   img.addEventListener('error', () => link.replaceWith(el('p', { class: 'hint', text: 'Picture deleted.' })), { once: true });
-  return el('figure', { class: 'chat-pic' }, link, caption ? el('figcaption', { class: 'hint', text: caption }) : null);
+  // A Videographer can start a clip from it (clips.js).
+  const toClip = el('button', { class: 'btn quiet chat-pic-clip', type: 'button', text: 'Make a clip from this picture', onclick: () => app.clipFromPicture?.(pictureUrl(pic.output), { gallery: pic.output }, pic.prompt) });
+  return el('figure', { class: 'chat-pic' }, link, caption ? el('figcaption', { class: 'hint', text: caption }) : null, toClip);
 }
+const clipUrl = rel => `/api/clips/file/${rel.split('/').map(encodeURIComponent).join('/')}`;
+/** A clip a Videographer made: a player in the bubble, its length and size under it. */
+function clipBubble(clip, caption) {
+  const video = el('video', { src: clipUrl(clip.file), controls: '', preload: 'metadata', playsinline: '', loop: '', title: clip.prompt });
+  if (clip.width && clip.height) video.style.aspectRatio = `${clip.width} / ${clip.height}`;
+  // A clip deleted from the Videos shelf leaves a plain note here, not a broken player.
+  // Open: the clip viewer (clips.js), large, with how it was made and Make again.
+  const open = clip.id ? el('button', { class: 'btn quiet clip-open', type: 'button', text: 'Open', title: 'Open it large, with how it was made', onclick: () => app.openClip?.(clip.id) }) : null;
+  video.addEventListener('error', () => (video.replaceWith(el('p', { class: 'hint', text: 'Clip deleted.' })), open?.remove()), { once: true });
+  return el('figure', { class: 'chat-pic chat-clip' }, video, el('figcaption', { class: 'hint', text: [caption, `${clip.seconds} s · ${clip.width}×${clip.height}`].filter(Boolean).join(' · ') }), open, app.clipActs?.(clip, video) ?? null);
+}
+app.clipBubble = clipBubble;
+app.clipUrl = clipUrl;
 const secs = n => (n < 60 ? `${Math.max(1, Math.round(n))} s` : `${Math.floor(n / 60)} min ${Math.round(n % 60)} s`);
 function progressText(p) {
   if (p.state === 'queued') return `Waiting for the picture before it${p.queued ? ` (${p.queued} waiting)` : ''}…`;
@@ -1594,7 +1626,7 @@ app.tierRows = save => {
   const tierRow = kind => {
     const k = kinds[kind];
     const pick = app.setSeg(k.tiers.map(t => [t, app.TIER_NAMES[t]]), now().tiers?.[kind] ?? k.tiers[0], `${k.name}: when to ask`, async v => {
-      const p = await save({ tiers: { ...now().tiers, [kind]: v } });
+      const p = await save({ tiers: { [kind]: v } });
       pick.value = p ? p.tiers[kind] : now().tiers?.[kind] ?? k.tiers[0];
     });
     picks[kind] = pick;
@@ -1672,7 +1704,8 @@ app.permissionRows = (onChange) => {
   const said = el('span', { class: 'hint', role: 'status' });
   const save = async change => {
     try {
-      const s = await api('/api/settings', { permissions: { ...now(), ...change } });
+      // Only what changed: the server keeps the rest as saved, so a second window never puts back what this one showed.
+      const s = await api('/api/settings', { permissions: change });
       if (app.models?.settings) app.models.settings.permissions = s.permissions;
       said.textContent = 'Saved.';
       onChange?.(s.permissions);
@@ -1700,12 +1733,12 @@ app.permissionRows = (onChange) => {
  */
 app.permissionsPage = () => {
   const said = app.setSaid();
-  // One save at a time: each sends the whole permissions, so two sent together would undo each other's change.
+  // One save at a time, each sending only what changed: the server keeps the rest as saved (another window's changes too).
   let queue = Promise.resolve(null);
   const save = change => (queue = queue.then(() => saveNow(change)));
   const saveNow = async change => {
     try {
-      const s = await api('/api/settings', { permissions: { files: 'ask', web: 'ask', webDelay: true, ...(app.models?.settings?.permissions ?? {}), ...change } });
+      const s = await api('/api/settings', { permissions: change });
       if (app.models?.settings) app.models.settings.permissions = s.permissions;
       said.textContent = 'Saved.';
       return s.permissions;
@@ -1929,7 +1962,7 @@ function drawChat(lines, chat) {
   if (chat?.opening) log.append(openingNote(chat.opening));
   // Nobody to talk to (the host is off for now and nobody who chats is hired yet): says where to hire someone (home.js).
   if (!lines.length) log.append(el('p', { class: 'empty', text: !chat && app.nobodyToTalkTo ? NOBODY_YET : EMPTY_CHAT }));
-  for (const l of lines) log.append(el('div', { class: `msg ${l.failed ? 'system' : l.role}${l.refused ? ' refused' : ''}${l.recalled ? ' recalled' : ''}` }, l.role === 'user' && !l.picture && l.content ? copyButton(l.content) : null, l.thought?.text ? thoughtFold(l.thought.text, l.thought.seconds, true) : null, l.picture ? pictureBubble(l.picture, l.content) : l.role === 'assistant' ? formatted(l.content) : l.content, l.picture ? (l.ran ? speedLine({ ran: `drawn ${l.ran}` }) : null) : l.failed ? null : speedLine(l), sentLine(l), l.picture || l.refused || l.failed || l.ran === 'written by the app, no model' ? null : msgActs(l.content, l.role === 'assistant', chat?.who)));
+  for (const l of lines) log.append(el('div', { class: `msg ${l.failed ? 'system' : l.role}${l.refused ? ' refused' : ''}${l.recalled ? ' recalled' : ''}` }, l.role === 'user' && !l.picture && l.content ? copyButton(l.content) : null, l.thought?.text ? thoughtFold(l.thought.text, l.thought.seconds, true) : null, l.attached && chat?.id ? sentPic(sentPicUrl(chat.id, l.attached.file)) : null, l.picture ? pictureBubble(l.picture, l.content) : l.clip ? clipBubble(l.clip, l.clip.prompt) : l.role === 'assistant' ? formatted(l.content) : l.content, l.picture ? (l.ran ? speedLine({ ran: `drawn ${l.ran}` }) : null) : l.clip ? (l.ran ? speedLine({ ran: `made ${l.ran}` }) : null) : l.failed ? null : speedLine(l), sentLine(l), l.picture || l.clip || l.refused || l.failed || l.ran === 'written by the app, no model' ? null : msgActs(l.content, l.role === 'assistant', chat?.who)));
   // An answer a linked PC is still writing (the connection was lost part-way): Reconnect under it.
   lines.forEach((l, i) => { if (l.waiting) log.children[i + (chat?.opening ? 1 : 0)]?.append(reconnectLine(l.waiting)); });
   watchOwed(lines.some(l => l.waiting) ? chat?.id ?? '' : '');
@@ -1962,7 +1995,7 @@ function drawDocs(docs) {
       }
     });
     const size = d.kind === 'pdf' ? `${d.pages} page${d.pages === 1 ? '' : 's'}` : `${d.pages.toLocaleString()} lines`;
-    return el('span', { class: 'doc-chip', title: d.empty ? `${d.empty} page${d.empty === 1 ? ' has' : 's have'} no text (pictures only) and cannot be read.` : '' }, el('span', { text: `${d.name} · ${size}${d.empty ? ` · ${d.empty} without text` : ''}` }), x);
+    return el('span', { class: 'doc-chip', title: d.empty ? `${d.empty} page${d.empty === 1 ? ' has' : 's have'} no text (pictures only)${d.pictures ? '. The page pictures are kept: reading them needs a chat model that can read pictures.' : ' and cannot be read.'}` : '' }, el('span', { text: `${d.name} · ${size}${d.empty ? ` · ${d.empty} without text` : ''}` }), x);
   }));
 }
 async function addDocs(files) {
@@ -1991,7 +2024,10 @@ async function addDocs(files) {
           named.chatId = r.chat;
           await app.afterSend?.(r.chat, from);
         }
-        const ok = await app.scanWarn(r.scan, r.scan.text, {
+        const ok = await app.scanWarn(r.scan, r.scan.text, r.scan.unread ? {
+          title: `${r.name} was not checked to the end`,
+          hint: 'This file is too long to check all the way through for text that tries to trick an AI into doing harm. Nothing was found in the part that was checked, but the rest was not checked. Add it only if you trust where it came from.',
+        } : {
           title: `${r.name} looks risky`,
           hint: 'This file holds text that is often used to trick an AI into doing harm: hiding its orders, reading your files or passwords, sending them out, or running commands. The flagged parts are marked, with a little of the text around each (… marks text left out). Add it only if you trust where it came from.',
         });
@@ -2013,6 +2049,8 @@ async function addDocs(files) {
   }
 }
 $('#doc-add').addEventListener('click', () => $('#doc-file').click());
+/** Adds files to the chat on screen as documents, as the paperclip does (Ask about a report, public/agents.js). */
+app.addDocs = addDocs;
 
 // ---- Options (bottom left of the chat box): Quick or Think, Web and Max in a menu that opens upward ----
 // The switches are the same buttons as before (thinkPick, webPick, maxPick keep their state); the button names what is
@@ -2056,7 +2094,12 @@ chatDrop.addEventListener('drop', e => {
   if (!e.dataTransfer?.files?.length) return;
   e.preventDefault();
   chatDrop.classList.remove('dropping');
-  addDocs([...e.dataTransfer.files]);
+  // A picture dropped goes on the next message for the model to look at (chatview.js); other files are documents.
+  const files = [...e.dataTransfer.files];
+  const pic = files.find(f => app.isPictureFile?.(f));
+  if (pic) app.attachPicture(pic, pic.name);
+  const docs = files.filter(f => !app.isPictureFile?.(f));
+  if (docs.length) addDocs(docs);
 });
 
 // ---- Long answers (PLAN F10 G1): Continue on an answer its length limit cut ----

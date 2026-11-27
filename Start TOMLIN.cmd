@@ -12,8 +12,10 @@ set SM_NO_PIC=
 if not exist node_modules\sharp set SM_NO_PIC=1
 if not exist node_modules\@img\sharp-win32-x64\lib set SM_NO_PIC=1
 if defined SM_NO_PIC (echo Installing the picture tools ^(one time^)... & call npm install --omit=dev --include=optional --no-audit --no-fund || (pause & exit /b 1))
-if not exist runtime\llama-cpu\llama-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
-if not exist runtime\sd-cpu\sd-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & call npm run fetch || (pause & exit /b 1))
+rem A missing model runner is downloaded once; when that fails (offline, or a virus scanner took it) TOMLIN still starts.
+set SM_FETCHED=
+if not exist runtime\llama-cpu\llama-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & set "SM_FETCHED=1" & call npm run fetch || (echo The model runners could not be downloaded ^(no internet, or a virus scanner took one^). TOMLIN starts without them: no model loads until they are back. Start TOMLIN again when online, or use Repair install.))
+if not defined SM_FETCHED if not exist runtime\sd-cpu\sd-server.exe (echo The model runners ^(the small programs that load a model and make it write or draw^) are missing. Downloading them now... & call npm run fetch || (echo The model runners could not be downloaded ^(no internet, or a virus scanner took one^). TOMLIN starts without them: no model loads until they are back. Start TOMLIN again when online, or use Repair install.))
 rem The model runners need Microsoft's Visual C++ Runtime (src/vcrt.ts); a clean Windows lacks it. Said, not stopped.
 set SM_NO_VCRT=
 for %%f in (vcruntime140.dll vcruntime140_1.dll msvcp140.dll msvcp140_1.dll msvcp140_atomic_wait.dll msvcp140_codecvt_ids.dll vcomp140.dll) do if not exist "%SystemRoot%\System32\%%f" set SM_NO_VCRT=1

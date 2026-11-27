@@ -2,7 +2,7 @@
 // plan file and the workspace files are the memory, not the chat, so a long job never depends on one long conversation.
 // This file holds the plain functions (plan format, prompts, reading a worker's answer); the plain functions are tested in
 // test/jobs.test.ts. Nothing here runs code or touches the disk: the server saves the plan as jobs/<id>/plan.json.
-import { firstWords, keptFromModels, RESERVED, SPECIALISTS, stamp } from './folders.ts';
+import { AGENTS, firstWords, keptFromModels, RESERVED, SPECIALISTS, stamp } from './folders.ts';
 import { cleanPath } from './workspace.ts';
 
 export const ROLE_IDS = ['coder', 'writer', 'artist', 'designer'] as const;
@@ -118,8 +118,8 @@ export function cleanProjectFolder(input: unknown): string | null {
   if (!raw || raw.length > 120 || /[\0<>:"|?*]/.test(raw)) return null;
   const parts = raw.split('/').map(p => p.trim());
   if (parts.length > 3 || parts.some(p => !p || p === '.' || p === '..' || p.startsWith('.') || /[ .]$/.test(p) || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(p))) return null;
-  // jobs\ holds every project's plan; chats\ and notes\ hold quick chats and notes (src/folders.ts).
-  if (parts[0].toLowerCase() === 'jobs' || parts[0] === 'node_modules' || RESERVED.includes(parts[0].toLowerCase())) return null;
+  // jobs\ holds every project's plan, agents\ the agents' reports; chats\ and notes\ hold quick chats and notes (src/folders.ts).
+  if (parts[0].toLowerCase() === 'jobs' || parts[0].toLowerCase() === AGENTS || parts[0] === 'node_modules' || RESERVED.includes(parts[0].toLowerCase())) return null;
   return parts.join('/');
 }
 

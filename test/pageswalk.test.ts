@@ -15,19 +15,11 @@ test('a linked PC tile is wide enough for its memory lines, and a long card name
   assert.match(css, /\.mbar-short > \.mbar \{ flex: 0 0 100%; \}/);
 });
 
-test('a card that starts with a block (Guest passes, the measured speeds) has room above its words', () => {
+test('a card that starts with a block has room above its words; Guest passes starts with its switch row, as Node does', () => {
   assert.match(css, /\.set-card > \.set-block:first-child \{ padding: 14px 16px; \}/);
   const html = read('index.html');
-  for (const id of ['guest-passes']) {
-    const part = html.slice(html.indexOf(`id="${id}"`), html.indexOf('</section>', html.indexOf(`id="${id}"`)));
-    assert.match(part, /<div class="set-card">\s*<div class="set-block">/, `${id} starts with a block`);
-  }
-});
-
-test('the host PIN says it is being given while a linked PC takes it', () => {
-  const home = read('home.js');
-  const give = home.slice(home.indexOf('async function giveHostPin('), home.indexOf("$('#host-pin-set').addEventListener"));
-  assert.ok(give.indexOf('hostPinSay(`Giving the host PIN to "${p.name}"…`);') < give.indexOf("await api('/api/network/host-pin', { action: 'give'"));
+  const part = html.slice(html.indexOf('id="guest-passes"'), html.indexOf('</section>', html.indexOf('id="guest-passes"')));
+  assert.match(part, /<div class="set-card">\s*<div class="set-row">/, 'guest-passes starts with its switch row');
 });
 
 test('a guest pass does not say a linked PC never answered when it simply has no models', () => {
@@ -36,10 +28,10 @@ test('a guest pass does not say a linked PC never answered when it simply has no
   assert.match(home, /'No models there yet, or it has not answered since it was linked\.'/);
 });
 
-test('This PC lists every permission a linked PC may have, and says turning it off starts ticked', () => {
+test('This PC has every permission a linked PC may have as its tick, and turning it off starts ticked', () => {
   const html = read('index.html');
-  const row = html.slice(html.indexOf('<b>What linked PCs may do here</b>'), html.indexOf('</span></span>', html.indexOf('<b>What linked PCs may do here</b>')));
-  assert.match(row, /and turn it off\. Each is a tick, off until you tick it, except turning it off, which is on until you untick it\./);
+  const thispc = html.slice(html.indexOf('<section class="nodes" id="thispc"'), html.indexOf('\n</section>\n', html.indexOf('<section class="nodes" id="thispc"')));
+  for (const k of ['pull', 'receive', 'backup', 'update', 'tune', 'off', 'peer', 'give', 'lend']) assert.match(thispc, new RegExp(`data-allow="${k}"`), k);
   // The tick itself: on unless its owner turns it off (home.js drawNodeAllow's default).
   assert.match(read('home.js'), /receive: false, give: false, off: true \}/);
 });

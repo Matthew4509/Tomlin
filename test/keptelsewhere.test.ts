@@ -179,10 +179,10 @@ test('one that came back without the mark keeps this PC\'s recovery codes, claim
   assert.deepEqual(s.remotes.map((r: Record<string, unknown>) => [r.id, r.token, r.key ?? null]), [['p1', 't'.repeat(64), 'K1'], ['p2', 'u'.repeat(64), null], ['evil', '', null]]);
 });
 
-test('a restore point made here is put back whole, as before (its PIN and sharing are this PC\'s own)', async () => {
+test('a restore point made here is put back whole, but the app lock stays as it is now (an old PIN never comes back)', async () => {
   const h = await home();
   const here = await keep.backup(h, 'by hand');
   await put(join(h.data, 'app-lock.json'), '{"hash":"NEWER"}');
   assert.match(await keep.restore(h, here, '2.0.61'), /Restored the backup/);
-  assert.equal(await readFile(join(h.data, 'app-lock.json'), 'utf8'), '{"hash":"PIN-HASH"}');
+  assert.equal(await readFile(join(h.data, 'app-lock.json'), 'utf8'), '{"hash":"NEWER"}');
 });

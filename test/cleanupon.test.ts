@@ -39,7 +39,7 @@ test('Free up space on a linked PC: one short line when something really blocks 
     // Its tick is not set: the one real reason, in one line, with no how-to.
     const blocked = (await host.post('/api/cleanup', { pc })).body;
     assert.equal(blocked.canDelete, false);
-    assert.equal(blocked.why, 'Tick "Accept models from linked PCs" on "Test node" (Network) to remove models there.');
+    assert.equal(blocked.why, 'Tick "Accept models from linked PCs" on "Test node" (This PC) to remove models there.');
     assert.equal(blocked.rows.length, 3);
 
     // Ticked there: nothing blocks, no message, the models are listed to tick.

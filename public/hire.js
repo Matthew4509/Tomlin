@@ -26,7 +26,10 @@
 
   const d = () => team.data;
   const role = () => d()?.roles.find(r => r.id === hs.role);
-  const kind = () => (role()?.kind === 'image' ? 'image' : 'chat');
+  /** The kind of model the role works with: 'chat', 'image' (pictures) or 'video' (a Videographer's clips). */
+  const kind = () => (role()?.kind === 'image' || role()?.kind === 'video' ? role().kind : 'chat');
+  /** What the cards are called for the role's kind. */
+  const things = () => ({ image: 'picture models', video: 'video models' })[kind()] ?? 'chat models';
   const GBs = n => `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GB`;
   // Two linked PCs with one name are told apart (app.pcLabel, public/home.js); before Home has read the PCs, by the
   // names the staff list gave (src/brains.ts pcLabels).
@@ -78,36 +81,40 @@
   }
 
   /**
-   * Role is two tiles, Text / coding and Images (a role's `kind`), and the sub-role is a drop-down of the roles of the
+   * Role is two tiles, Text / coding and Pictures and video (a role's `kind`), and the sub-role is a drop-down of the roles of the
    * tile picked. A tile picked again goes back to the sub-role last picked under it.
    */
-  const KINDS = [{ id: 'chat', name: 'Text / coding', icon: 'coder' }, { id: 'image', name: 'Images', icon: 'artist' }];
-  const kindOf = r => (r?.kind === 'image' ? 'image' : 'chat');
+  // The Videographer (a 'video' role) is listed under Pictures and video, as "Video (Videographer)".
+  const KINDS = [{ id: 'chat', name: 'Text / coding', icon: 'coder' }, { id: 'image', name: 'Pictures and video', icon: 'artist' }];
+  const kindOf = r => (r?.kind === 'image' || r?.kind === 'video' ? 'image' : 'chat');
+  const subName = r => (r.kind === 'video' ? `Video (${r.name})` : r.name);
   const lastSub = {};
   function drawRoles() {
     $('#hs-roles').replaceChildren(...KINDS.filter(k => d().roles.some(r => kindOf(r) === k.id)).map(k => el('label', { class: 'pick-card hs-role' },
-      el('input', { type: 'radio', name: 'hs-kind', value: k.id, checked: k.id === kind(), onchange: () => pickKind(k.id) }),
+      el('input', { type: 'radio', name: 'hs-kind', value: k.id, checked: k.id === kindOf(role()), onchange: () => pickKind(k.id) }),
       el('span', { class: 'role-icon', 'aria-hidden': 'true' }, roleIcon(k.icon)), el('span', { text: k.name }))));
     drawSubRoles();
   }
   function drawSubRoles() {
     const sel = $('#hs-subrole');
-    sel.replaceChildren(...d().roles.filter(r => kindOf(r) === kind()).map(r => el('option', { value: r.id, text: r.name, selected: r.id === hs.role })));
+    sel.replaceChildren(...d().roles.filter(r => kindOf(r) === kindOf(role())).map(r => el('option', { value: r.id, text: subName(r), selected: r.id === hs.role })));
     sel.value = hs.role;
     sel.disabled = false;
   }
   function pickKind(id) {
-    if (id === kind()) return;
-    lastSub[kind()] = hs.role;
+    if (id === kindOf(role())) return;
+    lastSub[kindOf(role())] = hs.role;
     const keep = d().roles.find(r => r.id === lastSub[id]);
-    pickRole((keep ?? d().roles.find(r => kindOf(r) === id))?.id ?? hs.role);
+    // Pictures and video starts on Artist (the one most hires want), not the first in the list (Graphic designer).
+    const first = id === 'image' ? d().roles.find(r => r.id === 'artist') : null;
+    pickRole((keep ?? first ?? d().roles.find(r => kindOf(r) === id))?.id ?? hs.role);
     drawSubRoles();
   }
   function pickRole(id) {
     const before = kind();
     hs.role = id;
     if (!hs.lookPicked) drawLook();
-    // A chat role and a picture role start on different kinds of model.
+    // A chat role, a picture role and a video role start on different kinds of model.
     if (kind() !== before) hs.model = '';
     drawAll();
   }
@@ -129,7 +136,7 @@
   function drawSummary() {
     const m = onPc(hs.pc).find(c => c.id === hs.model);
     $('#hs-sum-pc').textContent = pcName(hs.pc);
-    $('#hs-sum-model').textContent = m ? m.label : kind() === 'image' ? 'None yet: pick one after hiring' : hs.pc ? 'None picked' : 'None yet: the model loaded here';
+    $('#hs-sum-model').textContent = m ? m.label : kind() !== 'chat' ? 'None yet: pick one after hiring' : hs.pc ? 'None picked' : 'None yet: the model loaded here';
     // Moving: a model on the PC picked, and not the one they have now.
     $('#hs-go').disabled = hs.move ? !m || m.id === hs.move.model : !!hs.pc && !m;
   }
@@ -157,8 +164,59 @@
 
   // ---- Choose a model (right) ----
 
+  /** What the memory on the cards is measured against, by the role's kind. */
+  const MEM_HINT = { chat: 'Memory needed is an estimate (a chat model with an 8K context).', image: 'Memory needed is an estimate.', video: 'Graphics memory needed is an estimate.' };
   const FIT = { ok: '', tight: 'Tight fit: little memory to spare', no: 'Needs more memory than is free' };
+  /**
+   * A video model's card: its name, size, the fits guide for that PC's card (Fits, Tight fit, Not enough memory) and
+   * the line under it; on this PC one not downloaded yet cannot be picked and has Get it (the Models page, Video).
+   */
+  function videoCard(c) {
+    const missing = c.here === false;
+    // A linked PC that does not say which video models it has (before 2.1.34): the clip finds out when it is made.
+    const state = missing ? (c.pc ? 'Not on that PC: send it there' : 'Not downloaded') : c.here ? (c.pc ? 'On that PC' : 'Downloaded') : 'That PC does not say: update it to know';
+    const fit = c.videoFit ?? 'Card not known';
+    return el('label', { class: `pick-card hs-model${c.videoFit === 'Not enough memory' ? ' hs-tight' : ''}${missing ? ' hs-missing' : ''}` },
+      el('input', { type: 'radio', name: 'hs-model', value: c.id, checked: hs.model === c.id, disabled: missing, onchange: () => pickModel(c.id) }),
+      el('span', { class: 'hs-model-text' },
+        el('strong', { text: c.label }),
+        el('span', { class: 'hint', text: c.bytes ? `files ${GBs(c.bytes)}` : 'Size not known' }),
+        el('span', { class: c.videoFit === 'Fits' ? 'hs-fits' : 'hs-warn', text: c.videoFit === 'Fits' ? `Fits · ${c.fitLine}` : `⚠ ${fit} · ${c.fitLine}` }),
+        pairs?.videos?.[modelKey(c)] ? el('ul', { class: 'hs-pair', 'aria-label': 'Video starts' }, pairItem(pairs.videos[modelKey(c)])) : null,
+        missing ? el('button', { class: 'link', type: 'button', text: 'Get it on the Models page', onclick: () => toModels('video') }) : null),
+      el('span', { class: 'hs-state', text: state }));
+  }
+  /**
+   * A picture model's card in words, as a video model's: whether it is here, its file size, its licence (a
+   * non-commercial one: not for paid work), and how it fits that PC's graphics card (src/calc.ts pictureFit: Fits,
+   * Tight fit, Too big for this PC's card with about how long a picture takes on the processor).
+   */
+  function pictureWords(c) {
+    const missing = c.here === false;
+    const f = c.cardFit;
+    const state = c.busy ? 'Drawing now' : c.loaded ? (c.pc ? 'Loaded there' : 'Loaded') : missing ? (c.pc ? 'Not on that PC' : 'Not downloaded') : c.ok === false ? 'Off now' : c.pc ? 'Loads when asked' : 'Installed';
+    const licence = c.nonCommercial ? 'Licence: not for paid work (non-commercial)' : c.licence ? `Licence: ${String(c.licence).split(' (')[0].replace(/\.$/, '')}` : '';
+    const fit = !f ? { warn: true, text: '⚠ Card not known' } : f.level === 'ok' ? { warn: false, text: `Fits · ${f.line}` } : { warn: true, text: `⚠ ${f.word} · ${f.line}` };
+    return { missing, state, size: c.bytes ? `file ${GBs(c.bytes)}` : 'Size not known', licence, fit };
+  }
+  /** A picture model's card: one not downloaded here cannot be picked and has Get it (the Models page, Pictures). */
+  function pictureCard(c) {
+    const w = pictureWords(c);
+    // Not enough memory free now (another model loaded), on top of how it fits the PC as a whole.
+    const now = !w.missing && FIT[c.fit] && c.cardFit?.level !== 'no' ? `⚠ ${c.pc && c.fit === 'no' ? 'Needs more memory than that PC has' : FIT[c.fit]}` : '';
+    return el('label', { class: `pick-card hs-model${w.fit.warn && c.cardFit?.level !== 'tight' ? ' hs-tight' : ''}${w.missing ? ' hs-missing' : ''}${c.hidden ? ' hidden-model' : ''}` },
+      el('input', { type: 'radio', name: 'hs-model', value: c.id, checked: hs.model === c.id, disabled: w.missing, onchange: () => pickModel(c.id) }),
+      el('span', { class: 'hs-model-text' },
+        el('strong', { text: c.label }),
+        el('span', { class: 'hint', text: [w.size, w.licence, c.hidden ? 'Hidden' : ''].filter(Boolean).join(' · '), title: c.licence || '' }),
+        el('span', { class: w.fit.warn ? 'hs-warn' : 'hs-fits', text: w.fit.text }),
+        now ? el('span', { class: 'hs-warn', text: now }) : null,
+        w.missing && !c.pc ? el('button', { class: 'link', type: 'button', text: 'Get it on the Models page', onclick: () => toModels('image') }) : null),
+      el('span', { class: `hs-state${c.loaded || c.busy ? ' on' : ''}`, text: w.state }));
+  }
   function modelCard(c) {
+    if (kind() === 'video') return videoCard(c);
+    if (kind() === 'image') return pictureCard(c);
     const state = c.busy ? (kind() === 'image' ? 'Drawing now' : 'Answering now') : c.loaded ? (c.pc ? 'Loaded there' : 'Loaded') : c.ok === false ? 'Off now' : c.pc ? 'Loads when asked' : 'Installed';
     const size = [c.need ? `Needs about ${GBs(c.need)}` : '', c.bytes ? `file ${GBs(c.bytes)}` : ''].filter(Boolean).join(' · ');
     const lvl = d().levels.find(l => l.id === c.level);
@@ -182,27 +240,104 @@
     if (!tick.isConnected) $('#hs-tools').append(tick);
     const q = hs.q.trim().toLowerCase();
     // Loaded first, then those that fit, then by name.
-    const rank = c => (c.loaded || c.busy ? 0 : c.fit === 'no' ? 2 : 1);
-    const list = offered(hs.pc).filter(c => !q || c.label.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
-    const thing = kind() === 'image' ? 'picture models' : 'chat models';
+    // A video model: downloaded first, then by how it fits; the list keeps its order (smallest first) within each.
+    // A picture model: loaded first, then those here, then by how it fits that PC's card; by name within each.
+    const cardRank = { ok: 0, tight: 1, cpu: 2, no: 3 };
+    const rank = c => (kind() === 'video' ? (c.here === false ? 3 : 0) + (c.fit === 'no' ? 2 : c.fit === 'tight' ? 1 : 0)
+      : kind() === 'image' ? (c.loaded || c.busy ? 0 : 1) + (c.here === false ? 4 : 0) + (cardRank[c.cardFit?.level] ?? 1) * 0.5
+      : c.loaded || c.busy ? 0 : c.fit === 'no' ? 2 : 1);
+    const list = offered(hs.pc).filter(c => !q || c.label.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b) || (kind() === 'video' ? 0 : a.label.localeCompare(b.label)));
+    const thing = things();
     const p = hs.pc ? d().pcs.find(x => x.id === hs.pc) : null;
     const empty = q && offered(hs.pc).length ? [el('p', { class: 'hint', text: `No ${thing} on ${pcName(hs.pc)} match "${hs.q.trim()}".` })]
       : hs.pc ? [el('p', { class: 'hint', text: !p?.ok && !all.length ? `${pcName(hs.pc)} is off and has not said which ${thing} it shares. Start it, or pick another PC.` : `${pcName(hs.pc)} has no ${thing} yet. Send one there from Models, or pick another PC.` })]
-      : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => { dlg.close(); app.openModels(kind() === 'image' ? 'image' : 'chat'); } }), '.')];
+      : [el('p', { class: 'hint' }, `No ${thing} on this PC yet. You can still hire them now and pick their model after; or `, el('button', { class: 'link', type: 'button', text: 'get a model', onclick: () => toModels(kind()) }), '.')];
     // The model kept when it is still offered; else the one loaded now on this PC; else the first on the list.
     if (!list.some(c => c.id === hs.model)) {
       // Moving: their own model first, when it is on the PC picked.
-      const now = hs.move?.model && list.some(c => c.id === hs.move.model) ? hs.move.model : !hs.pc ? (kind() === 'image' ? d().connectedImage : d().connected) : null;
-      hs.model = list.find(c => c.id === now)?.id ?? list[0]?.id ?? '';
+      const now = hs.move?.model && list.some(c => c.id === hs.move.model) ? hs.move.model : !hs.pc && kind() !== 'video' ? (kind() === 'image' ? d().connectedImage : d().connected) : null;
+      // A video model not downloaded here is never picked for them.
+      hs.model = list.find(c => c.id === now)?.id ?? list.find(c => c.here !== false)?.id ?? '';
     }
     keepCards($('#hs-models'), list.length ? list.map(modelCard) : empty);
     $('#hs-models-title').textContent = `Choose a model${list.length ? ` (${list.length})` : ''}`;
+    $('#hs-models-hint').textContent = MEM_HINT[kind()];
   }
+
+  // ---- Image styles: each picture model offered, with its style samples (stylepick.js), to compare by real pictures ----
+
+  dlg.addEventListener('close', () => stylePick.hide());
+  /** The opening the samples were read for: read again once each time the window opens. */
+  let stylesRead = -1;
+  function drawStyles() {
+    const block = $('#hs-styles-block');
+    block.hidden = kind() !== 'image';
+    if (block.hidden) return;
+    if (stylesRead !== hs.turn) {
+      stylesRead = hs.turn;
+      void stylePick.load(true).then(() => { if (dlg.open) drawStyles(); });
+    }
+    const data = stylePick.now();
+    // The models here: one not downloaded has no samples yet (its card above has Get it).
+    const list = offered(hs.pc).filter(c => c.here !== false);
+    $('#hs-styles-line').textContent = !data ? 'Reading the style samples…' : `Each model's own pictures of one fox in every style, drawn from the same words and seed (${data.seed}), so you can compare them. Hover a picture for how it was drawn.`;
+    if (!data) return;
+    $('#hs-styles').replaceChildren(...(list.length ? list.map(c => styleRow(c)) : [el('p', { class: 'hint', text: `No ${things()} downloaded here to compare yet. Get one from its card above (Get it on the Models page); its style samples are drawn once someone is hired on it.` })]));
+  }
+  function styleRow(c) {
+    const key = c.pc ? c.id.slice(`remote:${c.pc}:`.length) : c.id;
+    const strip = stylePick.strip(key);
+    const size = [c.bytes ? `file ${GBs(c.bytes)}` : '', c.need ? `needs about ${GBs(c.need)}` : ''].filter(Boolean).join(' · ');
+    const who = stylePick.artistsOn(key);
+    const said = el('span', { class: 'hint', role: 'status' });
+    // Made by someone hired on this model, through the queue; nobody on it yet: what is needed is said.
+    const make = who.length
+      ? el('button', { class: 'btn quiet', type: 'button', text: strip ? 'Make them again' : 'Make the style samples', title: `Queues ${stylePick.count()} pictures for ${who[0].name}, one per style, each kept as this model's sample`, onclick: async e => {
+        e.currentTarget.disabled = true;
+        try { said.textContent = await stylePick.make(who[0].id); } catch (err) { said.textContent = err.message; }
+      } })
+      : null;
+    // One line per video model installed here or on a linked PC.
+    const installed = new Set(modelsOf('video', true).map(v => v.id));
+    const lines = (pairs?.pictures?.[key] ?? []).filter(l => installed.has(l.video));
+    return el('div', { class: 'hs-style-row' },
+      el('div', { class: 'hs-style-name' }, el('strong', { text: c.label }), size ? el('span', { class: 'hint', text: size }) : null),
+      lines.length ? el('ul', { class: 'hs-pair', 'aria-label': 'Video starts' }, ...lines.map(pairItem)) : null,
+      strip ?? el('p',{ class: 'hint', text: `No style samples yet for ${c.label}.${who.length ? '' : ` Hire someone on it first (or move an artist to it): their model draws the samples, ${stylePick.count()} pictures through the queue.`}` }),
+      make ? el('div', { class: 'style-make' }, make, said) : null);
+  }
+
+  // ---- Video starts: which pictures make good starts for video (src/pairing.ts), each line Expected or Seen ----
+
+  /** The opening the lines were read for, and the lines: per picture model (one per video model), per video model. */
+  let pairRead = -1;
+  let pairs = null;
+  /** A choice's model id (a linked PC's without its "remote:<pc>:"). */
+  const modelKey = c => (c.pc ? c.id.slice(`remote:${c.pc}:`.length) : c.id);
+  /** The models of a kind on any PC, once each; `here`: only those on their PC (a linked PC that does not say counts). */
+  function modelsOf(k, here = false) {
+    const out = new Map();
+    for (const c of d()?.hireChoices?.[k] ?? []) if ((!here || c.here !== false) && !out.has(modelKey(c))) out.set(modelKey(c), c.label);
+    return [...out].map(([id, name]) => ({ id, name }));
+  }
+  /** Read once each time the window opens, for a picture or video role; drawn again when they come. */
+  function loadPairs() {
+    if (kind() === 'chat' || pairRead === hs.turn) return;
+    const turn = pairRead = hs.turn;
+    void api('/api/pairing/lines', { pictures: modelsOf('image').map(p => ({ key: p.id, name: p.name })), videos: modelsOf('video') }).then(r => {
+      if (turn !== hs.turn || !dlg.open) return;
+      pairs = r;
+      drawModels();
+      drawStyles();
+    }, () => undefined);
+  }
+  /** One line: its words, then Expected or Seen; the hover says what that rests on. */
+  const pairItem = l => el('li', { title: l.hover }, `${l.text} `, el('span', { class: 'tag', text: `(${l.tag})` }));
 
   // ---- All models: every model on the network that the PC picked has not got, to copy there (then hire on it) ----
 
-  /** A model's key across PCs, as src/carry.ts modelKey makes it: a chat model by its file name, a picture model by its id. */
-  const keyOf = (k, id) => (k === 'image' ? `image:${id}` : `chat:${String(id).replace(/\\/g, '/').split('/').pop().toLowerCase()}`);
+  /** A model's key across PCs, as src/carry.ts modelKey makes it: a chat model by its file name, a picture or video model by its id. */
+  const keyOf = (k, id) => (k === 'image' || k === 'video' ? `${k}:${id}` : `chat:${String(id).replace(/\\/g, '/').split('/').pop().toLowerCase()}`);
   /** A hire choice's key: a linked PC's is "remote:<pc>:<its model id>". */
   const choiceKey = c => keyOf(kind(), c.pc ? c.id.slice(`remote:${c.pc}:`.length) : c.id);
 
@@ -240,7 +375,8 @@
     const linked = e.on.find(o => o.pc && o.copy) ?? null;
     const room = roomWhy(e, target);
     if (!target) return room ? { why: room } : linked ? { from: linked } : { why: e.on.find(o => o.pc)?.why || 'it cannot be copied now' };
-    const send = hs.net?.pcs.find(p => p.id === target)?.send;
+    const net = hs.net?.pcs.find(p => p.id === target);
+    const send = kind() === 'video' ? net?.sendVideo ?? net?.send : net?.send;
     if (send) return { why: send };
     if (room) return { why: room };
     if (here) return { from: here };
@@ -256,20 +392,25 @@
 
   function drawAllModels() {
     const block = $('#hs-all-block');
-    // Only with other PCs linked: alone, Models: add or remove is where models come from.
-    block.hidden = !d()?.pcs.length;
+    // Only with other PCs linked: alone, Models: add or remove is where models come from. A video model only goes
+    // from this PC to a linked PC (src/carry.ts kind 'video'), so a Videographer has the block only for a linked PC.
+    const video = kind() === 'video';
+    block.hidden = !d()?.pcs.length || (video && !hs.pc);
     if (block.hidden) return;
     const target = hs.pc;
-    const there = new Set(onPc(target).map(choiceKey));
+    // A linked PC does not say which video models it has: each of this PC's is offered (one there already is not sent again).
+    const there = new Set(video ? [] : onPc(target).map(choiceKey));
     const q = hs.q.trim().toLowerCase();
     // A model only on PCs that are off is not a card (it cannot be installed now): it is listed under that PC, folded, below.
     const off = new Set((hs.net?.pcs ?? []).filter(p => p.ok === false).map(p => p.id));
     const reachable = e => e.on.some(o => !o.pc || !off.has(o.pc));
     const list = networkModels().filter(e => reachable(e) && !there.has(e.key) && (!q || e.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
-    drawOffPcs(off);
-    const thing = kind() === 'image' ? 'picture models' : 'chat models';
+    // A linked PC that is off has not said which video models it has: nothing to list under it for a Videographer.
+    drawOffPcs(video ? new Set() : off);
+    const thing = things();
     block.classList.toggle('hs-wait', !hs.net);
     $('#hs-all-line').textContent = !hs.net ? 'Asking the linked PCs which models they have…'
+      : video ? (list.length ? `Send a video model from this PC to ${pcName(target)}: every file is checked there.` : `This PC has no video model downloaded${q ? ` that matches "${hs.q.trim()}"` : ''} to send: get one on the Models page (Video).`)
       : list.length ? 'Choose and pull a model from across your network.'
       : `${pcName(target)} has every ${thing.slice(0, -1)} your linked PCs share${q ? ` that matches "${hs.q.trim()}"` : ''}.`;
     // The PC that Install puts a model on, as a tile like the left panel's.
@@ -421,15 +562,21 @@
     if (was !== null) box.querySelector(`input[value="${CSS.escape(was)}"]`)?.focus();
   }
 
+  /** The numbers on the steps: Assign a PC is shown only with linked PCs, so without them Choose a model is step 2. */
+  const stepNumbers = pcsShown => ({ pcs: '2', models: pcsShown ? '3' : '2' });
   function drawAll() {
     keepCards($('#hs-pcs'), [pcCard('')]);
     keepCards($('#hs-net-pcs'), d().pcs.map(p => pcCard(p.id)));
     $('#hs-pcs-block').hidden = !d().pcs.length;
+    const step = $('#hs-models-title').previousElementSibling;
+    if (step?.classList.contains('hs-step')) step.textContent = stepNumbers(!!d().pcs.length).models;
+    loadPairs();
     drawModels();
+    drawStyles();
     drawAllModels();
     drawRoleLine();
     drawSummary();
-    for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === kind();
+    for (const x of document.querySelectorAll('#hs-roles input')) x.checked = x.value === kindOf(role());
     if ($('#hs-subrole').value !== hs.role) drawSubRoles();
   }
 
@@ -437,7 +584,7 @@
   function drawWaiting() {
     $('#hs-subrole').replaceChildren(el('option', { text: 'Reading the roles…' }));
     $('#hs-subrole').disabled = true;
-    $('#hs-roles').replaceChildren(...['Text / coding', 'Images'].map(t => el('span', { class: 'pick-card hs-role hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'role-icon' }), el('span', { text: t }))));
+    $('#hs-roles').replaceChildren(...['Text / coding', 'Pictures and video'].map(t => el('span', { class: 'pick-card hs-role hs-wait-card', 'aria-hidden': 'true' }, el('span', { class: 'role-icon' }), el('span', { text: t }))));
     $('#hs-pcs-block').hidden = true;
     $('#hs-all-block').hidden = true;
     $('#hs-models-title').textContent = 'Choose a model';
@@ -467,9 +614,12 @@
    * the Settings menu on the left; else a window over the page. `name`: typed on the Staff menu (`fromMenu`); else a
    * name is made up. Shown at once, never waiting on a linked PC: blurred stand-ins first (before any staff list has
    * come), then the PCs as they said last, then as they answer now (one that is off takes 3 s to give up on).
+   * `resume`: the hire parked when the Models page was opened from here (parkOf): its model and look come back too.
    */
-  app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false, move = null } = {}) => {
+  app.openHire = async ({ role = '', pc = '', page = false, name = '', fromMenu = false, move = null, resume = null } = {}) => {
     const turn = ++hs.turn;
+    // Opened again (Back to the hire, or anew): the hire parked on the Models page is this one now, or let go.
+    dropBack();
     hs.role = role;
     hs.pc = pc === 'here' ? '' : pc;
     hs.model = '';
@@ -486,6 +636,12 @@
     hs.fromMenu = fromMenu;
     $('#hs-name').value = move ? move.name : name.trim() || freeName();
     $('#hs-search').value = '';
+    if (resume) {
+      // Kept when it is still offered once the list is read (a model just downloaded is); else the list picks again.
+      hs.model = resume.model ?? '';
+      hs.look = resume.look ?? hs.look;
+      hs.lookPicked = !!resume.lookPicked;
+    }
     fault('');
     closeLook();
     drawLook();
@@ -527,7 +683,7 @@
     }
   };
   /** Edit staff's "Move to another PC, see more models": this window for that hire, on the PC they work on now. */
-  app.openMove = (m, pc = '') => app.openHire({ role: m.role, pc: pc || 'here', move: { id: m.id, name: m.name, first: m.name.split(/s+/)[0], look: m.look ?? null, model: m.model ?? null } });
+  app.openMove = (m, pc = '') => app.openHire({ role: m.role, pc: pc || 'here', move: { id: m.id, name: m.name, first: m.name.split(/\s+/)[0], look: m.look ?? null, model: m.model ?? null } });
   /** A model hidden, shown, deleted or got: the cards are read again while the window is open. */
   app.hireRedraw = async () => {
     if (!dlg.open) return;
@@ -564,11 +720,38 @@
   $('#hs-subrole').addEventListener('change', e => pickRole(e.target.value));
   // A name typed: the look follows it (a woman's name, a woman) until a look is chosen by hand.
   $('#hs-name').addEventListener('input', nameChanged);
-  // Add new: the Models page (Models: add or remove), as "get a model" does.
-  $('#hs-add-model').addEventListener('click', () => {
-    dlg.close();
-    app.openModels(kind() === 'image' ? 'image' : 'chat');
+  // ---- To the Models page and back: the hire in progress is kept (Add new, Get it, get a model) ----
+
+  /** The hire in progress, as openHire takes it back: role, PC, model, name, look, and how the window was shown. */
+  const parkOf = (hs, name, page) => ({
+    role: hs.role, pc: hs.pc, model: hs.model, name, look: hs.look, lookPicked: hs.lookPicked, move: hs.move, fromMenu: hs.fromMenu, page,
   });
+  /** What openHire is called with to put a parked hire back as it was. */
+  function unpark(p) {
+    return { role: p.role, pc: p.pc, page: p.page, fromMenu: p.fromMenu, move: p.move, name: p.name, resume: p };
+  }
+  /** The line at the top of the Models page while a hire waits: "Back to hiring Ella" (or moving them). */
+  function dropBack() {
+    document.querySelector('#hs-back-bar')?.remove();
+  }
+  /**
+   * The Models page (Models: add or remove, on the kind `cat`), with the hire kept: the window closes, and the Models
+   * page has "Back to hiring <name>" at its top, which opens this window again as it was.
+   */
+  function toModels(cat) {
+    const p = parkOf(hs, $('#hs-name').value, dlg.classList.contains('as-page'));
+    dlg.close();
+    app.openModels(cat);
+    dropBack();
+    const first = String(p.name).trim().split(/\s+/)[0] || 'them';
+    const back = el('button', { class: 'btn primary', type: 'button', text: p.move ? `Back to moving ${p.move.first}` : `Back to hiring ${first}`, onclick: () => app.openHire(unpark(p)) });
+    const bar = el('div', { class: 'hs-back-bar', id: 'hs-back-bar', role: 'status' },
+      el('span', { text: `${p.move ? `Moving ${p.move.first}` : `Hiring ${first}`} is kept while you get a model here.` }), back,
+      el('button', { class: 'btn quiet', type: 'button', text: 'Let it go', onclick: dropBack }));
+    $('#models-page .home-head')?.after(bar);
+  }
+  // Add new: the Models page (Models: add or remove), as "get a model" does; the hire waits.
+  $('#hs-add-model').addEventListener('click', () => toModels(kind()));
   // Back to where Hire staff was opened from (as a page: Settings, or All staff; else the page under the window).
   const leave = () => dlg.close();
   $('#hs-cancel').addEventListener('click', leave);

@@ -152,9 +152,18 @@ async function copyOrder(b: Record<string, unknown>): Promise<Done> {
   const from = remotes.find(x => x.id === b.from);
   const to = remotes.find(x => x.id === b.to);
   if (!from || !to) return { status: 404, body: { error: 'Pick two PCs linked to this one.' } };
-  // `to` calls `from`: the introduction that lets it is the one made from `to`.
-  if (!intros().some(x => x.from.id === to.id && x.to.id === from.id && x.scopes.includes('copy'))) return { status: 409, body: { error: `"${to.name}" and "${from.name}" are not introduced to each other for copying models. Introduce them, with "copy".` } };
   const action = b.action === 'state' || b.action === 'stop' ? b.action : 'start';
+  // `to` calls `from`: the introduction that lets it is the one made from `to`. Two PCs linked to this one are introduced
+  // by being linked: a copy between them sets up its own direct link ("copy", beside what the pair had), as long as both
+  // owners let PCs their host introduces connect directly. Nobody introduces them by hand first.
+  if (!intros().some(x => x.from.id === to.id && x.to.id === from.id && x.scopes.includes('copy'))) {
+    if (action !== 'start') return { status: 409, body: { error: `"${to.name}" and "${from.name}" have no direct link for copying yet.` } };
+    const had = intros().find(x => pairOf(x, to.id, from.id))?.scopes ?? [];
+    const made = await introduce({ a: to.id, b: from.id, scopes: [...new Set([...had, 'copy'])] });
+    if (made.status !== 200) return made;
+    // Both told now (not at their next hello), so the copy below finds its direct link there.
+    await Promise.all([sendPeers(to, seen.get(to.id)), sendPeers(from, seen.get(from.id))]).catch(() => undefined);
+  }
   const kind = b.kind === 'image' ? 'image' : 'chat';
   const model = String(b.model ?? '');
   let name = model;

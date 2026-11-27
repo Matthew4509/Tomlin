@@ -131,18 +131,44 @@ export function lineWords(place: number, running: number, averageMs: number | nu
 
 /** By default a guest's answer is up to 2000 tokens and its prompt (everything sent) up to 32,000 characters (about 8,000 tokens). */
 export const GUEST_CAPS = { answer: 2000, prompt: 32000 } as const;
-export interface GuestCaps { answer: number; prompt: number }
+/**
+ * What a guest may do here. `answer` and `prompt`: the sizes, 0 for no limit (a test cluster for people to try). `web`:
+ * search and read pages through this PC. `tools`: let the model use the tools of the guest's own app. Both on unless
+ * the owner turns them off, as before they could be.
+ */
+export interface GuestCaps { answer: number; prompt: number; web: boolean; tools: boolean }
 
 export function cleanCaps(raw: unknown): GuestCaps {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const n = (v: unknown, lo: number, hi: number, dflt: number) => {
+    if (v === 0 || v === '0' || v === 'none') return 0;
     const x = Math.floor(Number(v));
     return Number.isFinite(x) && x > 0 ? Math.min(hi, Math.max(lo, x)) : dflt;
   };
-  return { answer: n(o.answer, 256, 32_000, GUEST_CAPS.answer), prompt: n(o.prompt, 1000, 200_000, GUEST_CAPS.prompt) };
+  return { answer: n(o.answer, 256, 32_000, GUEST_CAPS.answer), prompt: n(o.prompt, 1000, 200_000, GUEST_CAPS.prompt), web: o.web !== false, tools: o.tools !== false };
 }
 
-export const capAnswer = (asked: number, caps: GuestCaps) => Math.min(asked, caps.answer);
+/** No limit on either size: a guest's tools are not held to rounds or room either. */
+export const noLimits = (c: GuestCaps) => c.answer === 0 && c.prompt === 0;
+
+/**
+ * The room a guest's tools may give back (src/jobrun/node.ts boxFor): null for no guest limits at all; with a prompt
+ * cap, what is left under it; with only the answer capped, all the room there is (the rounds and calls still count).
+ */
+export function guestRoomOf(c: GuestCaps, promptChars: number): number | null {
+  if (noLimits(c)) return null;
+  return c.prompt ? c.prompt - promptChars : Number.MAX_SAFE_INTEGER;
+}
+
+/** A guest's request with what the owner does not allow taken out: no web through this PC, no tools of its own. */
+export function guestAllowed<T extends Record<string, unknown>>(body: T, c: GuestCaps): T {
+  const out = { ...body };
+  if (!c.web) delete out.web;
+  if (!c.tools) delete out.tools;
+  return out;
+}
+
+export const capAnswer = (asked: number, caps: GuestCaps) => (caps.answer ? Math.min(asked, caps.answer) : asked);
 
 /** How long a guest's prompt is, in characters: the system words, the message, the turns and the tools it offers. */
 export function promptSize(b: { system?: unknown; user?: unknown; turns?: unknown; tools?: unknown }): number {
@@ -154,6 +180,7 @@ export function promptSize(b: { system?: unknown; user?: unknown; turns?: unknow
 
 /** Why a guest's prompt is too long here (null when it is not): every word sent counts. */
 export function promptRefusal(b: { system?: unknown; user?: unknown; turns?: unknown; tools?: unknown }, caps: GuestCaps): string | null {
+  if (!caps.prompt) return null;
   const size = promptSize(b);
   return size > caps.prompt ? `a guest's prompt there may be up to ${caps.prompt} characters, and this one is ${size}. Start a new chat, or send a shorter one.` : null;
 }
@@ -188,7 +215,7 @@ export function guestBox(box: ToolBox, room: number): ToolBox {
   };
 }
 
-export const capsWords = (c: GuestCaps) => `answers up to ${c.answer} tokens, prompts up to ${c.prompt} characters`;
+export const capsWords = (c: GuestCaps) => [c.answer ? `answers up to ${c.answer} tokens` : 'answers of any length', c.prompt ? `prompts up to ${c.prompt} characters` : 'prompts of any length', c.web ? '' : 'no web', c.tools ? '' : 'no tools of its own'].filter(Boolean).join(', ');
 
 // ---- Whether a request at the head of the line can start now ----
 

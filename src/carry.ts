@@ -11,7 +11,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { open, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { open, mkdir, readdir, readFile, rename, rm, stat, statfs, truncate, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { SharedModel } from './nodestaff.ts';
 import type { RunnerHello } from './runnerpush.ts';
@@ -19,6 +19,7 @@ import * as git from './gitstore.ts';
 import { writeAtomic } from './atomic.ts';
 import { cleanJobList, type Job } from './drivejobs.ts';
 import { drives, theirDriveHint } from './modelhome.ts';
+import { copyDone, copyWrote, writerOf } from './download.ts';
 
 // ---- What linked PCs may do here ----
 
@@ -111,8 +112,17 @@ export function modelParts(first: string, names: string[]): string[] {
   return want.every(w => byLower.has(w)) ? want.map(w => byLower.get(w)!) : [first];
 }
 
-/** The key two PCs' copies of one model share: a chat model by its file name, a picture model by its id. */
-export const modelKey = (kind: 'chat' | 'image', id: string) => (kind === 'image' ? `image:${id}` : `chat:${basename(id.replace(/\\/g, '/')).toLowerCase()}`);
+/** What a model sent or copied between PCs is: a chat model (its files), a picture model or a video model (registry ids). */
+export type CarryKind = 'chat' | 'image' | 'video';
+
+/** The kind a request names; anything else is a chat model, as before video models could be sent. */
+export const carryKind = (v: unknown): CarryKind => (v === 'image' || v === 'video' ? v : 'chat');
+
+/** What a PC says in its hello once it takes a video model sent from another PC (an older TOMLIN would read one as a chat model). */
+export const VIDEO_CARRY = 'video-carry';
+
+/** The key two PCs' copies of one model share: a chat model by its file name, a picture or video model by its id. */
+export const modelKey = (kind: CarryKind, id: string) => (kind === 'image' || kind === 'video' ? `${kind}:${id}` : `chat:${basename(id.replace(/\\/g, '/')).toLowerCase()}`);
 
 // ---- What the node network has ----
 
@@ -214,6 +224,14 @@ export function sendWhy(pc: NetPc): string {
   return '';
 }
 
+/** Why a video model cannot be sent to a linked PC now ('' when it can): as any send, and its TOMLIN must take video models. */
+export function sendVideoWhy(pc: NetPc): string {
+  const why = sendWhy(pc);
+  if (why) return why;
+  if (!pc.can.includes(VIDEO_CARRY)) return `"${pc.name}" runs an older TOMLIN that cannot take a video model: update it first (Network, Update)`;
+  return '';
+}
+
 /**
  * Why one of this PC's models cannot be moved to a linked PC now ('' when it can): it must take a send, and be able to check
  * the copy (a TOMLIN from before the check cannot, and a move without a check is not offered).
@@ -242,12 +260,12 @@ export function powerOffWhy(pc: NetPc): string {
   if (!pc.ok) return `"${pc.name}" is off or not answering now`;
   if (pc.away) return `"${pc.name}" is being used by its owner for now`;
   if (!pc.can.includes('power-off')) return `"${pc.name}" runs a TOMLIN that cannot be turned off from another PC: update it there first`;
-  if (pc.allow?.off !== true) return `"${pc.name}" does not allow a host to turn it off now (its owner ticks "Allow host to turn this PC off" under Network)`;
+  if (pc.allow?.off !== true) return `"${pc.name}" does not allow a host to turn it off now (its owner ticks "Allow host to turn this PC off" on This PC)`;
   return '';
 }
 
 /** Why a node takes no model sent to it: the tick, named as its owner sees it. */
-export const receiveRefused = (name: string) => `"${name}" does not take models from other PCs now (its owner ticks "Accept models from linked PCs" under Network)`;
+export const receiveRefused = (name: string) => `"${name}" does not take models from other PCs now (its owner ticks "Accept models from linked PCs" on This PC)`;
 
 /** Why a linked PC cannot download a model itself now (Download, To that PC, on the Models page): '' when it can. */
 export function fetchWhy(pc: NetPc): string {
@@ -429,6 +447,14 @@ export async function sumRange(file: string, from: number, len: number): Promise
   return h.digest('hex');
 }
 
+/** A received file that failed its check: cut back to `at` (the start of the first range that differs) and kept as a part. */
+export async function setAside(dest: string, at: number): Promise<void> {
+  const part = partOf(dest);
+  await rm(part, { force: true });
+  await rename(dest, part);
+  await truncate(part, at);
+}
+
 /** A received file that reached its size takes its place. False when it is not whole (it stays as a part). */
 export async function finish(part: string, dest: string, bytes: number): Promise<boolean> {
   if ((await sizeOf(part)) !== bytes) return false;
@@ -492,13 +518,15 @@ export interface NodeDeps {
   chatHas: (name: string) => boolean;
   /** Where each file of picture model `id` goes here, and whether it is here whole; null when this PC does not know it. */
   pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
+  /** Where each file of video model `id` goes here (models/video in its models folder), as pictureDest; unset: none taken. */
+  videoDest?: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
   /** The folder of restore points kept for linked PCs. */
   keptRoot: string;
   freeBytes?: (dir: string) => Promise<number>;
   /** Told when a linked PC's projects were backed up here (the page's list is read again). */
   onProjects?: () => void;
   /** Told when a model was installed here from a linked PC (lists are read again; it is shared from then on). */
-  onInstalled?: (name: string, model: { kind: 'chat' | 'image'; id: string }) => void;
+  onInstalled?: (name: string, model: { kind: CarryKind; id: string }) => void;
 }
 
 /** What a door answers: JSON with a status, or a piece of a file. */
@@ -519,9 +547,15 @@ export function nodeSide(d: NodeDeps) {
     return true;
   };
 
+  /** Why a model cannot be received now: one of its files is being downloaded here (or null). */
+  const downloadingOf = (files: { path: string }[]): string | null => {
+    const f = files.find(x => writerOf(x.path) === 'download');
+    return f ? `"${d.pcName()}" is downloading ${basename(f.path)} now (another model there uses the same file). Send it again when that download has finished.` : null;
+  };
+
   /** A shared model's files, when linked PCs may copy it. */
   function shared(b: Record<string, unknown>): FileRef[] | string {
-    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" under Network).`;
+    if (!d.allow().pull) return `"${d.pcName()}" does not let other PCs copy its models now (its owner ticks "Sharing of models" on This PC).`;
     const id = typeof b.model === 'string' ? b.model : '';
     if (!d.shared().includes(id)) return `that model is not on "${d.pcName()}" any more.`;
     const files = b.kind === 'image' ? d.pictureFiles(id) : d.chatFiles(id);
@@ -535,11 +569,13 @@ export function nodeSide(d: NodeDeps) {
   async function incoming(b: Record<string, unknown>, asked = true): Promise<{ files: { name: string; path: string; bytes: number; sha256?: string }[]; have: boolean } | string> {
     if (asked && !d.allow().receive) return `${receiveRefused(d.pcName())}.`;
     const raw = Array.isArray(b.files) ? b.files.slice(0, 64) : [];
-    if (b.kind === 'image') {
-      const dest = typeof b.model === 'string' ? d.pictureDest(b.model) : null;
-      if (!dest) return `"${d.pcName()}" runs a TOMLIN that does not know that picture model: update it there first.`;
+    if (b.kind === 'image' || b.kind === 'video') {
+      // A picture or video model's files are named and placed by this PC's own registry (models/image or models/video), never by the sender.
+      const what = b.kind === 'video' ? 'video' : 'picture';
+      const dest = typeof b.model === 'string' ? (b.kind === 'video' ? d.videoDest?.(b.model) ?? null : d.pictureDest(b.model)) : null;
+      if (!dest) return `"${d.pcName()}" runs a TOMLIN that does not know that ${what} model: update it there first.`;
       const sent = raw.map(f => int((f as Record<string, unknown>)?.bytes));
-      if (sent.length !== dest.length || dest.some((f, k) => f.bytes !== sent[k])) return `"${d.pcName()}" knows another version of that picture model: update TOMLIN on both PCs.`;
+      if (sent.length !== dest.length || dest.some((f, k) => f.bytes !== sent[k])) return `"${d.pcName()}" knows another version of that ${what} model: update TOMLIN on both PCs.`;
       return { files: dest.map(({ name, path, bytes, sha256 }) => ({ name, path, bytes, sha256 })), have: dest.every(f => f.have) };
     }
     const files: { name: string; path: string; bytes: number }[] = [];
@@ -573,6 +609,10 @@ export function nodeSide(d: NodeDeps) {
         const got = await incoming(b);
         if (typeof got === 'string') return no(403, got);
         if (got.have) return { status: 200, json: { have: true } };
+        // A file of it this PC is downloading now (one another picture model shares): the send waits for that, never
+        // writes the same file beside it (both were spoiled, and a piece was refused as "changed on the way").
+        const busy = downloadingOf(got.files);
+        if (busy) return no(409, busy);
         // A file already whole says so (all its bytes), so the sender skips it instead of sending it again.
         const at = await Promise.all(got.files.map(async f => ((await sizeOf(f.path)) === f.bytes ? f.bytes : sizeOf(partOf(f.path)))));
         const need = got.files.reduce((n, f, k) => n + f.bytes - Math.min(at[k], f.bytes), 0);
@@ -590,23 +630,29 @@ export function nodeSide(d: NodeDeps) {
         // A file already whole here is never written over by a copy (only its unfinished part takes pieces).
         // (It answers with all its bytes, so a sender whose last answer was lost carries on with the next file.)
         if ((await sizeOf(f.path)) === f.bytes) return { status: 409, json: { error: `${basename(f.path)} is already whole on "${d.pcName()}".`, at: f.bytes } };
+        const busy = downloadingOf([f]);
+        if (busy) return no(409, busy);
         if (!claim(f.path, who.key)) return no(409, `another PC is sending that model to "${d.pcName()}" now.`);
+        // Said before the write: a download of this file asked for meanwhile waits for the copy.
+        copyWrote(f.path);
         const r = await addPiece(partOf(f.path), int(b.from), piece);
         if ('error' in r) return { status: 409, json: r };
         if (r.at > f.bytes) {
           await rm(partOf(f.path), { force: true });
           return no(400, 'more came than the file holds, so it was thrown away. Send it again.');
         }
-        // A picture model's file is the registry's, byte for byte (its SHA-256), before it takes its place.
+        // A picture or video model's file is the registry's, byte for byte (its SHA-256), before it takes its place.
         if (r.at === f.bytes && f.sha256 && (await sha256File(partOf(f.path))) !== f.sha256) {
           writing.delete(f.path);
+          copyDone(f.path);
           await rm(partOf(f.path), { force: true });
           return no(400, `${basename(f.path)} that came is not the file TOMLIN's registry names (its SHA-256 differs), so it was thrown away.`);
         }
         const done = r.at === f.bytes && (await finish(partOf(f.path), f.path, f.bytes));
         if (done) {
           writing.delete(f.path);
-          if (await allWhole(got.files)) d.onInstalled?.(String(b.name ?? f.name), b.kind === 'image' ? { kind: 'image', id: String(b.model) } : { kind: 'chat', id: got.files[0].name });
+          copyDone(f.path);
+          if (await allWhole(got.files)) d.onInstalled?.(String(b.name ?? f.name), b.kind === 'image' || b.kind === 'video' ? { kind: b.kind, id: String(b.model) } : { kind: 'chat', id: got.files[0].name });
         }
         return { status: 200, json: { at: r.at, done } };
       }
@@ -642,6 +688,9 @@ export function nodeSide(d: NodeDeps) {
           const w = writing.get(f.path);
           if (w && w.pc !== who.key) continue;
           writing.delete(f.path);
+          // A .part a download here writes is the download's, not the stopped send's: it stays.
+          if (writerOf(f.path) === 'download') continue;
+          copyDone(f.path);
           await rm(partOf(f.path), { force: true });
         }
         return { status: 200, json: { ok: true } };
@@ -651,7 +700,7 @@ export function nodeSide(d: NodeDeps) {
       case '/worker/backup-list':
         return { status: 200, json: { backups: await listKept(keptFolder(d.keptRoot, who.key)), allowed: d.allow().backup } };
       case '/worker/backup-put': {
-        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" under Network).`);
+        if (!d.allow().backup) return no(403, `"${d.pcName()}" does not keep restore points for other PCs now (its owner ticks "Enable backups" on This PC).`);
         const name = safeBackupName(b.name);
         const bytes = int(b.bytes);
         const from = int(b.from);
@@ -797,7 +846,7 @@ export function nodeSide(d: NodeDeps) {
 /** Ids asked about in one go, and files in one backup. */
 export const MAX_IDS = 2000;
 export const MAX_FILES = 100_000;
-const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" under Network).`;
+const backupOff = (pc: string) => `"${pc}" does not keep backups for other PCs now (its owner ticks "Enable backups" on This PC).`;
 
 async function exists(file: string): Promise<boolean> {
   try {
@@ -932,7 +981,7 @@ export async function pull(w: Wire, o: { kind: 'chat' | 'image'; model: string; 
 }
 
 /** Sends one of this PC's models to a linked PC, carrying on from what it has of it. False when it was there already. */
-export async function push(w: Wire, o: { kind: 'chat' | 'image'; model: string; name: string; files: FileRef[]; progress: (p: Progress) => void; signal: AbortSignal }): Promise<boolean> {
+export async function push(w: Wire, o: { kind: CarryKind; model: string; name: string; files: FileRef[]; progress: (p: Progress) => void; signal: AbortSignal }): Promise<boolean> {
   const ask = { kind: o.kind, model: o.model, name: o.name, files: o.files.map(f => ({ name: f.name, bytes: f.bytes })) };
   const offer = await w.ask('/worker/carry-offer', ask);
   if (offer.have === true) return false;
@@ -970,7 +1019,7 @@ export async function push(w: Wire, o: { kind: 'chat' | 'image'; model: string; 
  * SUM_RANGE, hashed on both PCs. Null when everything matches, else why not (nothing is changed on either PC). A PC that
  * cannot answer, or a dropped link, throws: the copy is then not proved, and the caller keeps its own files.
  */
-export async function verifySent(w: Wire, o: { kind: 'chat' | 'image'; model: string; name: string; files: FileRef[]; progress: (p: Progress) => void; signal: AbortSignal; range?: number }): Promise<string | null> {
+export async function verifySent(w: Wire, o: { kind: CarryKind; model: string; name: string; files: FileRef[]; progress: (p: Progress) => void; signal: AbortSignal; range?: number }): Promise<string | null> {
   const step = Math.min(SUM_RANGE, o.range ?? SUM_RANGE);
   const ask = { kind: o.kind, model: o.model, name: o.name, files: o.files.map(f => ({ name: f.name, bytes: f.bytes })) };
   const bytes = o.files.reduce((n, f) => n + f.bytes, 0);
@@ -1012,7 +1061,12 @@ export async function verifyPulled(w: Wire, o: { kind: 'chat' | 'image'; model: 
       const len = Math.min(step, f.bytes - at);
       const [mine, theirs] = await Promise.all([sumRange(o.paths[k], at, len), w.ask('/worker/carry-sum', { kind: o.kind, model: o.model, source: true, file: k, from: at, length: len })]);
       if (int(theirs.bytes) !== f.bytes) return `${f.name} is ${int(theirs.bytes)} bytes there and ${f.bytes} here`;
-      if (theirs.sha256 !== mine) return `${f.name} differs from the file it was copied from (bytes ${at} to ${at + len})`;
+      if (theirs.sha256 !== mine) {
+        // Not used as it is: the file goes back to a part ending where the bad range starts, so the model is not listed
+        // as here, and copying again carries on from that range instead of starting over.
+        await setAside(o.paths[k], at);
+        return `${f.name} differs from the file it was copied from (bytes ${at} to ${at + len})`;
+      }
     }
     before += f.bytes;
   }

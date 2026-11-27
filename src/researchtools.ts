@@ -268,7 +268,9 @@ export class ResearchTurn {
     if (!this.o.root) return null;
     const refused = checkSave(null, text);
     if (refused) return refused;
-    const r = await ws.save(this.o.root, path, text, true, false);
+    // Kept as a model's save keeps older copies: the notes file is written whole each time, so a person's own lines in
+    // it stay in a copy beside it (src/workspace.ts save) rather than only in the one .bak the next save replaces.
+    const r = await ws.save(this.o.root, path, text, true, true);
     if ('error' in r) return r.error;
     this.saved.add(r.path);
     return null;
@@ -278,10 +280,20 @@ export class ResearchTurn {
     return `# Working notes\n\nKept by TOMLIN as the model works. The newest is last.\n\n${this.notes.map(n => `- ${n}`).join('\n')}\n`;
   }
 
-  private async quotesFile(): Promise<string> {
-    const was = this.o.root ? await ws.read(this.o.root, QUOTES_FILE) : { error: 'none' };
-    const old = 'error' in was ? '# Quotes\n\nEach quote here was found, word for word, in its source when it was kept.\n' : was.text.replace(/\s*$/, '\n');
-    return old;
+  /**
+   * The quotes file as it is, to add to; a new one when there is none. One that is there but cannot be read (over the
+   * workspace's 1 MB, or held by another program) gives why instead: it was once taken as no file, and written over
+   * with the new quote alone.
+   */
+  private async quotesFile(): Promise<string | { error: string }> {
+    const fresh = '# Quotes\n\nEach quote here was found, word for word, in its source when it was kept.\n';
+    if (!this.o.root) return fresh;
+    const full = await ws.inside(this.o.root, QUOTES_FILE);
+    const there = full ? await stat(full).then(s => s.isFile(), (e: NodeJS.ErrnoException) => e.code !== 'ENOENT') : false;
+    if (!there) return fresh;
+    const was = await ws.read(this.o.root, QUOTES_FILE);
+    if ('error' in was) return { error: `Not kept: ${QUOTES_FILE} is there but could not be read (${was.error.replace(/\.$/, '').replace(/^That file/, 'it')}), so it was left as it is. Tell the person: moving it or renaming it starts a new one.` };
+    return was.text.replace(/\s*$/, '\n');
   }
 
   private checkAsk(draft: string): string {
@@ -404,7 +416,9 @@ export class ResearchTurn {
       const q: KeptQuote = { n: this.quotes.length + 1, claim, quote, source: src.name, place: src.pieces.length > 1 ? at.piece : '' };
       const d = (this.o.today ?? (() => new Date()))();
       const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const why = await this.write(QUOTES_FILE, `${await this.quotesFile()}\n- ${day}: ${claim}\n  > ${quote}\n  Source: ${src.name}${q.place ? `, ${q.place}` : ''}\n`);
+      const kept = await this.quotesFile();
+      if (typeof kept !== 'string') return done(false, claim, 'not saved', kept.error);
+      const why = await this.write(QUOTES_FILE, `${kept}\n- ${day}: ${claim}\n  > ${quote}\n  Source: ${src.name}${q.place ? `, ${q.place}` : ''}\n`);
       if (why) return done(false, claim, 'not saved', why);
       this.quotes.push(q);
       return done(true, claim, `kept as quote ${q.n}, found in the source`, `Kept as quote ${q.n}: the words are in ${src.name}${q.place ? ` (${q.place})` : ''}.`);

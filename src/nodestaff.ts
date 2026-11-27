@@ -2,6 +2,7 @@
 // may use, and a linked PC hires its OWN staff on them (who they are, their notebooks and chats stay on that PC). Staff
 // hired on a node and lent out (before 2.0.31) are retired: an old chat with one is kept to read, and says so. The
 // plain parts, tested in test/nodestaff.test.ts.
+import { isSeed } from './drawrefs.ts';
 
 const PC_ID = /^[0-9a-f]{8}$/;
 
@@ -17,7 +18,7 @@ export const RETIRED_NODE_HIRE = 'Linked PCs no longer lend their own staff: a n
 const text = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 // ---- Models a node lets linked PCs use ----
-// Its owner ticks them under Network ("Models other PCs may use"): chat models and picture models. A linked PC
+// Its owner ticks them on This PC ("Models other PCs may use"): chat models and picture models. A linked PC
 // then hires its OWN staff on them; the node only loads the model and answers (or draws). Nothing is shared until a
 // model is ticked.
 
@@ -123,7 +124,10 @@ export function chatVerdict(o: { state: string; lending: boolean; busyHere: bool
  */
 export function pictureVerdict(o: { id: string; model: string | null; state: string; drawing: boolean; busyHere: boolean; idleMs: number; dropMs: number }): 'keep' | 'gone' | 'theirs' | 'drop' | 'wait' {
   if (o.drawing) return 'keep';
-  if (o.model !== o.id || (o.state !== 'connected' && o.state !== 'loading')) return 'gone';
+  // Another model loaded: gone. The same model only between runners (a Cancel restarts it, a move to the CPU reloads
+  // it): still theirs for a while, or the next "Free its memory" from that PC is refused as this PC's owner's own.
+  if (o.model !== o.id) return 'gone';
+  if (o.state !== 'connected' && o.state !== 'loading') return o.idleMs > o.dropMs ? 'gone' : 'wait';
   if (o.state === 'loading') return 'keep';
   if (o.busyHere) return 'theirs';
   return o.idleMs > o.dropMs ? 'drop' : 'wait';
@@ -179,6 +183,42 @@ export function statsModel(ref: string | null | undefined, pc: string): string {
   return m && m[1] === pc ? m[2] : '';
 }
 
+/** What a linked PC has loaded now, by name: its chat models and its picture model (none: [] and null). */
+export interface LoadedThere {
+  chat: string[];
+  image: string | null;
+}
+
+/** What a node tells with its meters as loaded: the loaded models of its shared list, chat ones and the picture one. */
+export function loadedOf(models: SharedModel[]): LoadedThere {
+  return { chat: models.filter(m => m.loaded && m.kind === 'chat').map(m => m.name), image: models.find(m => m.loaded && m.kind === 'image')?.name ?? null };
+}
+
+/** What a node sent as loaded, made safe: at most 8 chat names, capped; null when it sent nothing of the kind. */
+export function cleanLoaded(x: unknown): LoadedThere | null {
+  const o = x && typeof x === 'object' ? (x as Record<string, unknown>) : null;
+  if (!o || !Array.isArray(o.chat)) return null;
+  const chat = [...new Set(o.chat.map(v => text(v, 120)).filter(Boolean))].slice(0, 8);
+  return { chat, image: text(o.image, 120) || null };
+}
+
+/** A hello this old (or older) is not trusted for what is loaded there now. */
+export const LOADED_HELLO_MS = 90_000;
+
+/**
+ * What is loaded on a linked PC, from what that PC itself said: its meters' answer first (fresh every few
+ * seconds); else a hello under 90 s old (its loaded models, its chat and picture model); else null: not known, never a
+ * guess from the hire's choice.
+ */
+export function loadedThere(statsRaw: unknown, hello: { at: number; model?: string | null; image?: { name: string | null } | null; models?: SharedModel[] } | null | undefined, now: number): LoadedThere | null {
+  const sent = cleanLoaded(statsRaw && typeof statsRaw === 'object' ? (statsRaw as Record<string, unknown>).loaded : null);
+  if (sent) return sent;
+  if (!hello || !(now - hello.at < LOADED_HELLO_MS)) return null;
+  const said = loadedOf(cleanShared(hello.models ?? []));
+  const chat = [...new Set([...(hello.model ? [text(hello.model, 120)] : []), ...said.chat])].filter(Boolean);
+  return { chat, image: (hello.image?.name ? text(hello.image.name, 120) : '') || said.image };
+}
+
 /** Initials for a card or row. */
 export const initialsOf = (name: string) => name.split(/\s+/).map(w => w[0] ?? '').join('').slice(0, 2).toUpperCase() || '?';
 
@@ -215,7 +255,8 @@ export function drawChoices(b: Record<string, unknown>): { quality?: string; see
   const negative = typeof b.negative === 'string' ? b.negative.replace(/\s+/g, ' ').trim().slice(0, 1000) : '';
   return {
     ...(b.quality === 'draft' || b.quality === 'mid' || b.quality === 'high' ? { quality: b.quality } : {}),
-    ...(Number.isInteger(b.seed) && (b.seed as number) >= 0 && (b.seed as number) < 2 ** 31 ? { seed: b.seed as number } : {}),
+    // Every seed the Images window takes (src/drawrefs.ts SEED_MOST), so the one asked is the one drawn there.
+    ...(isSeed(b.seed) ? { seed: b.seed } : {}),
     ...(negative ? { negative } : {}),
   };
 }

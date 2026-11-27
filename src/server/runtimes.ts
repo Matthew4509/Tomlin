@@ -3,6 +3,7 @@
 // and taking a CUDA one away. Sending it to a linked PC is src/jobrun/copies.ts runnerTo.
 import { type Progress } from '../download.ts';
 import { pageDownloads, pinWhy } from '../runtimes.ts';
+import { VIDEO_DEVICES } from '../video.ts';
 import { hardware, hwKey, json, runnerChecks, runtimes, type Routes } from './core.ts';
 import { unsafeWhy } from './runnercheck.ts';
 import { images, runners } from './panes.ts';
@@ -31,6 +32,8 @@ function list() {
       // The CUDA build Auto starts first on this PC (the one with code made for its card).
       best: p.device === 'cuda' && runtimes.order(p.engine, 'cuda')[0] === id,
       cuda: p.cuda?.version ?? null,
+      // A picture card runner also makes video clips (its sd-cli, src/video.ts): the Models row says so.
+      video: p.engine === 'sd' && VIDEO_DEVICES.includes(p.device),
       // Its first-run test on this card and driver (src/runnercheck.ts): passed, failed (and why), or not tried.
       check: runnerChecks.rec(hwKey())?.results[id] ?? null,
       getting: g ? { got: g.got, bytes: g.bytes, checking: g.checking, error: g.error, done: g.done } : null,

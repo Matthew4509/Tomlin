@@ -232,16 +232,16 @@ test('Open sharing and cluster permissions: the ticks are found after Network is
   const from = js.indexOf('app.openSharePermissions = async () => {');
   assert.ok(from > 0, 'the handler is found');
   const handler = js.slice(from, js.indexOf('\n};', from));
-  // One place, opened from Network, This PC, and Manage PC and updates.
+  // One place, opened from the My PC window's Permissions row and Manage PC and updates.
   assert.ok(js.includes("for (const b of document.querySelectorAll('[data-perms-open]')) b.addEventListener('click', () => app.openSharePermissions());"));
-  // Network no longer has its own button: its Sharing page is the ticks themselves.
-  assert.equal((html.match(/data-perms-open/g) ?? []).length, 1, 'a button on This PC');
+  // This PC has the ticks themselves, so no button of its own that opens them.
+  assert.equal((html.match(/data-perms-open/g) ?? []).length, 0, 'no button on This PC: the ticks are there');
   assert.ok(readFileSync(join(import.meta.dirname, '..', 'public', 'pcs.js'), 'utf8').includes("text: 'Sharing and cluster permissions', onclick: () => { dlg.close(); app.openSharePermissions?.(); }"), 'and in Manage PC and updates');
   // Not under the Permissions page's name: mute.js, loaded after home.js, sets app.openPermissions to that page, and
   // these buttons opened it instead of the ticks.
   assert.doesNotMatch(js, /app\.openPermissions = /);
   assert.match(readFileSync(join(import.meta.dirname, '..', 'public', 'mute.js'), 'utf8'), /app\.openPermissions = openPermissions;/);
-  assert.ok(handler.indexOf('await refreshNodes()') < handler.indexOf("closest('[hidden]')"), 'drawn first, then looked for');
+  assert.ok(handler.indexOf('await openThisPc()') < handler.indexOf("closest('[hidden]')"), 'drawn first, then looked for');
   assert.match(handler, /Turn it on to set them/);
   assert.match(js, /if \(sh\.on\) \$\('#node-allow-why'\)\.hidden = true;/);
   // The line sits beside the switch, outside Setup (which is hidden while the PC is not a node).

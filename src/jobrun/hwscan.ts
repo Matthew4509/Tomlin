@@ -7,11 +7,14 @@ import { d } from './shared.ts';
 import { hello } from './links.ts';
 import { wireFor } from './copies.ts';
 
-export async function hardwareScan(): Promise<{ status: number; body: Record<string, unknown> }> {
-  const mine = d.rescanHardware ? await d.rescanHardware() : [];
+/** `only`: one linked PC's id (its own window's Scan): only that PC reads its hardware again, not this one. */
+export async function hardwareScan(only = ''): Promise<{ status: number; body: Record<string, unknown> }> {
   const s = await d.store.settings();
+  const pcs = s.remotes.filter(r => r.role !== 'guest' && (!only || r.id === only));
+  if (only && !pcs.length) return { status: 404, body: { error: 'That PC is not linked to this one any more.' } };
+  const mine = !only && d.rescanHardware ? await d.rescanHardware() : [];
   const labels = brains.pcLabels(s.remotes);
-  const theirs = await Promise.all(s.remotes.filter(r => r.role !== 'guest').map(async r => {
+  const theirs = await Promise.all(pcs.map(async r => {
     const name = labels[r.id] ?? r.name;
     const h = await hello(r, 10_000).catch(() => null);
     if (!h) return `"${name}": not answering now.`;
@@ -26,6 +29,6 @@ export async function hardwareScan(): Promise<{ status: number; body: Record<str
       return `"${name}": ${(e as { said?: string }).said ?? (e as Error).message}`;
     }
   }));
-  const here = `This PC: ${mine.length ? mine.join('; ') : 'no change'}.`;
-  return { status: 200, body: { said: [here, ...theirs].join(' '), changed: mine.length > 0 || theirs.some(t => !/: (no change|not answering now|runs an older)/.test(t)) } };
+  const here = only ? '' : `This PC: ${mine.length ? mine.join('; ') : 'no change'}.`;
+  return { status: 200, body: { said: [here, ...theirs].filter(Boolean).join(' '), changed: mine.length > 0 || theirs.some(t => !/: (no change|not answering now|runs an older)/.test(t)) } };
 }

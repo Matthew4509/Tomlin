@@ -10,7 +10,7 @@ import type { Gate, Permissions } from '../permits.ts';
 import { makeKit, type Kit, type KitOpts } from '../toolkit.ts';
 import { winScreen } from '../winscreen.ts';
 import type { ToolUse } from '../webtools.ts';
-import { DATA_DIR, type Routes, chats, json } from './core.ts';
+import { DATA_DIR, type Routes, chats, json, modelSaved } from './core.ts';
 import { appLock, appLockOn } from './locks.ts';
 import { chatFilesRoot } from './places.ts';
 
@@ -46,6 +46,7 @@ export async function kitFor(o: { perms: Permissions; gate: Gate; perCall: numbe
     second: o.second,
     canQueue: o.canQueue,
     saved: o.saved,
+    since: modelSaved,
     log: a => logAction(ACTION_DIR, a),
   });
 }

@@ -17,7 +17,13 @@ const ROLE_ICONS = {
   pm: 'M9 2h6v2h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3V2Zm1 7v2h7V9h-7Zm0 4v2h7v-2h-7Zm-3-4v2h2V9H7Zm0 4v2h2v-2H7Z',
   designer: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4Zm-9 9h7v7H4v-7Zm12.5 0a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z',
   artist: 'M12 3a9 9 0 0 0 0 18c1 0 1.5-.7 1.5-1.4 0-.4-.2-.7-.4-1-.2-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8Zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z',
+  // A video camera.
+  videographer: 'M4 6h11a2 2 0 0 1 2 2v2.5l4-3v9l-4-3V16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z',
+  // A spy: a hat with a brim over round glasses (the Agent, who works alone).
+  agent: 'M7 9.2 8.3 4.6a1 1 0 0 1 1.3-.7L12 4.7l2.4-.8a1 1 0 0 1 1.3.7L17 9.2Z M2 10.4c0-.7.6-1.2 1.3-1.1 5.8.9 11.6.9 17.4 0 .7-.1 1.3.4 1.3 1.1 0 .5-.3.9-.8 1-6.1 1.3-12.3 1.3-18.4 0-.5-.1-.8-.5-.8-1Z M4.2 16.6a3.3 3.3 0 1 0 6.6 0 3.3 3.3 0 1 0-6.6 0Z M5.9 16.6a1.6 1.6 0 1 1 3.2 0 1.6 1.6 0 1 1-3.2 0Z M13.2 16.6a3.3 3.3 0 1 0 6.6 0 3.3 3.3 0 1 0-6.6 0Z M14.9 16.6a1.6 1.6 0 1 1 3.2 0 1.6 1.6 0 1 1-3.2 0Z M10.6 15.9h2.8v1.4h-2.8Z',
 };
+/** A hire who does not chat: an artist or designer ('image'), or a Videographer ('video'). */
+const notChat = m => m?.kind === 'image' || m?.kind === 'video';
 const PERSON = 'M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.3-8 5.2V21h16v-1.8c0-2.9-3.6-5.2-8-5.2Z';
 const PENCIL = 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25Zm17.7-10.2a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z';
 function svgIcon(d, size = 20) {
@@ -69,7 +75,7 @@ function rolePicker(roles, value, onChange) {
   const list = el('ul', { class: 'rp-list', role: 'listbox', tabindex: '-1', 'aria-label': 'Role', hidden: true });
   const options = [];
   roles.forEach((r, i) => {
-    if (i && (roles[i - 1].kind === 'image') !== (r.kind === 'image')) list.append(el('li', { class: 'rp-line', role: 'separator' }));
+    if (i && notChat(roles[i - 1]) !== notChat(r)) list.append(el('li', { class: 'rp-line', role: 'separator' }));
     const o = el('li', { class: 'rp-option', role: 'option', id: `rp-${r.id}`, title: r.hint ?? '' }, el('span', { text: r.name }), el('span', { class: 'rp-icon', 'aria-hidden': 'true' }, iconOf(r.id)));
     o.dataset.id = r.id;
     o.addEventListener('click', () => choose(r.id));
@@ -166,14 +172,23 @@ async function teamAct(body) {
 /** Every brain a hire can be given: the models on this PC (best suggestions first), then each paired PC's loaded model. */
 function brainChoices(m) {
   const image = m.kind === 'image';
+  // A Videographer's: each video model with the fits guide for the card of the PC (Fits, Tight fit, Not enough memory).
+  if (m.kind === 'video') {
+    return [
+      ...m.models.map(x => ({ id: x.id, name: [x.name, `files ${x.sizeB} GB`, x.installed ? '' : 'not downloaded', x.videoFit ?? 'card not known'].filter(Boolean).join(' · '), audition: null, hidden: false })),
+      ...(m.pcBrains ?? []).map(x => ({ id: x.id, name: x.name, audition: null, hidden: false })),
+    ];
+  }
   return [
     // A Default level says nothing about size, so "matches the level" is left off.
-    ...m.models.map(x => ({ id: x.id, name: [x.name, `about ${x.sizeB}${x.unit}`, x.moe ? 'MoE' : '', image && !x.installed ? 'not downloaded' : '', x.against === 'any' ? (FIT[x.fit] ?? '').trim().replace(/^\(|\)$/g, '') : `${AGAINST[x.against] ?? ''}${FIT[x.fit] ?? ''}`, x.audition ? `audition ${x.audition.score}/${x.audition.of}` : ''].filter(Boolean).join(' · '), audition: x.audition, hidden: x.hidden })),
+    // A picture model also says how it fits this PC's graphics card (src/calc.ts pictureFit): tight, or too big for
+    // the card with about how long a picture takes on the processor.
+    ...m.models.map(x => ({ id: x.id, name: [x.name, `about ${x.sizeB}${x.unit}`, x.moe ? 'MoE' : '', image && !x.installed ? 'not downloaded' : '', image ? x.cardFit?.short ?? '' : '', x.against === 'any' ? (FIT[x.fit] ?? '').trim().replace(/^\(|\)$/g, '') : `${AGAINST[x.against] ?? ''}${FIT[x.fit] ?? ''}`, x.audition ? `audition ${x.audition.score}/${x.audition.of}` : ''].filter(Boolean).join(' · '), audition: x.audition, hidden: x.hidden })),
     ...(m.pcBrains ?? []).map(x => ({ id: x.id, name: `${x.name}${x.audition ? ` · audition ${x.audition.score}/${x.audition.of}` : ''}`, audition: x.audition, hidden: x.hidden })),
   ];
 }
 // Their first choice is named as the server decides it (m.use, src/hiremodel.ts), the same on every screen.
-const brainName = (m, ref) => (m.use && (ref ?? null) === (m.model ?? null) ? m.use.text : ref ? brainChoices(m).find(c => c.id === ref)?.name.split(' · ')[0] ?? 'a model no longer here' : m.kind === 'image' ? 'the picture model connected here' : 'the model connected here');
+const brainName = (m, ref) => (m.use && (ref ?? null) === (m.model ?? null) ? m.use.text : ref ? brainChoices(m).find(c => c.id === ref)?.name.split(' · ')[0] ?? 'a model no longer here' : m.kind === 'video' ? 'no video model given' : m.kind === 'image' ? 'the picture model connected here' : 'the model connected here');
 
 /** The PC a hire works on: '' for this PC, else the linked PC's id (as the left panel places them). */
 const hirePcOf = m => homeRowOf(m)?.pcId ?? (String(m.model ?? '').startsWith('remote:') ? String(m.model).split(':')[1] : '');
@@ -211,9 +226,11 @@ let savedPick = null;
 function modelWarning(m) {
   if (!m.use?.pick) return null;
   const first = m.name.split(/\s+/)[0];
+  // What they cannot do without a model: an artist draws, a Videographer makes clips, everyone else answers.
+  const verb = m.kind === 'video' ? 'make clips' : m.kind === 'image' ? 'draw' : 'answer';
   const text = m.use.state === 'none'
-    ? `${first} has no model of their own and no model is loaded here, so ${first} cannot answer. Pick one below.`
-    : `${m.use.text.replace(/, (no longer)/, ' is $1')}. ${first} cannot answer until you pick another model below.`;
+    ? `${first} has no model of their own and no model is loaded here, so ${first} cannot ${verb}. Pick one below.`
+    : `${m.use.text.replace(/, (no longer)/, ' is $1')}. ${first} cannot ${verb} until you pick another model below.`;
   return el('p', { class: 'model-warn', role: 'status' }, el('span', { class: 'model-warn-mark', 'aria-hidden': 'true', text: '!' }), ` ${text}`);
 }
 
@@ -224,19 +241,25 @@ function modelOptions(m) {
   if (warn) box.append(warn);
   if (!choices.length) {
     box.append(el('p', { class: 'hint' }, 'No model is on the PC this person works on yet. Get one there, or move them to another PC under Works on. ',
-      el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(); } }), '.'));
+      el('button', { class: 'link', type: 'button', text: 'Get models', onclick: () => { dlg.close(); app.openModels?.(m.kind === 'video' ? 'video' : undefined); } }), '.'));
     return box;
   }
   const image = m.kind === 'image';
   const select = (key, label, none) => modelPick(m, key, label, none);
   // One model each: no fallback and no other models are kept (src/staff.ts sound()). When it cannot answer, the chat says why and asks.
   box.append(el('div', { class: 'team-pick' },
-    select('model', 'Select model', image ? 'No model picked' : 'None: the model connected here')), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
+    select('model', 'Select model', notChat(m) ? 'No model picked' : 'None: the model connected here')), hiddenTick('show-hidden-edit', choices.some(c => c.hidden)));
+  // A Videographer's model on this PC: how it fits this PC's card, and Get it when it is not downloaded yet.
+  const vid = m.kind === 'video' ? m.models.find(x => x.id === m.model) : null;
+  if (vid) {
+    box.append(el('p', { class: vid.videoFit === 'Fits' ? 'hint' : 'hs-warn', text: `${vid.videoFit === 'Fits' ? '' : '⚠ '}${vid.videoFit ?? 'Card not known'}: ${vid.fitLine}` }));
+    if (!vid.installed) box.append(el('p', { class: 'hint' }, `${vid.name.replace(/\s*\(.*\)$/, '')} is not downloaded on this PC yet. `, el('button', { class: 'link', type: 'button', text: 'Get it on the Models page', onclick: () => { dlg.close(); app.openModels?.('video'); } }), '.'));
+  }
   if (image) {
     const st = el('select', { 'aria-label': `Preferred style for ${m.name}` }, el('option', { value: '', text: 'Any: as the words ask' }), ...(m.styles ?? []).map(s => el('option', { value: s.id, text: s.name })));
     st.value = m.style ?? '';
     st.addEventListener('change', () => teamAct({ action: 'change', id: m.id, style: st.value || null }));
-    box.append(el('label', { class: 'field' }, el('span', { text: 'Preferred style (used when the words name none; a linked PC picks its own model for it)' }), st));
+    box.append(el('label', { class: 'field' }, el('span', { text: 'Preferred style (used when a picture\'s style is Auto and its words name none)' }), st));
   }
   return box;
 }
@@ -293,12 +316,23 @@ function teamDraw() {
   }
 }
 
+/** Counts each press of a card's Talk, Draw or Make a clip button (afterHire opens the profile only when there was none). */
+let useTurn = 0;
+
 function staffCard(m) {
   const d = team.data;
   const role = d.roles.find(r => r.id === m.role);
   const imageRole = m.kind === 'image';
-  const use = el('button', { class: 'btn primary', type: 'button', text: imageRole ? `Draw with ${m.name}` : `Talk to ${m.name}` });
-  use.addEventListener('click', async () => {
+  const videoRole = m.kind === 'video';
+  // A Videographer's clips are made in their chat (app.openVideographer); until that is on this page there is no button.
+  const use = videoRole && !app.openVideographer ? null : el('button', { class: 'btn primary', type: 'button', text: videoRole ? `Make a clip with ${m.name}` : imageRole ? `Draw with ${m.name}` : `Talk to ${m.name}` });
+  use?.addEventListener('click', async () => {
+    useTurn++;
+    if (videoRole) {
+      dlg.close();
+      await app.openVideographer(`staff:${m.id}`).catch(e => app.chatNote?.(e.message));
+      return;
+    }
     if (imageRole) {
       // Their own chat, in the pictures pane: what is typed there is drawn just as typed.
       dlg.close();
@@ -335,7 +369,7 @@ function pickButton(m) {
 
 // The model a person was given is picked in the chat's model list (nothing loads until Connect).
 async function useModelOf(m) {
-  if (!m?.model || m.kind === 'image') return;
+  if (!m?.model || notChat(m)) return;
   if (![...panes.chat.model.options].some(o => o.value === m.model && !o.disabled)) return;
   panes.chat.model.value = m.model;
   await api('/api/settings', { pane: 'chat', model: m.model }).catch(() => undefined);
@@ -438,6 +472,7 @@ function askStartChat(hired, offerAsk) {
 }
 
 app.afterHire = async hired => {
+  const pressed = useTurn;
   if (team.data.staff.some(s => s.kind === 'chat')) app.nobodyToTalkTo = false;
   // A new hire who chats: one window ("X is hired"): Start chat now turns this window's chat to them (the server no
   // longer turns every window's chat to them); a model never through the speed finder also gets "Find the fastest
@@ -463,7 +498,9 @@ app.afterHire = async hired => {
   app.drawAs?.();
   if (typeof homeAsk !== 'undefined') homeAsk.drawn = '';
   if (typeof refresh === 'function') await refresh().catch(() => undefined);
-  if (hired && !hired.model) openProfile(hired.id);
+  // Their profile, unless a Talk, Draw or Make a clip button was pressed while the page caught up: that chat is where
+  // they went, and Edit staff opened over it (F15, a race right after hiring).
+  if (hired && !hired.model && useTurn === pressed) openProfile(hired.id);
 };
 
 api('/api/staff').then(d => {
@@ -683,8 +720,8 @@ function drawProfile() {
  */
 function toneLine(m) {
   const tones = app.models?.tones ?? [];
-  if (!tones.length || m.kind === 'image' || m.role === 'default') return null;
-  const first = m.name.split(/s+/)[0];
+  if (!tones.length || notChat(m) || m.role === 'default') return null;
+  const first = m.name.split(/\s+/)[0];
   return el('label', { class: 'tone-line', title: `Used when you ask ${first} for a letter, article, post or message in a chat.` },
     el('span', { text: 'Tone for writing' }),
     pick(tones, m.tone ?? app.models.settings?.tone ?? tones[0].id, v => teamAct({ action: 'change', id: m.id, tone: v })));
@@ -779,8 +816,8 @@ function drawPerson(m) {
   const first = m.name.split(/\s+/)[0];
   const lent = String(m.model ?? '').startsWith('remote:');
   const now = m.active && m.active !== m.model ? m.models.find(x => x.id === m.active)?.name.split(' · ')[0] : brainName(m, m.model);
-  const use = el('button', { class: 'btn primary', type: 'button', text: image ? `Draw with ${first}` : `Talk to ${first}` });
-  use.addEventListener('click', () => {
+  const use = m.kind === 'video' && !app.openVideographer ? null : el('button', { class: 'btn primary', type: 'button', text: m.kind === 'video' ? `Make a clip with ${first}` : image ? `Draw with ${first}` : `Talk to ${first}` });
+  use?.addEventListener('click', () => {
     const card = [...document.querySelectorAll('#team-list .team-card')].find(c => c.dataset.id === m.id);
     if (card) card.querySelector('.btn.primary')?.click();
     else talkTo?.({ ...m, kind: m.kind });
@@ -802,7 +839,7 @@ function drawPerson(m) {
 
 /** Under their role: how fast they answer (a picture hire: nothing). The tokens are folded at the foot of the page. */
 function personFigures(m) {
-  if (m.kind === 'image') return null;
+  if (notChat(m)) return null;
   const speed = typeof m.speed === 'number' ? m.speed : m.speed?.expect;
   return el('p', { class: 'person-figures', title: 'What their model is expected to write (Works on > Speed).' },
     el('span', { text: speed ? app.speedWords(speed, true) : 'speed not measured yet' }));
@@ -915,7 +952,7 @@ function pcCard(m, now) {
  * hiring, and a model on another PC or a Backups only PC is installed first.
  */
 function workPart(m, theirModels) {
-  const first = m.name.split(/s+/)[0];
+  const first = m.name.split(/\s+/)[0];
   const at = hirePcOf(m);
   const x = pcChoices().find(p => p.id === at);
   const now = el('div', { class: 'pc-pick-here' },
@@ -944,7 +981,9 @@ function drawEdit() {
     return drawEdit();
   }
   const role = d.roles.find(r => r.id === m.role);
-  const image = m.kind === 'image';
+  // A Videographer is drawn as a picture hire is (no speed, tone or tokens), with no audition yet.
+  const image = notChat(m);
+  const video = m.kind === 'video';
   drawPerson(m);
   const run = profileRuns[m.id];
   // A chat hire is auditioned on their own model (it loads if it is not loaded), not on whatever happens to be connected.
@@ -967,11 +1006,13 @@ function drawEdit() {
   const roleSel = rolePicker(d.roles, m.role, async v => {
     const to = d.roles.find(r => r.id === v);
     const had = [m.model, m.fallback].filter(Boolean).map(ref => brainName(m, ref));
-    // Every role has a kind ('chat' or 'image'): only 'image' is a picture role.
-    const toImage = to?.kind === 'image';
-    if (to && toImage !== image && had.length) {
+    // Every role has a kind ('chat', 'image' or 'video'): each works with its own kind of model.
+    const word = { image: 'picture', video: 'video' };
+    const toKind = to?.kind ?? 'chat';
+    if (to && toKind !== m.kind && had.length) {
       const first = m.name.split(/\s+/)[0];
-      const ok = await askHere(roleAsk, `${to.name} is a ${toImage ? 'picture' : 'chat'} role: ${first}'s ${image ? 'picture' : 'chat'} ${had.length > 1 ? 'models' : 'model'} (${had.join(', ')}) cannot ${toImage ? 'draw' : 'chat'}, so ${had.length > 1 ? 'they come' : 'it comes'} off ${first}. You then give ${first} a ${toImage ? 'picture' : 'chat'} model under Models.`, `Make ${first} ${/^[aeiou]/i.test(to.name) ? 'an' : 'a'} ${to.name}`, `Keep ${first} as ${role?.name ?? m.role}`, false);
+      const doing = { image: 'draw', video: 'make clips' }[toKind] ?? 'chat';
+      const ok = await askHere(roleAsk, `${to.name} is a ${word[toKind] ?? 'chat'} role: ${first}'s ${word[m.kind] ?? 'chat'} ${had.length > 1 ? 'models' : 'model'} (${had.join(', ')}) cannot ${doing}, so ${had.length > 1 ? 'they come' : 'it comes'} off ${first}. You then give ${first} a ${word[toKind] ?? 'chat'} model under Models.`, `Make ${first} ${/^[aeiou]/i.test(to.name) ? 'an' : 'a'} ${to.name}`, `Keep ${first} as ${role?.name ?? m.role}`, false);
       if (!ok) {
         roleSel.value = m.role;
         return;
@@ -1002,7 +1043,7 @@ function drawEdit() {
         el('summary', { text: `Speed: ${speed ? app.speedWords(speed, true) : 'not measured yet'}` }),
         el('div', { class: 'profile-speed' }, app.speedBox(`staff:${m.id}`, m.speed, () => api('/api/staff').then(d => { team.data = d; }).catch(() => undefined), { split: true }),
           m.model ? el('div', { class: 'team-actions' }, app.finderButton(m.model)) : null))),
-    SHOW_AUDITION ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),
+    SHOW_AUDITION && !video ? section('Audition', el('p', { class: 'hint', text: image ? 'Draws three set pictures on the connected picture model for you to judge.' : own ? `Asks ${m.name.split(/\s+/)[0]}'s own model three set jobs for this role and marks the answers.` : 'Asks the connected model three set jobs for this role and marks the answers.' }), el('div', { class: 'team-actions' }, audition),
       run?.error ? el('p', { class: 'fault', text: run.error }) : run?.result ? auditionView(run.result) : null) : null,
   ];
   // Left out parts are skipped (replaceChildren would write a null as the word "null").
@@ -1018,7 +1059,7 @@ function drawEdit() {
 
 /** The foot of their page: the tokens their answers used, folded (rarely needed), and Fire beside them. */
 function footer(m) {
-  const usage = m.kind === 'image' ? null : usageSection(m, (_t, ...kids) => el('div', {}, ...kids));
+  const usage = notChat(m) ? null : usageSection(m, (_t, ...kids) => el('div', {}, ...kids));
   return el('div', { class: 'profile-foot' },
     usage ? el('details', { class: 'sub profile-tokens' }, el('summary', { text: tokensSummary(m) }), usage) : el('span'),
     fireSection(m));

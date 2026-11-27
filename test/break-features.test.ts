@@ -68,7 +68,7 @@ async function inTemp(fn: (dir: string) => Promise<void>): Promise<void> {
   }
 }
 
-type Started = { id: string; state: string; error: string | null; target: { width: number; height: number }; generated: { width: number; height: number }; done: Promise<void>; results: unknown[] };
+type Started = { id: string; state: string; error: string | null; target: { width: number; height: number }; generated: { width: number; height: number }; done: Promise<void>; results: unknown[]; step?: number };
 const started = (r: unknown): Started => {
   assert.ok(r && typeof r === 'object' && 'id' in r, `no job started: ${JSON.stringify(r)}`);
   return r as Started;
@@ -167,6 +167,27 @@ test('a runner that sends back an empty or broken picture is a failed picture, w
       }
     });
   }
+});
+
+test('the sharpener\'s progress lines after drawing are not drawing steps (no "step 121 of 5")', async () => {
+  await inTemp(async dir => {
+    const runner = await madeUpRunner(res => res.end(JSON.stringify({ status: 'generating' })));
+    try {
+      const images = rig(dir, runner.base);
+      const job = started(await images.generate({ prompt: 'a red bicycle', source: 'page' }));
+      while (job.state !== 'drawing') await sleep(50);
+      images.pane.worker.onLine?.('  |=====>   | 3/4 - 1.20s/it');
+      assert.equal(job.step, 3);
+      job.state = 'finishing';
+      images.pane.worker.onLine?.('  |=====>   | 100/121 - 0.30s/it');
+      images.pane.worker.onLine?.('generating image: 1/1');
+      assert.equal(job.state, 'finishing');
+      assert.equal(job.step, 3);
+      await images.cancel(undefined, { restart: false });
+    } finally {
+      await runner.close();
+    }
+  });
 });
 
 test('Cancel stays cancelled when the runner\'s last progress line comes after it (it is never drawn again)', async () => {

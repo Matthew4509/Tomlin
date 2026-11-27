@@ -7,6 +7,8 @@
 function itemCard(x, key) {
   // What the queue brought back (Review photos, Review documents, Reply and answer): queue.js draws it.
   if (x.queue && app.queueCard) return app.queueCard(x, key);
+  // An agent's run came back (Read the report, Seen): agents.js draws it.
+  if (x.agent && app.agentCard) return app.agentCard(x, key);
   if (x.kind === 'pcask') return pcAskCard(x, key);
   const go = el('button', { class: `btn${x.kind === 'result' ? ' primary' : ''}`, type: 'button', text: x.action, 'data-key': key });
   go.addEventListener('click', () => app.openJob(x.job));
@@ -43,6 +45,38 @@ function pcAskCard(x, key) {
       el('button', { class: 'btn primary', type: 'button', text: `Log out for ${hours}`, 'data-key': `${key}:yes`, onclick: answer(true) }),
       el('button', { class: 'btn quiet', type: 'button', text: 'Not now', 'data-key': `${key}:no`, onclick: answer(false) })));
 }
+
+/**
+ * Recent projects: a small tile for each project with chats, newest use first (at most 8): its name, then its mini
+ * description, or the subject of its newest chat when it has none. Pressing one opens that newest chat with the
+ * Project tab on the right, which lists the project's chats by kind of work (projecttab.js).
+ */
+const TILES_MOST = 8;
+function projectTiles() {
+  if (typeof chatUi !== 'object' || !chatUi.projects) return [];
+  const newest = new Map();
+  for (const c of chatUi.list ?? []) {
+    if (!c.project) continue;
+    const had = newest.get(c.project);
+    if (!had || String(c.updated ?? '') > String(had.updated ?? '')) newest.set(c.project, c);
+  }
+  return chatUi.projects.filter(p => newest.has(p.id))
+    .map(p => ({ id: p.id, name: p.name || 'A project', about: p.about || p.goal || newest.get(p.id).title || '', chat: newest.get(p.id).id, at: String(newest.get(p.id).updated ?? '') }))
+    .sort((a, b) => b.at.localeCompare(a.at)).slice(0, TILES_MOST);
+}
+function drawProjectTiles() {
+  const tiles = projectTiles();
+  const sig = JSON.stringify(tiles);
+  if (sig === homeUi.drawn.tiles) return;
+  homeUi.drawn.tiles = sig;
+  $('#home-projects-box').hidden = !tiles.length;
+  keepFocus($('#home-projects'), tiles.map(t => el('button', { class: 'proj-tile', type: 'button', 'data-key': `tile:${t.id}`, title: `Open ${t.name}: its chats, and its code, pictures, writing and videos`, onclick: async () => {
+    if (app.openProjectPage) return app.openProjectPage(t.id);
+    await app.openChat(t.chat);
+    $('#tab-project')?.click();
+  } }, el('strong', { class: 'proj-tile-name', text: t.name }), t.about ? el('span', { class: 'proj-tile-about', text: t.about }) : null)));
+}
+app.drawProjectTiles = drawProjectTiles;
 
 /** One of the recent projects: its name, how far it is, and Open (Make the plan for one saved without a plan; Open the chat for one started with Lets go!). */
 function recentCard(x, key) {
@@ -155,7 +189,7 @@ function setupCards() {
       card(u.chatModels > 0, 'Add a chat model', u.chatModels ? `${u.chatModels} chat model${u.chatModels > 1 ? 's' : ''} found.` : 'TOMLIN needs at least one chat model on this PC. Models shows which ones fit.', 'Models', () => app.openModels()),
       card(u.staff > 0, 'Hire your first staff member', u.staff ? `${u.staff} on the team.` : 'Give a person a name, a role (coder, writer, artist…) and a level. They appear in the list on the left.', u.staff ? 'Manage staff' : 'Hire staff', () => (u.staff ? $('#team-open').click() : app.openHire())),
       card(u.pcs > 0, 'Connect a PC (optional)', [u.pcs ? `${u.pcs} PC${u.pcs > 1 ? 's' : ''} linked.` : '', u.pcsBroken?.length ? `${u.pcsBroken.map(n => `"${n}"`).join(', ')} need${u.pcsBroken.length > 1 ? '' : 's'} linking again: its old link no longer works.` : '', !u.pcs && !u.pcsBroken?.length ? 'Use a stronger PC on your home network for some of the work.' : ''].filter(Boolean).join(' '), 'Other PCs', () => app.openPcs()),
-      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'Network', () => openNodes())));
+      card(u.node, 'Use this PC as a node (optional)', u.node ? 'Shared with your other PCs.' : 'Let another PC send work to this one: the steps, the memory it has, and which models stay loaded.', 'This PC', () => openThisPc())));
 }
 
 // The Home title greets by the time of day, with the date under it.
@@ -183,6 +217,7 @@ function drawHome() {
     $('#home-ready-box').hidden = !recent.length;
     keepFocus($('#home-ready'), recent.map((x, i) => recentCard(x, `r:${x.job}:${i}`)));
   }
+  drawProjectTiles();
   const working = workingCards();
   keepFocus($('#home-working'), working.length ? working : [themeWords.put(el('p', { class: 'home-empty' }), 'nobody-working', 'Nobody working')]);
   app.drawQueue?.();
@@ -220,6 +255,7 @@ async function refresh() {
     }
     // A chat with someone no longer on the team (or a retired node hire) is read, not carried on.
     $('#chat-input').placeholder = chatUi.open && chatUi.open.here === false ? READ_ONLY_BOX
+      : app.isClipChat?.() ? 'What should the clip show? e.g. waves rolling onto a beach at sunset'
       : app.nobodyToTalkTo ? 'Hire someone first: press Hire staff on the left'
       : `Message ${app.inSentence?.(talking ? talking.name : chatUi.people.find(p => p.who === 'manager')?.name ?? 'The host') ?? 'the host'}…`;
     drawRail();
@@ -285,10 +321,14 @@ for (const b of document.querySelectorAll('[data-setup]')) {
     // Staff, Jobs and Files opened from here close back to Settings (home.js showAsPage).
     asPage.fromMenu = true;
     if (b.dataset.setup === 'settings') app.openSettings?.();
-    else if (b.dataset.setup === 'staff') app.openStaffMenu();
+    // Hire staff opens Hire staff (it opened All staff, which Hire staff's See all staff and Settings' Manage open).
+    else if (b.dataset.setup === 'staff') app.openHire({ page: true, fromMenu: true });
     else if (b.dataset.setup === 'models') app.openModels();
     else if (b.dataset.setup === 'nodes') openNodes();
     else if (b.dataset.setup === 'cluster') app.openCluster?.();
+    else if (b.dataset.setup === 'agents') app.openAgents?.();
+    // The memory editor's own way in, at the team notebook (there before anybody is hired).
+    else if (b.dataset.setup === 'memory') app.openMemory?.('team');
     else if (b.dataset.setup === 'thispc') openThisPc();
     else if (b.dataset.setup === 'updates') app.openUpdateInstall?.();
     else if (b.dataset.setup === 'jobs') $('#jobs-open').click();
@@ -304,6 +344,7 @@ for (const b of document.querySelectorAll('[data-setup]')) {
       // Network, Guest passes, with the new-pass form open (Create guest pass pressed for you) and its name box ready.
       openNodes();
       app.netSection('guests');
+      app.passesOn?.();
       if ($('#node-pass-new').hidden) $('#node-pass-create').click();
       $('#guest-passes').scrollIntoView({ block: 'start' });
     }
@@ -380,7 +421,7 @@ function folderFromName(name) {
 function nameHover() {
   const typed = $('#home-name').value.trim();
   const folder = typed ? folderFromName(typed) : folderNow();
-  $('#home-name-field').title = `The project's name, shown in Recent projects. It also names the project's folder in your workspace, where the files staff make go: "${folder}"${typed ? '' : ' (left empty: Project and the date and time)'}. A folder of that name already there gets " 2" after it.`;
+  $('#home-name-field').title = `The project's name, shown in the Project planner. It also names the project's folder in your workspace, where the files staff make go: "${folder}"${typed ? '' : ' (left empty: Project and the date and time)'}. A folder of that name already there gets " 2" after it.`;
 }
 $('#home-name').addEventListener('input', nameHover);
 $('#home-name-field').addEventListener('mouseenter', nameHover);
@@ -401,7 +442,7 @@ function drawHomeAsk() {
   // Nobody hired yet: the staff icons (one per chat role), each opening a window to hire one.
   const hire = $('#home-hire');
   hire.hidden = !!staff.length;
-  if (!staff.length) hire.replaceChildren(...(team.data?.roles ?? []).map(r => el('button', { class: 'staff-chip', type: 'button', title: `Hire ${/^[aeiou]/i.test(r.name) ? 'an' : 'a'} ${r.name.toLowerCase()}: pick their PC and software`, onclick: () => quickHire(r.id) },
+  if (!staff.length) hire.replaceChildren(...(team.data?.roles ?? []).map(r => el('button', { class: 'staff-chip', type: 'button', title: r.id === 'default' ? 'Hire someone with no role: pick their PC and model' : `Hire ${/^[aeiou]/i.test(r.name) ? 'an' : 'a'} ${r.name.toLowerCase()}: pick their PC and model`, onclick: () => quickHire(r.id) },
     el('span', { class: 'rail-avatar', 'aria-hidden': 'true' }, roleIcon(r.id)), el('span', { text: r.name }))));
   if (staff.length) {
     pick.replaceChildren(el('option', { value: '', text: 'Default - strongest available PC', title: 'The strongest worker that is free when it starts' }),
@@ -448,13 +489,13 @@ $('#home-ask').addEventListener('submit', async e => {
     say.hidden = true;
     // A TOMLIN still running older code (started before an update) makes the project but does not plan it.
     if (!r.plan) {
-      sayHere(say, 'The project was made (it is in Recent projects), but TOMLIN is still running an older version that does not plan it. Close TOMLIN and open it again, then press Lets go! again.');
+      sayHere(say, 'The project was made (it is in the Project planner), but TOMLIN is still running an older version that does not plan it. Close TOMLIN and open it again, then press Lets go! again.');
       return;
     }
     try {
       await app.addToQueue([{ kind: 'project', project: r.id }]);
     } catch (err) {
-      sayHere(say, `The project was made (it is in Recent projects), but it was not added to the queue: ${err.message} Open it and press Make the plan.`);
+      sayHere(say, `The project was made (it is in the Project planner), but it was not added to the queue: ${err.message} Open it and press Make the plan.`);
       return;
     }
     sayHere(say, r.picture ? `${r.name} is in the queue: the artist draws it as one picture.` : `${r.name} is in the queue: it is planned into steps first, then each step goes to its hire.`);
@@ -467,7 +508,7 @@ $('#home-ask').addEventListener('submit', async e => {
   }
 });
 
-// Developer notes (above Recent projects): what may be phased out, each one still opening from here. Planner is
+// Developer notes (above Recent projects and the Project planner): what may be phased out, each one still opening from here. Planner is
 // "Advanced / job planner"; Jobs has no Settings line now, so this is its way in.
 $('#devnotes-planner').addEventListener('click', () => $('#project-open').click());
 $('#devnotes-jobs').addEventListener('click', () => $('#jobs-open').click());

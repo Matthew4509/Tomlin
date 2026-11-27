@@ -48,7 +48,7 @@ export function lendersOf(max: { endpoints: string[]; lent: string[]; ids?: stri
  * instead of llama.cpp's fit (13 Nov 2026: it filled the HP 800 first and crashed it). Null when it does not apply (no
  * lender, no layer count); `note` only when the fit stays; `refuse` when the PCs cannot hold the model.
  */
-export async function maxSplit(o: { name: string; layers: number; bytes: number; cache: number; exe: string; device: 'cuda' | 'vulkan'; cards?: string[]; max: { endpoints: string[]; lent: string[]; ids?: string[] } | null; path?: string | null; experts?: { count: number; used: number } | null }): Promise<Placed | null> {
+export async function maxSplit(o: { name: string; layers: number; bytes: number; cache: number; exe: string; device: 'cuda' | 'vulkan' | 'cpu'; cards?: string[]; max: { endpoints: string[]; lent: string[]; ids?: string[] } | null; path?: string | null; experts?: { count: number; used: number } | null }): Promise<Placed | null> {
   if (!o.max?.endpoints.length || !(o.layers > 0)) return null;
   const listed = parseListed(await listWith(o.exe, o.max.endpoints));
   const read = await readPerLayer(o);
@@ -61,7 +61,7 @@ export async function maxSplit(o: { name: string; layers: number; bytes: number;
       log.info('max', `${o.name}: load refused before it started: ${got.why}.`);
       return { note: '', refuse: `Max mode cannot load ${o.name}: ${got.why}.` };
     }
-    log.info('max', `${o.name}: llama.cpp's own fit kept, not the layer split by room: ${got.why}.`);
+    log.info('max', `${o.name}: no layer split by room (${got.why}), so it loads without the lenders: llama.cpp's own fit ignores their RAM limits.`);
     return { note: '' };
   }
   // What each lender holds in its RAM now: a stall while it holds it lowers its cap next time.

@@ -61,3 +61,6 @@ function startWindowsHold(): Hold {
 
 /** This program's own holder. */
 export const awake = new KeepAwake(process.platform === 'win32' ? startWindowsHold : null);
+
+/** Another holder of its own (a shot list's), so it never lets go of the node's hold or the node of its. */
+export const keepAwakeHolder = (): KeepAwake => new KeepAwake(process.platform === 'win32' ? startWindowsHold : null);

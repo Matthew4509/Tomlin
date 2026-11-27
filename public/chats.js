@@ -21,14 +21,16 @@ async function loadChats() {
     // The chat on this window's screen; before one is drawn, the one the server reopens (another window may open others).
     chatUi.current = app.chatId ?? d.current;
     // The projects a chat can belong to (the jobs in the workspace that are not hidden), by name.
-    // and the ones saved on Home that are not planned yet.
+    // and the ones saved on Home that are not planned yet (plan: false, for the Project tab's Make the plan).
     const j = await api('/api/jobs').catch(() => null);
-    const planned = (j?.jobs ?? []).filter(x => !x.hidden).map(x => ({ id: x.id, name: x.name || x.goal, folder: x.folder || '' }));
-    chatUi.projects = [...planned, ...(j?.unplanned ?? []).filter(x => !planned.some(p => p.id === x.id)).map(x => ({ id: x.id, name: x.name || x.goal, folder: '' }))];
+    const planned = (j?.jobs ?? []).filter(x => !x.hidden && !x.damaged).map(x => ({ id: x.id, name: x.name || x.goal, goal: x.name ? x.goal ?? '' : '', folder: x.folder || '' }));
+    chatUi.projects = [...planned, ...(j?.unplanned ?? []).filter(x => !planned.some(p => p.id === x.id)).map(x => ({ id: x.id, name: x.name || x.goal, goal: x.name ? x.goal ?? '' : '', about: x.about ?? '', folder: '', plan: false }))];
   } catch {
     // The top bar says when the server is not answering; the list keeps what it had.
   }
   drawChats();
+  // Home's Recent projects tiles are made from the chats and their projects (homeview.js).
+  app.drawProjectTiles?.();
   // The head may have been drawn before the people were known.
   drawHead();
 }
@@ -251,24 +253,55 @@ $('#rail-recent-all').addEventListener('click', () => app.openAllChats());
 // `shown`: tiles drawn so far. Thousands at once took seconds to draw (and again on each left-panel redraw), so 60 are
 // drawn, then 60 more each time the end of the list scrolls into view (or Show more is pressed).
 const ALL_PAGE = 60;
-const allUi = { q: '', project: '*', who: '*', shown: ALL_PAGE };
+const allUi = { q: '', project: '*', who: '*', role: '*', shown: ALL_PAGE };
+// Role: a whole kind (Text / coding, Images, Video) or one role in it, as Hire staff groups them. Only kinds and roles
+// that some chat has are listed. A chat whose role is not known (a linked PC's, an early leaver's) shows under All roles.
+const ROLE_KINDS = [['chat', 'Text / coding'], ['image', 'Images'], ['video', 'Video']];
+function fillRolePick(sel, visible, now) {
+  const kinds = ROLE_KINDS.map(([kind, name]) => {
+    const roles = [...new Map(visible.filter(c => c.roleKind === kind).map(c => [c.roleId, String(c.role ?? '').split(' · ')[0]])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return { kind, name, roles };
+  }).filter(k => k.roles.length);
+  const values = ['*', ...kinds.flatMap(k => [`kind:${k.kind}`, ...k.roles.map(([id]) => `role:${id}`)])];
+  sel.replaceChildren(el('option', { value: '*', text: 'All roles' }), ...kinds.map(k => {
+    const g = el('optgroup', { label: k.name });
+    g.append(el('option', { value: `kind:${k.kind}`, text: `All ${k.name.toLowerCase()}` }), ...k.roles.map(([id, name]) => el('option', { value: `role:${id}`, text: name })));
+    return g;
+  }));
+  sel.value = values.includes(now) ? now : '*';
+  return sel.value;
+}
+/** Whether chat `c` is in the Role pick `pick` ('*', 'kind:image', 'role:writer'). */
+function roleMatches(c, pick) {
+  if (pick === '*') return true;
+  return pick.startsWith('kind:') ? c.roleKind === pick.slice(5) : c.roleId === pick.slice(5);
+}
 function fillPick(sel, options, now) {
   const want = options.some(o => o[0] === now) ? now : '*';
   sel.replaceChildren(...options.map(([value, text]) => el('option', { value, text })));
   sel.value = want;
   return want;
 }
+/** A chat tile's small line: its first message; an artist's chat with pictures and no message says how many it has. */
+function chatMini(c) {
+  if (c.preview) return c.preview;
+  const n = c.pictures ?? 0;
+  return n ? `${n} picture${n === 1 ? '' : 's'}, no message` : 'No message yet';
+}
+
 function drawAllChats() {
   const visible = chatUi.list.filter(chatShown);
   const projects = [...new Map(visible.map(c => { const g = chatGroup(c); return [g?.id ?? '', g?.name ?? 'Default']; })).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   allUi.project = fillPick($('#allchats-project'), [['*', 'All projects'], ...projects], allUi.project);
   const people = [...new Map(visible.map(c => [c.who, c.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   allUi.who = fillPick($('#allchats-staff'), [['*', 'All staff'], ...people], allUi.who);
+  allUi.role = fillRolePick($('#allchats-role'), visible, allUi.role);
   const words = allUi.q.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = visible.filter(c => {
     const g = chatGroup(c);
     if (allUi.project !== '*' && (g?.id ?? '') !== allUi.project) return false;
     if (allUi.who !== '*' && c.who !== allUi.who) return false;
+    if (!roleMatches(c, allUi.role)) return false;
     const hay = `${c.title} ${c.name} ${g?.name ?? 'Default'} ${c.preview ?? ''}`.toLowerCase();
     return words.every(w => hay.includes(w));
   });
@@ -276,10 +309,10 @@ function drawAllChats() {
     const person = chatUi.people.find(p => p.who === c.who);
     const model = person ? modelWords(person) : '';
     const g = chatGroup(c);
-    const b = el('button', { class: 'allchats-tile', type: 'button', 'data-key': `all:${c.id}`, title: c.preview ? `${c.preview}${c.preview.length >= 100 ? '…' : ''}` : 'No message yet' },
+    const b = el('button', { class: 'allchats-tile', type: 'button', 'data-key': `all:${c.id}`, title: c.preview ? `${c.preview}${c.preview.length >= 100 ? '…' : ''}` : chatMini(c) },
       el('span', { class: 'allchats-who' }, chatAvatar(c), el('span', { class: 'allchats-name', text: model ? `${c.name} · ${model}` : c.name })),
       el('b', { class: 'allchats-subject', text: c.title }),
-      el('span', { class: 'allchats-mini', text: c.preview || 'No message yet' }),
+      el('span', { class: 'allchats-mini', text: chatMini(c) }),
       el('span', { class: 'allchats-where', text: `${g?.name ?? 'Default'} · ${timeText(c.updated)}` }));
     b.addEventListener('click', () => openChat(c.id));
     return el('li', {}, b);
@@ -288,7 +321,7 @@ function drawAllChats() {
   $('#allchats-count').textContent = hits.length === visible.length ? `${visible.length} chat${visible.length === 1 ? '' : 's'}` : `${hits.length} of ${visible.length} chats`;
   const left = hits.length - allUi.shown;
   const more = left > 0 ? el('li', { class: 'allchats-more' }, el('button', { class: 'btn', type: 'button', 'data-key': 'all:more', text: `Show more (${left} left)`, onclick: showMoreChats })) : null;
-  keepFocus($('#allchats-tiles'), hits.length ? [...hits.slice(0, allUi.shown).map(tile), more] : [el('li', { class: 'home-empty', text: visible.length ? 'No chat matches. Try fewer words, or All projects and All staff.' : 'No chats yet. Press "New chat" to start one.' })]);
+  keepFocus($('#allchats-tiles'), hits.length ? [...hits.slice(0, allUi.shown).map(tile), more] : [el('li', { class: 'home-empty', text: visible.length ? 'No chat matches. Try fewer words, or All projects, All staff and All roles.' : 'No chats yet. Press "New chat" to start one.' })]);
   // The row on the page (an unchanged list is not drawn again, so it may be the earlier one).
   moreSeen.disconnect();
   const live = $('#allchats-tiles .allchats-more');
@@ -311,6 +344,7 @@ app.openAllChats = () => {
 $('#allchats-search').addEventListener('input', e => { allUi.q = e.target.value; allUi.shown = ALL_PAGE; drawAllChats(); });
 $('#allchats-project').addEventListener('change', e => { allUi.project = e.target.value; allUi.shown = ALL_PAGE; drawAllChats(); });
 $('#allchats-staff').addEventListener('change', e => { allUi.who = e.target.value; allUi.shown = ALL_PAGE; drawAllChats(); });
+$('#allchats-role').addEventListener('change', e => { allUi.role = e.target.value; allUi.shown = ALL_PAGE; drawAllChats(); });
 
 // ---- Which project a chat's work belongs to: Default (the chats by date) or one of the projects ----
 
@@ -333,7 +367,7 @@ $('#project-new-form').addEventListener('submit', async e => {
   say.hidden = true;
   if (!chat) return newProjectDlg.close();
   try {
-    const made = await api('/api/projects/create', { name: $('#project-new-name').value, fromChat: true });
+    const made = await api('/api/projects/create', { name: $('#project-new-name').value, about: $('#project-new-about').value, fromChat: true });
     await loadChats();
     newProjectDlg.close();
     await putInProject(chat, made.id);
@@ -352,6 +386,7 @@ $('#chat-project').addEventListener('change', async () => {
   if (!chat) return;
   if ($('#chat-project').value === NEW_PROJECT) {
     $('#project-new-name').value = '';
+    $('#project-new-about').value = '';
     $('#project-new-fault').hidden = true;
     newProjectDlg.showModal();
     $('#project-new-name').focus();
@@ -370,6 +405,8 @@ async function putInProject(chat, project) {
     if (project) chatUi.openProjects.add(project);
     drawChats();
     drawChatProject(chatUi.open);
+    // An artist's Character sets and @Name chips follow the chat into its new project at once.
+    void app.charSets?.load();
     if (r.said) app.chatNote?.(r.said);
   } catch (e) {
     app.chatNote?.(e.message);
@@ -416,11 +453,11 @@ function drawHead() {
   const person = chatUi.people.find(p => p.who === who);
   // Who the open chat is with (Save and Copy the whole chat name their answers with it).
   app.chatPerson = person ?? null;
-  $('#chat-title').textContent = chat?.title ?? 'New chat';
+  $('#chat-title').textContent = chat?.title ?? 'Untitled chat';
   $('#chat-title').title = chat?.title ?? 'A new chat: the first message names it';
   // A rename under way stays open while the same chat is redrawn; another chat on screen ends it.
   if (!titleEditing || titleEditing !== chat?.id) titleEdit(false);
-  // Like a Staff overview card: name · software, the PC under it; the speed, then the chat's name, in the next column.
+  // Like an Office card: name · software, the PC under it; the speed, then the chat's name, in the next column.
   const gone = chat && !chat.here;
   const software = !person || gone ? '' : modelWords(person);
   const pc = !person || gone ? '' : person.pc === 'this PC' ? 'This PC' : person.pc;
@@ -451,13 +488,15 @@ function drawHead() {
   // the chat. The pictures pane's head says whose chat it is, like the chat's.
   const artist = person?.kind === 'image';
   $('#panes').dataset.show = artist ? 'image' : 'chat';
-  $('#image-title').textContent = chat?.title ?? (artist ? 'New chat' : 'Pictures');
+  $('#image-title').textContent = chat?.title ?? (artist ? 'Untitled chat' : 'Pictures');
   $('#image-with').textContent = artist ? `With ${person.name} · ${person.role.replace(/ · draws what you ask$/, '')} · ${person.model} on ${person.pc} · draws your words just as you type them` : '';
   $('#image-with').title = $('#image-with').textContent;
   $('#image-menu-open').hidden = !chat;
   $('#img-prompt-label').textContent = artist ? `What should ${person.name.split(/\s+/)[0]} draw?` : 'What to draw';
   $('#draw-as-row').classList.toggle('in-chat', artist);
   drawSubjects();
+  // A Videographer's chat: the clip choices under the box (clips.js).
+  app.clipsFollow?.();
 }
 
 // ---- A chat with someone on a linked PC: the top bar shows that PC (its name, the model loaded there, its meters) ----
@@ -467,8 +506,9 @@ function drawHead() {
  * measures itself every second anyway for its own top bar; asking only reads the last figure, so it costs it nothing
  * to speak of. A PC whose TOMLIN is too old to share them is asked once (the bar says so while the chat is open).
  */
-const meters = { pc: '', who: '', timer: 0, asking: false };
-const chatOnScreen = () => !document.hidden && !!$('#pane-chat').getClientRects().length;
+// `chat`: the PC of the chat drawn in the chat pane; `person`: the one of the person page (a face on a PC card).
+const meters = { pc: '', who: '', timer: 0, asking: false, chat: { pc: '', who: '' }, person: null };
+const chatOnScreen = () => !document.hidden && (!!$('#pane-chat').getClientRects().length || !!$('#person-page').getClientRects().length);
 async function askMeters() {
   const pc = meters.pc;
   // Only while the chat is on screen: Home, Jobs or Nodes in front (or a hidden tab) asks nothing, so a node can drop
@@ -493,6 +533,12 @@ async function askMeters() {
   }
 }
 function nodeMeters(pc, who = '') {
+  meters.chat = { pc, who };
+  metersFor(homeUi.view);
+}
+/** Follows the PC of what is on screen: the person page's person, else the chat's. */
+function metersFor(view) {
+  const { pc, who } = view === 'person' && meters.person ? meters.person : meters.chat;
   meters.who = who;
   if (pc === meters.pc) return;
   clearInterval(meters.timer);
@@ -507,9 +553,13 @@ function nodeMeters(pc, who = '') {
 // Back on screen, or back to the chat from Home: a fresh snapshot at once, not up to 3 s later; away from the chat, this
 // PC's bar at once.
 document.addEventListener('visibilitychange', askMeters);
-app.onView = view => (view === 'chat' ? askMeters() : app.showBarPc?.(null));
+app.onView = view => {
+  if (view !== 'chat' && view !== 'person') return app.showBarPc?.(null);
+  metersFor(view);
+  askMeters();
+};
 
-// ---- Subjects (the panel on the right): the chats with the person open now, each named for what it is about ----
+// ---- Who the chat pane is with ----
 
 /** Who the chat pane is with now: the open chat's person, or the one picked when no chat is open yet. */
 const subjectWho = () => chatUi.open?.who ?? kindOf(app.models?.settings?.who ?? 'standard');
@@ -522,72 +572,18 @@ app.chatModelPicked = async id => {
   if (app.models?.settings) app.models.settings.hostModel = id;
 };
 
-// The "!" beside Subject name: what a subject is, shown and hidden in place.
-$('#subject-info').addEventListener('click', () => {
-  const text = $('#subject-info-text');
-  text.hidden = !text.hidden;
-  $('#subject-info').setAttribute('aria-expanded', String(!text.hidden));
-});
-
-/** Create new subject's project: the chat it was drawn for, and the project picked by hand (null: none picked). */
-let subjectChat = null;
-let subjectPick = null;
-$('#subject-project').addEventListener('change', e => {
-  subjectPick = e.target.value;
-});
-
+// The panel's folded line names the chat open now. (Create new subject was here: a chat is named from its first message,
+// Rename in its top bar changes it, and the New chat window picks its project.)
 function drawSubjects() {
-  const who = subjectWho();
-  const person = chatUi.people.find(p => p.who === who);
-  // Before the people are known (the page is still loading) nothing is said about who this is.
-  const known = chatUi.people.length > 0;
-  $('#subjects-with').textContent = person ? `A new subject with ${app.inSentence(person.name)}.` : known ? 'They are no longer on the team: no new subject can be made with them.' : '';
-  $('#subjects-with').hidden = !$('#subjects-with').textContent;
   $('#subjects-now').textContent = chatUi.open?.title ?? '';
-  $('#subjects-new').hidden = !person;
-  // The project a new subject goes in: the open chat's, so the writer's and the artist's chats for one project stay together.
-  const sel = $('#subject-project');
-  const before = sel.value;
-  sel.replaceChildren(el('option', { value: '', text: 'Default' }), ...chatUi.projects.map(p => el('option', { value: p.id, text: p.name.length > 40 ? `${p.name.slice(0, 40)}…` : p.name })));
-  const openId = chatUi.open?.id ?? null;
-  const own = chatGroup(chatUi.open ?? {})?.id ?? '';
-  // A project picked by hand is kept while the same chat is open, and into an empty chat in no project (a new chat
-  // with the next person): the writer's and then the artist's subject for one project need it picked once.
-  const listed = chatUi.list.find(c => c.id === openId);
-  const blank = !own && !listed?.messages;
-  // Another chat opened: an empty one in no project carries on in the project shown before (picked or not).
-  if (subjectChat !== openId) subjectPick = blank && before ? before : null;
-  subjectChat = openId;
-  sel.value = subjectPick !== null && [...sel.options].some(o => o.value === subjectPick) ? subjectPick : own;
+  // The Project tab: the open chat's project, its chats by kind of work and person (projecttab.js).
+  app.drawProjectTab?.();
 }
 
-function subjectsSay(text, fault = false) {
-  const note = $('#subjects-note');
-  note.textContent = text;
-  note.classList.toggle('fault', fault);
-  note.hidden = !text;
-}
+// ---- Project | Tools | Office: tabs on the right of the chat (the one picked is kept in this browser). Office is the
+// staff overview (its ids are still tab-staff and panel-staff). ----
 
-$('#subjects-new').addEventListener('submit', async e => {
-  e.preventDefault();
-  subjectsSay('');
-  const box = $('#subject-name');
-  try {
-    const project = $('#subject-project').value;
-    // chatId: the chat on screen, which takes the name when it is still empty (not the one another window opened).
-    const r = await api('/api/chats/new', { who: subjectWho(), plain: plainWho(), title: box.value, project, chatId: app.chatId ?? '' });
-    box.value = '';
-    await showOpened(r);
-    const where = chatUi.projects.find(p => p.id === project)?.name ?? 'Default';
-    subjectsSay(r.existed ? `"${r.chat.title}" was already a subject in ${where}: it is open now.` : `"${r.chat.title}" is made, in ${where}. It is in the Chats tab.`);
-  } catch (err) {
-    subjectsSay(err.message, true);
-  }
-});
-
-// ---- Tools | Staff overview: tabs on the right of the chat (the one picked is kept in this browser) ----
-
-const sideTabs = [$('#tab-tools'), $('#tab-staff')];
+const sideTabs = [$('#tab-project'), $('#tab-tools'), $('#tab-staff')];
 function sideTab(tab, focus = false) {
   for (const t of sideTabs) {
     const on = t === tab;
@@ -596,10 +592,11 @@ function sideTab(tab, focus = false) {
     $(`#${t.getAttribute('aria-controls')}`).hidden = !on;
   }
   if (focus) tab.focus();
+  if (tab.id === 'tab-project') app.drawProjectTab?.();
   try {
     localStorage.setItem('sm-side-tab', tab.id);
   } catch {
-    // not kept: Tools opens first next time
+    // not kept: Project opens first next time
   }
 }
 for (const t of sideTabs) {
@@ -617,7 +614,7 @@ try {
   const kept = sideTabs.find(t => t.id === localStorage.getItem('sm-side-tab'));
   if (kept) sideTab(kept);
 } catch {
-  // Tools first
+  // Project first
 }
 
 // A wide screen starts with the panel hidden, a thin strip at the right with one arrow, and the chat takes its room;
@@ -659,12 +656,44 @@ app.artistPointer = () => {
   return `Pictures are drawn by ${list}. Open ${names[0]} in the left panel (or New chat, then ${names[0]}) and type what to draw: the words go to the picture model just as you type them.`;
 };
 
-/** An artist's chat: their latest one opens (or a new one when there is none), in the pictures pane. */
-app.openArtist = async who => {
+/**
+ * An artist's or a Videographer's chat: their latest one opens (or a new one when there is none); an artist's in the
+ * pictures pane, a Videographer's in the chat pane with the clip choices under the box.
+ */
+/** The latest chat with `who`, or a new one. `project` (a project's id): the latest of theirs in that project, else a new one in it. */
+const openLatestWith = async (who, project = '') => {
   await loadChats();
-  const last = chatUi.list.find(c => c.who === who);
-  await showOpened(last ? await api('/api/chats/open', { id: last.id, plain: plainWho() }) : await api('/api/chats/new', { who, plain: plainWho() }));
+  const last = chatUi.list.find(c => c.who === who && (!project || c.project === project));
+  await showOpened(last ? await api('/api/chats/open', { id: last.id, plain: plainWho() }) : await api('/api/chats/new', { who, plain: plainWho(), ...(project ? { project } : {}) }));
 };
+app.openArtist = openLatestWith;
+app.openVideographer = openLatestWith;
+/** The project of the chat on screen ('' for Default or none). */
+app.chatProject = () => chatUi.open?.project ?? '';
+
+/**
+ * "Ask about this picture" (the gallery): the picture goes on the next message of the chat on screen when that chat
+ * talks (not an artist's or a Videographer's); else the host's latest chat opens (or the first hire who talks).
+ */
+app.askAboutPicture = async (url, name = '') => {
+  const talks = p => p && p.kind !== 'image' && !p.video && !String(p.who).startsWith('node:');
+  const here = chatUi.people.find(p => p.who === app.chatWho?.());
+  try {
+    if (!talks(here)) {
+      const who = (chatUi.people.find(p => p.who === 'manager' && talks(p)) ?? chatUi.people.find(talks))?.who;
+      if (!who) return app.chatNote('Nobody here talks about pictures yet: hire someone (Hire staff), then try again.');
+      await openLatestWith(who);
+    }
+    app.showPanes?.();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('That picture is not there any more.');
+    await app.attachPicture?.(await res.blob(), name ? (name.length > 40 ? `${name.slice(0, 40)}…` : name) : 'picture');
+  } catch (err) {
+    app.chatNote(err.message);
+  }
+};
+/** The Videographers on the team (clips.js asks which one makes a clip from a picture). */
+app.videographers = () => chatUi.people.filter(p => p.video);
 $('#image-menu-open').addEventListener('click', () => $('#chat-menu-open').click());
 
 /** The chat pane's head: the chat's name and who it is with ("New chat" until the first message names it). */
@@ -675,7 +704,7 @@ app.onChat = chat => {
   drawHead();
   app.drawAvatar?.();
   if (changed) app.chatChanged?.();
-  // The office in Staff overview follows the person this chat is with, at once.
+  // The office (the Office tab) follows the person this chat is with, at once.
   const person = app.chatPersonId?.();
   if (changed && person) app.office?.follow(person);
   if (chatUi.current !== app.chatId) {
@@ -736,6 +765,8 @@ async function openChat(id) {
     const r = await api('/api/chats/open', { id, plain: plainWho() });
     if (turn !== openTurn) return;
     await showOpened(r, turn);
+    // The artist's Character sets and @Name chips follow the chat's project (charsets.js).
+    void app.charSets?.load();
   } catch (e) {
     if (e.status === 404) await loadChats();
     app.chatNote?.(e.message);
@@ -816,8 +847,10 @@ async function startChat(who, button) {
   fault.hidden = true;
   button.disabled = true;
   try {
-    const r = await api('/api/chats/new', { who, plain: plainWho() });
+    const project = newChatProject();
+    const r = await api('/api/chats/new', { who, plain: plainWho(), project });
     $('#new-chat').close();
+    if (project) chatUi.openProjects.add(project);
     await showOpened(r);
   } catch (e) {
     fault.textContent = e.message;
@@ -840,10 +873,11 @@ const previewDay = at => new Date(at).toLocaleDateString(undefined, { day: 'nume
 const initialsOf = name => String(name).split(/\s+/).map(w => w[0] ?? '').join('').slice(0, 2).toUpperCase() || '?';
 /**
  * A chat's preview in its row: the day's picture of its project's site (press = bigger), else the site's icon, else the
- * project's initials. Nothing at all (no space kept) for a chat in no project, or an artist's before Show preview.
+ * project's initials. Nothing at all (no space kept) for a chat in no project, or an artist's before Show preview
+ * (`shown`: the window's or the person page's own Show preview).
  */
-function chatPreview(c, artist) {
-  if (!c.project || (artist && !personShowPreview)) return null;
+function chatPreview(c, artist, shown) {
+  if (!c.project || (artist && !shown)) return null;
   const p = chatGroup(c);
   if (!p) return null;
   const v = chatUi.previews[c.project] ?? {};
@@ -867,29 +901,14 @@ function chatPreview(c, artist) {
   return el('span', { class: 'person-chat-pic', title: `${p.name}. ${no}` }, el('span', { class: 'person-chat-initials', 'aria-hidden': 'true', text: initialsOf(p.name) }));
 }
 /**
- * A person's window: New chat, Edit staff (a hire), Resume chat (opened from one of their chats in Recent chats), then
- * their recent chats, each with its own Resume chat, and Load more.
+ * A person's recent chats in `list`, newest first, shared by their window and their page in the middle panel: each row
+ * "Project - subject - time" with the project's short description under it; the whole row and its Resume chat open it
+ * (`open(id)`), and Load more shows RECENT_SHOWN more. `preview()` says whether an artist's previews are shown; `empty()`
+ * gives what an empty list says. Returns their chats, whether they draw, and draw(how many).
  */
-app.openPerson = async (who, name, opts = {}) => {
-  personWho = who;
-  personResume = opts.resume ?? '';
-  // Off every time the window opens.
-  if (!$('#person-chats').open) personShowPreview = false;
-  await loadChats();
-  if (personWho !== who) return;
-  $('#person-chats-title').textContent = name;
-  $('#person-chats-fault').hidden = true;
-  $('#person-chats-face').replaceChildren(app.avatar ? app.avatar(who, name.slice(0, 2).toUpperCase()) : '');
-  $('#person-chats-start').textContent = chatUi.people.find(p => p.who === who)?.kind === 'image' ? 'New chat (draw)' : 'New chat';
-  $('#person-chats-edit').hidden = !(who.startsWith('staff:') && app.editStaff);
-  $('#person-chats-resume').hidden = !personResume;
+function personChatRows(list, who, name, { preview, open, empty }) {
   const theirs = chatUi.list.filter(c => c.who === who).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   const artist = chatUi.people.find(p => p.who === who)?.kind === 'image';
-  $('#person-chats-show').hidden = !artist || personShowPreview || !theirs.some(c => chatGroup(c));
-  const open = async id => {
-    $('#person-chats').close();
-    await openChat(id);
-  };
   const row = c => {
     // Project name - subject - date; the whole row opens it, and so does its Resume chat button.
     const b = el('button', { class: 'person-chat', type: 'button', title: `${c.title}: ${c.messages} message${c.messages === 1 ? '' : 's'}` },
@@ -901,13 +920,12 @@ app.openPerson = async (who, name, opts = {}) => {
       // The project's short description: "Project 2026-10-12-1422" alone says nothing.
       chatUi.previews[c.project]?.about ? el('span', { class: 'person-chat-about', text: chatUi.previews[c.project].about }) : null);
     b.addEventListener('click', () => open(c.id));
-    return el('li', { class: 'person-chat-item' }, chatPreview(c, artist), b,
+    return el('li', { class: 'person-chat-item' }, chatPreview(c, artist, preview()), b,
       el('button', { class: 'btn primary person-chat-resume', type: 'button', text: 'Resume chat', 'aria-label': `Resume chat: ${c.title}`, onclick: () => open(c.id) }));
   };
-  const list = $('#person-chats-list');
   const draw = shown => {
     const rows = theirs.slice(0, shown).map(row);
-    if (!rows.length) rows.push(el('li', { class: 'hint', text: `No chats with ${name} yet.` }));
+    if (!rows.length) rows.push(empty ? empty() : el('li', { class: 'hint', text: `No chats with ${name} yet.` }));
     else if (theirs.length > shown) {
       rows.push(el('li', { class: 'person-chat-more' }, el('button', { class: 'link', type: 'button', text: `Load more (${theirs.length - shown} older)`, onclick: () => {
         draw(shown + RECENT_SHOWN);
@@ -916,6 +934,37 @@ app.openPerson = async (who, name, opts = {}) => {
     }
     list.replaceChildren(...rows);
   };
+  return { theirs, artist, draw };
+}
+
+/**
+ * A person's window: New chat, Edit staff (a hire), Resume chat (opened from one of their chats in Recent chats), then
+ * their recent chats, each with its own Resume chat, and Load more.
+ */
+app.openPerson = async (who, name, opts = {}) => {
+  personWho = who;
+  personResume = opts.resume ?? '';
+  // Off every time the window opens.
+  if (!$('#person-chats').open) personShowPreview = false;
+  await loadChats();
+  if (personWho !== who) return;
+  // The top line: their name, then their model, cut to 20 characters (the whole name on hover). None given: name only.
+  const model = chatUi.people.find(p => p.who === who)?.model ?? '';
+  const hasModel = model && !/^no model/i.test(model);
+  $('#person-chats-title').replaceChildren(name, ...(hasModel ? [' ', el('span', { class: 'person-chats-model', title: model, text: model.length > 20 ? `${model.slice(0, 19)}…` : model })] : []));
+  $('#person-chats-fault').hidden = true;
+  $('#person-chats-face').replaceChildren(app.avatar ? app.avatar(who, name.slice(0, 2).toUpperCase()) : '');
+  $('#person-chats-start').textContent = chatUi.people.find(p => p.who === who)?.kind === 'image' ? 'New chat (draw)' : 'New chat';
+  $('#person-chats-edit').hidden = !(who.startsWith('staff:') && app.editStaff);
+  $('#person-chats-resume').hidden = !personResume;
+  const { theirs, artist, draw } = personChatRows($('#person-chats-list'), who, name, {
+    preview: () => personShowPreview,
+    open: async id => {
+      $('#person-chats').close();
+      await openChat(id);
+    },
+  });
+  $('#person-chats-show').hidden = !artist || personShowPreview || !theirs.some(c => chatGroup(c));
   draw(RECENT_SHOWN);
   personDraw = draw;
   if (!$('#person-chats').open) $('#person-chats').showModal();
@@ -955,17 +1004,175 @@ $('#person-chats-start').addEventListener('click', async e => {
   }
 });
 
+// ---- A face on a PC card in Home's left panel: that person's page in the middle panel ----
+
+/** Who the person page is for, what its head says, its own Show preview (off each time it opens) and its list's draw. */
+const pageUi = { who: '', name: '', info: {}, preview: false, draw: null };
+/**
+ * `who`'s page beside Home and the chat: their face, name, role, the PC they are on with its state word and their model;
+ * New chat and Edit staff; then their recent chats. Nothing loads or starts until a chat is picked or New chat is pressed.
+ * The top bar shows their PC at once, as an open chat with them does. `info`: { role, pc, pcId, word, model }.
+ */
+app.openPersonPage = async (who, name, info = {}) => {
+  if (pageUi.who !== who || homeUi.view !== 'person') {
+    pageUi.preview = false;
+    $('#person-page-list').replaceChildren();
+  }
+  Object.assign(pageUi, { who, name, info });
+  meters.person = { pc: info.pcId ?? '', who };
+  $('#person-page-fault').hidden = true;
+  drawPersonPage();
+  setView('person');
+  // Drawn at once from the lists already here, then again once they are read fresh.
+  await loadChats();
+  if (pageUi.who === who && homeUi.view === 'person') drawPersonPage();
+};
+function drawPersonPage() {
+  const { who, name, info } = pageUi;
+  const person = chatUi.people.find(p => p.who === who);
+  const artist = person?.kind === 'image';
+  $('#person-page-title').textContent = name;
+  $('#person-page-face').replaceChildren(app.avatar ? app.avatar(who, name.slice(0, 2).toUpperCase()) : '');
+  $('#person-page-role').textContent = info.role ?? '';
+  $('#person-page-role').hidden = !info.role;
+  $('#person-page-where').replaceChildren(
+    el('span', { text: `On ${info.pc ?? 'this PC'}` }),
+    info.word ? el('span', { class: 'person-page-word', 'data-activity': info.activity ?? '', text: info.word }) : null,
+    // The server says "no model given" in words when there is none: not "Model: no model given".
+    el('span', { text: info.model && !/^no model/i.test(info.model) ? `Model: ${info.model}` : 'No model given' }));
+  $('#person-page-start').textContent = artist ? 'New chat (draw)' : 'New chat';
+  $('#person-page-edit').hidden = !(who.startsWith('staff:') && app.editStaff);
+  // Memory: theirs for a hire, the team's for the host (a person on a linked PC keeps none here).
+  $('#person-page-memory').hidden = who.startsWith('node:');
+  const list = $('#person-page-list');
+  const { theirs, draw } = personChatRows(list, who, name, {
+    preview: () => pageUi.preview,
+    open: id => openChat(id),
+    empty: () => el('li', { class: 'person-page-none' }, el('p', { class: 'hint', text: `No chats with ${name} yet.` }),
+      el('button', { class: 'btn primary', type: 'button', text: artist ? 'New chat (draw)' : 'New chat', onclick: e => personPageStart(e.currentTarget) })),
+  });
+  $('#person-page-show').hidden = !artist || pageUi.preview || !theirs.some(c => chatGroup(c));
+  // A redraw keeps as many rows as Load more had shown.
+  draw(Math.max(RECENT_SHOWN, list.querySelectorAll('.person-chat').length));
+  pageUi.draw = draw;
+}
+async function personPageStart(b) {
+  $('#person-page-fault').hidden = true;
+  b.disabled = true;
+  try {
+    const r = await api('/api/chats/new', { who: pageUi.who, plain: plainWho() });
+    await showOpened(r);
+  } catch (err) {
+    $('#person-page-fault').textContent = `No new chat was started: ${err.message}`;
+    $('#person-page-fault').hidden = false;
+  } finally {
+    b.disabled = false;
+  }
+}
+$('#person-page-start').addEventListener('click', e => personPageStart(e.currentTarget));
+$('#person-page-edit').addEventListener('click', () => app.editStaff(pageUi.who.slice('staff:'.length)));
+$('#person-page-show').addEventListener('click', () => {
+  pageUi.preview = true;
+  $('#person-page-show').hidden = true;
+  pageUi.draw?.($('#person-page-list').querySelectorAll('.person-chat').length || RECENT_SHOWN);
+  $('#person-page-list').querySelector('.person-chat-pic, .person-chat')?.focus();
+});
+
 // The window opens at once with the people already known, then is drawn again once the lists are read fresh (that took
 // a second with many chats). Only the first time, with nobody known yet, does it wait.
+// ---- New chat's Project fold: closed, its line says where the chat goes; open, a tile per project ----
+// Tiles 5 across (fewer when narrow), names cut to 20 characters, the full name and its description on hover. Default
+// first, + New project last (a name and a mini description: every project made here gets its one line). The projects
+// used most recently come first; 15 at first, then Show all, and a search box when there are more than 10.
+const PROJECT_TILES = 15;
+const pickUi = { project: '', all: false, q: '' };
+const projectShort = (name, max = 20) => (name.length > max ? `${name.slice(0, max).trimEnd()}…` : name);
+/** The project the New chat window has picked ('' = Default). */
+const newChatProject = () => pickUi.project;
+function projectsByUse() {
+  const used = new Map();
+  for (const c of chatUi.list) if (c.project && (used.get(c.project) ?? '') < (c.updated ?? '')) used.set(c.project, c.updated ?? '');
+  return [...chatUi.projects].sort((a, b) => (used.get(b.id) ?? '').localeCompare(used.get(a.id) ?? ''));
+}
+function drawNewChatProject(want = pickUi.project) {
+  pickUi.project = chatUi.projects.some(p => p.id === want) ? want : '';
+  const now = chatUi.projects.find(p => p.id === pickUi.project);
+  $('#new-chat-where-sum').textContent = `Project: ${now ? projectShort(now.name, 40) : 'Default'}`;
+  $('#new-chat-where-sum').parentElement.title = now ? `${now.name}${now.goal ? `: ${now.goal}` : ''}. What staff save goes into its folder.` : 'Default: no project. Saved files go into this chat\'s own folder.';
+  const all = projectsByUse();
+  $('.new-chat-pfind').hidden = all.length <= 10;
+  const words = ($('.new-chat-pfind').hidden ? '' : pickUi.q).toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = all.filter(p => words.every(w => `${p.name} ${p.goal ?? ''}`.toLowerCase().includes(w)));
+  const shown = pickUi.all || words.length ? hits : hits.slice(0, PROJECT_TILES);
+  const tile = (id, name, title, cls = '') => {
+    const b = el('button', { class: `new-chat-ptile${cls}`, type: 'button', 'data-key': `p:${id}`, title, 'aria-pressed': String(id === pickUi.project), text: name });
+    b.addEventListener('click', () => {
+      if (id === NEW_PROJECT) return openNewChatProjectForm();
+      pickUi.project = id;
+      drawNewChatProject();
+    });
+    return el('li', {}, b);
+  };
+  keepFocus($('#new-chat-projects'), [
+    tile('', 'Default', 'No project: saved files go into this chat\'s own folder.'),
+    ...shown.map(p => tile(p.id, projectShort(p.name), `${p.name}${p.goal ? `\n${p.goal.slice(0, 160)}` : ''}`)),
+    tile(NEW_PROJECT, '+ New project', 'Make a project: a name and a one-line description. Its folder is made in the workspace.', ' new-chat-padd'),
+  ]);
+  const more = hits.length - shown.length;
+  $('#new-chat-pmore-row').hidden = more <= 0 && !pickUi.all;
+  $('#new-chat-pmore').textContent = more > 0 ? `Show all (${hits.length})` : 'Show fewer';
+}
+function openNewChatProjectForm() {
+  $('#new-chat-pname').value = '';
+  $('#new-chat-pabout').value = '';
+  $('#new-chat-pfault').hidden = true;
+  $('#new-chat-pnew').hidden = false;
+  $('#new-chat-pname').focus();
+}
+$('#new-chat-pmore').addEventListener('click', () => { pickUi.all = !pickUi.all; drawNewChatProject(); });
+$('#new-chat-psearch').addEventListener('input', e => { pickUi.q = e.target.value; drawNewChatProject(); });
+$('#new-chat-pcancel').addEventListener('click', () => { $('#new-chat-pnew').hidden = true; });
+$('#new-chat-pnew').addEventListener('submit', async e => {
+  e.preventDefault();
+  const say = $('#new-chat-pfault');
+  say.hidden = true;
+  try {
+    const made = await api('/api/projects/create', { name: $('#new-chat-pname').value, about: $('#new-chat-pabout').value, fromChat: true });
+    await loadChats();
+    $('#new-chat-pnew').hidden = true;
+    drawNewChatProject(made.id);
+  } catch (err) {
+    say.textContent = err.message;
+    say.hidden = false;
+  }
+});
+// Open or closed is kept in this browser.
+$('#new-chat-where').open = store('new-chat-where') === '1';
+$('#new-chat-where').addEventListener('toggle', e => store('new-chat-where', e.target.open ? '1' : '0'));
+/** New chat with `project` picked (a project page's + New chat). */
+app.newChatIn = project => {
+  pickUi.next = project;
+  $('#rail-new').click();
+};
 $('#rail-new').addEventListener('click', async () => {
   $('#new-chat-fault').hidden = true;
   $('#new-chat-search').value = '';
   if (!chatUi.people.length) await loadChats();
+  pickUi.q = '';
+  pickUi.all = false;
+  $('#new-chat-psearch').value = '';
+  $('#new-chat-pnew').hidden = true;
+  // A project page's + New chat picks its project (app.newChatIn); otherwise the open chat's.
+  drawNewChatProject(pickUi.next ?? chatUi.open?.project ?? '');
+  pickUi.next = undefined;
   drawPeople();
   if (!$('#new-chat').open) $('#new-chat').showModal();
   ($('.new-chat-find').hidden ? $('#new-chat-people button') : $('#new-chat-search'))?.focus();
   await loadChats();
-  if ($('#new-chat').open) drawPeople();
+  if ($('#new-chat').open) {
+    drawNewChatProject();
+    drawPeople();
+  }
 });
 // Search: by name, role or model; the cards that do not match are hidden.
 $('#new-chat-search').addEventListener('input', () => drawPeople());
@@ -1034,12 +1241,29 @@ function chatMenu() {
   $('#chat-delete-actions').replaceChildren(...(c.pictures
     ? [go(`Delete the chat and its ${c.pictures} picture${c.pictures > 1 ? 's' : ''}`, 'delete', true), go('Delete the chat, keep the pictures', 'keep')]
     : [go('Delete the chat', 'keep', true)]));
+  // Memory only where the top bar would have it (memory.js hides it for a chat with no notebook).
+  $('#chat-menu-memory').hidden = $('#notebook-open').hidden;
+  $('#chat-menu-copy').textContent = 'Copy';
   // No mute here: the mute at the top of the page, and right-click on a chat in the list, do that.
   $('#chat-menu').showModal();
 }
 $('#chat-menu-open').addEventListener('click', async () => {
   await loadChats();
   chatMenu();
+});
+// The whole chat's Save, Copy and Memory: the menu's buttons press the (hidden) top-bar ones, so each works as before.
+$('#chat-menu-save').addEventListener('click', () => {
+  $('#chat-menu').close();
+  $('#chat-save').click();
+});
+$('#chat-menu-copy').addEventListener('click', () => {
+  $('#chat-copy').click();
+  // The copy says how it went on the top-bar button; here it is said on this one.
+  setTimeout(() => { $('#chat-menu-copy').textContent = $('#chat-copy').title === 'Copied the whole chat' ? 'Copied' : 'Copy'; }, 300);
+});
+$('#chat-menu-memory').addEventListener('click', () => {
+  $('#chat-menu').close();
+  $('#notebook-open').click();
 });
 
 $('#chat-rename').addEventListener('submit', async e => {
@@ -1069,6 +1293,18 @@ function trashIcon() {
   return s;
 }
 
+/**
+ * After a chat is deleted the button that opened its window (the … beside it in the list) is gone, so the keyboard
+ * would be left nowhere: it goes to the message box when a chat is on screen, else to the first chat in the list, else
+ * to New chat.
+ */
+function focusAfterDelete() {
+  const box = $('#chat-input');
+  const to = [box, document.querySelector('.rail-recent-row'), $('#rail-new')]
+    .find(x => x && x.offsetParent !== null && !x.disabled);
+  to?.focus();
+}
+
 /** "Delete this chat?" with the choice for its pictures: delete them too, or keep them (they stay under All chats). */
 const delDlg = el('dialog', { class: 'small-dlg', 'aria-labelledby': 'del-title' });
 document.body.append(delDlg);
@@ -1083,10 +1319,23 @@ function askDelete(c) {
       // This window's chat stays on screen, unless it was the one deleted.
       showChat(c.id === app.chatId ? app.noChat() : await app.chatAgain());
       app.redrawGallery?.();
+      focusAfterDelete();
     } catch (err) {
+      // Already gone (deleted in another window, or a slow list pressed twice): nothing left to delete, so the window
+      // says so and offers only Close, and the lists are read again.
+      if (err.status === 404) return deletedAlready();
       fault.textContent = err.message;
       fault.hidden = false;
     }
+  };
+  const deletedAlready = async () => {
+    delDlg.replaceChildren(el('div', { class: 'help-body' },
+      el('h2', { id: 'del-title', text: 'Already deleted' }),
+      el('p', { text: `"${c.title}" with ${c.name} is not there any more: it was already deleted.` }),
+      el('div', { class: 'team-actions' }, el('button', { class: 'btn primary', type: 'button', text: 'Close', onclick: () => delDlg.close() }))));
+    delDlg.querySelector('button')?.focus();
+    await loadChats();
+    if (c.id === app.chatId) showChat(app.noChat());
   };
   delDlg.replaceChildren(el('div', { class: 'help-body' },
     el('h2', { id: 'del-title', text: 'Delete this chat?' }),
@@ -1107,6 +1356,13 @@ async function deleteChat(c, pictures) {
     showChat(c.id === app.chatId ? app.noChat() : await app.chatAgain());
     app.redrawGallery?.();
   } catch (err) {
+    // Already gone: the menu closes, the lists are read again, and the chat's line says so (no Delete left to press).
+    if (err.status === 404) {
+      $('#chat-menu').close();
+      await loadChats();
+      if (c.id === app.chatId) showChat(app.noChat());
+      return app.chatNote?.(`"${c.title}" was already deleted.`);
+    }
     $('#chat-menu-fault').textContent = err.message;
     $('#chat-menu-fault').hidden = false;
   }

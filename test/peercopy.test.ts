@@ -138,14 +138,28 @@ after(async () => {
   rmSync(top, { recursive: true, force: true, maxRetries: 5 });
 });
 
-test('not introduced for copying: the order is refused and nothing moves', async () => {
-  const r = await order();
-  assert.equal(r.status, 409, r.text);
-  assert.match(r.json.error, /not introduced to each other for copying models/);
+test('two linked PCs need no introducing: a copy order sets up their direct link ("copy", beside what they had)', async () => {
   const only = await share({ peerIntroduce: { a: SOURCE.id, b: TARGET.id, scopes: ['cluster'] } });
   assert.equal(only.status, 200, only.text);
-  assert.equal((await order()).status, 409, 'a pair introduced for the cluster only may not copy');
+  // The host has heard the source's list of shared models; then the order reaches the target over the new link, and the
+  // target's owner has not ticked "Accept models" yet, so it says no there.
+  const r = await until('the order to be understood', async () => {
+    await poke();
+    const x = await order();
+    return x.status === 404 ? null : x;
+  }, 30_000, 500);
+  assert.equal(r.status, 403, r.text);
+  assert.match(r.json.error, /Accept models from linked PCs/);
+  const pairs = (await share()).json.peerLinks.pairs;
+  assert.equal(pairs.length, 1);
+  assert.deepEqual([...pairs[0].scopes].sort(), ['cluster', 'copy']);
   assert.ok(!existsSync(join(TARGET.home, 'models', 'chat', FILE)));
+});
+
+test('a copy order is not a change to this PC: it is taken before the PIN check (as Send a copy is)', () => {
+  const node = readFileSync(new URL('../src/jobrun/node.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const fn = node.slice(node.indexOf('export async function setShare'));
+  assert.ok(fn.indexOf('b.peerCopy &&') > 0 && fn.indexOf('b.peerCopy &&') < fn.indexOf('appPinCheck'));
 });
 
 test('introduced for copying: the target\'s owner must accept models, and the model must be one the source shares', async () => {
@@ -253,6 +267,12 @@ test('the check of a pulled copy: whole files match, a changed byte or a wrong s
     const flipped = Buffer.from(mine);
     flipped[2 * 2 ** 20 + 17] ^= 0xff;
     assert.match(String(await run(flipped)), /differs from the file it was copied from \(bytes 2097152 to 3145728\)/);
+    // A file that fails is not left in place as if whole: it goes back to a part, cut where the bad range starts, so the
+    // model is not listed and copying again carries on from there (26 Nov: a broken copy was listed as installed).
+    assert.ok(!existsSync(here), 'the failed file is not left in place');
+    assert.equal(readFileSync(`${here}.part`).length, 2 * 2 ** 20);
+    assert.ok(readFileSync(`${here}.part`).equals(mine.subarray(0, 2 * 2 ** 20)));
+    writeFileSync(here, mine);
     assert.match(String(await run(mine.subarray(0, mine.length - 1))), /bytes here and/);
     await assert.rejects(carry.verifyPulled({ ...wire(mine), ask: async () => { throw new Error('the PC did not answer'); } }, { kind: 'chat', model: 'a.gguf', paths: [here], progress: () => undefined, signal: new AbortController().signal }), /did not answer/);
   } finally {

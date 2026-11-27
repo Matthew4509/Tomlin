@@ -4,7 +4,7 @@
 // Everything here sits in one block: page scripts share one global scope, so no name of this file can clash.
 'use strict';
 {
-  const KIND = { picture: 'Picture', project: 'Project', chat: 'Message' };
+  const KIND = { picture: 'Picture', project: 'Project', chat: 'Message', agent: 'Agent run' };
   const STATE = { waiting: 'Waiting', running: 'Running now', done: 'Done', needs: 'Needs you', failed: 'Did not finish', cancelled: 'Cancelled' };
   const time = n => (n < 60 ? `${n} s` : n < 3600 ? `${Math.floor(n / 60)} min` : `${Math.floor(n / 3600)} h ${Math.floor((n % 3600) / 60)} min`);
   const picUrl = rel => `/api/images/file/${String(rel).split('/').map(encodeURIComponent).join('/')}`;
@@ -117,7 +117,9 @@
         post('/api/queue/cancel', { id: x.id });
       } }));
     }
-    if (x.state === 'failed' || x.state === 'cancelled') {
+    // An agent's run is started again from the Agents page (Run now), which checks its job first.
+    if (x.kind === 'agent' && (x.state === 'failed' || x.state === 'cancelled')) acts.push(el('button', { class: 'btn quiet', type: 'button', text: 'Agents', title: 'Open the Agents page', onclick: () => app.openAgents?.({ back: 'home' }) }));
+    else if (x.state === 'failed' || x.state === 'cancelled') {
       acts.push(el('button', { class: 'btn quiet', type: 'button', text: 'Again', title: 'Put it back in line, at the end', 'aria-label': `Again: ${x.title}`, 'data-key': `q:${x.id}:again`, onclick: () => post('/api/queue/again', { id: x.id }) }));
     }
     return el('li', { class: `queue-row q-${x.state}` },
@@ -174,7 +176,18 @@
 
   function pictureFields() {
     const num = id => (Number($(id).value) > 0 ? Number($(id).value) : undefined);
-    return { kind: 'picture', as: $('#draw-as').value || undefined, mode: $('#img-mode').value, width: num('#img-w'), height: num('#img-h'), project: $('#img-queue-project').value || undefined };
+    // Draft, Mid or High and the seed go with it, so the queue draws what the Images window would have drawn.
+    const quality = document.querySelector('input[name="img-quality"]:checked')?.value || undefined;
+    const seedText = $('#img-seed')?.value.trim() ?? '';
+    const seed = !$('#img-random')?.checked && /^\d+$/.test(seedText) ? Number(seedText) : undefined;
+    // The style picked (stylepick.js tiles), none while Custom style is ticked.
+    const style = $('#img-custom')?.checked ? undefined : document.querySelector('input[name="img-style"]:checked')?.value || undefined;
+    // The chat on screen keeps the pictures, as Draw does: each one comes into it as it is drawn.
+    return { kind: 'picture', as: $('#draw-as').value || undefined, mode: $('#img-mode').value, style, width: num('#img-w'), height: num('#img-h'), quality, seed, project: $('#img-queue-project').value || undefined, ...(app.chatId ? { chat: app.chatId } : {}) };
+  }
+  /** What a list put in the queue says: how many, for what, and where they come in. */
+  function listAdded(n, forWhat, inChat) {
+    return `${n} picture${n === 1 ? '' : 's'} added to the queue ${forWhat}.${inChat ? ` ${n === 1 ? 'It comes' : 'They come'} into this chat as ${n === 1 ? 'it is' : 'they are'} drawn;` : ''} Home says when ${n === 1 ? 'it is' : 'they are'} back.`;
   }
   function imgNote(text) {
     $('#img-note').textContent = text;
@@ -188,8 +201,10 @@
     const prompt = $('#img-prompt').value.trim();
     if (!prompt) return imgNote('Type what to draw first, then Add to the queue.');
     try {
-      const r = await add([{ ...pictureFields(), prompt }]);
+      const fields = pictureFields();
+      const r = await add([{ ...fields, prompt }]);
       $('#img-prompt').value = '';
+      if (fields.chat) app.afterSend?.(fields.chat);
       const ahead = (r.items ?? []).filter(x => x.state === 'waiting' || x.state === 'running').length - 1;
       imgNote(`Added to the queue ${where()}${ahead > 0 ? `: ${ahead} ahead of it` : ''}. It is drawn by itself; Home says when it is back.`);
     } catch (e) {
@@ -204,7 +219,12 @@
       const base = pictureFields();
       const r = await add(lines.map(prompt => ({ ...base, prompt })));
       $('#img-list').value = '';
-      line.textContent = `${r.added} picture${r.added === 1 ? '' : 's'} added to the queue ${where()}. Home says when they are back.`;
+      // Said beside the button and under the Draw box, where it is seen with Advanced closed.
+      const said = listAdded(r.added, where(), !!base.chat);
+      line.textContent = said;
+      imgNote(said);
+      // The chat's new name (from the first line) shows in the lists.
+      if (base.chat) app.afterSend?.(base.chat);
     } catch (e) {
       line.textContent = e.message;
     }

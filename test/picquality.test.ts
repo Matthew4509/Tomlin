@@ -67,6 +67,15 @@ test('"leave out" words work on the fast models: their guidance goes up from 1 (
   assert.equal(cfgFor(QWEN, 'mid', 'text'), QWEN.defaults.cfg, 'a model that reads them already keeps its own');
 });
 
+test('the larger models made for CFG 1 keep it, leave-out words or not (P5): no doubled steps, no over-cooked colour', () => {
+  for (const id of ['z-image-turbo', 'qwen-image-2.1-turbo', 'flux1-krea-dev', 'flux2-dev']) {
+    const m = model(id);
+    assert.equal(m.defaults.cfg, 1, id);
+    for (const q of ['draft', 'mid', 'high'] as const) assert.equal(cfgFor(m, q, 'cartoon, illustration, text'), 1, `${id} ${q}`);
+  }
+  assert.equal(cfgFor(model('dreamshaper8-lcm'), 'high', 'text'), 1.5, 'the SD 1.5 fast ones still go up');
+});
+
 test('the page has Draft / Mid / High beside Draw, sends it, and says when a background was cut away', () => {
   const html = read('public/index.html');
   assert.match(html, /<div class="img-quality" role="radiogroup" aria-label="Quality">/);

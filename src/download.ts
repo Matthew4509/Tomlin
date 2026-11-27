@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { capsFromHf, type Caps } from './capabilities.ts';
@@ -21,8 +21,60 @@ export interface Progress {
   checking: boolean;
 }
 
-/** Downloads `url` to `dest` (via dest.part), checks size and hash, then keeps it. */
+// ---- Who writes a model file's .part now ----
+// A download (here) and a copy from a linked PC (src/carry.ts) both write "<file>.part": two at once on one file (a
+// file two picture models share, such as a VAE or TAESD) mixed their bytes, and the file failed its check or a piece
+// was refused. Each says here which file it writes; the other waits for it or is refused.
+
+const writers = new Map<string, { by: 'download' | 'copy'; at: number; done?: Promise<unknown> }>();
+const keyOf = (file: string) => resolve(file).toLowerCase();
+/** How long a copy's last piece holds its file for: a copy that stopped sending lets it go after this. */
+export const COPY_HOLD_MS = 120_000;
+
+/** What writes `file` now: 'download' (fetchChecked), 'copy' (a piece from a linked PC in the last COPY_HOLD_MS), or null. */
+export function writerOf(file: string, now = Date.now()): 'download' | 'copy' | null {
+  const w = writers.get(keyOf(file));
+  if (!w) return null;
+  if (w.by === 'copy' && now - w.at >= COPY_HOLD_MS) return null;
+  return w.by;
+}
+
+/** A piece from a linked PC was written to `file` (src/carry.ts): a download of it waits until the copy is done. */
+export function copyWrote(file: string): void {
+  writers.set(keyOf(file), { by: 'copy', at: Date.now() });
+}
+/** That copy is whole (or was dropped): the file is free again. */
+export function copyDone(file: string): void {
+  const k = keyOf(file);
+  if (writers.get(k)?.by === 'copy') writers.delete(k);
+}
+
+/**
+ * Downloads `url` to `dest` (via dest.part), checks size and hash, then keeps it. A download of the same file already
+ * running (another model shares it) is waited for, and its file used: one file is downloaded once. A copy from a linked
+ * PC writing it now refuses the download, in words.
+ */
 export async function fetchChecked(url: string, dest: string, bytes: number, hash: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<'kept' | 'already'> {
+  const key = keyOf(dest);
+  for (;;) {
+    const w = writers.get(key);
+    if (!w || (w.by === 'copy' && Date.now() - w.at >= COPY_HOLD_MS)) break;
+    if (w.by === 'copy') throw new Error(`A linked PC is sending ${basename(dest)} to this PC now. Download again once that copy has finished (or stop it).`);
+    onProgress?.({ got: 0, bytes, checking: false });
+    await w.done?.catch(() => undefined);
+    if (signal?.aborted) throw signal.reason ?? new Error('Stopped.');
+  }
+  const done = fetchOnce(url, dest, bytes, hash, onProgress, signal);
+  const mine = { by: 'download' as const, at: Date.now(), done };
+  writers.set(key, mine);
+  try {
+    return await done;
+  } finally {
+    if (writers.get(key) === mine) writers.delete(key);
+  }
+}
+
+async function fetchOnce(url: string, dest: string, bytes: number, hash: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<'kept' | 'already'> {
   if (existsSync(dest) && statSync(dest).size === bytes && (await sha256(dest)) === hash) return 'already';
   // Another model with the same file name (a different repo, or another size of it): never written over.
   if (existsSync(dest)) throw new Error(`A different model file named ${basename(dest)} is already on this PC. Delete it under Models first (or pick another model), then download this one.`);
@@ -46,25 +98,94 @@ export async function fetchChecked(url: string, dest: string, bytes: number, has
     await rm(part, { force: true });
     have = 0;
   }
-  let res = await fetch(url, { headers: have ? { range: `bytes=${have}-` } : {}, redirect: 'follow', signal });
-  // 416: the server cannot go on from where the part stopped (the file changed): the part goes, and it starts again.
-  if (res.status === 416 && have) {
-    await rm(part, { force: true });
-    have = 0;
-    res = await fetch(url, { redirect: 'follow', signal });
+  // A server that stops sending (a connection left open with nothing on it) ends the download with a fault after a
+  // while with no byte, so the downloads list is never held for ever; the .part stays, and Download again carries on.
+  const stall = new AbortController();
+  const stalled = new Error(`The server stopped sending for ${Math.round(STALL_MS / 1000)} seconds, so the download was stopped. Press Download again to carry on from where it stopped.`);
+  let timer: NodeJS.Timeout | undefined;
+  const awake = (on = true) => {
+    clearTimeout(timer);
+    if (!on) return;
+    timer = setTimeout(() => stall.abort(stalled), STALL_MS);
+    timer.unref?.();
+  };
+  const both = signal ? AbortSignal.any([signal, stall.signal]) : stall.signal;
+  try {
+    awake();
+    return await fetchPart(url, dest, part, have, bytes, hash, both, awake, onProgress, () => stall.signal.aborted ? stalled : null);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** How long a download waits with no byte from the server before it ends with a fault. */
+export const STALL_MS = 60_000;
+
+async function fetchPart(url: string, dest: string, part: string, have: number, bytes: number, hash: string, signal: AbortSignal, awake: (on?: boolean) => void, onProgress: ((p: Progress) => void) | undefined, stallFault: () => Error | null): Promise<'kept'> {
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: have ? { range: `bytes=${have}-` } : {}, redirect: 'follow', signal });
+    // 416: the server cannot go on from where the part stopped (the file changed): the part goes, and it starts again.
+    if (res.status === 416 && have) {
+      await rm(part, { force: true });
+      have = 0;
+      awake();
+      res = await fetch(url, { redirect: 'follow', signal });
+    }
+  } catch (e) {
+    throw stallFault() ?? e;
   }
   if (!res.ok || !res.body) throw new Error(`The download could not start: the server answered ${res.status}. Try again later.`);
   if (have && res.status !== 206) have = 0; // the server ignored the range: start again
+  // A part answer that does not start where the part file ends (Content-Range "bytes <start>-...") would be written in
+  // the wrong place: it is not used, and the file starts again.
+  if (have && res.status === 206) {
+    const start = /^bytes\s+(\d+)-/i.exec(res.headers.get('content-range') ?? '')?.[1];
+    if (start !== undefined && Number(start) !== have) {
+      await res.body.cancel().catch(() => undefined);
+      await rm(part, { force: true });
+      have = 0;
+      awake();
+      try {
+        res = await fetch(url, { redirect: 'follow', signal });
+      } catch (e) {
+        throw stallFault() ?? e;
+      }
+      if (!res.ok || !res.body) throw new Error(`The download could not start: the server answered ${res.status}. Try again later.`);
+    }
+  }
   let got = have;
   onProgress?.({ got, bytes, checking: false });
+  // A server that sends more than the file's listed size is cut off there: nothing past that size is written.
+  const tooBig = new Error('The server sent more than the file\'s listed size, so the download was stopped and deleted. Try again later.');
   const counter = new Transform({
     transform(chunk: Buffer, _enc, done) {
+      if (got + chunk.length > bytes) return done(tooBig);
       got += chunk.length;
+      awake();
       onProgress?.({ got, bytes, checking: false });
       done(null, chunk);
     },
   });
-  await pipeline(Readable.fromWeb(res.body as never), counter, createWriteStream(part, { flags: have ? 'a' : 'w' }), { signal });
+  try {
+    await pipeline(Readable.fromWeb(res.body as never), counter, createWriteStream(part, { flags: have ? 'a' : 'w' }), { signal });
+  } catch (e) {
+    if (e === tooBig) await rm(part, { force: true });
+    throw stallFault() ?? e;
+  }
+  awake(false);
+  // The server ended the file early with no fault (a dropped connection can look like a whole answer): what came is
+  // kept, never hashed and thrown away, and Download again carries on from there.
+  // But an answer that came whole at its own stated length and is still short (a web page sent instead of the file) is
+  // not the file: it goes, as one that fails its check does.
+  const said = Number(res.headers.get('content-length') ?? NaN);
+  const page = /^\s*text\/html/i.test(res.headers.get('content-type') ?? '');
+  if (got < bytes && (page || (Number.isFinite(said) && got === have + said))) {
+    await rm(part, { force: true });
+    throw new Error('The downloaded file did not match its SHA-256 check (the server sent something else, shorter than the file), so it was deleted. Try again later.');
+  }
+  if (got < bytes) throw new Error(`The server stopped sending ${basename(dest)} part way (${got} of ${bytes} bytes). Press Download again to carry on from where it stopped.`);
+  // Every byte is in: the check that follows reads the disk, not the server, so it is not timed.
   onProgress?.({ got, bytes, checking: true });
   const actual = await sha256(part);
   if (actual !== hash) {
@@ -154,11 +275,26 @@ export function groupGguf(files: HfFile[]): HfModel[] {
   return [...models.values()].sort((a, b) => a.bytes - b.bytes);
 }
 
+/**
+ * Asks Hugging Face, with its faults in words: no connection (Node's own "fetch failed") and a time limit run out each
+ * say that Hugging Face could not be reached and what to do.
+ */
+export async function hfFetch(url: string, signal?: AbortSignal): Promise<Response> {
+  try {
+    return await fetch(url, { signal: signal ?? AbortSignal.timeout(15_000) });
+  } catch (e) {
+    // Stopped on purpose (the asker's own signal): passed on as it is.
+    if (signal?.aborted) throw e;
+    if ((e as Error)?.name === 'TimeoutError') throw new Error('Hugging Face took too long to answer. Check this PC\'s internet connection, then try again.');
+    throw new Error('Hugging Face could not be reached. Check that this PC is connected to the internet (and that nothing blocks huggingface.co), then try again.');
+  }
+}
+
 /** What a Hugging Face link offers: its .gguf models at one fixed revision, each file with Hugging Face's SHA-256. */
 export async function lookUpHf(link: string): Promise<HfLookup> {
   const at = parseHfLink(link);
   if (!at) throw new Error('That is not a Hugging Face model link. Paste a link that starts https://huggingface.co/ followed by the model\'s owner and name.');
-  const info = await fetch(`https://huggingface.co/api/models/${at.repo}/revision/${encodeURIComponent(at.rev)}`, { signal: AbortSignal.timeout(15_000) });
+  const info = await hfFetch(`https://huggingface.co/api/models/${at.repo}/revision/${encodeURIComponent(at.rev)}`);
   if (info.status === 401 || info.status === 404) throw new Error(`Hugging Face has no public model ${at.repo}. Check the link.`);
   if (!info.ok) throw new Error(`Hugging Face answered ${info.status}. Try again later.`);
   const meta = await info.json() as { sha: string; gated?: unknown; cardData?: { license?: string }; gguf?: { total?: number; chat_template?: unknown }; pipeline_tag?: unknown; siblings?: { rfilename?: unknown }[] };
@@ -184,7 +320,7 @@ async function hfTree(repo: string, rev: string, dir: string): Promise<TreeEntry
   let url: string | null = `https://huggingface.co/api/models/${repo}/tree/${rev}${dir ? `/${dir.split('/').map(encodeURIComponent).join('/')}` : ''}?recursive=true`;
   const all: TreeEntry[] = [];
   for (let page = 0; url && page < 10; page++) {
-    const r: Response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const r: Response = await hfFetch(url);
     if (!r.ok) throw new Error(`Hugging Face answered ${r.status} for the file list. Try again later.`);
     all.push(...await r.json() as TreeEntry[]);
     url = /<([^>]+)>;\s*rel="next"/.exec(r.headers.get('link') ?? '')?.[1] ?? null;
@@ -271,7 +407,7 @@ export async function searchHf(q: string, size: { minB?: number | null; maxB?: n
   const range = [minB ? `min:${hfB(minB)}` : '', maxB ? `max:${hfB(maxB)}` : ''].filter(Boolean).join(',');
   const expand = ['gguf', 'siblings', 'downloads', 'likes', 'gated', 'pipeline_tag', 'private'].map(e => `expand[]=${e}`).join('&');
   const url = `https://huggingface.co/api/models?${words.length >= 2 ? `search=${encodeURIComponent(words)}&` : ''}filter=gguf${range ? `&num_parameters=${range}` : ''}&sort=downloads&direction=-1&limit=${Math.max(1, Math.min(100, Math.round(limit)))}&${expand}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-  const r = await fetch(url, { signal: signal ?? AbortSignal.timeout(15_000) });
+  const r = await hfFetch(url, signal);
   if (!r.ok) throw new Error(`Hugging Face did not answer the search (${r.status}). Try again in a minute.`);
   return { found: hfFound(await r.json()), next: nextCursor(r.headers.get('link')) };
 }

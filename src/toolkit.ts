@@ -33,6 +33,8 @@ export interface KitOpts {
   me?: string;
   /** The chat's folder (the file tools' folder), when it has one. */
   root?: string | null;
+  /** Files a model saved in folders across answers (src/modelsaved.ts): a run asks while its folder holds any. */
+  since?: { pending(folder: string): string[]; clear(folder: string): void };
   /** TOMLIN's own data folder: never a coding folder. */
   dataDir?: string;
   /** Web is on in this chat: the research notes go with it. */
@@ -94,7 +96,7 @@ export function makeKit(o: KitOpts): Kit | null {
   const helper = tier.machine !== 'never' ? (o.helpers ?? []).find(h => h.tools.length) : undefined;
   const machine = helper && o.me ? new MachineTurn({ helper, me: o.me, perCall: o.perCall, get: o.fetch }) : null;
   const code = p.coding && o.root && tier.git !== 'never' && codingFolder(o.root, p.folders, o.dataDir)
-    ? new CodeTurn({ root: o.root, perCall: o.perCall, run: tier.run, extra: p.commands, confirm: confirm('run'), mustAsk: () => runAskWhy(o.gate.held, o.saved?.() ?? []), exec: o.exec, log: o.log })
+    ? new CodeTurn({ root: o.root, perCall: o.perCall, run: tier.run, extra: p.commands, confirm: confirm('run'), mustAsk: () => runAskWhy(o.gate.held, o.saved?.() ?? []), since: o.since, exec: o.exec, log: o.log })
     : null;
   const notes = p.research && o.web && o.root && tier.notes !== 'never' ? new NoteTurn({ root: o.root, sources: o.sources ?? (() => []) }) : null;
   // The research tools go with the research role: with Web on (pages to look in) or a folder (files to read).

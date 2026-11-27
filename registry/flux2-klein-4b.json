@@ -1,0 +1,61 @@
+{
+  "id": "flux2-klein-4b",
+  "kind": "image",
+  "name": "FLUX.2 Klein 4B (Q8, fast, takes reference pictures, test)",
+  "about": "Black Forest Labs' small FLUX.2, 4B, in 4 steps: draws with up to 4 reference pictures, so a character or a location from a Character set (@Name) keeps its look. Fits a 6 GB card. Text encoder: Qwen3 4B. Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "flux2",
+  "licence": "Apache-2.0 (FLUX.2 [klein] 4B, text encoder and VAE; commercial use allowed).",
+  "quant": "Q8_0 (image) + Q8_0 (text encoder)",
+  "minRamGB": 16,
+  "minVramGB": 6,
+  "refs": 4,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1536
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "leejet/FLUX.2-klein-4B-GGUF",
+      "rev": "3b1f5a9dc3abb32238b053aeb3d823c30afdacbd",
+      "path": "flux-2-klein-4b-Q8_0.gguf",
+      "bytes": 4300629440,
+      "sha256": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28"
+    },
+    {
+      "role": "llm",
+      "repo": "unsloth/Qwen3-4B-GGUF",
+      "rev": "22c9fc8a8c7700b76a1789366280a6a5a1ad1120",
+      "path": "Qwen3-4B-Q8_0.gguf",
+      "bytes": 4280405792,
+      "sha256": "eed555233267a33c7e8ee31682762cc7751b3f6d224039086e0e846f05fffa5d"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/flux2-dev",
+      "rev": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7",
+      "path": "split_files/vae/flux2-vae.safetensors",
+      "saveAs": "flux2-vae.safetensors",
+      "bytes": 336213556,
+      "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
+    }
+  ],
+  "args": [
+    "--offload-to-cpu",
+    "--fa",
+    "--vae-tiling"
+  ],
+  "defaults": {
+    "steps": 4,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

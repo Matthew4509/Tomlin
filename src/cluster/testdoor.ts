@@ -168,9 +168,30 @@ export function testEnds(st: share.ShareState, p: maxlend.Presence | null): stri
   return '';
 }
 
+/**
+ * The linked PC whose test RPC server or distributed-llama worker runs here now, and how many of its streams hold one.
+ * One PC at a time: each server takes the card, the RAM and the cores, so a second PC's test would starve the first
+ * (and both would time the wrong thing). The same PC may open more (llama.cpp opens a short stream to check a server).
+ */
+let heavy: { hash: string; name: string; n: number } | null = null;
+/** Holds the servers here for linked PC `hash`; '' when it may, or the name of the PC that holds them now. */
+function holdHeavy(hash: string, name: string): string {
+  if (heavy && heavy.hash !== hash) return heavy.name;
+  if (heavy) heavy.n++;
+  else heavy = { hash, name, n: 1 };
+  return '';
+}
+function dropHeavy(hash: string): void {
+  if (!heavy || heavy.hash !== hash) return;
+  if (--heavy.n <= 0) heavy = null;
+}
+
 export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deps: DoorDeps): Promise<void> {
   let from = req.socket.remoteAddress ?? '';
+  // This stream's hold on the servers here (holdHeavy), let go once, however the stream ends or fails.
+  let release = (): void => undefined;
   const no = (status: number, error: string) => {
+    release();
     deps.say(`Did not open a cluster test (${from}): ${error}`);
     refuse(socket, status, error);
   };
@@ -208,6 +229,16 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
     if (why) return no(409, why);
     const busy = deps.lending();
     if (busy) return no(409, `"${st.name}" is lending to "${busy}" now (Max mode); a test waits until that ends.`);
+    if (ask.target !== 'echo') {
+      const holder = holdHeavy(hash, who.name);
+      if (holder) return no(409, `"${st.name}" is running a cluster test for "${holder}" now (its RPC server takes the card, RAM and cores); a test from here waits until that ends.`);
+      let held = true;
+      release = () => {
+        if (!held) return;
+        held = false;
+        dropHeavy(hash);
+      };
+    }
 
     let inner: Duplex;
     let stopRpc: () => void = () => undefined;
@@ -286,6 +317,7 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
       clearTimeout(limit);
       clearInterval(check);
       clearTimeout(tell);
+      release();
       const moved = { in: (socket as Socket).bytesRead ?? 0, out: (socket as Socket).bytesWritten ?? 0 };
       socket.destroy();
       inner.destroy();
@@ -299,7 +331,9 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
     };
     const limit = setTimeout(() => end(`its ${ask.minutes} minutes were up`), ask.minutes * 60_000);
     const check = setInterval(() => {
-      const stop = testEnds(deps.state(), deps.presenceNow());
+      const now = deps.state();
+      // A PC whose link was removed here keeps nothing it opened: its stream and the server started for it end.
+      const stop = share.pairedByHash(now, hash) ? testEnds(now, deps.presenceNow()) : `the link to "${who.name}" was removed here`;
       if (stop) end(stop);
     }, TEST_CHECK_MS);
     const byAsker = 'the asking PC closed the stream (or the network between the PCs dropped)';
@@ -324,6 +358,7 @@ export async function clusterTestUpgrade(req: IncomingMessage, socket: Duplex, h
   } catch (e) {
     undo();
     if (upgraded) {
+      release();
       deps.say(`The cluster test stopped here: ${(e as Error).message}`);
       socket.destroy();
     } else no(500, `The cluster test failed here: ${(e as Error).message}`);

@@ -142,7 +142,7 @@ export interface JobDeps {
   /** Whether picture model `id` fits on the graphics card beside the chat models loaded there now. */
   pictureRoom: (id: string) => boolean;
   /** Draws one picture on this PC's connected picture model (nothing is loaded for it), with progress. */
-  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number; negative?: string }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note?: string; made?: Made } | { error: string }>;
+  draw: (o: { prompt: string; mode: string; width?: number; height?: number; forPc: string; quality?: string; seed?: number; negative?: string; refData?: string[] }, progress: (p: unknown) => void, signal: AbortSignal) => Promise<{ png: Buffer; modelName: string; modelPrompt: string; mode: string; seconds: number; note?: string; made?: Made } | { error: string }>;
   /** Swaps the connected picture model for another on this PC (same device and cores); true when it is connected. */
   swapImage: (id: string) => Promise<boolean>;
   /** A hire's system prompt (who they are, the role, the level, the writing tone chosen here), for a paired PC's chat with them. */
@@ -150,7 +150,7 @@ export interface JobDeps {
   /** Loads a picture model in the Images pane (returns at once; the pane's state shows progress). */
   connectImage: (id: string) => Promise<boolean>;
   /** Loads a picture model in the Images pane, in place of the one connected (if any), and waits: true once connected. */
-  loadImage: (id: string) => Promise<boolean>;
+  loadImage: (id: string, signal?: AbortSignal) => Promise<boolean>;
   /** True while this PC's Images pane is drawing. */
   imageBusy: () => boolean;
   /** A picture hire's way of working (the words added to every picture), or null. */
@@ -245,6 +245,10 @@ export interface CarryDeps {
   chatHas: (name: string) => boolean;
   pictureFiles: (id: string) => carry.FileRef[] | null;
   pictureDest: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
+  /** A downloaded video model's files (all of them, each whole) by its id; null when it is not all here. */
+  videoFiles: (id: string) => carry.FileRef[] | null;
+  /** Where each file of video model `id` goes here (models/video), as pictureDest. */
+  videoDest: (id: string) => { name: string; path: string; bytes: number; have: boolean; sha256?: string }[] | null;
   /** Restore points kept on this PC for linked PCs. */
   keptRoot: string;
   /** This PC's own backups folder. */
@@ -280,6 +284,8 @@ export interface Hello {
   image: { model: string | null; name: string | null; styles: string[]; swaps: boolean; coverage: ReturnType<typeof brains.styleCoverage> } | null;
   /** The models that PC lets linked PCs use (ticked there): this PC's hires can run on them (an older PC sends none). */
   models: nodestaff.SharedModel[];
+  /** The video models downloaded there (ids); absent from a TOMLIN before 2.1.34, which does not say which it has. */
+  videos?: string[];
   /** Set while someone at that PC pressed "I need to use the pc": when they pressed it. */
   away: string | null;
   /** "I need to use the pc, please log out for N hours", sent from that PC's lock screen and not answered yet (2.0.44 on). */
@@ -484,7 +490,8 @@ async function post(p: string, b: Record<string, unknown>, res: ServerResponse):
     case '/api/network/models-where': reply(await modelsWhereOn(b)); return true;
     case '/api/network/pool': reply(await poolModeOn(b)); return true;
     // Network, Scan for hardware changes: this PC's processor, RAM and cards read again, then each linked PC's (src/jobrun/hwscan.ts).
-    case '/api/network/hardware-scan': reply(await hardwareScan()); return true;
+    // { pc }: only that linked PC (its own window's Scan).
+    case '/api/network/hardware-scan': reply(await hardwareScan(typeof b.pc === 'string' ? b.pc : '')); return true;
     // { pc, id, act }: Cancel, Download again or Clear on a PC's downloads list; { repo, rev, name, bytes }: into the Model store.
     case '/api/network/download-line': reply(await downloadLineOn(b)); return true;
     case '/api/network/store-get': reply(await storeGetOn(b)); return true;

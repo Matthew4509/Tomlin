@@ -94,6 +94,21 @@
   const hasCopy = r => (st.info?.copies?.[`${r.kind}:${r.id}`]?.held ?? 0) > 0;
   /** "Show models that have copies elsewhere": on, both lists show only those. Kept while the window stays open. */
   let copiesOnly = false;
+  /** The kinds shown in All installed: '' every one, else 'standard' (chat and code), 'images' or 'video'. */
+  let kindsShown = '';
+  const KIND_GROUPS = [
+    { key: 'standard', title: 'Standard', has: r => r.cat === 'chat' || r.cat === 'code', none: 'No chat or code models here.' },
+    { key: 'images', title: 'Images', has: r => r.cat === 'pictures', none: 'No picture models here.' },
+    // Video models are not in this list yet: TOMLIN cannot remove them from a PC (they stay in their own folder).
+    { key: 'video', title: 'Video', has: () => false, none: 'Video models are not listed here yet: TOMLIN cannot remove them.' },
+  ];
+  for (const b of dlg.querySelectorAll('.cleanup-kinds button')) {
+    b.addEventListener('click', () => {
+      kindsShown = b.dataset.kinds;
+      for (const x of dlg.querySelectorAll('.cleanup-kinds button')) x.setAttribute('aria-pressed', String(x === b));
+      if (st) drawLeft();
+    });
+  }
 
   function drawLeft() {
     const by = new Map(st.data.rows.map(r => [r.id, r]));
@@ -107,7 +122,14 @@
     btn.textContent = `Show models that have copies elsewhere${st.info ? ` (${n})` : ''}`;
     const noneCopied = 'No model here has a copy on another PC.';
     $('#cleanup-suggested').replaceChildren(...(sug.length ? sug.map(row) : [el('li', { class: 'hint', text: copiesOnly ? noneCopied : 'Nothing to suggest: every model is in use, hidden, or the only one of its kind.' })]));
-    $('#cleanup-all').replaceChildren(...(all.length ? all.map(row) : [el('li', { class: 'hint', text: copiesOnly ? noneCopied : 'No models installed.' })]));
+    // All installed, in groups: Standard, Images, Video (one group when a filter is pressed).
+    const groups = KIND_GROUPS.filter(g => !kindsShown || g.key === kindsShown).map(g => {
+      const rows = all.filter(g.has);
+      return el('section', { class: 'cleanup-group', 'aria-label': g.title },
+        el('h4', { text: g.title }),
+        el('ul', { class: 'cleanup-list' }, ...(rows.length ? rows.map(row) : [el('li', { class: 'hint', text: copiesOnly && g.key !== 'video' ? noneCopied : g.none })])));
+    });
+    $('#cleanup-all').replaceChildren(...groups);
   }
 
   const chosen = () => st.data.rows.filter(r => st.sel.has(r.id));

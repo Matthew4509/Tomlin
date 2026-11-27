@@ -43,7 +43,7 @@ test('each Sharing permission is a tile: an icon, its name, a switch, and a (!) 
     pull: ['Sharing of models', 'Visible only to computers connected on your network'],
     backup: ['Enable backups', "This is a local git, that backs up host's projects to this node."],
     update: ['Allow host to update TOMLIN remotely', 'This makes it easy to update headless nodes. Requires a pin'],
-    tune: ['Allow host to test and change model run settings', "This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN or the host PIN typed each time. This switch itself can only be changed at this PC."],
+    tune: ['Allow host to test and change model run settings', "This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN typed each time, or with no PIN from an admin PC that holds this PC's key. This switch itself can only be changed at this PC."],
     receive: ['Accept models from linked PCs', "Allows a linked pc to push LLM's to this computer."],
     give: ['Let linked PCs pull TOMLIN updates from here', "A linked PC with an older TOMLIN can copy this PC's TOMLIN (its app files only, never your data or models) to update itself. Nothing changes on this PC."],
     lend: ['Allow to be used as part of a cluster', 'This lets another pc use part of the ram, cpu, or vram to run a model.'],
@@ -67,7 +67,7 @@ test('each Sharing permission is a tile: an icon, its name, a switch, and a (!) 
   const lend = tiles.find(x => x.includes('data-allow="lend"'))!;
   assert.match(lend, /<p class="hint">Only while nobody is using this PC: when Windows is locked, or after <select id="node-lend-idle"[^]*<\/select> minutes with no key press or mouse move\. Using this PC again ends it at once\.<\/p>/);
   // Allow all is a switch too, first in the part (Open sharing permissions focuses the first box there).
-  assert.match(part, /<legend>Sharing and cluster permissions:<\/legend>\s*<div class="share-all"><span class="perm-switch"><input type="checkbox" id="node-allow-all">/);
+  assert.match(part, /<legend>What linked PCs may do here:<\/legend>\s*<div class="share-all"><span class="perm-switch"><input type="checkbox" id="node-allow-all">/);
   // The words show on hover or focus, colours by the page's own names, nothing under 12px.
   const css = read('public/style.css');
   const block = css.slice(css.indexOf('/* ---- Network, Setup: the models in two columns'));

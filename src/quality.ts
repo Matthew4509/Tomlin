@@ -33,13 +33,15 @@ export const fastModel = (m: Model): boolean => (m.defaults?.steps ?? 20) <= 8 &
 export const draftCount = (m: Model, q: Quality): number => (q !== 'draft' ? 1 : fastModel(m) ? 4 : 2);
 
 /**
- * The guidance (CFG). The fast models run at 1, where "leave out" words are ignored altogether; for Mid and High they
- * get 1.5 when there is something to leave out (each step then costs about twice as long, still seconds). Drafts stay
- * quick; a model that reads them already keeps its own.
+ * The guidance (CFG). The SD 1.5 fast models (512 px, 4 steps) run at 1, where "leave out" words are ignored altogether;
+ * for Mid and High they get 1.5 when there is something to leave out (each step then costs about twice as long, still
+ * seconds). Drafts stay quick; a model that reads them already keeps its own. Larger models made for CFG 1 (Z-Image
+ * Turbo, Qwen-Image 2.1 Turbo, FLUX.1 Krea, FLUX.2) keep 1: they are distilled for it, and above 1 every step runs twice
+ * and the colours over-cook (P5, 26 Nov picture tests).
  */
 export function cfgFor(m: Model, q: Quality, negative: string): number {
   const cfg = m.defaults?.cfg ?? 7;
-  return cfg <= 1 && q !== 'draft' && negative.trim() ? 1.5 : cfg;
+  return cfg <= 1 && (m.native ?? 512) <= 512 && q !== 'draft' && negative.trim() ? 1.5 : cfg;
 }
 
 /** The largest side (of a square worth of pixels) this model draws at: its High, or its native size when that is more. */

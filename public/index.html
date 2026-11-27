@@ -77,8 +77,10 @@
     <ul class="rail-list rail-links rail-settings-sub" id="rail-settings-sub" aria-label="Settings">
       <li class="rail-group"><h3 class="rail-group-head" id="rail-group-staff">Staff and models</h3></li>
       <li><button class="link" type="button" data-setup="staff" data-about="Add someone to chat, write or draw, or change who you have."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>Hire staff</button></li>
+      <li><button class="link" type="button" data-setup="agents" data-about="Staff who work by themselves on a timer, and their reports."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9l1.3-4.5L12 5.5l3.7-1L17 9"/><path d="M3 10.5c6 1.3 12 1.3 18 0"/><circle cx="7.5" cy="16.5" r="3"/><circle cx="16.5" cy="16.5" r="3"/><path d="M10.5 16.5h3"/></svg>Agents</button></li>
+      <li><button class="link" type="button" data-setup="memory" data-about="The notebooks your staff read, the team's and each hire's."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/></svg>Memory</button></li>
       <li><button class="link" type="button" data-setup="models" data-about="Add or remove the AI models on this PC."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Models</button></li>
-      <li><button class="link" type="button" data-setup="thispc" data-about="See this PC's models, memory and use."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC</button></li>
+      <li><button class="link" type="button" data-setup="thispc" data-about="Its models, node setup and what linked PCs may do."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This PC</button></li>
       <li class="rail-group"><h3 class="rail-group-head" id="rail-group-network">Your network</h3></li>
       <li><button class="link" type="button" data-setup="addpc" data-about="Link a PC with TOMLIN on it, or one started from a stick."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M12 7v6M9 10h6"/></svg>Add another PC</button></li>
       <li><button class="link" type="button" data-setup="usb" data-about="Run TOMLIN on a diskless node from a USB stick."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="6" rx="1"/><path d="M10 4.5h.01M14 4.5h.01"/><rect x="6" y="8" width="12" height="14" rx="2"/><path d="M10 13h4"/></svg>Bootable USB</button></li>
@@ -93,7 +95,7 @@
       <li class="rail-group"><h3 class="rail-group-head" id="rail-group-app">This app</h3></li>
       <li><button class="link" type="button" data-setup="updates" data-about="Check for a new version and install it."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>Manage updates</button></li>
       <li><button class="link" type="button" data-setup="data" data-about="Back up your data, set a PIN and choose alerts."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Data and lock</button></li>
-      <li><button class="link" type="button" data-setup="perms" data-about="Choose what a chat&#39;s model may do on its own."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Permissions</button></li>
+      <li><button class="link" type="button" data-setup="perms" data-about="Choose what a chat&#39;s model may do on its own."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Chat permissions</button></li>
       <li><button class="link" type="button" data-setup="colours" data-about="Pick Day, Night, Auto or Vibe code."><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.500 0 2-1 2-2s-1-2 0-3 2-1 3-1h2c1.200 0 2-1 2-3a9 9 0 0 0-9-9z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Theme</button></li>
     </ul>
   </div>
@@ -127,13 +129,17 @@
       <button class="btn" type="button" id="devnotes-jobs">Jobs</button>
     </div>
   </section>
+  <section class="home-part" id="home-projects-box" aria-labelledby="home-projects-title" hidden>
+    <h3 id="home-projects-title">Recent projects</h3>
+    <div class="proj-tiles" id="home-projects"></div>
+  </section>
   <section class="home-part" id="home-ready-box" aria-labelledby="home-ready-title" hidden>
-    <h3 id="home-ready-title">Recent projects</h3>
+    <h3 id="home-ready-title">Project planner</h3>
     <div class="home-list" id="home-ready"></div>
   </section>
   <form class="home-part home-ask" id="home-ask" novalidate>
     <h3 class="home-ask-title" id="home-ask-title" data-words="ask-title">Lets create a project</h3>
-    <label class="field" id="home-name-field" title="The project's name, shown in Recent projects. It also names the project's folder in your workspace (the files staff make go there). Left empty: Project and the date and time, in a folder named by the date and time."><span>Project name (optional)</span><input id="home-name" type="text" maxlength="80" autocomplete="off"></label>
+    <label class="field" id="home-name-field" title="The project's name, shown in the Project planner. It also names the project's folder in your workspace (the files staff make go there). Left empty: Project and the date and time, in a folder named by the date and time."><span>Project name (optional)</span><input id="home-name" type="text" maxlength="80" autocomplete="off"></label>
     <label class="field" id="home-about-field" title="One line on what the project is for. It goes on the project's Scope card as its statement, which staff read before they work on it. The Prompt below is what they are asked to make."><span>Mini description (optional)</span><input id="home-about" type="text" maxlength="200" autocomplete="off" placeholder="e.g. billion dollar saas make no mistake"></label>
     <label class="field"><span>Prompt</span><textarea id="home-goal" rows="3" spellcheck="true" maxlength="1500" placeholder="Describe what should exist when it is finished, e.g. a one-page tip calculator" data-words-ph="ask-goal"></textarea></label>
     <div class="home-staff-row">
@@ -183,20 +189,167 @@
   <section class="net-map" id="net-map" aria-label="How your PCs connect"></section>
   <nav class="net-menu" id="net-menu" aria-label="What this PC is">
     <button type="button" class="net-tab" data-role="admin">This is an admin PC (it connects to nodes)</button>
-    <button type="button" class="net-tab" data-role="node">This is a node</button>
-    <button type="button" class="net-tab" data-role="storage">Backup, model and LLM storage</button>
+    <button type="button" class="net-tab" data-thispc="node">This is a node: set it up on This PC &#8250;</button>
+    <button type="button" class="net-tab" data-thispc="sharing">Backup, model and LLM storage: on This PC &#8250;</button>
   </nav>
   <div class="fault" id="node-fault" role="alert" hidden></div>
-  <div class="net-sec" id="net-sec-pc" data-sec="pc">
+  <div class="net-sec" id="net-sec-linked" data-sec="linked" hidden>
+  <div class="net-actions">
+  <button class="btn primary" type="button" id="net-add-open">Add another PC</button>
+  <button class="btn" type="button" id="node-test-net">Test network</button>
+  </div>
+  <div class="set-block net-test" id="node-test-out" hidden></div>
+  <section class="set-part" id="node-linked-pcs" aria-labelledby="node-linked-title">
+    <div class="set-head">
+      <h3 id="node-linked-title">Linked PCs</h3>
+      <span class="net-linked-acts"><button class="btn" type="button" id="net-hw-scan" title="Reads the processor, RAM and graphics cards of this PC and every linked PC again, and says what changed. TOMLIN otherwise reads them only when it starts.">Scan for hardware changes</button>
+      <button class="btn primary fast-update" type="button" id="node-fast-update" hidden title="Updates every linked PC that is behind this one. A PC that holds this admin PC's key needs no PIN while TOMLIN here is unlocked; any other asks its own PIN"></button></span>
+    </div>
+    <p class="hint" id="net-head-said" role="status" hidden></p>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></span>
+        <span class="set-txt"><b>Models on my other PCs</b><span class="set-about">Copy a model a linked PC shares, or keep a restore point there.</span></span>
+        <span class="set-side"><button class="btn" type="button" data-net>Open</button></span>
+      </div>
+      <div class="set-block">
+        <div id="node-others-ask" hidden></div>
+        <div class="pcg" id="node-grid"></div>
+        <div class="pc-find" id="pc-find" hidden><input id="node-pc-find" type="search" placeholder="Find a PC by name" aria-label="Find a linked PC by name"><select id="node-pc-status" aria-label="Show linked PCs that are"><option value="">All</option><option value="on">On</option><option value="asleep">Asleep</option><option value="off">Off</option></select></div>
+        <div class="pc-detail" id="pc-detail" hidden><div class="pc-detail-head"><strong id="pc-detail-title"></strong><button class="btn" type="button" id="pc-detail-close">Close</button></div><div id="pc-detail-body"></div></div>
+        <div class="pc-tiles" id="node-others"></div>
+      </div>
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg></span>
+        <span class="set-txt"><b>TOMLIN on linked PCs</b><span class="set-about" id="node-update-all-line" aria-live="polite"></span></span>
+        <span class="set-side"><button class="btn" type="button" id="node-update-all" disabled>Update all linked PCs</button></span>
+      </div>
+      <div class="set-row">
+        <span class="set-txt"><b>Join another network as a guest</b><span class="set-about">With a guest pass another PC's owner gave you</span></span>
+        <span class="set-side"><button class="btn" type="button" id="net-join-guest" title="Opens Add another PC with its address and code boxes: type the address of the PC that gave you the pass and the guest pass code.">Connect as a guest</button></span>
+      </div>
+    </div>
+  </section>
+  </div>
+  <div class="net-sec" id="net-sec-guests" data-sec="guests" hidden>
+  <section class="set-part" id="guest-passes" aria-labelledby="node-passes-title">
+    <h3 id="node-passes-title">Guest passes</h3>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v14" stroke-dasharray="2 2"/></svg></span>
+        <span class="set-txt"><b id="pass-on-label">Guest passes</b><span class="set-about" id="pass-on-line">Off. Turn on to let users access your network with a passcode.</span></span>
+        <span class="set-side pass-side"><span class="info"><button class="info-mark" type="button" aria-label="About guest passes" aria-describedby="node-pass-tip">!</button><span class="info-tip" role="tooltip" id="node-pass-tip">A guest pass lets another PC use the models you tick, on the PCs you tick (this PC when it is a node, and the nodes linked to it), and pull TOMLIN updates where "Let linked PCs pull TOMLIN updates from here" is on. Nothing else: no copies, backups, settings, runners or cluster. Its staff and chats stay on that PC. Each node keeps its own copy, so a pass works while this PC is off, and ends on its date even on a node this PC cannot reach. The owner of each node can see what a guest runs there.</span></span><label class="set-sw"><input type="checkbox" role="switch" id="pass-on" aria-labelledby="pass-on-label"><i aria-hidden="true"></i></label></span>
+      </div>
+      <p class="hint set-block" id="pass-on-said" role="status" hidden></p>
+      <div class="set-block" id="pass-area" hidden>
+        <div class="net-actions"><button class="btn primary" type="button" id="node-pass-create" aria-expanded="false" aria-controls="node-pass-new">New guest pass</button></div>
+        <p class="hint" id="node-pass-none">No guest passes yet.</p>
+        <div id="node-pass-ask" hidden></div>
+        <div id="node-pass-list"></div>
+        <div id="node-pass-asks"></div>
+        <div class="node-line" id="node-line-box" hidden>
+          <p class="hint" id="node-line"></p>
+          <label class="check"><input type="checkbox" id="node-host-first"> Host goes first: work from this PC's own (admin) links runs before guests' (first come among each)</label>
+          <div class="node-caps">
+            <label class="field"><span>A guest's answer, up to (tokens)</span><input id="node-cap-answer" type="number" min="256" max="32000" step="256"></label>
+            <label class="check"><input type="checkbox" id="node-cap-answer-none"> No limit on a guest's answer</label>
+            <label class="field"><span>A guest's prompt, up to (characters)</span><input id="node-cap-prompt" type="number" min="1000" max="200000" step="1000"></label>
+            <label class="check"><input type="checkbox" id="node-cap-prompt-none"> No limit on a guest's prompt (with both on No limit, a guest's tools are not held to a number of rounds either)</label>
+            <label class="check"><input type="checkbox" id="node-cap-web"> Web use: guests may search and read web pages through this PC</label>
+            <label class="check"><input type="checkbox" id="node-cap-tools"> Their own tools: a guest's model may use the tools of the guest's own app</label>
+          </div>
+        </div>
+        <div id="node-pass-sync" role="status"></div>
+        <div class="node-pass-made" id="node-pass-made" role="status" hidden></div>
+        <div class="net-pass-form" id="node-pass-new" hidden>
+          <label class="field"><span>Name of person this is for</span><input id="node-pass-label" type="text" maxlength="40" autocomplete="off"></label>
+          <label class="field"><span>Length</span><select id="node-pass-length"><option value="day">1 day</option><option value="week" selected>1 week</option><option value="none">No limit</option></select></label>
+          <fieldset class="node-pass-pick"><legend>PCs and the models a guest may use on each</legend><div id="node-pass-nodes"></div></fieldset>
+          <div class="team-actions"><button class="btn primary" type="button" id="node-pass-make">Make pass</button></div>
+          <p class="hint" id="node-pass-said" role="status"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+  </div>
+  <div class="net-sec" id="net-sec-advanced" data-sec="advanced" hidden>
+  <section class="set-part" id="direct-links" aria-labelledby="node-peers-title">
+    <h3 id="node-peers-title">Direct links between PCs</h3>
+    <div class="set-card">
+      <div class="set-block">
+        <details class="net-more" id="direct-fold"><summary>(!) The direct links between linked PCs</summary>
+        <p class="hint" id="node-peer-lead">Linked PCs need no introducing to copy a model to each other: a copy ordered from this PC sets up their direct link by itself, and the model goes straight between them, not through this PC. Below: the direct links now set up.</p>
+        <details class="net-more"><summary>(?) What each PC must tick</summary>
+        <p class="hint">Two PCs linked to this one copy a model straight to each other over the home network, without it passing through this PC. Each PC's owner must have ticked "Let PCs my host introduces connect to this PC directly" (a PC started from a TOMLIN USB stick has it on), and the PC that receives a model "Accept models from linked PCs".</p>
+        </details>
+        <div id="node-peer-ask" hidden></div>
+        <div id="node-peers-here"></div>
+        <div id="node-peer-pairs"></div>
+        <details class="sub" id="node-peer-new"><summary>Introduce two linked PCs by hand (not needed for copying models)</summary>
+          <div class="node-peer-pick">
+            <label class="field"><span>One PC</span><select id="node-peer-a"></select></label>
+            <label class="field"><span>The other PC</span><select id="node-peer-b"></select></label>
+          </div>
+          <div class="team-actions"><button class="btn primary" type="button" id="node-peer-make">Introduce them</button></div>
+        </details>
+        <p class="hint" id="node-peer-why" hidden></p>
+        <p class="hint" id="node-peer-said" role="status"></p>
+        </details>
+      </div>
+    </div>
+  </section>
+  <section class="set-part" id="node-adv" aria-labelledby="node-adv-title">
+    <h3 id="node-adv-title">Admin PC</h3>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg></span>
+        <span class="set-txt"><b id="host-key-title">Admin PC: manages the linked PCs while unlocked</b><span class="set-about" id="host-key-line" aria-live="polite">Unlocking TOMLIN here lets this PC update, turn off or delete models on the linked PCs, with no PIN typed.</span></span>
+        <span class="set-side"><button class="btn" type="button" id="host-key-new" hidden>Make a new key</button><button class="btn primary" type="button" id="host-key-lock" hidden>Set a PIN…</button></span>
+      </div>
+      <div class="set-block" id="host-key-more">
+        <p class="hint" id="host-key-pcs"></p>
+        <p class="hint" id="host-key-said" role="status" hidden></p>
+      </div>
+    </div>
+  </section>
+  <section class="set-part" id="node-cluster" aria-labelledby="node-cluster-title">
+    <h3 id="node-cluster-title">Cluster</h3>
+    <div class="set-card">
+      <div class="set-row">
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="14" width="7" height="6" rx="1"/><path d="M10 7h4M7 10l3 4M17 10l-3 4"/></svg></span>
+        <span class="set-txt"><b>PCs that work together</b><span class="set-about" id="node-cluster-line">Put linked PCs together for models too big for this PC, and switch them on or off as one.</span></span>
+        <span class="set-side"><button class="btn" type="button" data-cluster-open>Open the cluster page</button></span>
+      </div>
+    </div>
+  </section>
+  </div>
+</section>
+
+<section class="nodes" id="thispc" data-crumb="This PC" aria-labelledby="thispc-title">
+  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <div class="home-head">
+    <h2 id="thispc-title">This PC</h2>
+  </div>
+  <div class="fault" id="thispc-fault" role="alert" hidden></div>
+  <section class="set-part" aria-label="What this PC is and where it keeps things">
+    <div class="set-card" id="thispc-roles"></div>
+  </section>
   <section class="set-part node-switch" aria-labelledby="node-share-title">
-    <h3 id="node-share-title">This PC</h3>
+    <h3 id="node-share-title">Node</h3>
     <div class="set-card">
       <div class="set-row">
         <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg></span>
-        <span class="set-txt"><b id="node-on-label">Enable this PC as a node</b><span class="set-about" id="node-on-line"></span></span>
+        <span class="set-txt"><b id="node-on-label">Use this PC as a node</b><span class="set-about" id="node-on-line"></span></span>
         <span class="set-side"><label class="set-sw"><input type="checkbox" role="switch" id="node-on" aria-labelledby="node-on-label"><i aria-hidden="true"></i></label></span>
       </div>
       <p class="hint set-block" id="node-allow-why" role="status" hidden></p>
+      <div class="hint set-block" id="node-pin-need" role="status" hidden>
+        <p>A node must have the app lock, so it is still off. The PIN is set under Settings, Data and lock, or here. <button class="btn" type="button" id="node-pin-set">Set a PIN…</button></p>
+        <p class="node-nopin-risk">Without a PIN: anyone who sits at this PC can open TOMLIN and change it (its sharing, staff, guest passes and links) with nothing asked; a linked PC cannot update it, turn it off, delete its models or change its permissions (there is no PIN to prove who asks), so those are done at this PC; and its chats and files are as readable as they are with a PIN (they are not encrypted either way). The links to other PCs stay encrypted.</p>
+        <label class="check"><input type="checkbox" id="node-nopin-tick"> I refuse to have a PIN and acknowledge the risks</label>
+        <button class="btn" type="button" id="node-nopin-go" disabled>Turn the node on without a PIN</button>
+      </div>
+      <p class="hint set-block" id="node-nopin-note" role="status" hidden>This node has no PIN: you refused one and acknowledged the risks. Set a PIN under Settings, Data and lock at any time; from then on every change here asks for it.</p>
     <div class="node-card node-setup node-gated" id="node-setup" hidden>
       <div class="node-setup-grid">
         <label class="field"><span>Node name:</span><input id="node-name" type="text" maxlength="40" autocomplete="off"></label>
@@ -232,13 +385,19 @@
         </ol>
       </details>
     </div>
+      <div class="set-block node-gated" hidden>
+  <div id="node-claims"></div>
+  <div id="node-paired-ask" hidden></div>
+  <div id="node-paired"></div>
+  <div id="node-host-pins"></div>
+      </div>
       <div class="set-block node-gated" hidden><details class="sub"><summary>Port, PIN and slots</summary>
         <div class="node-at-once-box" id="node-at-once-box">
           <label class="field node-at-once"><span>At once: answers one model writes together for other PCs</span><select id="node-at-once"><option value="1">1 (one at a time)</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
           <p class="hint" id="node-at-once-line">More than 1 starts a model with that many slots, each keeping its whole context, so it needs that much more memory; fewer are used when they do not fit. It takes effect when the model loads next. Whether it is faster on this PC has not been measured: tools/slotspeed.ts measures it.</p>
         </div>
           <p class="hint" id="node-slots-now" hidden></p>
-      <label class="check"><input type="checkbox" id="node-pin-on"> Also ask for a PIN (optional)</label>
+      <label class="check"><input type="checkbox" id="node-pin-on"> Also ask for a link PIN (optional): a second, 6-digit PIN typed when a PC links, not the app lock PIN</label>
       <p class="hint" id="node-pin-line" hidden></p>
       <details class="sub"><summary>Advanced: port</summary>
         <label class="field"><span>Port other PCs use (8741 unless something else uses it)</span><input id="node-port" type="number" min="1024" max="65535"></label>
@@ -247,54 +406,25 @@
       </details></div>
     </div>
   </section>
-  </div>
-  <div class="net-sec" id="net-sec-linked" data-sec="linked" hidden>
-  <div class="net-actions">
-  <button class="btn primary" type="button" id="net-add-open">Add another PC</button>
-  <button class="btn" type="button" id="node-test-net">Test network</button>
-  </div>
-  <div class="set-block net-test" id="node-test-out" hidden></div>
-  <section class="set-part" id="node-linked-pcs" aria-labelledby="node-linked-title">
-    <div class="set-head">
-      <h3 id="node-linked-title">Linked PCs</h3>
-      <span class="net-linked-acts"><button class="btn" type="button" id="net-hw-scan" title="Reads the processor, RAM and graphics cards of this PC and every linked PC again, and says what changed. TOMLIN otherwise reads them only when it starts.">Scan for hardware changes</button>
-      <button class="btn primary fast-update" type="button" id="node-fast-update" hidden title="Updates every linked PC that is behind this one, asking for the host PIN once when the PCs hold it"></button></span>
-    </div>
-    <p class="hint" id="net-head-said" role="status" hidden></p>
+  <section class="set-part" aria-labelledby="node-models-title">
+    <h3 id="node-models-title">Models on this PC</h3>
     <div class="set-card">
       <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></span>
-        <span class="set-txt"><b>Models on my other PCs</b><span class="set-about">Copy a model a linked PC shares, or keep a restore point there.</span></span>
-        <span class="set-side"><button class="btn" type="button" data-net>Open</button></span>
+        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4-5"/></svg></span>
+        <span class="set-txt"><b>Speed tests</b><span class="set-about">List of models on this PC. Runs speed tests to see what works well.</span></span>
+        <span class="set-side"><button class="btn" type="button" data-calc>What can this PC run?</button></span>
       </div>
       <div class="set-block">
-        <div id="node-others-ask" hidden></div>
-        <div class="pc-find" id="pc-find" hidden><input id="node-pc-find" type="search" placeholder="Find a PC by name" aria-label="Find a linked PC by name"><select id="node-pc-status" aria-label="Show linked PCs that are"><option value="">All</option><option value="on">On</option><option value="asleep">Asleep</option><option value="off">Off</option></select></div>
-        <div class="pc-detail" id="pc-detail" hidden><div class="pc-detail-head"><strong id="pc-detail-title"></strong><button class="btn" type="button" id="pc-detail-close">Close</button></div><div id="pc-detail-body"></div></div>
-        <div class="pc-tiles" id="node-others"></div>
+        <div id="node-models-ask" hidden></div>
+        <div class="node-models" id="node-models"></div>
       </div>
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg></span>
-        <span class="set-txt"><b>TOMLIN on linked PCs</b><span class="set-about" id="node-update-all-line" aria-live="polite"></span></span>
-        <span class="set-side"><button class="btn" type="button" id="node-update-all" disabled>Update all linked PCs</button></span>
-      </div>
-      <div class="set-block node-gated" hidden>
-  <div id="node-claims"></div>
-  <div id="node-paired-ask" hidden></div>
-  <div id="node-paired"></div>
-  <div id="node-host-pins"></div>
-      </div>
-      <div class="set-row">
-        <span class="set-txt"><b>Guest:</b><span class="set-about">Connect to a network as a guest</span></span>
-        <span class="set-side"><button class="btn" type="button" id="net-join-guest" title="Opens Add another PC with its address and code boxes: type the address of the PC that gave you the pass and the guest pass code.">Connect as a guest</button></span>
-      </div>
+      <div class="set-block models-done" id="models-done" aria-live="polite"></div>
     </div>
   </section>
-  </div>
-  <div class="net-sec" id="net-sec-sharing" data-sec="sharing" hidden>
-    <p class="hint net-off" id="net-sharing-off" hidden>Turn on "Enable this PC as a node" under This PC to share models and set these permissions.</p>
-    <section class="set-part node-gated" id="node-sharing" hidden aria-labelledby="node-sharing-title">
-    <h3 id="node-sharing-title">Sharing</h3>
+  <section class="set-part" id="thispc-sharing" aria-labelledby="node-sharing-title">
+    <h3 id="node-sharing-title">Sharing and cluster permissions</h3>
+    <p class="hint net-off" id="net-sharing-off" hidden>Turn on "Use this PC as a node" above to share models and set these permissions.</p>
+    <div class="node-gated" id="node-sharing" hidden>
     <div class="set-card">
     <div class="node-card node-setup">
       <p class="hint">What linked PCs may do on this PC. Set on the PC that shares.</p>
@@ -309,11 +439,11 @@
         <p class="hint" id="node-share-line" role="status"></p>
       </fieldset>
       <fieldset class="pick-set node-allow" id="node-allow">
-        <legend>Sharing and cluster permissions:</legend>
+        <legend>What linked PCs may do here:</legend>
         <div class="share-all"><span class="perm-switch"><input type="checkbox" id="node-allow-all"><span class="perm-knob"></span></span><label for="node-allow-all">Allow all</label></div>
         <p class="hint">A linked host is trusted like an administrator, but only for what is switched on below.</p>
         <details class="net-more"><summary>(?) Who can do what here</summary>
-        <p class="hint pin-either" id="node-admin-note"><span class="info-mark" aria-hidden="true">!</span><span>The PC that links to this one becomes its admin (the host). Its host PIN, if this PC's owner has given it one, works like this PC's own PIN to update it, turn it off or delete models here, but only for what is switched on below. An update is program code sent over the link, so a linked host is trusted like an administrator. A guest never can.</span></p>
+        <p class="hint pin-either" id="node-admin-note"><span class="info-mark" aria-hidden="true">!</span><span>The PC that links to this one becomes its admin (the host). While that PC is unlocked, it can update this PC, turn it off or delete models here with no PIN typed (it takes its admin key the first time this PC's own PIN is typed there), but only for what is switched on below. Two admin PCs each hold their own key. An update is program code sent over the link, so a linked host is trusted like an administrator. A guest never can.</span></p>
         </details>
         <div class="share-groups">
           <div class="share-group" id="share-group-models">
@@ -345,7 +475,7 @@
           </div>
           <div class="share-tile">
             <div class="share-tile-top"><span class="share-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span><span class="perm-switch"><input type="checkbox" id="allow-tune" data-allow="tune" aria-describedby="allow-tune-tip"><span class="perm-knob"></span></span></div>
-            <div class="share-tile-name"><label for="allow-tune">Allow host to test and change model run settings</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow host to test and change model run settings" aria-describedby="allow-tune-tip">!</button><span class="info-tip" role="tooltip" id="allow-tune-tip">This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN or the host PIN typed each time. This switch itself can only be changed at this PC.</span></span></div>
+            <div class="share-tile-name"><label for="allow-tune">Allow host to test and change model run settings</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow host to test and change model run settings" aria-describedby="allow-tune-tip">!</button><span class="info-tip" role="tooltip" id="allow-tune-tip">This allows changing the model, and setting a guessing model to improve speeds. It also lets the host change the other switches here from its own Network page, with this PC's PIN typed each time, or with no PIN from an admin PC that holds this PC's key. This switch itself can only be changed at this PC.</span></span></div>
             <p class="hint ok" id="node-run-changes" role="status" hidden></p>
           </div>
           <div class="share-tile">
@@ -370,8 +500,8 @@
             <div class="share-tile-top"><span class="share-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/></svg></span><span class="perm-switch"><input type="checkbox" id="allow-lend" data-allow="lend" aria-describedby="allow-lend-tip"><span class="perm-knob"></span></span></div>
             <div class="share-tile-name"><label for="allow-lend">Allow to be used as part of a cluster</label><span class="info"><button class="info-mark" type="button" aria-label="About Allow to be used as part of a cluster" aria-describedby="allow-lend-tip">!</button><span class="info-tip" role="tooltip" id="allow-lend-tip">This lets another pc use part of the ram, cpu, or vram to run a model.</span></span></div>
             <p class="hint">Only while nobody is using this PC: when Windows is locked, or after <select id="node-lend-idle" aria-label="Minutes with nobody using this PC before it lends"><option value="2" label="2"></option><option value="5" label="5"></option><option value="10" label="10"></option><option value="15" label="15"></option><option value="30" label="30"></option><option value="60" label="60"></option></select> minutes with no key press or mouse move. Using this PC again ends it at once.</p><span class="sr-only" aria-hidden="true">Chosen: <span id="node-lend-idle-text">5</span> minutes.</span><p class="hint ok" id="node-lend-now" role="status" hidden></p>
-            <label class="node-plain"><input type="checkbox" id="node-plain-links" aria-describedby="node-plain-why"> Allow unencrypted cluster links</label>
-            <p class="hint" id="node-plain-why">A linked PC that ticks "Unencrypted cluster link" for this PC then borrows over a link that is not encrypted: faster (each step on the network took about half the time when measured), but anything on your home network could read it or send this PC's model runner commands of its own. Only on a wired home network you trust. Off unless ticked; both PCs must choose it.</p>
+            <label class="node-plain" hidden><input type="checkbox" id="node-plain-links" aria-describedby="node-plain-why"> Allow unencrypted cluster links</label>
+            <p class="hint" id="node-plain-why" hidden>A linked PC that ticks "Unencrypted cluster link" for this PC then borrows over a link that is not encrypted: faster (each step on the network took about half the time when measured), but anything on your home network could read it or send this PC's model runner commands of its own. Only on a wired home network you trust. Off unless ticked; both PCs must choose it.</p>
           </div>
             </div>
           </div>
@@ -382,144 +512,6 @@
       </fieldset>
     </div>
     </div>
-  </section>
-  </div>
-  <div class="net-sec" id="net-sec-guests" data-sec="guests" hidden>
-  <section class="set-part" id="guest-passes" aria-labelledby="node-passes-title">
-    <h3 id="node-passes-title">Guest passes</h3>
-    <div class="set-card">
-      <div class="set-block">
-        <div class="net-actions"><button class="btn primary" type="button" id="node-pass-create" aria-expanded="false" aria-controls="node-pass-new">Create a guest pass</button></div>
-        <details class="net-more" id="node-pass-about"><summary aria-label="About guest passes">(!)</summary>
-        <p class="hint">A guest pass lets another PC use the models you tick, on the PCs you tick (this PC when it is a node, and the nodes linked to it), and pull TOMLIN updates where "Let linked PCs pull TOMLIN updates from here" is on. Nothing else: no copies, backups, settings, runners or cluster. Its staff and chats stay on that PC. Each node keeps its own copy, so a pass works while this PC is off, and ends on its date even on a node this PC cannot reach. The owner of each node can see what a guest runs there.</p>
-        <p class="hint" id="node-pass-none">No guest passes yet.</p>
-        </details>
-        <div id="node-pass-ask" hidden></div>
-        <div id="node-pass-list"></div>
-        <div id="node-pass-asks"></div>
-        <div class="node-line" id="node-line-box" hidden>
-          <p class="hint" id="node-line"></p>
-          <label class="check"><input type="checkbox" id="node-host-first"> Host goes first: work from this PC's own (admin) links runs before guests' (first come among each)</label>
-          <div class="node-caps">
-            <label class="field"><span>A guest's answer, up to (tokens)</span><input id="node-cap-answer" type="number" min="256" max="32000" step="256"></label>
-            <label class="field"><span>A guest's prompt, up to (characters)</span><input id="node-cap-prompt" type="number" min="1000" max="200000" step="1000"></label>
-          </div>
-        </div>
-        <div id="node-pass-sync" role="status"></div>
-        <div class="node-pass-made" id="node-pass-made" role="status" hidden></div>
-        <div class="net-pass-form" id="node-pass-new" hidden>
-          <label class="field"><span>Name of person this is for</span><input id="node-pass-label" type="text" maxlength="40" autocomplete="off"></label>
-          <label class="field"><span>Length</span><select id="node-pass-length"><option value="day">1 day</option><option value="week" selected>1 week</option><option value="none">No limit</option></select></label>
-          <fieldset class="node-pass-pick"><legend>PCs and the models a guest may use on each</legend><div id="node-pass-nodes"></div></fieldset>
-          <div class="team-actions"><button class="btn primary" type="button" id="node-pass-make">Make pass</button></div>
-          <p class="hint" id="node-pass-said" role="status"></p>
-        </div>
-      </div>
-    </div>
-  </section>
-  </div>
-  <div class="net-sec" id="net-sec-advanced" data-sec="advanced" hidden>
-  <section class="set-part" id="direct-links" aria-labelledby="node-peers-title">
-    <h3 id="node-peers-title">Direct links between PCs</h3>
-    <div class="set-card">
-      <div class="set-block">
-        <details class="net-more" id="direct-fold"><summary>(!) Introduce two linked PCs, and the direct links now set up</summary>
-        <p class="hint">Let two linked PCs copy a model straight to each other, without it passing through this PC.</p>
-        <details class="net-more"><summary>(?) What each PC must tick</summary>
-        <p class="hint">Two PCs linked to this one can copy a model straight to each other over the home network, without it passing through this PC. Each PC's owner must tick "Let PCs my host introduces connect to this PC directly", and the PC that receives a model "Accept models from linked PCs".</p>
-        </details>
-        <div id="node-peer-ask" hidden></div>
-        <div id="node-peers-here"></div>
-        <div id="node-peer-pairs"></div>
-        <details class="sub" id="node-peer-new"><summary>Introduce two linked PCs</summary>
-          <div class="node-peer-pick">
-            <label class="field"><span>One PC</span><select id="node-peer-a"></select></label>
-            <label class="field"><span>The other PC</span><select id="node-peer-b"></select></label>
-          </div>
-          <div class="team-actions"><button class="btn primary" type="button" id="node-peer-make">Introduce them</button></div>
-        </details>
-        <p class="hint" id="node-peer-why" hidden></p>
-        <p class="hint" id="node-peer-said" role="status"></p>
-        </details>
-      </div>
-    </div>
-  </section>
-  <section class="set-part" id="node-adv" aria-labelledby="node-adv-title">
-    <h3 id="node-adv-title">Admin access</h3>
-    <div class="set-card">
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg></span>
-        <span class="set-txt"><b>Admin access: on while this PC is unlocked</b><span class="set-about" id="host-key-line" aria-live="polite">Unlocking TOMLIN here lets this PC update, turn off or delete models on the linked PCs, with no PIN typed.</span></span>
-        <span class="set-side"><button class="btn" type="button" id="host-key-new" hidden>Make a new key</button></span>
-      </div>
-      <div class="set-block" id="host-key-more">
-        <p class="hint" id="host-key-pcs"></p>
-        <div class="team-actions">
-          <button class="link" type="button" id="host-key-off">Turn admin access off</button>
-          <button class="link" type="button" id="host-key-on" hidden>Turn admin access on</button>
-        </div>
-        <p class="hint" id="host-key-said" role="status" hidden></p>
-      </div>
-      <details class="net-more net-block" id="host-pin-fold"><summary>Advanced: a typed host PIN, for PCs set up with one</summary>
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg></span>
-        <span class="set-txt"><b>Host PIN: one PIN for the linked PCs</b><span class="set-about" id="host-pin-line" aria-live="polite">One PIN typed here updates, turns off or deletes a model on every linked PC that holds it.</span></span>
-        <span class="set-side"><button class="btn" type="button" id="host-pin-set">Set the host PIN</button></span>
-      </div>
-      <div class="set-block" id="host-pin-more" hidden>
-        <p class="hint" id="host-pin-pcs"></p>
-        <div class="team-actions">
-          <button class="btn" type="button" id="host-pin-give" hidden>Give it to the other PCs</button>
-          <button class="link" type="button" id="host-pin-off">Turn the host PIN off</button>
-        </div>
-        <p class="hint" id="host-pin-said" role="status" hidden></p>
-      </div>
-      </details>
-    </div>
-  </section>
-  <section class="set-part" id="node-cluster" aria-labelledby="node-cluster-title">
-    <h3 id="node-cluster-title">Cluster</h3>
-    <div class="set-card">
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="4" width="7" height="6" rx="1"/><rect x="8.5" y="14" width="7" height="6" rx="1"/><path d="M10 7h4M7 10l3 4M17 10l-3 4"/></svg></span>
-        <span class="set-txt"><b>PCs that work together</b><span class="set-about" id="node-cluster-line">Put linked PCs together for models too big for this PC, and switch them on or off as one.</span></span>
-        <span class="set-side"><button class="btn" type="button" data-cluster-open>Open the cluster page</button></span>
-      </div>
-    </div>
-  </section>
-  </div>
-</section>
-
-<section class="nodes" id="thispc" data-crumb="This PC" aria-labelledby="thispc-title">
-  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
-  <div class="home-head">
-    <h2 id="thispc-title">This PC</h2>
-  </div>
-  <section class="set-part" aria-label="What this PC is and where it keeps things">
-    <div class="set-card" id="thispc-roles"></div>
-  </section>
-  <section class="set-part" aria-labelledby="node-models-title">
-    <h3 id="node-models-title">Models on this PC</h3>
-    <div class="set-card">
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4-5"/></svg></span>
-        <span class="set-txt"><b>Speed tests</b><span class="set-about">List of models on this PC. Runs speed tests to see what works well.</span></span>
-        <span class="set-side"><button class="btn" type="button" data-calc>What can this PC run?</button></span>
-      </div>
-      <div class="set-block">
-        <div id="node-models-ask" hidden></div>
-        <div class="node-models" id="node-models"></div>
-      </div>
-    </div>
-  </section>
-  <section class="set-part" aria-labelledby="thispc-allow-title">
-    <h3 id="thispc-allow-title">Sharing and cluster permissions</h3>
-    <div class="set-card">
-      <div class="set-row">
-        <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
-        <span class="set-txt"><b>What linked PCs may do here</b><span class="set-about">What linked PCs may do on this PC: share its models, keep backups, update TOMLIN, change model run settings, accept models, pull TOMLIN updates, use its graphics card and RAM as part of a cluster, and turn it off. Each is a tick, off until you tick it, except turning it off, which is on until you untick it.</span></span>
-        <span class="set-side"><button class="btn" type="button" id="thispc-allow-open" data-perms-open>Open sharing and cluster permissions</button></span>
-      </div>
     </div>
   </section>
 </section>
@@ -533,10 +525,64 @@
     <input id="allchats-search" type="search" placeholder="Search subjects, staff, projects and first messages" aria-label="Search chats" autocomplete="off">
     <label class="allchats-pick"><span>Project</span><select id="allchats-project"></select></label>
     <label class="allchats-pick"><span>Staff</span><select id="allchats-staff"></select></label>
+    <label class="allchats-pick"><span>Role</span><select id="allchats-role"></select></label>
   </div>
   <div id="allchats-left"></div>
   <p class="hint" id="allchats-count" role="status"></p>
   <ul class="allchats-tiles" id="allchats-tiles"></ul>
+</section>
+
+<!-- A face on a PC card in Home's left panel: that person's page, their recent chats under it (chats.js). -->
+<section class="nodes person-page" id="person-page" aria-labelledby="person-page-title">
+  <button class="btn quiet back nodes-back" type="button" data-back>&#8249; Chats and staff</button>
+  <div class="person-page-head">
+    <span class="person-page-face" id="person-page-face"></span>
+    <div class="person-page-who">
+      <h2 id="person-page-title"></h2>
+      <p class="person-page-role" id="person-page-role"></p>
+      <p class="person-page-where" id="person-page-where"></p>
+    </div>
+    <div class="person-page-acts">
+      <button class="btn primary" type="button" id="person-page-start">New chat</button>
+      <button class="btn" type="button" id="person-page-edit" hidden>Edit staff</button>
+      <button class="btn" type="button" id="person-page-memory">Memory</button>
+    </div>
+  </div>
+  <div class="fault" id="person-page-fault" role="alert" hidden></div>
+  <div class="person-page-recent">
+    <div class="person-chats-head">
+      <h3>Recent chats</h3>
+      <button class="btn person-chats-show" type="button" id="person-page-show" hidden>Show preview</button>
+    </div>
+    <ul class="person-chats-list person-page-list" id="person-page-list"></ul>
+  </div>
+</section>
+
+<section class="nodes memory-page" id="memory-page" data-crumb="Memory" aria-labelledby="memory-page-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" id="memory-back">&#8249; Back</button>
+    <h2 id="memory-page-title">Memory</h2>
+  </div>
+  <div class="mem-tools" id="memory-tools" role="toolbar" aria-label="Memory"></div>
+  <p class="set-said" id="memory-said" role="status"></p>
+  <div class="page-ask" id="memory-ask" hidden></div>
+  <div class="mem-cols">
+    <ul class="mem-books" id="memory-books" aria-label="Notebooks"></ul>
+    <div class="mem-main" id="memory-main"></div>
+    <aside class="mem-gets" id="memory-gets" aria-label="What the model gets"></aside>
+  </div>
+</section>
+
+<section class="nodes agents-page" id="agents-page" data-crumb="Agents" aria-labelledby="agents-page-title">
+  <div class="home-head">
+    <button class="btn quiet back" type="button" id="agents-back">&#8249; Back</button>
+    <h2 id="agents-page-title">Agents</h2>
+  </div>
+  <div class="mem-tools" id="agents-tools" role="toolbar" aria-label="Agents"></div>
+  <p class="hint" id="agents-clock"></p>
+  <p class="set-said" id="agents-said" role="status"></p>
+  <div class="page-ask" id="agents-ask" hidden></div>
+  <div id="agents-main"></div>
 </section>
 
 <section class="nodes" id="cluster-page" data-crumb="Cluster" aria-labelledby="cluster-title">
@@ -708,11 +754,12 @@
   </div>
 </section>
 
-<section class="models-page app-page" id="settings-perms" data-crumb="Permissions" aria-labelledby="settings-perms-title">
+<section class="models-page app-page" id="settings-perms" data-crumb="Chat permissions" aria-labelledby="settings-perms-title">
   <div class="home-head">
     <button class="btn quiet back" type="button" data-back>&#8249; Chats and staff</button>
-    <h2 id="settings-perms-title">Permissions</h2>
+    <h2 id="settings-perms-title">Chat permissions</h2>
   </div>
+  <p class="hint perms-agents-line" id="perms-agents-line">Agents' standing jobs have their own tools, approved per job on the <button class="link" type="button" id="perms-agents-open">Agents</button> page.</p>
   <div class="help-body page-body set-page" id="settings-perms-body"></div>
 </section>
 
@@ -789,7 +836,7 @@
       <div class="addpc-tile">
         <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M12 7v5M9.5 9.5 12 12l2.5-2.5"/></svg></span>
         <b>Install TOMLIN on another PC</b>
-        <span class="set-about">Install TOMLIN on that PC and open it, then turn on <strong>Enable this PC as a node</strong> in its Settings, Network. Then find it here.</span>
+        <span class="set-about">Install TOMLIN on that PC and open it, then turn on <strong>Use this PC as a node</strong> on its This PC page. Then find it here.</span>
         <div class="addpc-go"><button class="btn" type="button" id="addpc-scan">Scan the network</button></div>
       </div>
       <div class="addpc-tile">
@@ -804,7 +851,7 @@
     <div class="set-card">
       <div class="set-row">
         <span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16 16l4 4"/></svg></span>
-        <span class="set-txt"><b>Scan the network</b><span class="set-about">On the other PC, turn on <strong>Enable this PC as a node</strong>, or start it from a stick made under Settings, <strong>Bootable USB</strong>. Then find it here: a PC started from your stick is added with no code.</span></span>
+        <span class="set-txt"><b>Scan the network</b><span class="set-about">On the other PC, turn on <strong>Use this PC as a node</strong>, or start it from a stick made under Settings, <strong>Bootable USB</strong>. Then find it here: a PC started from your stick is added with no code.</span></span>
         <span class="set-side"><label class="node-scan-port"><span>Port (if changed there)</span><input id="node-scan-port" type="number" min="1024" max="65535" value="8741"></label><button class="btn primary" type="button" id="node-scan">Find PCs on my network</button></span>
       </div>
       <div class="set-block">
@@ -825,7 +872,7 @@
       <details class="set-row" id="link-help">
         <summary><span class="set-tile"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></span><span class="set-txt"><b>Still not linking? Link helper</b><span class="set-about">Tests the other PC from here and says, in plain words, what is in the way. Nothing is changed on either PC.</span></span><span class="set-side"><span class="set-chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span></summary>
         <div class="set-inside">
-          <fieldset class="link-help-q"><legend>Is TOMLIN open on the other PC, with "Enable this PC as a node" turned on?</legend>
+          <fieldset class="link-help-q"><legend>Is TOMLIN open on the other PC, with "Use this PC as a node" turned on?</legend>
             <label class="check"><input type="radio" name="link-help-on" value="yes" checked> Yes</label>
             <label class="check"><input type="radio" name="link-help-on" value="no"> No</label>
             <label class="check"><input type="radio" name="link-help-on" value="unsure"> Not sure</label>
@@ -913,10 +960,10 @@
             <p class="hint profile-line" id="avatar-line" hidden><span id="avatar-line-name">Profile photo set.</span> <button class="link" type="button" id="avatar-remove">Remove it</button></p>
           </div>
         </details>
-        <button class="btn quiet chat-whole" type="button" id="chat-save" title="Save this whole chat as a text file" aria-label="Save this whole chat as a text file"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
-        <button class="btn quiet chat-whole" type="button" id="chat-copy" title="Copy this whole chat" aria-label="Copy this whole chat"></button>
+        <button class="btn quiet chat-whole chat-in-menu" type="button" id="chat-save" title="Save this whole chat as a text file in its project's folder (a chat in Default: its own chats folder)" aria-label="Save this whole chat as a text file in its project's folder"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></button>
+        <button class="btn quiet chat-whole chat-in-menu" type="button" id="chat-copy" title="Copy this whole chat" aria-label="Copy this whole chat"></button>
         <button class="btn quiet chat-whole" type="button" id="chat-find-open" hidden title="Find in this chat: bring back an older message, word for word" aria-label="Find in this chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
-          <button class="btn quiet chat-whole chat-memory" type="button" id="notebook-open" title="What this person and the team remember: see, change or delete each line" aria-label="Memory"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7h6M9 11h4"/></svg></button>
+          <button class="btn quiet chat-whole chat-memory chat-in-menu" type="button" id="notebook-open" title="What this person and the team remember: see, change or delete each line" aria-label="Memory"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7h6M9 11h4"/></svg></button>
         <button class="btn quiet" type="button" id="chat-menu-open" hidden title="Rename, mute, empty or delete this chat" aria-label="This chat: rename, mute, empty or delete">…</button>
       </div>
     </div>
@@ -936,6 +983,22 @@
       <form class="chat-form" id="chat-form">
         <div class="chat-grip" id="chat-grip" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to make the message box taller or shorter (double-click: back to its size)" aria-label="Message box height: drag, or press the up and down arrows"></div>
         <textarea id="chat-input" rows="2" spellcheck="true" placeholder="Message" aria-label="Message"></textarea>
+        <div class="chat-pic-pending" id="chat-pic" role="status" hidden></div>
+        <div class="clip-row" id="clip-row" hidden>
+          <label class="field"><span>Length</span><select id="clip-seconds" title="Seconds of video"></select></label>
+          <label class="field"><span>Size</span><select id="clip-size"></select></label>
+          <div class="img-quality" id="clip-quality" role="radiogroup" aria-label="Clip quality"></div>
+          <details class="clip-more" id="clip-more">
+            <summary>More options</summary>
+            <label class="field grow"><span>Leave out of the clip</span><input id="clip-negative" type="text" maxlength="1000" spellcheck="true" placeholder="e.g. blurry, text, watermark"></label>
+            <label class="field"><span>Seed</span><input id="clip-seed" type="number" min="0" max="4294967295" step="1" placeholder="random"></label>
+            <button class="btn quiet clip-dice" type="button" id="clip-dice" title="A new random seed in the box (leave the box empty for a new one each clip)" aria-label="New random seed"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="16" cy="16" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg></button>
+            <label class="field"><span>Steps</span><input id="clip-steps" type="number" min="1" max="60" step="1" placeholder="quality's"></label>
+            <button class="btn quiet" type="button" id="clip-shelf-open" title="Every clip made on this PC, newest first">Videos</button>
+            <button class="btn quiet" type="button" id="voice-open" title="Read lines aloud for a voice-over, on this PC">Voice</button>
+          </details>
+          <p class="hint clip-lowdisk" id="clip-lowdisk" role="status" hidden></p>
+        </div>
         <button class="box-save" type="button" id="prompt-save" title="Save to prompts (global)" aria-label="Save to prompts (global)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg></button>
         <div class="chat-actions">
           <div class="chat-options" id="chat-options">
@@ -954,9 +1017,12 @@
             </div>
           </div>
           <button class="btn quiet chat-clip" type="button" id="doc-add" title="Add a PDF, text or code file to this chat: each answer reads the parts that match your words, and names the page" aria-label="Add a document"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
+          <button class="btn quiet chat-clip" type="button" id="pic-add" title="Add a picture for the model to look at (PNG, JPEG or WebP; you can also paste or drop one). Only a model with a vision add-on can look at it" aria-label="Add a picture"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg></button>
+          <input type="file" id="pic-file" accept="image/png,image/jpeg,image/webp" hidden>
           <input type="file" id="doc-file" accept=".pdf,.txt,.md,.csv,.json,.xml,.yml,.yaml,.toml,.ini,.log,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.py,.php,.sql,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.sh,.ps1,.bat" multiple hidden>
           <span class="chat-actions-gap"></span>
           <button class="btn" type="button" id="chat-stop" hidden>Stop</button>
+          <button class="btn" type="button" id="shot-add" hidden title="Puts what you typed at the end of the shot list (right panel), with this length, size and quality">Add to the shot list</button>
           <button class="btn primary" type="submit" id="chat-send">Send</button>
         </div>
         <p class="hint max-why" id="max-why" role="status" hidden></p>
@@ -1002,8 +1068,54 @@
       <div class="conn-info hint" aria-live="polite"></div>
       <div class="fault" hidden></div>
 
+      <!-- The artist's two kinds of work: Pictures (the form below, every picture) and Character sets (charsets.js). -->
+      <div class="img-kinds" id="img-kinds" role="tablist" aria-label="Kind of work">
+        <button class="side-tab" type="button" role="tab" data-kind="blog" aria-selected="true">Pictures</button><span class="side-tab-bar" aria-hidden="true">|</span><button class="side-tab" type="button" role="tab" data-kind="sets" aria-selected="false" tabindex="-1">Character sets</button>
+      </div>
       <form class="img-form draw-box" id="img-form">
         <label class="field"><span id="img-prompt-label">What to draw</span><textarea id="img-prompt" rows="2" spellcheck="true" placeholder="e.g. a reading chair in a sunny room, photo 600x600. Enter draws it; Shift+Enter starts a new line."></textarea></label>
+        <div class="img-cards" id="img-cards" hidden></div>
+        <div class="field img-leave">
+          <span id="img-leave-label">Leave out</span>
+          <div class="img-chips" id="img-chips">
+            <span class="img-chip-list" id="img-chip-list" role="list" aria-labelledby="img-leave-label"></span>
+            <input id="img-negative" type="text" maxlength="200" spellcheck="true" placeholder="add words, e.g. blurry" aria-label="Words to leave out of the picture: Enter or + adds them">
+            <button class="btn quiet img-chip-add" type="button" id="img-chip-add" title="Add these words" aria-label="Add these words">+</button>
+          </div>
+          <button class="img-link" type="button" id="img-chips-back" hidden></button>
+        </div>
+        <div class="img-picks">
+          <div class="img-quality img-seg" role="radiogroup" aria-label="Shape" title="The shape of the picture, at the size this model is made for">
+            <span class="img-seg-name" aria-hidden="true">Shape</span>
+            <label><input type="radio" name="img-shape" value="auto" checked><span>Auto</span></label>
+            <label><input type="radio" name="img-shape" value="1:1"><span>1:1</span></label>
+            <label><input type="radio" name="img-shape" value="4:3"><span>4:3</span></label>
+            <label><input type="radio" name="img-shape" value="16:9"><span>16:9</span></label>
+            <label><input type="radio" name="img-shape" value="9:16"><span>9:16</span></label>
+          </div>
+          <!-- The Style row's inputs stay (saved forms, queue.js): the tiles below set them (stylepick.js). -->
+          <div class="img-quality img-seg" role="radiogroup" aria-label="Style" id="img-style-row" hidden>
+            <span class="img-seg-name" aria-hidden="true">Style</span>
+            <label title="Picked from the prompt"><input type="radio" name="img-style" value="auto" checked><span>Auto</span></label>
+            <label title="A photo, as for a blog"><input type="radio" name="img-style" value="blog"><span>Photo</span></label>
+            <label><input type="radio" name="img-style" value="cinematic"><span>Cinematic</span></label>
+            <label><input type="radio" name="img-style" value="anime"><span>Anime</span></label>
+            <label><input type="radio" name="img-style" value="ink"><span>Chinese ink</span></label>
+            <label><input type="radio" name="img-style" value="cdrama"><span>Chinese drama (realistic)</span></label>
+            <label title="A flat icon or graphic, background cut away"><input type="radio" name="img-style" value="icon"><span>Flat</span></label>
+            <label title="A cartoon or illustration"><input type="radio" name="img-style" value="cartoon"><span>Cartoon</span></label>
+            <label><input type="radio" name="img-style" value="watercolour"><span>Watercolour</span></label>
+            <label><input type="radio" name="img-style" value="surreal"><span>Surreal</span></label>
+            <label><input type="radio" name="img-style" value="pixel"><span>Pixel art</span></label>
+          </div>
+        </div>
+        <div class="style-pick" id="img-style-pick">
+          <div class="style-pick-head"><span class="img-seg-name">Style</span><span class="hint" id="img-style-line"></span></div>
+          <p class="hint style-none" id="img-style-none" hidden></p>
+          <div class="style-tiles" id="img-style-tiles" role="group" aria-label="Style"></div>
+          <div class="style-make"><button class="btn quiet" type="button" id="img-style-make">Make the style samples</button><span class="hint" id="img-style-said" role="status"></span></div>
+        </div>
+        <input type="hidden" id="img-mode" value="auto"><input type="hidden" id="img-w" value=""><input type="hidden" id="img-h" value="">
         <div class="img-tools">
           <button class="btn primary" type="submit" id="img-go">Draw</button>
           <div class="img-quality" role="radiogroup" aria-label="Quality">
@@ -1017,36 +1129,39 @@
           <span class="hint" id="img-detect"></span>
         </div>
         <p class="hint" id="img-note" role="status" hidden></p>
-        <details class="more-options" id="img-list-box">
-          <summary>Add a list to the queue: one picture per line</summary>
-          <label class="field"><span>Pictures, one per line</span><textarea id="img-list" rows="4" spellcheck="true" placeholder="a reading chair in a sunny room, photo&#10;an upright piano in a living room, photo 1200x800"></textarea></label>
-          <div class="img-tools"><button class="btn" type="button" id="img-list-go">Add to the queue</button><span class="hint" id="img-list-line"></span></div>
-          <p class="hint">Each line is drawn by the artist chosen above, on their PC, one after another, whole (not a draft). Each picture is kept in the gallery and put in the specialists\images folder of the project chosen beside Add to the queue. Size and mode come from each line, as when you press Draw.</p>
-        </details>
-        <details class="more-options" id="more-options">
-          <summary>More options: leave out, mode, size, seed, steps</summary>
-          <label class="field"><span>Leave out of the picture</span><textarea id="img-negative" rows="2" placeholder="e.g. blurry, text, watermark"></textarea></label>
+        <details class="img-advanced" id="img-advanced">
+          <summary id="img-adv-summary">Advanced</summary>
           <div class="img-row">
-            <label class="field"><span>Mode</span><select id="img-mode"><option value="auto">Auto (from the prompt)</option><option value="icon">Icon</option><option value="blog">Blog / photo</option><option value="cartoon">Cartoon</option><option value="custom">Custom</option></select></label>
-            <label class="field"><span>Width</span><input id="img-w" type="number" min="16" max="4096" step="1" placeholder="auto"></label>
-            <label class="field"><span>Height</span><input id="img-h" type="number" min="16" max="4096" step="1" placeholder="auto"></label>
+            <label class="field"><span>Width</span><input id="img-exact-w" type="number" min="16" max="4096" step="1" placeholder="from Shape"></label>
+            <label class="field"><span>Height</span><input id="img-exact-h" type="number" min="16" max="4096" step="1" placeholder="from Shape"></label>
             <label class="field"><span>Fit</span><select id="img-fit"><option value="crop">Crop</option><option value="pad">Pad</option><option value="stretch">Stretch</option></select></label>
           </div>
           <div class="img-row">
-            <label class="field"><span>Seed</span><input id="img-seed" type="number" min="0" step="1" placeholder="random"></label>
-            <label class="check"><input type="checkbox" id="img-random" checked> New random seed each time</label>
+            <label class="field"><span>Seed</span><input id="img-seed" type="number" min="0" max="4294967295" step="1" placeholder="random"></label>
+            <label class="check"><input type="checkbox" id="img-random" checked> New seed each time</label>
           </div>
-          <details class="sub"><summary>Advanced</summary>
-            <div class="img-row">
-              <label class="field"><span>Steps</span><input id="img-steps" type="number" min="1" max="100" step="1" placeholder="mode default"></label>
-              <label class="field"><span>CFG</span><input id="img-cfg" type="number" min="0" max="30" step="0.1" placeholder="mode default"></label>
-              <label class="field"><span>Drafts</span><input id="img-drafts" type="number" min="1" max="4" step="1" placeholder="mode default"></label>
-              <label class="field"><span>Sampler</span><select id="img-sampler"><option value="">Mode default</option><option>lcm</option><option>euler</option><option>euler_a</option><option>dpm++2m</option><option>ddim_trailing</option><option>tcd</option></select></label>
-            </div>
-            <label class="check"><input type="checkbox" id="img-ico"> Icon mode: also make 16–256 px sizes and an .ico</label>
+          <div class="img-row">
+            <label class="field"><span>Steps</span><input id="img-steps" type="number" min="1" max="100" step="1" placeholder="Auto"></label>
+            <label class="field"><span>Strength (CFG)</span><input id="img-cfg" type="number" min="0" max="30" step="0.1" placeholder="Auto"></label>
+            <label class="field"><span>Method</span><select id="img-sampler"><option value="">Auto</option><option value="lcm">Fast (lcm)</option><option value="euler">Quick (euler)</option><option value="euler_a">Balanced (euler a)</option><option value="dpm++2m">Detailed (dpm++ 2m)</option><option value="ddim_trailing">Smooth (ddim trailing)</option><option value="tcd">Few steps (tcd)</option></select></label>
+          </div>
+          <label class="check"><input type="checkbox" id="img-custom"> Custom style: no style words added, whatever Style says</label>
+          <label class="check"><input type="checkbox" id="img-ico"> Icon sizes: also make 16–256 px sizes and an .ico</label>
+          <details class="more-options" id="img-list-box">
+            <summary>Add a list to the queue: one picture per line</summary>
+            <label class="field"><span>Pictures, one per line</span><textarea id="img-list" rows="4" spellcheck="true" placeholder="a reading chair in a sunny room, photo&#10;an upright piano in a living room, photo 1200x800"></textarea></label>
+            <div class="img-tools"><button class="btn" type="button" id="img-list-go">Add to the queue</button><span class="hint" id="img-list-line"></span></div>
+            <p class="hint">Each line is drawn by the artist chosen above, on their PC, one after another, whole (not a draft). Each picture is kept in the gallery and put in the specialists\images folder of the project chosen beside Add to the queue. Size and mode come from each line, as when you press Draw.</p>
           </details>
+          <button class="img-link" type="button" id="img-adv-reset">Reset to defaults</button>
         </details>
       </form>
+      <section class="cs-panel draw-box" id="cs-panel" aria-label="Character sets" hidden>
+        <div id="cs-head"></div>
+        <p class="hint" id="cs-said" role="status" hidden></p>
+        <div id="cs-list"></div>
+        <div class="cs-editor" id="cs-editor" hidden></div>
+      </section>
 
       <div class="in-progress" id="img-progress" hidden>
         <div class="ip-frame" aria-hidden="true"><span class="ip-pct"></span></div>
@@ -1057,6 +1172,8 @@
           <div class="ip-row"><span class="p-text"></span><button class="btn" type="button" id="img-cancel" hidden>Cancel</button></div>
         </div>
       </div>
+      <!-- The other pictures being drawn on linked PCs at the same time, one line each (images.js drawAlso). -->
+      <div class="net-list img-also" id="img-also" aria-live="polite" hidden></div>
       <div class="fault" id="img-fault" hidden></div>
       <p class="hint img-lowdisk" id="img-lowdisk" role="status" hidden></p>
 
@@ -1081,6 +1198,8 @@
             <button class="g-shelf" type="button" data-shelf="gallery" aria-pressed="true">Gallery</button>
             <button class="g-shelf" type="button" data-shelf="drafts" aria-pressed="false">Drafts <span id="g-drafts"></span></button>
             <button class="g-shelf" type="button" data-shelf="all" aria-pressed="false">All</button>
+            <button class="g-shelf" type="button" data-shelf="videos" aria-pressed="false" title="Clips a Videographer made">Videos</button>
+            <button class="g-shelf" type="button" data-shelf="voice" aria-pressed="false" title="Voice-overs read aloud on this PC">Voice</button>
           </div>
           <div class="g-shelves" role="group" aria-label="Whose pictures">
             <button class="g-scope" type="button" data-scope="chat" aria-pressed="true" title="Only the pictures drawn in the chat open now">This chat</button>
@@ -1108,31 +1227,24 @@
     </div>
   </section>
 
-  <aside class="subjects" id="subjects" aria-label="Tools and staff overview">
+  <aside class="subjects" id="subjects" aria-label="Project, tools and office">
     <details class="subjects-fold" id="subjects-fold" open>
-      <summary class="subjects-sum" id="subjects-sum" title="Show tools and staff overview"><h2 id="subjects-title">Tools | Staff overview</h2><span class="hint subjects-now" id="subjects-now"></span><span class="subjects-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></span></summary>
-      <div class="side-tabs" role="tablist" aria-label="Tools and staff overview">
-        <button class="side-tab" type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="true">Tools</button>
+      <summary class="subjects-sum" id="subjects-sum" title="Show the project, tools and office"><h2 id="subjects-title">Project | Tools | Office</h2><span class="hint subjects-now" id="subjects-now"></span><span class="subjects-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></span></summary>
+      <div class="side-tabs" role="tablist" aria-label="Project, tools and office">
+        <button class="side-tab" type="button" role="tab" id="tab-project" aria-controls="panel-project" aria-selected="true">Project</button>
         <span class="side-tab-bar" aria-hidden="true">|</span>
-        <button class="side-tab" type="button" role="tab" id="tab-staff" aria-controls="panel-staff" aria-selected="false" tabindex="-1">Staff overview</button>
+        <button class="side-tab" type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1">Tools</button>
+        <span class="side-tab-bar" aria-hidden="true">|</span>
+        <button class="side-tab" type="button" role="tab" id="tab-staff" aria-controls="panel-staff" aria-selected="false" tabindex="-1">Office</button>
         <button class="btn quiet side-hide" type="button" id="subjects-hide" title="Hide this panel: the chat takes its room (the arrow brings it back)" aria-label="Hide this panel"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
+      <!-- The open chat's project: its chats by kind of work and person (projecttab.js). -->
+      <div class="side-panel side-project" role="tabpanel" id="panel-project" aria-labelledby="tab-project"></div>
       <div class="side-panel" role="tabpanel" id="panel-staff" aria-labelledby="tab-staff" hidden>
         <div class="office" data-office="chat"></div>
         <ul class="staff-overview" id="side-staff"></ul>
       </div>
-      <div class="side-panel" role="tabpanel" id="panel-tools" aria-labelledby="tab-tools">
-        <p class="hint subjects-with" id="subjects-with"></p>
-        <form class="subjects-new" id="subjects-new">
-          <div class="field">
-            <span class="field-head"><label for="subject-name">Subject name</label> <button class="info-bang" type="button" id="subject-info" aria-expanded="false" aria-controls="subject-info-text" title="What a subject is">!</button></span>
-            <p class="hint info-text" id="subject-info-text" hidden>A subject is one chat with this person, named for what it is about. Put it in a project and the files it saves go into that project's folder. E.g. project website, subject blog.</p>
-            <input id="subject-name" type="text" maxlength="80" autocomplete="off" required placeholder="e.g. blog photos">
-          </div>
-          <label class="field"><span>Project</span><select id="subject-project"></select></label>
-          <button class="btn primary" type="submit">Create new subject</button>
-        </form>
-        <p class="hint subjects-note" id="subjects-note" role="status" hidden></p>
+      <div class="side-panel" role="tabpanel" id="panel-tools" aria-labelledby="tab-tools" hidden>
           <details class="side-fold" id="scratch-fold" data-fold="scratch" open>
             <summary class="side-sum"><h2 id="scratch-title">Scratch pad</h2><span class="hint side-state" id="scratch-state" role="status"></span></summary>
             <div class="side-body">
@@ -1167,24 +1279,26 @@
               <p class="hint snippet-note" id="snippet-note" role="status" hidden></p>
             </div>
           </details>
-          <details class="side-fold" id="sitecheck-fold" data-fold="sitecheck">
-            <summary class="side-sum"><h2 id="sitecheck-title">Check a website</h2><span class="hint side-state" id="sitecheck-state"></span></summary>
-            <div class="side-body">
-              <form id="sitecheck-form" class="snippet-form">
-                <label class="field"><span>Address</span><input id="sitecheck-url" type="url" required maxlength="500" placeholder="https://example.com" autocomplete="off" spellcheck="false"></label>
-                <label class="field"><span>Pages at most</span><input id="sitecheck-pages" type="number" min="1" max="60" value="15"></label>
-                <label class="field"><span>Who reads the pages</span><select id="sitecheck-who"><option value="">The connected model</option></select></label>
-                <div class="snippet-btns">
-                  <button class="btn primary" type="submit" id="sitecheck-go" title="Reads the site's own pages one at a time, about every 1 to 5 seconds, and gives the model one page's words at a time">Check</button>
-                  <button class="btn" type="button" id="sitecheck-stop" hidden>Stop</button>
-                  <button class="btn" type="button" id="sitecheck-copy" hidden title="Copies the report as text">Copy report</button>
-                </div>
-              </form>
-              <p class="hint" id="sitecheck-words" role="status"></p>
-              <pre class="team-answer" id="sitecheck-report" hidden></pre>
-            </div>
-          </details>
       </div>
+      <!-- A Videographer's chat: their shot list in place of the tools (shots.js). -->
+      <section class="shot-list" id="shot-list" aria-labelledby="shot-title" hidden>
+        <div class="shot-bar">
+        <div class="shot-head">
+          <h2 id="shot-title">Shot list</h2>
+          <button class="btn quiet side-hide" type="button" id="shot-hide" title="Hide this panel: the chat takes its room (the arrow brings it back)" aria-label="Hide this panel"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+        </div>
+        <p class="shot-top" id="shot-top" role="status"></p>
+        <div class="shot-run" id="shot-run" role="toolbar" aria-label="Run the shot list"></div>
+        <p class="hint shot-said" id="shot-said" role="status" hidden></p>
+        </div>
+        <!-- The project this Videographer's chat is in, so its other chats are one press away (projecttab.js). -->
+        <details class="side-fold shot-project" id="shot-project" hidden>
+          <summary class="side-sum"><h2 id="shot-project-title">Project</h2></summary>
+          <div class="side-body side-project" id="shot-project-body"></div>
+        </details>
+        <ol class="shot-cards" id="shot-cards" aria-label="Shots in order"></ol>
+        <p class="hint shot-empty" id="shot-empty">No shots yet. Type what a shot shows in the box, pick its length, size and quality, then press "Add to the shot list". The list makes them one after another, so a long video is made while you are away.</p>
+      </section>
     </details>
   </aside>
 </main>
@@ -1203,6 +1317,42 @@
   <form method="dialog"><button class="btn" type="submit">Close</button></form>
 </dialog>
 
+<dialog id="clips-dlg" aria-labelledby="clips-dlg-title">
+  <h3 id="clips-dlg-title">Videos</h3>
+  <div class="g-head"><input class="g-search" id="clips-search" type="search" placeholder="Search prompts" aria-label="Search the clip prompts"></div>
+  <p class="hint clip-lowdisk" id="clips-dlg-lowdisk" role="status" hidden></p>
+  <div class="gallery clip-shelf" id="clips-list"></div>
+  <form method="dialog"><button class="btn" type="submit">Close</button></form>
+</dialog>
+
+<dialog id="voice-dlg" aria-labelledby="voice-dlg-title">
+  <h3 id="voice-dlg-title">Voice</h3>
+  <p class="hint">Type what to say. Each line is read in turn, with a pause between lines. It is read on this PC and kept as a WAV file. The voices speak American English.</p>
+  <div class="voice-get" id="voice-get" hidden></div>
+  <textarea id="voice-text" rows="4" maxlength="5000" spellcheck="true" placeholder="Type a line to read aloud" aria-label="Lines to read aloud"></textarea>
+  <div class="voice-row">
+    <label class="field"><span>Voice</span><select id="voice-pick"></select></label>
+    <label class="field"><span>Speed</span><select id="voice-speed"></select></label>
+    <button class="btn primary" type="button" id="voice-speak">Speak</button>
+  </div>
+  <p class="hint" id="voice-line" role="status"></p>
+  <div class="fault" id="voice-fault" role="alert" hidden></div>
+  <div class="voice-list" id="voice-list"></div>
+  <form method="dialog"><button class="btn" type="submit">Close</button></form>
+</dialog>
+
+<dialog id="clip-viewer" aria-label="Clip">
+  <div class="viewer-body">
+    <video id="clip-viewer-video" controls loop playsinline preload="metadata"></video>
+    <div class="viewer-side">
+      <dl id="clip-viewer-meta"></dl>
+      <div class="viewer-actions" id="clip-viewer-actions"></div>
+      <div class="fault" id="clip-viewer-fault" role="alert" hidden></div>
+    </div>
+  </div>
+  <form method="dialog"><button class="btn" type="submit">Close</button></form>
+</dialog>
+
 <dialog id="viewer" aria-label="Picture">
   <div class="viewer-body">
     <img id="viewer-img" alt="">
@@ -1217,23 +1367,23 @@
 <dialog id="applock-new" class="small-dlg" aria-labelledby="applock-new-title">
   <form class="help-body private-form" id="applock-new-form">
     <h2 id="applock-new-title">App lock</h2>
-    <p class="hint">Set a pin or a password. The app auto locks after <select id="applock-idle" aria-label="Minutes before the app locks by itself"></select> mins. It prevents someone using the pc from viewing work in progress.</p>
-    <p class="hint">It is also what must be typed on another PC to push an update to this one. In a cluster, the same pin on every PC makes updates fast: Update all linked PCs asks for it once.</p>
+    <p class="hint">Set a PIN or a password. The app auto locks after <select id="applock-idle" aria-label="Minutes before the app locks by itself"></select> mins. It stops someone using the PC from seeing work in progress.</p>
+    <p class="hint">It is also what must be typed on another PC to push an update to this one. In a cluster, the same PIN on every PC makes updates fast: Update all linked PCs asks for it once.</p>
     <div class="lock-kind" id="applock-kind" role="radiogroup" aria-label="Open TOMLIN with">
       <button type="button" role="radio" aria-checked="true" data-kind="pin">PIN</button>
       <button type="button" role="radio" aria-checked="false" data-kind="password">Password</button>
     </div>
     <div class="fault" id="applock-new-fault" role="alert" hidden></div>
-    <label class="field"><span id="applock-pin-label">Create a new pin</span><input id="applock-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <label class="field"><span id="applock-pin-label">Create a new PIN</span><input id="applock-pin" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
     <p class="hint lock-strength" id="applock-strength" role="status" hidden></p>
-    <label class="field"><span id="applock-pin2-label">Confirm pin</span><input id="applock-pin2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
+    <label class="field"><span id="applock-pin2-label">Confirm PIN</span><input id="applock-pin2" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="new-password" required></label>
     <p class="hint" id="applock-rule">4 to 12 digits.</p>
     <div class="team-actions" id="applock-gen-row" hidden><button class="btn quiet" type="button" id="applock-gen">Generate</button><span class="hint" id="applock-gen-words" role="status"></span></div>
-    <label class="check"><input type="checkbox" id="applock-agree" required> <span id="applock-agree-text">I confirm if I lose my pin I will be locked out</span></label>
-    <p class="hint">You get 10 recovery codes next: each one can set a new pin or password once if you forget it.</p>
-    <p class="applock-warn" role="note" id="applock-warn">WARNING, BY ENABLING THIS YOU NEED TO USE PIN TO LOGIN</p>
+    <label class="check"><input type="checkbox" id="applock-agree" required> <span id="applock-agree-text">I confirm if I lose my PIN I will be locked out</span></label>
+    <p class="hint">You get 10 recovery codes next: each one can set a new PIN or password once if you forget it.</p>
+    <p class="applock-warn" role="note" id="applock-warn">You will need this PIN (or a recovery code) to open TOMLIN.</p>
     <div class="team-actions">
-      <button class="btn primary" type="submit" id="applock-save">Save pin and lock</button>
+      <button class="btn primary" type="submit" id="applock-save">Save PIN and lock</button>
       <button class="btn" type="button" id="applock-cancel">Cancel</button>
     </div>
   </form>
@@ -1290,7 +1440,13 @@
   <form class="applock-card" id="applock-recover" hidden>
     <h1>Use a recovery code</h1>
     <div class="fault" id="applock-recover-fault" role="alert" hidden></div>
-    <label class="field"><span>Recovery code</span><input id="applock-code" type="text" autocomplete="off" spellcheck="false" maxlength="16" placeholder="XXXXX-XXXXX" required></label>
+    <div class="field"><span id="applock-code-label">Recovery code</span>
+      <div class="code-pair" role="group" aria-labelledby="applock-code-label">
+        <input id="applock-code-a" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="11" placeholder="XXXXX" aria-label="Recovery code, first five" required>
+        <span class="code-dash" aria-hidden="true">-</span>
+        <input id="applock-code-b" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="5" placeholder="XXXXX" aria-label="Recovery code, last five" required>
+      </div>
+    </div>
     <div class="lock-kind" id="applock-recover-kind" role="radiogroup" aria-label="Open TOMLIN with">
       <button type="button" role="radio" aria-checked="true" data-kind="pin">PIN</button>
       <button type="button" role="radio" aria-checked="false" data-kind="password">Password</button>
@@ -1379,8 +1535,7 @@
     <h2 id="node-pin-title">Type the app lock PIN</h2>
     <p class="hint" id="node-pin-about">This PC is a node: every change to it needs the PIN that opens TOMLIN, so whoever sits at it cannot change it.</p>
     <div class="fault" id="node-pin-fault" role="alert" hidden></div>
-    <label class="field"><span id="node-pin-label">PIN</span><input id="node-pin-input" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="off" aria-describedby="node-pin-either" required></label>
-    <p class="hint pin-either" id="node-pin-either" hidden><span class="info-mark" aria-hidden="true">!</span><span>You can use the node password or the admin password</span></p>
+    <label class="field"><span id="node-pin-label">PIN</span><input id="node-pin-input" type="password" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" autocomplete="off" required></label>
     <div class="team-actions">
       <button class="btn primary" type="submit" id="node-pin-ok">Apply the change</button>
       <button class="btn" type="button" id="node-pin-cancel">Cancel</button>
@@ -1388,21 +1543,6 @@
   </form>
 </dialog>
 
-<!-- The host PIN (Network, Linked PCs): set or changed here, then given to each linked PC once (home.js). -->
-<dialog id="host-pin-dlg" class="small-dlg" aria-labelledby="host-pin-title">
-  <form class="help-body private-form" id="host-pin-form">
-    <h2 id="host-pin-title">Set the host PIN</h2>
-    <p class="hint" id="host-pin-about">One PIN (or password) that updates, turns off or deletes a model on every linked PC that holds it, typed here once for all of them. Each PC takes it once with its own app lock PIN, takes it from this PC only, and keeps only a scrambled copy of it. This PC keeps only a scrambled copy too. Use 6 to 12 digits, or a password of 6 characters or more.</p>
-    <div class="fault" id="host-pin-fault" role="alert" hidden></div>
-    <label class="field" id="host-pin-now-row" hidden><span>Host PIN now</span><input id="host-pin-now" type="password" maxlength="256" autocomplete="current-password"></label>
-    <label class="field"><span>New host PIN or password</span><input id="host-pin-new" type="password" maxlength="256" autocomplete="new-password" required></label>
-    <label class="field"><span>The new one again</span><input id="host-pin-new2" type="password" maxlength="256" autocomplete="new-password" required></label>
-    <div class="team-actions">
-      <button class="btn primary" type="submit" id="host-pin-save">Save and give it to the linked PCs</button>
-      <button class="btn" type="button" id="host-pin-cancel">Cancel</button>
-    </div>
-  </form>
-</dialog>
 
 <!-- A person pressed in the left panel: a new chat with them on the left, their recent chats on the right (chats.js). -->
 <dialog id="person-chats" class="person-chats" aria-labelledby="person-chats-title">
@@ -1441,7 +1581,21 @@
 <dialog id="new-chat" aria-labelledby="new-chat-title">
   <div class="help-body">
     <h2 id="new-chat-title">New chat: who with?</h2>
-    <p class="hint">Each chat keeps its own messages and pictures.</p>
+    <details class="new-chat-where" id="new-chat-where">
+      <summary title="Which project this chat's work belongs to: what staff save goes into its folder. It can be changed later in the chat's top bar."><span id="new-chat-where-sum">Project: Default</span> <span class="link">Change</span></summary>
+      <div class="new-chat-where-body">
+        <label class="field new-chat-pfind" hidden><span>Search projects</span><input id="new-chat-psearch" type="search" autocomplete="off" placeholder="Project name or description"></label>
+        <ul class="new-chat-projects" id="new-chat-projects" aria-label="Projects"></ul>
+        <p class="hint" id="new-chat-pmore-row" hidden><button class="link" type="button" id="new-chat-pmore"></button></p>
+        <form class="new-chat-pnew" id="new-chat-pnew" hidden>
+          <label class="field"><span>Project name</span><input id="new-chat-pname" type="text" maxlength="80" autocomplete="off" required placeholder="e.g. Harbour Bakery"></label>
+          <label class="field" title="One line on what the project is for. It goes on the project's Scope card as its statement, which staff read before they work on it."><span>Mini description (optional)</span><input id="new-chat-pabout" type="text" maxlength="200" autocomplete="off" placeholder="e.g. a website for a small bakery"></label>
+          <div class="fault" id="new-chat-pfault" role="alert" hidden></div>
+          <div class="team-actions"><button class="btn primary" type="submit">Make the project</button><button class="btn" type="button" id="new-chat-pcancel">Cancel</button></div>
+        </form>
+      </div>
+    </details>
+    <p class="hint">Each chat keeps its own messages and pictures. It is named from your first message.</p>
     <div class="fault" id="new-chat-fault" role="alert" hidden></div>
     <label class="field new-chat-find"><span>Search staff</span><input id="new-chat-search" type="search" autocomplete="off" placeholder="Name, role or model"></label>
     <ul class="people-grid" id="new-chat-people"></ul>
@@ -1463,7 +1617,8 @@
 <dialog id="notebook" aria-labelledby="notebook-title">
   <div class="help-body">
     <h2 id="notebook-title">Memory</h2>
-    <p class="hint">Lines kept on this PC and read fresh before every answer. You write them: Add here, type "remember: ..." in a chat ("remember for the team: ..." for everyone), or press Pin under a message. A model may suggest a line; it is kept only if you press Save.</p>
+    <p class="hint">Lines kept on this PC and read fresh before every answer. You write them: Add here, type "remember: ..." in a chat ("remember for the team: ..." for everyone), or press Pin under a message. A model may suggest a line; it waits in that memory's Inbox until you keep it.</p>
+    <p><button class="btn" type="button" id="notebook-editor">Open the memory editor</button> <span class="hint">Groups, long entries, the whole file as text, and Open file in Notepad.</span></p>
     <div class="fault" id="notebook-fault" role="alert" hidden></div>
     <div id="notebook-body"></div>
     <details class="sub" id="reading-fold">
@@ -1478,9 +1633,10 @@
 <dialog id="project-new" aria-labelledby="project-new-title">
   <div class="help-body">
     <h2 id="project-new-title">New project</h2>
-    <p class="hint">A name is enough: this chat goes into it, and its chats are listed together under Recent chats. Its folder is made in the workspace; you can plan it in Jobs later.</p>
+    <p class="hint">A name is enough: this chat goes into it, and its chats are listed together under Recent chats. Its folder is made in the workspace.</p>
     <form id="project-new-form" class="prompt-save-form">
       <label class="field"><span>Project name</span><input id="project-new-name" type="text" maxlength="80" required autocomplete="off" placeholder="e.g. Harbour Bakery"></label>
+      <label class="field" title="One line on what the project is for. It goes on the project's Scope card as its statement, which staff read before they work on it."><span>Mini description (optional)</span><input id="project-new-about" type="text" maxlength="200" autocomplete="off" placeholder="e.g. a website for a small bakery"></label>
       <div class="fault" id="project-new-fault" role="alert" hidden></div>
       <div class="team-actions"><button class="btn primary" type="submit">Make it and put this chat in it</button><button class="btn" type="button" id="project-new-cancel">Cancel</button></div>
     </form>
@@ -1559,6 +1715,11 @@
       <label class="field grow"><span>Name</span><input id="chat-rename-text" type="text" maxlength="80" required autocomplete="off"></label>
       <button class="btn" type="submit">Save the name</button>
     </form>
+    <h3>The whole chat</h3>
+    <div class="menu-row">
+      <p class="hint">Save it as a text file in its project's folder (a chat in Default: its own chats folder), or copy it. Memory: what this person and the team remember.</p>
+      <div class="team-actions"><button class="btn" type="button" id="chat-menu-save">Save</button><button class="btn" type="button" id="chat-menu-copy">Copy</button><button class="btn" type="button" id="chat-menu-memory">Memory</button></div>
+    </div>
     <h3>Clear chat</h3>
     <div class="menu-row">
       <p class="hint">Erase all messages, but retain documents, chat log and images</p>
@@ -1896,10 +2057,15 @@
         </div>
         <div class="hs-models-head">
           <h3><span class="hs-step" aria-hidden="true">3</span><span id="hs-models-title">Choose a model</span></h3>
-          <p class="hint">Memory needed is an estimate (a chat model with an 8K context).</p>
+          <p class="hint" id="hs-models-hint">Memory needed is an estimate (a chat model with an 8K context).</p>
         </div>
         <div class="hs-tools" id="hs-tools"><input id="hs-search" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off"><button class="btn" type="button" id="hs-add-model">Add new</button></div>
         <div class="hs-models" id="hs-models"></div>
+        <div class="hs-styles" id="hs-styles-block" hidden>
+          <h3 id="hs-styles-title">Image styles</h3>
+          <p class="hint" id="hs-styles-line"></p>
+          <div class="hs-styles-list" id="hs-styles"></div>
+        </div>
         <div class="hs-all" id="hs-all-block" hidden>
           <div class="hs-all-head">
             <div><h3 id="hs-all-title">All models</h3><p class="hint" id="hs-all-line"></p></div>
@@ -1941,7 +2107,7 @@
     <div id="pc-body"></div>
     <div id="pc-ask" hidden></div>
     <p class="hint" id="pc-said" role="status" hidden></p>
-    <div class="team-actions"><button class="btn quiet" type="button" id="pc-more">Its settings (Network)</button></div>
+    <div class="team-actions"><button class="btn quiet" type="button" id="pc-more">This PC settings</button></div>
   </div>
 </dialog>
 
@@ -1962,8 +2128,16 @@
         <h3>Suggested to remove</h3>
         <ul id="cleanup-suggested" class="cleanup-list"></ul>
         <hr>
-        <h3>All installed</h3>
-        <ul id="cleanup-all" class="cleanup-list"></ul>
+        <div class="cleanup-all-head">
+          <h3>All installed</h3>
+          <div class="cleanup-kinds" role="group" aria-label="Show in All installed">
+            <button class="btn quiet" type="button" data-kinds="" aria-pressed="true">All</button>
+            <button class="btn quiet" type="button" data-kinds="standard" aria-pressed="false" title="Chat and code models">Standard</button>
+            <button class="btn quiet" type="button" data-kinds="images" aria-pressed="false" title="Picture models">Images</button>
+            <button class="btn quiet" type="button" data-kinds="video" aria-pressed="false" title="Video models">Video</button>
+          </div>
+        </div>
+        <div id="cleanup-all"></div>
       </section>
       <section class="cleanup-right" aria-label="Approved to remove">
         <h3>Approved to remove</h3>
@@ -2011,6 +2185,8 @@
       <form method="dialog"><button class="btn" type="submit">Close</button></form>
     </div>
     <p class="hint" id="net-said" role="status"></p>
+    <h3>Linked PCs</h3>
+    <div class="pcg" id="net-grid"></div>
     <div class="net-list" id="net-transfers" aria-live="polite"></div>
     <h3>Shared by linked PCs</h3>
     <div class="net-list" id="net-rows"></div>
@@ -2018,6 +2194,35 @@
     <p class="hint">You can backup and restore your project to nodes. Your backups are listed below:</p>
     <div class="net-list" id="net-kept"></div>
     <div class="net-list" id="net-backups"></div>
+  </div>
+</dialog>
+
+<!-- Update all and Fast update (home.js updateAllLinked): only the linked PCs and how each update goes (network.js). -->
+<!-- A project's page: its chats by kind of work, and its code, pictures, writing and videos from its folder (projectpage.js). -->
+<dialog id="pp-dlg" aria-labelledby="pp-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <div class="pp-head"><h2 id="pp-title">Project</h2><p class="hint" id="pp-about"></p></div>
+      <span class="pp-acts" id="pp-acts"></span>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <p class="hint fault" id="pp-said" role="status" hidden></p>
+    <div class="pp-cols">
+      <section aria-labelledby="pp-chats-title"><h3 id="pp-chats-title">Chats</h3><div id="pp-chats"></div></section>
+      <section aria-labelledby="pp-work-title"><h3 id="pp-work-title">Work</h3><div id="pp-work"></div></section>
+    </div>
+  </div>
+</dialog>
+<dialog id="upds-dlg" aria-labelledby="upds-title">
+  <div class="help-body">
+    <div class="dlg-top">
+      <h2 id="upds-title">Updating linked PCs</h2>
+      <form method="dialog"><button class="btn" type="submit">Close</button></form>
+    </div>
+    <p class="hint" id="upds-said" role="status"></p>
+    <h3>Linked PCs</h3>
+    <div class="pcg" id="upds-grid"></div>
+    <p class="hint upds-safe">Safe to close this page, the update continues in the background</p>
   </div>
 </dialog>
 
@@ -2075,7 +2280,9 @@
 <script src="finder.js"></script>
 <script src="runnercheck.js"></script>
 <script src="lock.js"></script>
+<script src="stylepick.js"></script>
 <script src="images.js"></script>
+<script src="charsets.js"></script>
 <script src="team.js"></script>
 <script src="files.js"></script>
 <script src="jobs.js"></script>
@@ -2084,6 +2291,11 @@
 <script src="netmap.js"></script>
 <script src="homeview.js"></script>
 <script src="chats.js"></script>
+<script src="clips.js"></script>
+<script src="voice.js"></script>
+<script src="shots.js"></script>
+<script src="projecttab.js"></script>
+<script src="projectpage.js"></script>
 <script src="sendto.js"></script>
 <script src="notes.js"></script>
 <script src="mute.js"></script>
@@ -2093,6 +2305,8 @@
 <script src="notify.js"></script>
 <script src="memory.js"></script>
 <script src="chatlog.js"></script>
+<script src="memorypage.js"></script>
+<script src="agents.js"></script>
 <script src="look.js"></script>
 <script src="faces.js"></script>
 <script src="banter.js"></script>
@@ -2104,6 +2318,7 @@
 <script src="keep.js"></script>
 <script src="backup.js"></script>
 <script src="claude.js"></script>
+<script src="pcgrid.js"></script>
 <script src="network.js"></script>
 <script src="owner.js"></script>
 <script src="modelmove.js"></script>
@@ -2112,7 +2327,7 @@
 <script src="hire.js"></script>
 <script src="queue.js"></script>
 <script src="todo.js"></script>
-<script src="sitecheck.js"></script>
 <script src="storage.js"></script>
+<script src="modelsdone.js"></script>
 </body>
 </html>

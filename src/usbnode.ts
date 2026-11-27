@@ -31,8 +31,11 @@ export interface StickConfig {
   version: string;
 }
 
-/** What a minted node may do at first, unless the admin unticks it at Mint: take models, be tested, lend, be turned off. */
-export const STICK_ALLOW: Allow = { pull: false, backup: false, update: false, tune: true, lend: true, receive: true, give: false, off: true };
+/**
+ * What a minted node may do at first, unless the admin unticks it at Mint: take models, be tested, lend, be turned off,
+ * and let the PCs its admin introduces connect to it directly (stick nodes copy models straight to each other).
+ */
+export const STICK_ALLOW: Allow = { pull: false, backup: false, update: false, tune: true, lend: true, receive: true, give: false, off: true, peer: true };
 
 /** A stick config made safe: null when it is not one (no key, or a newer format). */
 export function cleanStick(raw: unknown): StickConfig | null {

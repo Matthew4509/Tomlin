@@ -212,7 +212,26 @@ export async function allJobs(): Promise<Job[]> {
 }
 
 export async function listJobs() {
-  return (await allJobs()).map(job => ({ id: job.id, name: job.name ?? '', folder: job.folder ?? '', goal: job.goal, steps: job.steps.length, done: job.steps.filter(s => s.status === 'done').length, skipped: job.steps.filter(s => s.status === 'skipped').length, updated: job.updated, hidden: job.hidden === true }));
+  const good = (await allJobs()).map(job => ({ id: job.id, name: job.name ?? '', folder: job.folder ?? '', goal: job.goal, steps: job.steps.length, done: job.steps.filter(s => s.status === 'done').length, skipped: job.steps.filter(s => s.status === 'skipped').length, updated: job.updated, hidden: job.hidden === true, damaged: false }));
+  return [...good, ...(await damagedJobs())];
+}
+
+/**
+ * Jobs whose plan.json is there but cannot be read as a plan (cut short, edited by hand): listed, marked damaged and
+ * saying so, instead of dropped from every list without a word. Their name comes from project.json when it reads.
+ */
+async function damagedJobs() {
+  const root = await d.workspaceDir();
+  const out: { id: string; name: string; folder: string; goal: string; steps: number; done: number; skipped: number; updated: string; hidden: boolean; damaged: true }[] = [];
+  for (const [file, had] of plans) {
+    if (had.job) continue;
+    const id = file.split(sep).at(-2) ?? '';
+    if (!jobs.validId(id)) continue;
+    const p = await readFile(join(root, 'jobs', id, 'project.json'), 'utf8').then(t => JSON.parse(t) as Record<string, unknown>).catch(() => null);
+    const name = p && typeof p.name === 'string' ? p.name : '';
+    out.push({ id, name: name || `Project ${id}`, folder: p && typeof p.folder === 'string' ? p.folder : '', goal: `Its plan (jobs/${id}/plan.json) is damaged and cannot be read. Mend the file in a text editor, or take the folder out of the workspace.`, steps: 0, done: 0, skipped: 0, updated: new Date(had.mtimeMs).toISOString(), hidden: false, damaged: true });
+  }
+  return out;
 }
 
 /** The job folder's web files as they would be after saving `proposed`, for the cross-file check. */

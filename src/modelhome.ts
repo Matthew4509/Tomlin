@@ -440,6 +440,30 @@ export function filesToMove(from: string[]): MoveFile[] {
 const sizeOf = (path: string) => stat(path).then(s => s.size, () => -1);
 const busyCode = (e: unknown) => ['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '');
 
+/** True when the two files hold the same bytes (read side by side, a few MB at a time). */
+async function sameBytes(a: string, b: string): Promise<boolean> {
+  const fa = await open(a, 'r');
+  try {
+    const fb = await open(b, 'r');
+    try {
+      const size = 4 * 1024 * 1024;
+      const ba = Buffer.alloc(size);
+      const bb = Buffer.alloc(size);
+      for (let at = 0; ; ) {
+        const [ra, rb] = await Promise.all([fa.read(ba, 0, size, at), fb.read(bb, 0, size, at)]);
+        if (ra.bytesRead !== rb.bytesRead) return false;
+        if (!ra.bytesRead) return true;
+        if (!ba.subarray(0, ra.bytesRead).equals(bb.subarray(0, rb.bytesRead))) return false;
+        at += ra.bytesRead;
+      }
+    } finally {
+      await fb.close();
+    }
+  } finally {
+    await fa.close();
+  }
+}
+
 /** False when another program holds the file (a loaded model): Windows then refuses to open it for writing. */
 async function freeToMove(path: string): Promise<boolean> {
   try {
@@ -498,7 +522,9 @@ export async function moveFiles(files: MoveFile[], to: string, o: MoveOptions = 
       continue;
     }
     const there = await sizeOf(dest);
-    if (there >= 0 && there !== f.bytes) {
+    // The same name and size is not the same file (another revision of a model can be as big): only a file whose bytes
+    // match is counted as already moved; any other is a different file and this one stays where it is.
+    if (there >= 0 && (there !== f.bytes || !(await sameBytes(f.path, dest).catch(() => false)))) {
       skip(f, 'a different file of that name is already in the new folder');
       continue;
     }

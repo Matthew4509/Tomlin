@@ -229,3 +229,21 @@ test('a save of the chat list that fails (a full disk) never lets a change made 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('an unnamed chat is called Untitled chat, not New chat (the button\'s name); one kept as New chat reads as unnamed', async () => {
+  assert.equal(NEW_TITLE, 'Untitled chat');
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Store } = await import('../src/store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'tomlin-untitled-'));
+  try {
+    const store = new Store(dir);
+    await store.writeJson('chats/index.json', [{ id: 'a'.repeat(12), who: 'manager', title: 'New chat', created: 't0', updated: 't0', messages: 0 }, { id: 'b'.repeat(12), who: 'manager', title: 'New chat', named: true, created: 't0', updated: 't0', messages: 0 }]);
+    const list = await new Chats(store).list();
+    assert.equal(list.find(c => c.id === 'a'.repeat(12))?.title, 'Untitled chat');
+    assert.equal(list.find(c => c.id === 'b'.repeat(12))?.title, 'New chat', 'a chat named New chat on purpose keeps it');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -143,8 +143,8 @@ function bySpeed(all: Holder[], total: number, read: number): number {
 /**
  * `listed`: the host runner's devices with every lender connected; `lenders`: as maxLoad gave them (same order as --rpc),
  * with each one's speed figures when its hello sent them; `host`: this PC's free RAM now, the cards it is set to use and
- * its own speed figures. A plan, or `{ why }` (the usual fit stays: the devices could not be read, or this PC has no
- * card), or `{ why, refuse: true }` (the model does not fit the PCs' free memory without leaving one under the 2 GB
+ * its own speed figures. A plan (with no card here, the lenders and this PC's processor only), or `{ why }` (the
+ * devices could not be read: the caller then loads without the lenders), or `{ why, refuse: true }` (the model does not fit the PCs' free memory without leaving one under the 2 GB
  * floor: the load must not start).
  */
 export function planLayers(m: WholeModel, listed: Listed[], lenders: Lender[], host: { free: number; cards?: string[]; speed?: Speeds | null }): SplitPlan | { why: string; refuse?: true } {
@@ -154,8 +154,9 @@ export function planLayers(m: WholeModel, listed: Listed[], lenders: Lender[], h
   const rpcDevs = listed.filter(x => /^RPC\d+$/.test(x.name));
   if (!rpcDevs.length) return { why: 'the lending PCs\' devices could not be listed' };
   const cards = listed.filter(x => !/^(RPC\d+|CPU)$/.test(x.name));
+  // No card of this PC's in the runner's list (a PC with no card, or its cards held out): the layers go to the lenders
+  // and this PC's processor only, each lender still kept to the RAM policy (llama.cpp's own fit ignores it).
   const hostCards = host.cards?.length ? cards.filter(x => host.cards!.includes(x.name)) : cards.slice(0, 1);
-  if (!hostCards.length) return { why: 'this PC has no graphics card to start from' };
 
   const rate = (s: Speeds | null | undefined, ram: boolean) => (s ? Math.max(0, Number(ram ? s.ram : s.card) || 0) : 0);
   const holders: Holder[] = [];

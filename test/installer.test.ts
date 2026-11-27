@@ -189,8 +189,12 @@ test('a program on the port is called TOMLIN only when its /api/status says so; 
 
 test('old copies: the one in use and the one before stay; earlier ones go', () => {
   const names = ['tomlin-2.0.31', 'tomlin-2.0.34', 'tomlin-2.0.33', 'tomlin-2.0.32', 'icon.ico', 'Smart Manager.exe', 'current.txt', 'tomlin-2.0.34 (2)', 'tomlin-notes', 'tomlin-2'];
-  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34 (2)').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.33']);
-  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.33']);
+  // A copy of the same version as the one in use is kept for going back only when no other version is there (it may
+  // be an install cut off part way and run again: audit-install U-01): the older version stays.
+  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34 (2)').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.34']);
+  assert.deepEqual(inst.copiesToRemove(names, 'tomlin-2.0.34').sort(), ['tomlin-2.0.31', 'tomlin-2.0.32', 'tomlin-2.0.34 (2)']);
+  // A reinstall of the one version: the copy before it is the one kept.
+  assert.deepEqual(inst.copiesToRemove(['tomlin-2.0.34', 'tomlin-2.0.34 (2)'], 'tomlin-2.0.34 (2)'), []);
   assert.deepEqual(inst.copiesToRemove(['tomlin-2.0.33', 'tomlin-2.0.34'], 'tomlin-2.0.34'), []);
 });
 

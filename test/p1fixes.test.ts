@@ -91,7 +91,9 @@ test('the old-runner note compares with the runner picked for the model now, not
 test('the tray ends TOMLIN when the Windows session ends, not when Windows only asks whether it may', () => {
   const tray = read('tools/tray.cs');
   assert.match(tray, /SystemEvents\.SessionEnded \+= delegate \(object s, Microsoft\.Win32\.SessionEndedEventArgs e\)/);
-  assert.doesNotMatch(tray, /SessionEnding \+=/);
+  // SessionEnding only notes the time (so an end then is not restarted as a fault); it never ends TOMLIN.
+  assert.match(tray, /SessionEnding \+= delegate \{ sessionEndingAt = DateTime\.Now; \};/);
+  assert.equal((tray.match(/SessionEnding \+=/g) ?? []).length, 1);
 });
 
 test('uninstall from the setup window runs from outside the install folder and waits for files to be let go', () => {

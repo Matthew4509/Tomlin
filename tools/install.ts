@@ -20,6 +20,7 @@ import * as inst from '../src/installer.ts';
 import { appFiles, newFolder } from '../src/update.ts';
 import { OLD_STARTUP_FILES, STARTUP_FILE, startupDir, startupFileIn, writeStartup } from '../src/autostart.ts';
 import { STAMP, traySum } from '../src/trayfresh.ts';
+import { writeAtomic } from '../src/atomic.ts';
 import { OLD_RULE_NAMES, RULE_NAME } from '../src/firewall.ts';
 import { resolveHome } from '../src/keep.ts';
 import { RUNNER_WORDS, systemDir, VCRT_URL, vcrtMissing, vcrtTooOld } from '../src/vcrt.ts';
@@ -302,7 +303,8 @@ async function install() {
     await writeFile(join(P.root, STAMP), await traySum(dest));
   });
   const name = dest.slice(P.root.length).replace(/^[\\/]+/, '');
-  await step(`point current.txt at ${name}`, () => writeFile(join(P.root, inst.CURRENT), name));
+  // Written beside it and swapped in, so a kill or a power cut leaves the old current.txt whole, never an empty one.
+  await step(`point current.txt at ${name}`, () => writeAtomic(join(P.root, inst.CURRENT), name));
   await step('remember the install folder', writeLocation);
 
   // Shortcuts: the Start menu always; the desktop if wanted.
@@ -354,9 +356,17 @@ async function install() {
     });
   }
 
-  // Older copies: the one before stays for going back; earlier ones go.
+  // Older copies: the newest whole one before stays for going back; earlier ones, and one cut off part way, go.
   const names = existsSync(P.root) ? readdirSync(P.root) : [];
-  for (const old of inst.copiesToRemove(names, name)) await step(`remove the old copy ${old}`, () => rm(join(P.root, old), { recursive: true, force: true }));
+  for (const old of inst.copiesToRemove(names, name, n => inst.wholeCopy(join(P.root, n)))) {
+    // Models kept inside an older copy are used in place (src/oldcopies.ts), as the start-time sweep knows: that copy
+    // stays until they are moved.
+    if (inst.holdsModels(join(P.root, old))) {
+      say(`The old copy ${old} is kept: it still holds models TOMLIN uses there. Move them (Models, Storage) and it goes.`);
+      continue;
+    }
+    await step(`remove the old copy ${old}`, () => rm(join(P.root, old), { recursive: true, force: true }));
+  }
 
   say();
   say(`TOMLIN ${version} is installed in ${P.root}.`);

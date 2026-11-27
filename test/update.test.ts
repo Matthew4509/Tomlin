@@ -502,7 +502,7 @@ test('a PC gives only its own app files, read-only and behind its own tick; noth
   const g = await aGiver({ allowed: false });
   const refused = await g.give('/worker/update-list', {});
   assert.equal(refused.status, 403);
-  assert.match(errorOf(refused), /"Big PC" does not let linked PCs pull TOMLIN updates from it \(its owner ticks "Let linked PCs pull TOMLIN updates from here" under Network\)/);
+  assert.match(errorOf(refused), /"Big PC" does not let linked PCs pull TOMLIN updates from it \(its owner ticks "Let linked PCs pull TOMLIN updates from here" on This PC\)/);
   assert.equal((await g.give('/worker/update-get', { version: '2.0.33', build: g.own, path: 'src/server.ts', from: 0 })).status, 403);
   g.allow(true);
   const list = await g.give('/worker/update-list', {});

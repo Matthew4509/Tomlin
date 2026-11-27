@@ -1,4 +1,4 @@
-// Coding tools for a chat whose folder is on the person's coding list (Settings, Permissions): git_read reads a
+// Coding tools for a chat whose folder is on the person's coding list (Settings, Chat permissions): git_read reads a
 // repository with a fixed set of verbs, and run_command runs one of a few NAMED commands (test, build, lint,
 // typecheck from the project's package.json, plus lines the person wrote). There is no free shell here: nothing a
 // model writes becomes a command line. All in code, tested in test/codetools.test.ts with a made-up runner:
@@ -7,6 +7,7 @@
 //   data are never read; what comes back is withheld when it looks like a key or a password.
 // - run: without a shell, in the folder, with a time limit that ends the whole process tree, output capped, one at a
 //   time, with an environment that holds no key, token or password and that cannot sign in to push.
+import { pendingWhy } from './modelsaved.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -97,8 +98,40 @@ export function secretPath(path: string): boolean {
   return parts.includes('.ssh') || parts.includes('.gnupg') || parts[0] === 'data';
 }
 
-/** The whole git command for a verb and the model's arguments, or why not. Fixed words go first; nothing of the model's is an option git would act on. */
-export function gitArgs(verb: unknown, raw: unknown): { argv: string[] } | { error: string } {
+/** Verbs whose output a path list after "--" limits to those paths. */
+const PATH_LIMITED = new Set<GitVerb>(['status', 'diff', 'log', 'show', 'ls-files']);
+
+/**
+ * A folder that is a sub-folder of a larger repository: git reads the whole repository from there, so a revision's path
+ * ("HEAD:file") is read from the folder ("HEAD:./file"), the top-of-repository forms (":/file", ":(top)", ":file") are
+ * refused, and what git shows is limited to the folder (a "--" path list, "." when none was given). `isPath` tells a
+ * word that names a file or folder there from a revision, so "log --follow index.html" stays a path.
+ */
+function inFolder(v: GitVerb, out: string[], isPath: (word: string) => boolean): { argv: string[] } | { error: string } {
+  const dash = out.indexOf('--');
+  const words: string[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const a = out[i];
+    if (a.startsWith('-')) {
+      words.push(a);
+      continue;
+    }
+    // ":/file", ":(top)", ":file", a path after "--" with a colon in it, and "HEAD^{tree}" (the top folder's list).
+    if (a.startsWith(':') || (dash >= 0 && i > dash && a.includes(':')) || (!a.includes(':') && /\^\{\s*(tree|blob|object)\s*\}$/.test(a))) return { error: `"${a.slice(0, 60)}" names a place at the top of the repository, outside the folder you work in.` };
+    const m = /^([^:]+):(.*)$/.exec(a);
+    words.push(m ? `${m[1]}:${m[2].startsWith('./') ? m[2] : `./${m[2]}`}` : a);
+  }
+  if (!PATH_LIMITED.has(v)) return { argv: words };
+  if (dash >= 0) return { argv: dash === words.length - 1 ? [...words, '.'] : words };
+  const first = words.findIndex(w => !w.startsWith('-') && !w.includes(':') && isPath(w));
+  return { argv: first >= 0 ? [...words.slice(0, first), '--', ...words.slice(first)] : [...words, '--', '.'] };
+}
+
+/**
+ * The whole git command for a verb and the model's arguments, or why not. Fixed words go first; nothing of the model's
+ * is an option git would act on. `sub` is given when the folder is a sub-folder of a larger repository (see inFolder).
+ */
+export function gitArgs(verb: unknown, raw: unknown, sub?: { isPath: (word: string) => boolean }): { argv: string[] } | { error: string } {
   if (!(GIT_VERBS as readonly unknown[]).includes(verb)) return { error: `git_read reads only: ${GIT_VERBS.join(', ')}. Nothing that writes (commit, push, tag, reset, checkout, clean, remote, config) can be run.` };
   const v = verb as GitVerb;
   const args = raw === undefined || raw === null ? [] : raw;
@@ -129,7 +162,18 @@ export function gitArgs(verb: unknown, raw: unknown): { argv: string[] } | { err
     return { argv: ['--no-pager', '--no-optional-locks', 'branch', '--list', ...out.filter(a => a !== '--')] };
   }
   const safe = v === 'diff' || v === 'show' || v === 'log' ? ['--no-ext-diff', '--no-textconv'] : [];
-  return { argv: ['--no-pager', '--no-optional-locks', v, ...safe, ...out] };
+  const scoped = sub ? inFolder(v, out, sub.isPath) : { argv: out };
+  if ('error' in scoped) return scoped;
+  return { argv: ['--no-pager', '--no-optional-locks', v, ...safe, ...scoped.argv] };
+}
+
+/**
+ * Whether `root` is a sub-folder of a larger git repository (git's own answer, "--show-prefix" is not empty). Asked of
+ * git itself, not of a made-up runner a test gives. False when git is not there or the folder is not in a repository.
+ */
+export async function subOfRepo(root: string): Promise<boolean> {
+  const r = await runProgram('git', ['--no-pager', 'rev-parse', '--show-prefix'], { cwd: root, env: codeEnv(), timeoutMs: 10_000, maxChars: 4000, shell: false }).catch(() => null);
+  return !!r && r.code === 0 && !r.timedOut && r.out.trim().length > 0;
 }
 
 /** The environment git and a named command get: no key, token or password, and no way to sign in (a push cannot authenticate). */
@@ -230,6 +274,11 @@ export interface CodeTurnOpts {
    * orders, or saved files in the folder that the command may run.
    */
   mustAsk?: () => string;
+  /**
+   * Files a model saved in folders, across answers (src/modelsaved.ts): while this folder holds any, a run asks every
+   * time, naming them, whatever the tier; the person's yes clears them.
+   */
+  since?: { pending(folder: string): string[]; clear(folder: string): void };
   exec?: Exec;
   log?: (e: CodeLog) => void;
   timeoutMs?: number;
@@ -283,7 +332,8 @@ export class CodeTurn {
       return 'The call could not be read: its arguments are not JSON.';
     }
     if (name === 'git_read') {
-      const g = gitArgs(a.verb, a.args);
+      const root = this.o.root;
+      const g = gitArgs(a.verb, a.args, (await subOfRepo(root)) ? { isPath: w => existsSync(join(root, w)) } : undefined);
       const shown = `git ${String(a.verb ?? '').slice(0, 20)} ${(Array.isArray(a.args) ? a.args : []).join(' ')}`.trim();
       if ('error' in g) return done('git_read', false, shown, g.error.split('.')[0], `Not read: ${g.error}`);
       const r = await exec('git', g.argv, { cwd: this.o.root, env: codeEnv(), timeoutMs: 30_000, maxChars: Math.max(this.o.perCall * 2, 8000) });
@@ -294,18 +344,20 @@ export class CodeTurn {
     }
     if (name === 'run_command') {
       const asked = String(a.name ?? '').trim().toLowerCase();
-      if (this.o.run === 'never') return done('run_command', false, asked, 'turned off', 'Not run: running commands is turned off (Settings, Permissions).');
+      if (this.o.run === 'never') return done('run_command', false, asked, 'turned off', 'Not run: running commands is turned off (Settings, Chat permissions).');
       const list = await namedCommands(this.o.root, this.o.extra);
       const cmd = list.find(c => c.name === asked);
       if (!cmd) return done('run_command', false, asked.slice(0, 60), 'no such name', `Not run: there is no command named "${asked.slice(0, 40)}" here. ${list.length ? `The names are: ${list.map(c => c.name).join(', ')}.` : 'This folder has no named commands.'} You cannot write a command line.`);
       // Allowed runs with no card only while nothing in this answer could have changed what it runs.
-      const why = [this.o.mustAsk?.() ?? '', (await scriptsOf(this.o.root)) !== (await this.before) ? 'the scripts in package.json changed during this answer' : ''].filter(Boolean).join('; ');
+      const why = [this.o.mustAsk?.() ?? '', (await scriptsOf(this.o.root)) !== (await this.before) ? 'the scripts in package.json changed during this answer' : '', pendingWhy(this.o.since?.pending(this.o.root) ?? [], this.o.root)].filter(Boolean).join('; ');
       if (this.o.run === 'each' || why) {
         const t = now();
         const detail = why ? `${cmd.shown}\n\nAsked${this.o.run === 'allowed' ? ' although Run is Allowed' : ''}: ${why}.` : cmd.shown;
         const yes = this.o.confirm ? await this.o.confirm(`run "${cmd.name}" in ${basename(this.o.root)}`, { detail }).catch(() => false) : false;
         waited = now() - t;
         if (!yes) return done('run_command', false, cmd.name, 'not allowed', deniedWords('run'));
+        // The person saw the card naming the files a model saved here: they are theirs to run from now on.
+        this.o.since?.clear(this.o.root);
       }
       if (this.running) return done('run_command', false, cmd.name, 'one at a time', 'Not run: another command is still running. One at a time.');
       this.running = true;

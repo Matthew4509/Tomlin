@@ -48,7 +48,7 @@ export interface Item {
 export interface Check { every: Every; next: string; name: string }
 export interface Settings { dayHours: number; checksPerDay: 1 | 2; doneShow: DoneShow }
 export interface State { items: Item[]; checks: Record<string, Check>; settings: Settings }
-export type Result = { ok: true; item?: Item; check?: Check | null; settings?: Settings } | { ok: false; fault: string; reason: string; wayOut: string };
+export type Result = { ok: true; item?: Item; check?: Check | null; settings?: Settings } | { ok: false; fault: string; reason: string; wayOut: string; changed?: true };
 
 const DEFAULT_SETTINGS: Settings = { dayHours: 8, checksPerDay: 1, doneShow: 'week' };
 
@@ -132,9 +132,16 @@ export function add(s: State, o: AddAsk, today: string): Result {
 }
 
 /** Change a row's size or note. */
-export function set(s: State, id: unknown, o: { size?: unknown; note?: unknown }): Result {
+/**
+ * Change a row's size or note. `was`: the note the window showed; when the row no longer holds it (another window
+ * changed it since), nothing is saved and the answer says so, so neither change is lost without a word.
+ */
+export function set(s: State, id: unknown, o: { size?: unknown; note?: unknown; was?: unknown }): Result {
   const it = findItem(s, id);
   if (!it) return gone();
+  if (typeof o.was === 'string' && cleanText(o.was, NOTE_MAX) !== it.note) {
+    return { ...fault('That note was changed in another window since you opened it.', `It now says: "${it.note}".`, 'Your change was not saved: open the note again and make your change there.'), changed: true } as Result;
+  }
   if (o.size !== undefined) {
     if (!SIZES.includes(Number(o.size))) return fault('That is not one of the sizes.', 'Quick (15 min), 1 h, 2 h, 4 h or 8 h.');
     it.size = Number(o.size);
@@ -310,7 +317,7 @@ export class TodoStore {
     return v;
   }
   add(o: AddAsk) { return this.act((s, t) => add(s, o, t)); }
-  set(id: unknown, o: { size?: unknown; note?: unknown }) { return this.act(s => set(s, id, o)); }
+  set(id: unknown, o: { size?: unknown; note?: unknown; was?: unknown }) { return this.act(s => set(s, id, o)); }
   move(id: unknown, zone: unknown, before: unknown) { return this.act((s, t) => move(s, id, zone, before, t)); }
   done(id: unknown, on: boolean) { return this.act((s, t) => done(s, id, on, t)); }
   remove(id: unknown) { return this.act((s, t) => remove(s, id, t)); }

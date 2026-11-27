@@ -5,7 +5,8 @@ import { freeOn, pictureRoomLine } from './lowdisk.ts';
 import { driveOf } from './cleanup.ts';
 import { request, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomInt } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { Pane, type ConnectRequest } from './pane.ts';
 import type { Asked } from './worker.ts';
@@ -25,6 +26,9 @@ import { subjectMask } from './rembg.ts';
 import { checkMessage, REFUSAL } from './filter.ts';
 import { RUNNER_FILE_HELP, RUNNER_FILE_LINE, VCRT_HELP, vcrtFault } from './vcrt.ts';
 import type { ImageSource, Made } from './sources.ts';
+import { PROMPT_MOST, PROMPT_TYPED_MOST } from './cards.ts';
+import { isSeed as isSeedAsked, seedWhy } from './drawrefs.ts';
+import { pickedStyle, presetOf } from './styles.ts';
 
 /** Told when a picture model finished a picture (the server keeps its last-used time, src/lastused.ts). */
 export const drawings: { drawn: ((model: string) => void) | null } = { drawn: null };
@@ -36,7 +40,18 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export interface GenerateOptions {
   prompt: string;
   negative?: string;
+  /** Hidden "leave out" words dropped by where they come from (the artist's recipe, the style, a portrait, the model). */
+  negativeOff?: NegativeSource[];
+  /** Hidden "leave out" words dropped one by one, whichever source adds them (the typed words are never touched). */
+  negativeDrop?: string[];
   mode?: Mode | 'auto';
+  /**
+   * The style picked (src/styles.ts): its words in place of its mode's. An artist whose way of working sets the mode
+   * keeps theirs, as with the mode. The four styles that are a mode's own draw exactly as that mode.
+   */
+  look?: string;
+  /** Drawn without the artist's way of working (a style sample: only the style changes from one sample to the next). */
+  plain?: boolean;
   /** Draft (small, several to pick from), Mid (the model's own size) or High (its largest): src/quality.ts. */
   quality?: Quality;
   width?: number;
@@ -59,6 +74,8 @@ export interface GenerateOptions {
   as?: string;
   /** The chat the picture belongs to (src/chats.ts). Pictures from the page take the chat open at the time. */
   chat?: string;
+  /** The queue line's request id it is drawn for, written on the picture so a restart collects it (src/gallery.ts). */
+  queued?: string;
   /**
    * Drawn for a linked PC (F7 E2): its name. The picture is made in memory and handed over (takeAway): it never enters
    * the gallery or its folder, and this pane shows only "Drawing for <that PC>".
@@ -75,6 +92,16 @@ export interface GenerateOptions {
    * can (src/quality.ts askedDrawSize), not at the quality's smaller one, and said in words when it cannot.
    */
   exactSize?: boolean;
+  /**
+   * Reference pictures (full paths), the characters and locations named with @Name (src/server/cards.ts): given to a
+   * model that takes them (its card's `refs`), as many as it takes; another model draws from the words alone.
+   */
+  refs?: string[];
+  /**
+   * Reference pictures sent by a linked PC with its picture (src/drawrefs.ts), as base64 PNG: that PC has the project, so
+   * this one has no files to read. Used in place of `refs`, as many as the model takes; never kept with a picture here.
+   */
+  refData?: string[];
 }
 
 interface Job {
@@ -98,6 +125,8 @@ interface Job {
   note: string | null;
   /** Said when the size asked is more than the model draws (src/quality.ts shortSizeWords). */
   sizeNote?: string;
+  /** The style its words came from (src/styles.ts), when one picked by hand was used (a final keeps its draft's). */
+  style?: string;
   done: Promise<void>;
 }
 
@@ -157,8 +186,9 @@ export class Images {
   readonly gallery: Gallery;
   recipe: ((id: string) => { mode?: Mode; boost: string; negative: string; drafts: number } | null) | null = null;
   askChat: ((system: string, message: string, maxTokens?: number) => Promise<string>) | null = null;
-  /** Told when a picture is kept (added to the gallery): one kept in a project's chat is handed in to it (src/server/places.ts). */
-  onKept: ((p: Picture, file: string | null) => Promise<void>) | null = null;
+  /** Told when a picture is kept (added to the gallery): one kept in a project's chat is handed in to it (src/server/places.ts),
+   * which says where it went or why not (null: its chat is in no project). */
+  onKept: ((p: Picture, file: string | null) => Promise<unknown>) | null = null;
   private deps: ImagesDeps;
   private decoder: Decoder = 'fast';
   /** The sharpener's folder the picture runner was started with (--hires-upscalers-dir), or '' when it was not there. */
@@ -243,6 +273,17 @@ export class Images {
     return pictureRoom({ cardTotal: total, heldByOthers: held, need: pictureCardNeed(this.registry.bytes(m), m.native ?? 512, total) });
   }
 
+  /**
+   * Why this PC's card is too small for the model to try it first (below its cpuBelowGB: a size it is known to run out
+   * on part-way), or null: then the card is tried as usual, offloading to RAM when it is short.
+   */
+  private smallCard(m: RegistryModel): string | null {
+    const card = this.card();
+    if (!card?.total || !m.cpuBelowGB) return null;
+    const gb = card.total / GB;
+    return gb < m.cpuBelowGB ? `${m.name.replace(/\s*\(.*\)$/, '')} needs a graphics card with ${m.cpuBelowGB} GB or more; ${card.name ?? 'this card'} has ${gb.toFixed(1)} GB, so it draws on the CPU from the start (slower, but a card this small runs out part-way).` : null;
+  }
+
   /** Will this model run on this PC at all? (The free-memory check at Connect is separate.) */
   private hardwareFit(m: RegistryModel): { level: 'ok' | 'slow' | 'no'; text: string } {
     const hw = this.deps.hardware;
@@ -272,6 +313,11 @@ export class Images {
     if (path('model')) args.push('-m', path('model')!);
     if (path('diffusion')) args.push('--diffusion-model', path('diffusion')!);
     if (path('llm')) args.push('--llm', path('llm')!);
+    // The text encoder's vision part, which reads the reference pictures (Qwen-Image-Edit with a GGUF text encoder).
+    if (path('llm_vision')) args.push('--llm_vision', path('llm_vision')!);
+    // FLUX.1's two text encoders (FLUX.2, Qwen-Image and Z-Image read the prompt with one LLM instead).
+    if (path('clip_l')) args.push('--clip_l', path('clip_l')!);
+    if (path('t5xxl')) args.push('--t5xxl', path('t5xxl')!);
     if (path('vae')) args.push('--vae', path('vae')!);
     if (decoder === 'fast' && path('taesd')) args.push('--taesd', path('taesd')!);
     if (device !== 'cpu' && (this.forceOffload || this.overCard(m))) args.push(...OFFLOAD);
@@ -282,7 +328,7 @@ export class Images {
     this.upscalerDir = up ? dirname(up.path) : '';
     if (up) args.push('--hires-upscalers-dir', this.upscalerDir);
     // Every weight is read at Connect (not on the first picture), so the memory shown is what the model really holds.
-    args.push('--eager-load', ...(m.args ?? []), '--listen-ip', '127.0.0.1', '--listen-port', String(port), '-t', String(threads > 0 ? threads : -1));
+    args.push('--eager-load', ...(m.args ?? []), '--listen-ip', '127.0.0.1', '--listen-port', String(port), '-t', String(threads > 0 ? threads : pictureThreads()));
     return args;
   }
 
@@ -300,7 +346,13 @@ export class Images {
     const decoder = this.decoder;
     // The CUDA picture runner's own list first: one that lists no card is skipped by devicesFor.
     if (!devices && asked !== 'cpu') await this.deps.sdDevice?.('cuda');
-    const tried = devices ?? this.deps.devicesFor('sd', asked);
+    // Auto with a card smaller than the model is known to run out on (its cpuBelowGB): straight to the CPU, said why. On a 4 GB card
+    // RealVisXL sat 3 minutes at step 0 and then ran out of memory part-way (P4, 26 Nov), so trying the card first only
+    // costs time. Asking for the card (gpu) still tries it.
+    const small = this.smallCard(m);
+    // The CPU only when its picture runner is here (devicesFor leaves out one that is not): otherwise Auto as usual.
+    const cpuOnly = small && asked === 'auto' && !devices ? this.deps.devicesFor('sd', 'cpu') : [];
+    const tried = devices ?? (cpuOnly.length ? cpuOnly : this.deps.devicesFor('sd', asked));
     const backends = new Map<Device, string | null>();
     for (const d of tried) backends.set(d, d === 'cpu' ? null : ((await this.deps.sdDevice?.(d)) ?? null));
     const req: ConnectRequest = {
@@ -310,7 +362,7 @@ export class Images {
       threads,
       devices: tried,
       // A card in compute-only mode (TCC) that the CUDA picture runner cannot use either (a Tesla P100) is said too.
-      note: note ?? ((asked !== 'cpu' ? [missingCardRunner('sd', this.deps.hardware.gpus, d => this.deps.runtimes.installed('sd', d)), tccNote(this.deps.hardware.gpus, tried.includes('cuda'), 'pictures')].filter(Boolean).join(' ') : '') || undefined),
+      note: note ?? (cpuOnly.length && small ? small : undefined) ?? ((asked !== 'cpu' ? [missingCardRunner('sd', this.deps.hardware.gpus, d => this.deps.runtimes.installed('sd', d)), tccNote(this.deps.hardware.gpus, tried.includes('cuda'), 'pictures')].filter(Boolean).join(' ') : '') || undefined),
       expectedSeconds: s.loadSeconds[`image:${id}`] ?? Math.round(this.registry.bytes(m) / (200 * 2 ** 20)) + 4,
       build: device => ({
         exe: this.deps.runtimes.exe('sd', device)!,
@@ -354,9 +406,13 @@ export class Images {
   // ---- Progress, from what sd-server prints ----
 
   private onRunnerLine(line: string): void {
+    this.lineAt = Date.now();
     const job = this.current;
     // The runner's last lines can come after Cancel: they never put the picture back to drawing.
     if (!job || job.state === 'cancelled') return;
+    // Finishing: High's sharpener runs in the same runner and prints its tiles as "| 100/121" lines, which are not
+    // drawing steps (they read "step 121 of 5"): nothing it prints puts the picture back to drawing.
+    if (job.state === 'finishing') return;
     const img = /generating image: (\d+)\/(\d+)/.exec(line);
     if (img) {
       job.image = Number(img[1]);
@@ -390,6 +446,15 @@ export class Images {
     job.etaSeconds = Math.round(left);
   }
 
+  /**
+   * The note of picture `id` (drawn smaller, moved to the CPU …), for the PC it is drawn for: jobView blanks it for a
+   * picture drawn for a linked PC (this PC's own pane never shows another PC's words), but that PC is told.
+   */
+  noteOf(id: string): string | null {
+    const j = [this.current, ...this.jobs, this.lastJob].find(x => x?.id === id);
+    return j ? [j.sizeNote, j.note].filter(Boolean).join(' ') || null : null;
+  }
+
   jobView() {
     const j = this.current ?? this.jobs[0] ?? this.lastJob;
     if (!j) return null;
@@ -400,11 +465,20 @@ export class Images {
       perStep: j.perStep, etaSeconds: j.etaSeconds, elapsed: Math.round((Date.now() - j.startedAt) / 1000), results: j.results, error: j.error, note: [j.sizeNote, j.note].filter(Boolean).join(' ') || null,
       finalOf: j.opts.finalOf ?? null, queued: this.jobs.length, prompt: j.opts.prompt,
       chat: j.opts.chat ?? null,
+      // The artist it is drawn as: a queued picture (no chat) shows as in progress only in that artist's chats.
+      as: j.opts.as ?? null,
       ...(forPc ? { prompt: `Drawing for ${forPc}`, results: [], error: j.error ? `The picture for ${forPc} did not come out.` : null, note: null, forPc } : {}),
     };
   }
 
   private lastJob: Job | null = null;
+  /** When the runner last printed a line (a step, a decode): a picture with none for stallMs is stuck. */
+  private lineAt = 0;
+  /**
+   * How long a picture may go with no step and no line from the runner before it is stopped as stuck: far past the
+   * slowest step and decode seen on a CPU (minutes), so only a runner that has hung meets it.
+   */
+  stallMs = 30 * 60_000;
   /** Pictures drawn for a linked PC, by job, held in memory only until drawForPc takes them (F7 E2). */
   private away = new Map<string, { png: Buffer; modelName: string; modelPrompt: string; mode: Mode; seconds: number; note: string; made: Made }>();
 
@@ -446,14 +520,19 @@ export class Images {
     // open chat: that is whichever window opened one last).
     const chatId = base && !src ? base.chat : opts.chat;
     opts = { ...opts, chat: chatId || undefined };
+    // A final or a redraw uses the reference pictures its draft was drawn with.
+    if (base?.refs?.length && !opts.refs?.length) opts = { ...opts, refs: base.refs };
     const typed = (base?.prompt ?? opts.prompt ?? '').trim();
     if (!typed) return { error: 'Type a prompt first: what should the picture show?', status: 400 };
     const tooLong = promptWhy(typed);
     if (tooLong) return { error: tooLong, status: 400 };
+    // A seed the runner cannot read is refused in words, never swapped for another (a final or a redraw keeps its draft's).
+    const badSeed = base ? null : seedWhy(opts.seed);
+    if (badSeed) return { error: badSeed, status: 400 };
     const verdict = checkMessage(typed, { recent: [] });
     if (!verdict.ok) return { error: REFUSAL[verdict.reason].replace('Change the subject and carry on.', 'Change the prompt.').replace('Make someone up instead and carry on.', 'Describe a made-up person instead.'), status: 422 };
 
-    const recipe = !base && opts.as && this.recipe ? this.recipe(opts.as) : null;
+    const recipe = !base && opts.as && this.recipe && !opts.plain ? this.recipe(opts.as) : null;
     const parsed = parseSize(typed);
     // Only a size, or only where it will be used: the model would be given no words at all.
     if (!base && !forModel(parsed.prompt)) return { error: 'Type a prompt first: what should the picture show? A size alone is not enough.', status: 400 };
@@ -462,8 +541,9 @@ export class Images {
     const target0 = base ? base.target : parsed.size ?? asked ?? (portraitAsk(parsed.prompt) ? PORTRAIT_SIZE : groupAsk(parsed.prompt) ? GROUP_SIZE : null);
     // A final or a redraw keeps its draft's size; a new picture is drawn at the quality asked for (Mid unless said).
     const quality: Quality = base ? 'mid' : cleanQuality(opts.quality);
-    const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : opts.mode && MODES.includes(opts.mode as Mode) ? { mode: opts.mode as Mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
-    const preset = PRESETS[mode];
+    const look = base || recipe?.mode ? null : pickedStyle(opts.look);
+    const { mode, why } = base ? { mode: base.mode, why: 'same as the draft' } : recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : look ? { mode: look.mode as Mode, why: 'chosen' } : opts.mode && MODES.includes(opts.mode as Mode) ? { mode: opts.mode as Mode, why: 'chosen' } : detectMode(parsed.prompt, target0);
+    const preset = look ? presetOf(look) : PRESETS[mode];
     const defaults = m.defaults ?? { steps: 20, cfg: 7, sampler: 'euler_a', scheduler: '', negative: '' };
     const exact = !base && opts.exactSize === true && asked && target0 ? askedDrawSize(m, quality, target0) : null;
     const generated = base ? base.generated : exact ? exact.size : qualitySize(m, quality, target0);
@@ -473,16 +553,17 @@ export class Images {
     let modelPrompt = base ? base.modelPrompt : boosted(parsed.prompt, preset);
     if (!base && mode === 'icon' && m.transparent && m.transparentPrompt) modelPrompt = m.transparentPrompt.replace('{prompt}', boosted(parsed.prompt, { ...preset, boost: preset.boost.replace(', plain white background', '') }));
     if (recipe?.boost && !base) modelPrompt = `${modelPrompt.replace(/[\s,.]+$/, '')}, ${recipe.boost}`;
-    const negative = base ? base.negative : [opts.negative?.trim(), recipe?.negative, preset.negative, portraitAsk(parsed.prompt) ? PORTRAIT_NEGATIVE : '', defaults.negative].filter(Boolean).join(', ');
+    const negative = base ? base.negative : joinNegative(negativeParts({ typed: opts.negative, recipe: recipe?.negative, mode: preset.negative, portrait: portraitAsk(parsed.prompt), model: defaults.negative }), opts.negativeOff, opts.negativeDrop);
     const final = !!opts.finalOf || opts.full === true;
     // A final keeps the draft's seed and steps (with few-step models, other steps would draw a different picture);
     // what changes is the decoder (full quality) and the file.
     const steps = base ? base.steps : clampInt(opts.steps, 1, 100) ?? defaults.steps;
     const count = final || base ? 1 : clampInt(opts.drafts, 1, 4) ?? draftCount(m, quality);
-    const seed = base ? base.seed : typeof opts.seed === 'number' && opts.seed >= 0 ? Math.floor(opts.seed) : randomInt(0, 2 ** 31 - 1);
+    const seed = base ? base.seed : isSeedAsked(opts.seed) ? opts.seed : randomInt(0, 2 ** 31 - 1);
     const job: Job = {
       id: randomBytes(6).toString('hex'), state: 'queued', opts: { ...opts, prompt: typed }, mode, modeWhy: why, target, generated, count, steps, step: 0, image: 0, perStep: null,
       startedAt: Date.now(), stepAt: 0, etaSeconds: null, results: [], error: null, note: null, done: Promise.resolve(),
+      ...(look ? { style: look.id } : base?.style ? { style: base.style } : {}),
     };
     // A source made with another model: the same seed does not give the same picture, which is said.
     if (exact?.short) job.sizeNote = shortSizeWords(m.name.replace(/\s*\(.*\)$/, ''), generated, target0!);
@@ -565,10 +646,12 @@ export class Images {
       job.note = `Drawn on the CPU, not the ${card.name}: the model could not load on the card (often other models fill it), so it is slower${job.opts.quality === 'high' ? ', and High is drawn without the sharpener' : ''}.`;
     }
     const loras = m.files.filter(f => f.role === 'lora').map(f => ({ path: this.registry.fileName(f), multiplier: 1 }));
+    const refImages = job.opts.refData?.length ? await refPicturesOf(job.opts.refData, m.refs ?? 0) : await refPictures(job.opts.refs, m.refs ?? 0);
     const body = {
       prompt: plan.modelPrompt, negative_prompt: plan.negative, width: job.generated.width, height: job.generated.height, seed: plan.seed, batch_count: job.count,
       sample_params: { sample_method: plan.sampler, sample_steps: plan.steps, ...(plan.scheduler ? { scheduler: plan.scheduler } : {}), guidance: { txt_cfg: plan.cfg } },
       lora: loras, output_format: 'png', embed_image_metadata: false,
+      ...(refImages.length ? { ref_images: refImages } : {}),
     };
     const t0 = Date.now();
     let sdJob: string;
@@ -591,12 +674,30 @@ export class Images {
       await sleep(400);
       if (stateNow() === 'cancelled') return;
       if (stateNow() === 'decoding' && !decodeStart) decodeStart = Date.now();
+      // No step and no line from the runner for this long: it is stuck, and only Cancel would end it otherwise.
+      if (Date.now() - Math.max(t0, this.lineAt) > this.stallMs) {
+        this.broken = true;
+        return this.fail(job, `The image runner gave no sign of drawing for ${waitWords(this.stallMs)} (no step, no line), so the picture was stopped. The runner is started again for the next picture.`);
+      }
       let st: { status: string; result?: { images: Array<{ b64_json: string }> }; error?: { message?: string } };
+      // An answer that is not the job's state (an HTML page, broken JSON): said as that, never as the runner stopping.
+      let odd = '';
       try {
-        st = await (await fetch(`${this.pane.worker.base ?? base}/sdcpp/v1/jobs/${sdJob}`, { signal })).json();
+        const r = await fetch(`${this.pane.worker.base ?? base}/sdcpp/v1/jobs/${sdJob}`, { signal });
+        const text = await r.text();
+        try {
+          st = JSON.parse(text);
+        } catch (e) {
+          odd = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || `an empty answer, ${r.status}`;
+          throw e;
+        }
       } catch {
         if (stateNow() === 'cancelled') return;
         if (runnerPid && this.pane.worker.pid === runnerPid && ++missed < 5) continue;
+        if (odd) {
+          this.broken = true;
+          return this.fail(job, `The image runner answered with something that is not the picture's progress ("${odd}"), so the picture was stopped. Draw it again.`);
+        }
         // The runner went away (it ran out of memory, or Cancel restarted it).
         const tail = this.pane.worker.tail();
         const oom = device !== 'cpu' ? ranOut('', tail) : '';
@@ -752,15 +853,29 @@ export class Images {
   private async finish(job: Job, plan: Plan, m: RegistryModel, png: Buffer, seed: number, seconds: number, device: Device): Promise<Picture> {
     const name = slug(job.opts.prompt.replace(/\d{2,4}\s*(px|pixels?)?\s*(x|×|by|\*)\s*\d{2,4}\s*(px|pixels?)?/gi, ''));
     const id = randomBytes(6).toString('hex');
-    const original = await this.gallery.save(`${name}-${seed}-original.png`, png);
+    // Shaped in memory first, and every file saved here deleted again when a later step fails: a picture that cannot
+    // be finished leaves no stray file in the gallery's folder.
     const { out, data, transparent, fit, format } = await this.shape(job, plan, png);
-    const output = await this.gallery.save(`${name}-${sizeText(job.target).replace('×', 'x')}${plan.draft ? `-draft-${seed}` : ''}.${format}`, data);
+    const set = plan.ico && transparent ? await iconSet(out) : null;
+    const saved: string[] = [];
+    const keep = async (file: string, bytes: Buffer) => {
+      const rel = await this.gallery.save(file, bytes);
+      saved.push(rel);
+      return rel;
+    };
+    let original: string, output: string;
     let icoFiles: string[] | undefined;
-    if (plan.ico && transparent) {
-      const set = await iconSet(out);
-      icoFiles = [];
-      for (const p of set.pngs) icoFiles.push(await this.gallery.save(`${name}-${p.size}.png`, p.data));
-      icoFiles.push(await this.gallery.save(`${name}.ico`, set.ico));
+    try {
+      original = await keep(`${name}-${seed}-original.png`, png);
+      output = await keep(`${name}-${sizeText(job.target).replace('×', 'x')}${plan.draft ? `-draft-${seed}` : ''}.${format}`, data);
+      if (set) {
+        icoFiles = [];
+        for (const p of set.pngs) icoFiles.push(await keep(`${name}-${p.size}.png`, p.data));
+        icoFiles.push(await keep(`${name}.ico`, set.ico));
+      }
+    } catch (error) {
+      for (const rel of saved) await rm(join(this.gallery.dir, rel), { force: true }).catch(() => undefined);
+      throw error;
     }
     const picture: Picture = {
       id, at: new Date().toISOString(), prompt: job.opts.prompt, modelPrompt: plan.modelPrompt, negative: plan.negative, mode: job.mode, model: m.id, modelName: m.name,
@@ -769,8 +884,15 @@ export class Images {
       // Every new picture waits as a draft until the person adds it to the gallery.
       kept: false,
       ...(job.opts.chat ? { chat: job.opts.chat } : {}),
+      ...(job.opts.queued ? { queued: job.opts.queued } : {}),
+      ...(job.style ? { style: job.style } : {}),
+      // Kept only when this model took them (src/images.ts refPictures).
+      ...(job.opts.refs?.length && m.refs ? { refs: job.opts.refs.slice(0, m.refs) } : {}),
     };
-    await this.gallery.add(picture);
+    await this.gallery.add(picture).catch(async (error: unknown) => {
+      for (const rel of saved) await rm(join(this.gallery.dir, rel), { force: true }).catch(() => undefined);
+      throw error;
+    });
     await this.gallery.saveSource(picture, { modelFile: this.modelFile(m), licence: m.licence ?? '', tomlin: this.deps.version ?? '' });
     return picture;
   }
@@ -780,7 +902,7 @@ export class Images {
    * seed, steps and the rest that PC drew it with (`made`). An older TOMLIN there sends none: the settings are then
    * marked not known, never saved as noughts that look like settings.
    */
-  async receive(o: { png: Buffer; prompt: string; modelPrompt: string; mode: string; modelName: string; pc: string; seconds: number; chat?: string; made?: Made | null }): Promise<Picture> {
+  async receive(o: { png: Buffer; prompt: string; modelPrompt: string; mode: string; modelName: string; pc: string; seconds: number; chat?: string; made?: Made | null; queued?: string }): Promise<Picture> {
     const { width = 512, height = 512 } = await sharp(o.png).metadata();
     const size = { width, height };
     const made = o.made ?? null;
@@ -792,6 +914,7 @@ export class Images {
       generated: made?.generated ?? size, target: size, fit: made?.fit ?? 'crop', device: `on ${o.pc}`, seconds: Math.round(o.seconds * 10) / 10,
       draft: false, original: output, output, format: 'png', bytes: o.png.length, kept: false,
       ...(o.chat ? { chat: o.chat } : {}),
+      ...(o.queued ? { queued: o.queued } : {}),
     };
     await this.gallery.add(picture);
     await this.gallery.saveSource(picture, { model: made?.model ?? '', modelFile: made?.modelFile ?? '', licence: made?.licence ?? '', tomlin: made?.tomlin ?? '' });
@@ -800,7 +923,8 @@ export class Images {
 
   /** Stops the current picture. The runner cannot stop part-way, so it is ended and the model loaded again. */
   /**
-   * Cancels every picture (the Cancel button), or only the one with `id` (a chat or another PC that stopped asking).
+   * Cancels every picture (the model is being unloaded), or only the one with `id` (the Cancel button, a chat, the
+   * queue or another PC that stopped asking).
    * `restart: false` (an unload): the model is not loaded again after it, since it is being unloaded anyway.
    */
   async cancel(id?: string, o: { restart?: boolean } = {}): Promise<{ restarted: boolean }> {
@@ -881,7 +1005,11 @@ export class Images {
       // Connected: the model in use; otherwise the one chosen in the list.
       const m = this.registry.get((this.pane.view.state === 'connected' ? this.pane.view.model : url.searchParams.get('model') || this.pane.view.model) ?? '');
       const chosen = url.searchParams.get('mode');
-      const { mode, why } = MODES.includes(chosen as Mode) ? { mode: chosen as Mode, why: 'chosen' } : detectMode(parsed.prompt, target);
+      // Drawn as an artist: their recipe's style wins, and their own "leave out" words are added (as in generate).
+      const as = url.searchParams.get('as') ?? '';
+      const recipe = /^[a-z0-9-]{1,40}$/.test(as) && this.recipe ? this.recipe(as) : null;
+      const look = recipe?.mode ? null : pickedStyle(url.searchParams.get('style'));
+      const { mode, why } = recipe?.mode ? { mode: recipe.mode, why: 'their way of working' } : look ? { mode: look.mode as Mode, why: 'chosen' } : MODES.includes(chosen as Mode) ? { mode: chosen as Mode, why: 'chosen' } : detectMode(parsed.prompt, target);
       // Each quality's size and how many pictures it draws, for the Draft / Mid / High buttons (2.0.65).
       const quality = cleanQuality(url.searchParams.get('quality'));
       const model = m ?? { native: 512 };
@@ -891,7 +1019,11 @@ export class Images {
         const g = qualitySize(model, q, target);
         return [q, { generated: g, count: draftCount(model, q), output: q === 'high' && sharp2 ? target ?? { width: g.width * 2, height: g.height * 2 } : null }];
       }));
-      return send(res, 200, { size: parsed.size, prompt: parsed.prompt, target, generated: qualitySize(model, quality, target), quality, qualities, mode, why, drafts: draftCount(model, quality), portrait: portraitAsk(parsed.prompt), group: !parsed.size && groupAsk(parsed.prompt), better: this.betterFor(mode, m) }), true;
+      // The words left out without being typed, by where they come from, for the Leave out chips.
+      // A style picked leaves out its own words, as when drawing.
+      const preset = look ? presetOf(look) : PRESETS[mode];
+      const negative = negativeParts({ recipe: recipe?.negative, mode: preset.negative, portrait: portraitAsk(parsed.prompt), model: m?.defaults?.negative }).filter(x => x.source !== 'typed');
+      return send(res, 200, { size: parsed.size, prompt: parsed.prompt, target, generated: qualitySize(model, quality, target), quality, qualities, mode, why, ...(look ? { style: look.id, styleName: look.name } : {}), drafts: draftCount(model, quality), portrait: portraitAsk(parsed.prompt), group: !parsed.size && groupAsk(parsed.prompt), better: this.betterFor(mode, m), negative }), true;
     }
     const file = /^\/api\/images\/file\/(.+)$/.exec(p);
     if (file) {
@@ -926,8 +1058,11 @@ export class Images {
       case '/api/images/keep': {
         const r = await this.gallery.keep(String(b.id ?? ''), b.kept !== false);
         if (!r) return send(res, 404, { error: 'That picture is not in the gallery any more.' }), true;
-        if (r.fromDraft) void this.onKept?.(r.picture, await this.gallery.file(r.picture.output));
-        return send(res, 200, r.picture), true;
+        // Where the hand-in went is said under the picture; a fault in it never stops the keep. Every keep asks: a picture
+        // kept again after its copy was taken away is copied once more, one whose copy is there is not (handInPicture).
+        const saved = b.kept !== false && this.onKept ? await this.onKept(r.picture, await this.gallery.file(r.picture.output)).catch((e: Error) => ({ error: e.message })) : null;
+        const picture = (await this.gallery.get(r.picture.id)) ?? r.picture;
+        return send(res, 200, saved ? { ...picture, saved } : picture), true;
       }
       case '/api/images/delete': {
         // {ids}: the pictures picked; or {chat, which: 'recent' | 'all'}: a chat's pictures from today, or all of them.
@@ -942,14 +1077,26 @@ export class Images {
           since.setHours(0, 0, 0, 0);
           pick = live.filter(p => (p.chat ?? '') === b.chat && (b.which === 'all' || new Date(p.at) >= since));
         } else return send(res, 400, { error: 'Say which pictures to delete.' }), true;
-        for (const p of pick) await this.gallery.remove(p.id);
+        let left = 0;
+        let started = 0;
+        for (const p of pick) {
+          if (await this.gallery.isNeeded(p)) started++;
+          left += (await this.gallery.remove(p.id)).length;
+        }
         // A deleted picture also leaves the latest results, or a reload draws it again with its files gone.
         const gone = new Set(pick.map(p => p.id));
         for (const j of [this.current, this.lastJob, ...this.jobs]) if (j) j.results = j.results.filter(p => !gone.has(p.id));
-        return send(res, 200, { deleted: pick.length, ids: [...gone] }), true;
+        // Out of the gallery either way; a file another program holds open stays on the disk, which is said.
+        const notes = [
+          left ? `${left === 1 ? 'One file' : `${left} files`} could not be deleted from the disk (another program may have ${left === 1 ? 'it' : 'them'} open): the picture is out of the gallery.` : '',
+          started ? `${started === 1 ? 'One picture is' : `${started} pictures are`} the start of a clip on the Videos shelf, so ${started === 1 ? 'its file stays' : 'their files stay'} on this PC for that clip's Make again.` : '',
+        ].filter(Boolean);
+        const note = notes.length ? notes.join(' ') : undefined;
+        return send(res, 200, { deleted: pick.length, ids: [...gone], ...(note ? { note } : {}) }), true;
       }
       case '/api/images/cancel':
-        return send(res, 200, await this.cancel()), true;
+        // {id}: only that picture, drawing or waiting; the pictures waiting behind it keep their place.
+        return send(res, 200, await this.cancel(typeof b.id === 'string' && b.id ? b.id : undefined)), true;
       case '/api/images/enhance': {
         const no = this.needChat();
         if (no) return send(res, 409, { error: no }), true;
@@ -1051,18 +1198,106 @@ function clampInt(v: unknown, lo: number, hi: number): number | undefined {
 }
 
 /** A picture asked for, from a request body (the page's Generate is src/server/pictures.ts, which names its chat). */
-/** Why a prompt cannot be drawn for its length, here or on another PC (null when it can): one limit, refused in words, never cut. */
-export const promptWhy = (prompt: string): string | null => (prompt.length > 2000 ? 'That prompt is too long (over 2,000 characters). Shorten it.' : null);
+/**
+ * Why what a person typed for a picture cannot be drawn for its length (null when it can): checked before its @names
+ * add their words, here, in the queue and for a linked PC's artist. Refused in words, never cut.
+ */
+export const typedWhy = (typed: string): string | null => (typed.length > PROMPT_TYPED_MOST ? `That prompt is too long (over ${PROMPT_TYPED_MOST.toLocaleString('en-GB')} characters). Shorten it.` : null);
+/**
+ * Why a picture's whole prompt cannot be drawn for its length, here or on another PC (null when it can): what was typed
+ * with its cards' words added, so a prompt typed under the limit is never refused for them. Refused in words, never cut.
+ */
+export const promptWhy = (prompt: string): string | null => (prompt.length > PROMPT_MOST ? `That prompt is too long with its cards' words (over ${PROMPT_MOST.toLocaleString('en-GB')} characters). Shorten it, or name fewer cards.` : null);
+
+/** Where a hidden "leave out" word comes from: the artist's recipe, the style (src/modes.ts), a portrait, the model. */
+export const NEGATIVE_SOURCES = ['recipe', 'mode', 'portrait', 'model'] as const;
+export type NegativeSource = (typeof NEGATIVE_SOURCES)[number];
+export interface NegativePart { source: 'typed' | NegativeSource; words: string[] }
+
+const negativeWords = (text?: string): string[] => (text ?? '').split(',').map(w => w.trim()).filter(Boolean);
+
+/** The "leave out" words by source, in the order they are joined: typed first (kept whole, as typed), then the hidden ones. */
+export function negativeParts(p: { typed?: string; recipe?: string; mode?: string; portrait?: boolean; model?: string }): NegativePart[] {
+  const parts: NegativePart[] = [
+    { source: 'typed', words: p.typed?.trim() ? [p.typed.trim()] : [] },
+    { source: 'recipe', words: negativeWords(p.recipe) },
+    { source: 'mode', words: negativeWords(p.mode) },
+    { source: 'portrait', words: p.portrait ? negativeWords(PORTRAIT_NEGATIVE) : [] },
+    { source: 'model', words: negativeWords(p.model) },
+  ];
+  return parts.filter(x => x.words.length);
+}
+
+/** The negative prompt: every part's words, less the sources turned off and the hidden words dropped (case ignored). */
+export function joinNegative(parts: NegativePart[], off: readonly NegativeSource[] = [], drop: readonly string[] = []): string {
+  const dropped = new Set(drop.map(w => w.toLowerCase()));
+  return parts
+    .filter(x => x.source === 'typed' || !off.includes(x.source))
+    .flatMap(x => (x.source === 'typed' ? x.words : x.words.filter(w => !dropped.has(w.toLowerCase()))))
+    .join(', ');
+}
 
 export function optionsFrom(b: Record<string, unknown>, source: GenerateOptions['source']): GenerateOptions {
-  const mode = MODES.includes(b.mode as Mode) ? (b.mode as Mode) : 'auto';
+  const look = pickedStyle(b.style);
+  // A style picked names its mode too; the mode alone (an older page, the API) works as it always did.
+  const mode = look ? (look.mode as Mode) : MODES.includes(b.mode as Mode) ? (b.mode as Mode) : 'auto';
   const fit = ['crop', 'pad', 'stretch'].includes(String(b.fit)) ? (b.fit as Fit) : 'crop';
   const num = (v: unknown) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v));
   return {
-    prompt: String(b.prompt ?? ''), negative: typeof b.negative === 'string' ? b.negative.slice(0, 1000) : undefined, mode, fit,
+    prompt: String(b.prompt ?? ''), negative: typeof b.negative === 'string' ? b.negative.slice(0, 1000) : undefined, mode, fit, ...(look ? { look: look.id } : {}),
+    // Only the four sources, each once; dropped words are short strings, at most 100 of them. Anything else is ignored.
+    negativeOff: Array.isArray(b.negativeOff) ? NEGATIVE_SOURCES.filter(x => (b.negativeOff as unknown[]).includes(x)) : undefined,
+    negativeDrop: Array.isArray(b.negativeDrop) ? b.negativeDrop.filter((w): w is string => typeof w === 'string' && !!w.trim() && w.length <= 80).map(w => w.trim()).slice(0, 100) : undefined,
     width: num(b.width), height: num(b.height), seed: num(b.seed) ?? null, steps: num(b.steps), cfg: num(b.cfg), sampler: typeof b.sampler === 'string' ? b.sampler : undefined,
     drafts: num(b.drafts), ico: b.ico === true, quality: cleanQuality(b.quality), source, as: typeof b.as === 'string' && /^[a-z0-9-]{1,40}$/.test(b.as) ? b.as : undefined,
   };
+}
+
+/**
+ * The reference pictures for a model that takes `most` of them, as base64 PNG for the runner's ref_images: each made
+ * at most 1024 on its longest side (the model reads them at about that size, and a 4K photo would only cost memory).
+ * One that cannot be read is passed over: the picture is still drawn from the words. None for a model that takes none.
+ */
+export async function refPictures(paths: string[] | undefined, most: number): Promise<string[]> {
+  const out: string[] = [];
+  for (const p of (paths ?? []).slice(0, Math.max(0, most))) {
+    try {
+      out.push(await remadeRef(await readFile(p)));
+    } catch {
+      // Not there any more, or not a picture.
+    }
+  }
+  return out;
+}
+
+/**
+ * Reference pictures a linked PC sent (src/drawrefs.ts cleanRefImages has checked them as whole PNGs): each read and
+ * made afresh as this PC's own are, so what reaches the runner is always a picture this PC made. One that cannot be
+ * read is passed over.
+ */
+export async function refPicturesOf(data: string[] | undefined, most: number): Promise<string[]> {
+  const out: string[] = [];
+  for (const d of (data ?? []).slice(0, Math.max(0, most))) {
+    try {
+      out.push(await remadeRef(Buffer.from(d, 'base64')));
+    } catch {
+      // Not a picture this PC can read.
+    }
+  }
+  return out;
+}
+
+/** One reference picture read and made again as a PNG of at most 1024 on its longest side, as base64. */
+async function remadeRef(bytes: Buffer): Promise<string> {
+  // sharp's own pixel limit (about 268 million) refuses a header that claims a huge picture before anything is unpacked.
+  const png = await sharp(bytes).resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+  return png.toString('base64');
+}
+
+/** A wait in words: "30 minutes", "1 minute", "3 seconds". */
+function waitWords(ms: number): string {
+  const n = ms >= 60_000 ? Math.round(ms / 60_000) : Math.max(1, Math.round(ms / 1000));
+  return `${n} ${ms >= 60_000 ? 'minute' : 'second'}${n === 1 ? '' : 's'}`;
 }
 
 /** Whether these bytes can be read as a picture. */
@@ -1083,4 +1318,13 @@ function clean(text: string): string {
 function send(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(JSON.stringify(value));
+}
+
+/**
+ * Threads for the picture runner when none is set: all but one, never fewer than one. With every thread taken (26 Nov,
+ * a 4-core HP 800 drawing on its CPU) TOMLIN itself and Windows went quiet for over a minute, the PC that asked
+ * thought the link was gone, and the picture was stopped. One thread, not one core: a 2-core laptop keeps 3 of its 4.
+ */
+export function pictureThreads(n = availableParallelism()): number {
+  return Math.max(1, n - 1);
 }

@@ -94,7 +94,7 @@ test('one filled button per screen: list Downloads, Manage staff and the later s
   assert.match(look, /\n\.link \{ color: var\(--accent\);/);
 });
 
-test('Network, This PC and Manage updates are rows in white cards; Enable this PC as a node is a switch', () => {
+test('Network, This PC and Manage updates are rows in white cards; Use this PC as a node is a switch', () => {
   const html = read('index.html');
   const page = (id: string) => html.slice(html.indexOf(`<section class="nodes" id="${id}"`), html.indexOf('\n</section>\n', html.indexOf(`<section class="nodes" id="${id}"`)));
   for (const id of ['nodes', 'thispc', 'updates-page']) {
@@ -102,7 +102,7 @@ test('Network, This PC and Manage updates are rows in white cards; Enable this P
     assert.doesNotMatch(p, /class="home-part/, `${id}: no old card`);
     assert.match(p, /<section class="set-part[^"]*"[^>]*>\n\s*<h3[^>]*>[^<]+<\/h3>\n\s*<div class="set-card">/, `${id}: a heading, then a card`);
   }
-  assert.match(page('nodes'), /<label class="set-sw"><input type="checkbox" role="switch" id="node-on" aria-labelledby="node-on-label"><i aria-hidden="true"><\/i><\/label>/);
+  assert.match(page('thispc'), /<label class="set-sw"><input type="checkbox" role="switch" id="node-on" aria-labelledby="node-on-label"><i aria-hidden="true"><\/i><\/label>/);
   // The link helper moved with Find other PCs to the Add another PC page.
   const addPc = html.slice(html.indexOf('id="settings-addpc"'), html.indexOf('\n</section>\n', html.indexOf('id="settings-addpc"')));
   assert.match(addPc, /<details class="set-row" id="link-help">/);
@@ -125,4 +125,10 @@ test('one page head: Staff, Hire staff, Jobs and Files as pages have the breadcr
   assert.match(heads, /dialog\.as-page > \.help-body > \.dlg-top \{ position: static;[^}]*background: none; border: 0;/);
   assert.match(heads, /dialog\.as-page :is\(#team-close, #hs-close\), #setup-page > dialog\.as-page > \.help-body > \.dlg-top > form\[method="dialog"\] \{ display: none; \}/);
   assert.match(heads, /@media \(max-width: 760px\) \{ \[data-crumb\] \.back \{ display: none; \} \}/);
+});
+
+test('Agents and Memory have the breadcrumb every Settings page has ("Settings › Agents"), so there is a way back on a wide window', () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="agents-page" data-crumb="Agents"/);
+  assert.match(html, /id="memory-page" data-crumb="Memory"/);
 });

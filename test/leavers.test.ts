@@ -7,7 +7,7 @@ import { initialsOf, leftPerson, nameFromId } from '../src/leavers.ts';
 import { Staff } from '../src/staff.ts';
 
 test('a leaver kept by name shows as "Name (left the team)" with their initials and role', () => {
-  assert.deepEqual(leftPerson('cy-holt', { name: 'Cy Holt', role: 'pm' }), { name: 'Cy Holt (left the team)', avatar: 'CH', role: 'Project manager · left the team' });
+  assert.deepEqual(leftPerson('cy-holt', { name: 'Cy Holt', role: 'pm' }), { name: 'Cy Holt (left the team)', avatar: 'CH', role: 'Project manager · left the team', roleId: 'pm' });
 });
 
 test('someone who left before names were kept gets a name from their id, so two leavers can be told apart', () => {

@@ -188,15 +188,17 @@ export class FileTurn {
       return 'The call could not be read: its arguments are not JSON.';
     }
     if (name === 'list_files') {
-      const files = await ws.list(this.root);
+      const { files, more } = await ws.listAll(this.root);
       if (!files.length) return 'There are no text or code files in this folder yet.';
+      // Past the list's limit the count is not known: said as more files, so the model does not take the list as all.
+      const past = more ? `There are more files in this folder than the ${files.length} listed here: read one by its path with read_file.` : '';
       let out = '';
       for (const [i, f] of files.entries()) {
         const line = `${f.path} (${f.bytes.toLocaleString('en-GB')} bytes)\n`;
-        if (out.length + line.length > this.perCall) return `${out}(and ${files.length - i} more)`;
+        if (out.length + line.length > this.perCall) return `${out}(and ${more ? 'over ' : ''}${files.length - i} more)`;
         out += line;
       }
-      return out.trimEnd();
+      return past ? `${out}${past}` : out.trimEnd();
     }
     if (name === 'read_file') {
       const r = await ws.read(this.root, a.path);

@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Gallery, type Picture } from '../src/gallery.ts';
-import { promptWhy } from '../src/images.ts';
+import { promptWhy, typedWhy } from '../src/images.ts';
+import { PROMPT_MOST } from '../src/cards.ts';
 import * as keep from '../src/keep.ts';
 import { listZip } from '../src/zip.ts';
 import { addSnippet, NotesStore, setScratch } from '../src/notes.ts';
@@ -293,7 +294,10 @@ test('a backup that left out a link says which, and a note of it goes in the zip
 // ---- A prompt's limit ----
 
 test('one limit for a prompt, here and on another PC: over it is refused in words, never cut', () => {
-  assert.equal(promptWhy('a'.repeat(2000)), null);
-  assert.match(promptWhy('a'.repeat(2001)) ?? '', /too long/);
+  // What is typed: 2,000 characters. The whole prompt: that, with room for its cards' words (audit R-04).
+  assert.equal(typedWhy('a'.repeat(2000)), null);
+  assert.match(typedWhy('a'.repeat(2001)) ?? '', /too long/);
   assert.equal(promptWhy('a'.repeat(1500)), null, 'a prompt over the old 1,000 for another PC goes whole');
+  assert.equal(promptWhy('a'.repeat(PROMPT_MOST)), null);
+  assert.match(promptWhy('a'.repeat(PROMPT_MOST + 1)) ?? '', /too long/);
 });

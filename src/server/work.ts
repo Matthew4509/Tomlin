@@ -6,7 +6,7 @@ import { extname, join } from 'node:path';
 import { repeatWatch, streamChat } from '../engine.ts';
 import { cleanPrompt } from '../chatpic.ts';
 import { toneOf } from '../persona.ts';
-import { nowModel, sizeB, roleOf, drawsFor, type StaffMember } from '../staff.ts';
+import { nowModel, sizeB, roleOf, drawsFor, drawsPictures, type StaffMember } from '../staff.ts';
 import * as ws from '../workspace.ts';
 import { blogAsk, blogSystem, splitPost, blogSlug, blogFile, withoutFrontMatter, BLOG_PICTURE_SYSTEM } from '../blog.ts';
 import * as project from '../project.ts';
@@ -171,7 +171,7 @@ async function blogPicture(b: Record<string, unknown>) {
   if (!prompt) return { status: 500, body: { error: 'The chat model could not think of a picture. Try again.' } };
   // Picked in the card ("staff:<id>", or '' for nobody).
   const who = staffId(b.as) ? staff.get(b.as.slice(6)) ?? null : null;
-  if (b.as && (!who || !roleOf(who.role).kind)) return { status: 400, body: { error: 'That artist is not on the team any more. Pick another in the card.' } };
+  if (b.as && (!who || !drawsPictures(who.role))) return { status: 400, body: { error: 'That artist is not on the team any more. Pick another in the card.' } };
   // The blog writer is opened from a chat: its picture belongs to the chat that window had open.
   const job = await images.generate({ prompt, drafts: 1, source: 'chat', mode: 'blog', chat: inChat?.id, ...(who ? { as: who.id } : {}) });
   if (!('id' in job)) return { status: 422, body: { error: job.error } };
@@ -209,7 +209,8 @@ async function projectCandidates(): Promise<project.Candidate[]> {
   for (const h of staff.list()) {
     const now = nowModel(h);
     if (roleOf(h.role).kind) {
-      const x = pictures.find(p => p.id === now && p.installed);
+      // A Videographer makes clips: not a candidate for a step (a picture or words).
+      const x = drawsPictures(h.role) ? pictures.find(p => p.id === now && p.installed) : undefined;
       if (x) out.push({ kind: 'image', hire: h.name, role: h.role, model: shortName(x.name), where: 'This PC', sizeB: 0, ctx: 0, fit: x.fit.level });
     } else if (now?.startsWith('remote:')) {
       const r = s.remotes.find(x => x.id === now.slice(7));
@@ -305,7 +306,7 @@ async function projectCreate(b: Record<string, unknown>): Promise<{ status: numb
   // Planned: a planner is needed, unless the request is a picture alone (that needs an artist, not a planner).
   const pictureOnly = planned && plainPictureAsk(String(b.prompt ?? '').trim() || String(b.about ?? '').trim());
   if (planned && !pictureOnly && !picked && !(await jobRoutes.strongestHire())) return { status: 409, body: { error: 'Nobody can plan it now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
-  if (pictureOnly && !staff.list().some(m => roleOf(m.role).kind)) return { status: 409, body: { error: 'Nobody on the team draws: hire an artist (Setup staff), then press Lets go! again. Nothing was made.' } };
+  if (pictureOnly && !staff.list().some(m => drawsPictures(m.role))) return { status: 409, body: { error: 'Nobody on the team draws: hire an artist (Setup staff), then press Lets go! again. Nothing was made.' } };
   const hire = go ? picked ?? (await jobRoutes.strongestHire()) : null;
   if (go && !hire) return { status: 409, body: { error: 'Nobody can take the prompt now: each hire who chats is on a PC that is off or not answering, is on a PC set to Backups only, or has no model that fits. Turn that PC on, or move a hire to this PC (Staff), then press Lets go! again. Nothing was made.' } };
   // {fromChat: true}: "+ New project…" in a chat's project list, a name alone (never with Lets go!, which sends a prompt).
@@ -445,7 +446,11 @@ export const workGet: Routes = {
 /** POST requests answered here, by path (the body is read already). */
 export const workPost: Routes = {
   '/api/files/save': async ({ res, b }) => {
-    const r = await ws.save(await workspaceDir(), b.path, b.text, b.create !== false);
+    // The person's own typing in Files is not a model's, so a command later does not ask about it (src/modelsaved.ts).
+    // Save under a code block in an answer (fromAnswer) writes words a model wrote: it is marked as a model save, so the
+    // next command in that folder asks first, and older copies are kept as a model save keeps them.
+    const fromAnswer = b.fromAnswer === true;
+    const r = await ws.save(await workspaceDir(), b.path, b.text, b.create !== false, fromAnswer, !fromAnswer);
     return json(res, 'error' in r ? 400 : 200, r);
   },
   '/api/files/folder': async ({ res, b }) => {

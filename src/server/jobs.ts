@@ -20,6 +20,8 @@ import { drawForPc, loadImage, pictureModels, swapImage } from './pictures.ts';
 import { tellJob } from './notices.ts';
 import { cpuHere, memoryNow } from './thispc.ts';
 import { fetchHere } from './hf.ts';
+import { videoRegistry } from './videomodels.ts';
+import { videoReceiveDest, videoSendFiles } from '../videomodels.ts';
 import { finderBusy, finderTesting, tuneDoor } from './finder.ts';
 import { SPEED_FILE, benchBeside, ramPass, runFor, useSpeedTest, type BenchModel, type Figures } from '../speedtest.ts';
 import { modelShape, quantFamily, wordBytes } from '../gguf.ts';
@@ -166,15 +168,28 @@ export function startJobs(): void {
         const m = images.registry.get(id);
         if (!m || m.kind !== 'image') return null;
         return m.files.map(f => {
+          // A file this PC holds already (another picture model shares it, or it is in another folder TOMLIN reads) is
+          // named where it is, so a copy skips it (Q2: 12.4 GB were sent for 7.1 GB new); one not here goes in the
+          // models folder.
+          const at = images.registry.filePath(m, f);
           let have = false;
           try {
-            have = statSync(images.registry.filePath(m, f)).size === f.bytes;
+            have = statSync(at).size === f.bytes;
           } catch {
             // not here
           }
-          return { name: images.registry.fileName(f), path: images.registry.ownPath(m, f), bytes: f.bytes, have, sha256: f.sha256 };
+          return { name: images.registry.fileName(f), path: have ? at : images.registry.ownPath(m, f), bytes: f.bytes, have, sha256: f.sha256 };
         });
       },
+      // A video model: all its files from the video Registry, placed in models/video as that Registry expects them.
+      videoFiles: id => videoSendFiles(videoRegistry(), id),
+      videoDest: id => videoReceiveDest(videoRegistry(), id, path => {
+        try {
+          return statSync(path).size;
+        } catch {
+          return -1;
+        }
+      }),
       // Read each time it is used: the folder can be changed while the app runs (src/server/backuphome.ts).
       get keptRoot() { return backupsHome.dir(); },
       backupsDir: HOME.backups,

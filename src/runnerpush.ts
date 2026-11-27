@@ -25,7 +25,8 @@ export interface RunnerHello {
   /** Its CUDA chat runner (the CUDA 12.4 build). */
   cuda: RunnerState;
   /**
-   * Each CUDA build of the chat runner it pins, by id (llama-cuda, llama-cuda13): how it is there and why it cannot
+   * Each CUDA build of the chat runner it pins, by id (llama-cuda, llama-cuda13), and of the picture and video runner
+   * (sd-cuda): how it is there and why it cannot
    * take it ('' when it can); `best` is the one that suits its card. Unset: an older TOMLIN that knows one build only.
    */
   pins?: Record<string, { state: RunnerState; why: string }>;
@@ -111,14 +112,14 @@ function cleanCan(raw: unknown[]): NonNullable<RunnerHello['can']> {
   return out;
 }
 
-/** A CUDA build's id as a hello may name it. */
-const PIN_ID = /^llama-cuda\d{0,2}$/;
+/** A CUDA build's id as a hello may name it: a chat runner's, or the picture and video runner's (sd-cuda). */
+const PIN_ID = /^(llama|sd)-cuda\d{0,2}$/;
 
-/** A hello's builds, each field checked (at most 4, unknown ids dropped); nothing when it named none. */
+/** A hello's builds, each field checked (at most 8, unknown ids dropped); nothing when it named none. */
 function cleanPins(raw: unknown, best: unknown): Pick<RunnerHello, 'pins' | 'best'> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const pins: Record<string, { state: RunnerState; why: string }> = {};
-  for (const [id, v] of Object.entries(raw as Record<string, unknown>).slice(0, 4)) {
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>).slice(0, 8)) {
     if (!PIN_ID.test(id) || !v || typeof v !== 'object') continue;
     const o = v as Record<string, unknown>;
     pins[id] = { state: STATES.includes(o.state as RunnerState) ? (o.state as RunnerState) : 'none', why: typeof o.why === 'string' ? o.why.slice(0, 300) : '' };

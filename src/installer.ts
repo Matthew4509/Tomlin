@@ -308,7 +308,7 @@ export async function pruneOldCopies(root: string, running: string): Promise<str
     if (named) keep.add(basename(named).toLowerCase());
     // The copy current.txt names is judged with the others (and never removed): right after an update pushed from a
     // linked PC it is the one before the running one, so it is the copy kept for going back, not one more beside it.
-    for (const old of copiesToRemove([...readdirSync(root).filter(n => n !== running), running], running)) {
+    for (const old of copiesToRemove([...readdirSync(root).filter(n => n !== running), running], running, n => wholeCopy(join(root, n)))) {
       if (keep.has(old.toLowerCase())) continue;
       const dir = join(root, old);
       try {
@@ -529,12 +529,27 @@ export function portTakenLine(port: number | string, tomlin: boolean): string {
     : `Another program is using port ${port}, which TOMLIN needs. Close that program, then carry on. To see which program it is, run this in PowerShell: Get-Process -Id (Get-NetTCPConnection -LocalPort ${port} -State Listen).OwningProcess`;
 }
 
-/** The copies in the install folder that go: all but the one in use and the newest others, KEEP_COPIES in all. */
-export function copiesToRemove(names: string[], current: string): string[] {
-  const copies = names.filter(n => /^tomlin-\d+(\.\d+)+( \(\d+\))?$/.test(n) && n !== current);
+/** Files every whole copy holds; a copy without them was cut off part way and cannot start. */
+const WHOLE_FILES = ['package.json', 'src/server.ts', 'tools/install.ts'];
+
+/** Whether a copy folder holds the files a copy needs to start (one cut off part way does not). */
+export const wholeCopy = (dir: string): boolean => WHOLE_FILES.every(f => existsSync(join(dir, ...f.split('/'))));
+
+/**
+ * The copies in the install folder that go: all but the one in use and the newest others, KEEP_COPIES in all. A copy of
+ * the same version as the one in use (an install cut off part way and run again leaves "tomlin-x" beside
+ * "tomlin-x (2)") is kept for going back only when no other version is there, and with `whole` (a copy's name: whether it can start) the copy
+ * kept is the newest whole one; when none looks whole, the newest is kept as before.
+ */
+export function copiesToRemove(names: string[], current: string, whole?: (name: string) => boolean): string[] {
   const ver = (n: string) => n.replace(/^tomlin-/, '').replace(/ \(\d+\)$/, '');
+  const copies = names.filter(n => /^tomlin-\d+(\.\d+)+( \(\d+\))?$/.test(n) && n !== current);
   copies.sort((a, b) => (newer(ver(a), ver(b)) ? -1 : newer(ver(b), ver(a)) ? 1 : b.localeCompare(a)));
-  return copies.slice(KEEP_COPIES - 1);
+  // Another version first; a copy of the same version only when there is no other (a reinstall of the one version).
+  const order = [...copies.filter(n => ver(n) !== ver(current)), ...copies.filter(n => ver(n) === ver(current))];
+  const wholeOnes = whole ? order.filter(whole) : order;
+  const kept = new Set((wholeOnes.length ? wholeOnes : order).slice(0, KEEP_COPIES - 1));
+  return copies.filter(n => !kept.has(n));
 }
 
 /** The Start TOMLIN when this PC starts file's text when TOMLIN is installed: the program, with no window at the start. */

@@ -133,7 +133,8 @@ test('the load and the crash notice are wired: kept on a crash, not tried again,
   assert.match(place, /const epCrash = maxSpeeds\.epCrash\(id, runtimes\.expertStamp\(\)\);/);
   assert.match(place, /if \(main \|\| o\.max\) maxSpeeds\.epLetGo\(id\);\s*else if \(!tryRun && !forced\) \{[\s\S]*?return \{ error: said \};/, 'a load the person did not ask for is refused while held');
   assert.match(place, /const ep = !epCrash && started\.moe/, 'expert parallel is not tried again after a crash');
-  assert.match(panes, /retry: \(device, tail\) => \(ep \? \(log\.info\([\s\S]*?epFailed\(tail\)\)/, 'a failed expert-parallel start is kept');
+  // A start that fails on the vision add-on is tried again without it first (src/askpics.ts); then the expert parallel case.
+  assert.match(panes, /retry: \(device, tail\) => \([\s\S]*?\(ep \? \(log\.info\([\s\S]*?epFailed\(tail\)\)/, 'a failed expert-parallel start is kept');
   const faults = src('src/server/faults.ts');
   assert.match(faults, /const ep = p\.kind === 'crash' && !f\.gone \? epCrashKept\(p, f\.modelName\) : '';/);
   assert.match(faults, /maxRunOf\(pane\)\?\.engine !== 'experts'/, 'only a runner that held its model by expert parallel');

@@ -148,10 +148,13 @@ export interface FoundSource extends ImageSource {
 
 /**
  * Every image source in a folder and the folders in it, newest first. Links are not followed; .git and node_modules
- * are not looked in. `more`: there were over `limit`, and only that many were read.
+ * are not looked in. `more`: there were over `limit`, and only the newest `limit` were read (newest by when each file
+ * was last written, so the newest pictures are always among them, wherever they are in the folders).
  */
 export async function readSources(dir: string, limit = 500): Promise<{ sources: FoundSource[]; more: boolean; damaged: number }> {
-  const sources: FoundSource[] = [];
+  // Every source file is found first (up to FOUND_MOST), with when it was written; only the newest are then read.
+  const FOUND_MOST = 50_000;
+  const found: Array<{ full: string; path: string; names: import('node:fs').Dirent[]; at: number }> = [];
   let more = false;
   let damaged = 0;
   const walk = async (at: string, rel: string, depth: number): Promise<void> => {
@@ -162,30 +165,39 @@ export async function readSources(dir: string, limit = 500): Promise<{ sources: 
       return;
     }
     for (const d of names) {
-      if (more) return;
+      if (found.length >= FOUND_MOST) {
+        more = true;
+        return;
+      }
       if (d.isSymbolicLink()) continue;
       const path = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) {
         if (depth < 8 && d.name !== '.git' && d.name !== 'node_modules') await walk(join(at, d.name), path, depth + 1);
       } else if (d.isFile() && d.name.endsWith(SOURCE_END)) {
-        if (sources.length >= limit) {
-          more = true;
-          return;
-        }
-        let s: ImageSource | null = null;
-        try {
-          const f = join(at, d.name);
-          // A source is a page of text at most: anything bigger is not one.
-          if ((await stat(f)).size <= 64 * 1024) s = cleanSource(JSON.parse(await readFile(f, 'utf8')));
-        } catch {
-          s = null;
-        }
-        if (!s) damaged++;
-        else sources.push({ ...s, path, pictureThere: names.some(x => x.isFile() && x.name === s!.file) });
+        const full = join(at, d.name);
+        const st = await stat(full).catch(() => null);
+        // A source is a page of text at most: anything bigger is not one.
+        if (!st || st.size > 64 * 1024) damaged++;
+        else found.push({ full, path, names, at: st.mtimeMs });
       }
     }
   };
   await walk(dir, '', 0);
+  found.sort((a, b) => b.at - a.at);
+  const sources: FoundSource[] = [];
+  let i = 0;
+  for (; i < found.length && sources.length < limit; i++) {
+    const f = found[i];
+    let s: ImageSource | null = null;
+    try {
+      s = cleanSource(JSON.parse(await readFile(f.full, 'utf8')));
+    } catch {
+      s = null;
+    }
+    if (!s) damaged++;
+    else sources.push({ ...s, path: f.path, pictureThere: f.names.some(x => x.isFile() && x.name === s!.file) });
+  }
+  if (i < found.length) more = true;
   sources.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   return { sources, more, damaged };
 }

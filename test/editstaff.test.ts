@@ -43,7 +43,9 @@ test('no tabs: one settings page, its parts in this order: Who, Works on, How th
 test('Tone for writing: one line under Role, only for a chat hire with a role (a Default hire is sent no instructions)', () => {
   assert.doesNotMatch(team, /writingSection|'How they write'/);
   const t = fn('toneLine');
-  assert.match(t, /if \(!tones\.length \|\| m\.kind === 'image' \|\| m\.role === 'default'\) return null;/);
+  // A picture hire or a Videographer (notChat) writes nothing.
+  assert.match(t, /if \(!tones\.length \|\| notChat\(m\) \|\| m\.role === 'default'\) return null;/);
+  assert.match(team, /const notChat = m => m\?\.kind === 'image' \|\| m\?\.kind === 'video';/);
   assert.match(t, /el\('label', \{ class: 'tone-line'/);
   assert.match(t, /el\('span', \{ text: 'Tone for writing' \}\)/);
 });
@@ -81,7 +83,7 @@ test('the Role list shows each role\'s icon on the right of its row, with a line
   const picker = fn('rolePicker');
   assert.match(picker, /role: 'listbox'/);
   assert.match(picker, /role: 'separator'/);
-  assert.match(picker, /\.kind === 'image'\) !== \(r\.kind === 'image'\)/, 'the line goes where chat roles end');
+  assert.match(picker, /notChat\(roles\[i - 1\]\) !== notChat\(r\)/, 'the line goes where chat roles end (picture and video roles after it)');
   assert.match(picker, /ROLE_ICONS\[id\]/, 'the same icons as Hire staff');
   assert.match(picker, /'Escape'/);
   assert.match(picker, /Object\.defineProperty\(wrap, 'value'/, 'Cancel on "is a picture role" puts the old role back');

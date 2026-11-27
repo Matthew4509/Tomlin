@@ -211,3 +211,11 @@ test('Home says Lets go! is the way into the queue: its tip, the empty Queue pan
   assert.match(read('help/queue.html'), /Work goes in three ways: <b>Lets go!<\/b> on Home/);
   assert.doesNotMatch(read('help/queue.html'), /in Jobs beside LETS GO!!!/);
 });
+
+test('a sheet view keeps its card (kind and a good name); a bad kind or name is dropped', () => {
+  assert.deepEqual(Q.cleanItem({ id: 'a1', kind: 'picture', card: { kind: 'character', name: 'Lan' } })?.card, { kind: 'character', name: 'Lan' });
+  assert.deepEqual(Q.cleanItem({ id: 'a2', kind: 'picture', card: { kind: 'location', name: "Jun's flat" } })?.card, { kind: 'location', name: "Jun's flat" });
+  assert.equal(Q.cleanItem({ id: 'a3', kind: 'picture', card: { kind: 'prop', name: 'Lan' } })?.card, undefined);
+  assert.equal(Q.cleanItem({ id: 'a4', kind: 'picture', card: { kind: 'character', name: '../x' } })?.card, undefined);
+  assert.equal(Q.cleanItem({ id: 'a5', kind: 'picture', card: 'Lan' })?.card, undefined);
+});

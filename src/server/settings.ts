@@ -12,7 +12,7 @@ import { lastLines, log, logFile } from '../log.ts';
 import { buildReport, issueLink, scrub } from '../report.ts';
 import { repoOf } from '../release.ts';
 import { toneOf } from '../persona.ts';
-import { roleOf } from '../staff.ts';
+import { drawsPictures } from '../staff.ts';
 import * as claude from '../claude.ts';
 import { DEFAULT_RULES, PROJECT_RULES_MAX, RULES_MAX, getRules, readProjectRules, saveProjectRules, rulesBlock, resetRules, saveRules, projectRulesForModel } from '../rules.ts';
 import * as keep from '../keep.ts';
@@ -225,13 +225,14 @@ export const settingsPost: Routes = {
       const asked = b.webSearch as Record<string, unknown>;
       await store.saveSettings({ webSearch: cleanSearch({ ...asked, key: 'key' in asked ? asked.key : was?.key }) });
     }
-    // Permissions ({files, web: ask | auto, webDelay}): what a chat's model may do without asking (src/permits.ts).
+    // Permissions ({files, web: ask | auto, webDelay, tiers, ...}): what a chat's model may do without asking
+    // (src/permits.ts). Only what is sent changes (a tier not named keeps its saved one): the pages send just the change.
     if (b.permissions && typeof b.permissions === 'object') await store.saveSettings({ permissions: cleanPermissions(b.permissions, (await store.settings()).permissions) });
     if (hostModel !== null) await store.saveSettings({ hostModel });
     if ('imageAs' in b) {
       const v = String(b.imageAs);
       const m = staff.get(v);
-      await store.saveSettings({ imageAs: m && roleOf(m.role).kind ? m.id : '' });
+      await store.saveSettings({ imageAs: m && drawsPictures(m.role) ? m.id : '' });
     }
     if ('draftDays' in b) {
       const days = [0, 7, 30, 90].includes(Number(b.draftDays)) ? Number(b.draftDays) : 0;
@@ -244,6 +245,7 @@ export const settingsPost: Routes = {
   },
   // {text?, on?} saves the person's rules; {reset: true} puts the 12 defaults back (src/rules.ts).
   '/api/rules': async ({ res, b }) => {
+    if (b.reset !== true && 'text' in b && typeof b.text !== 'string') return json(res, 400, { error: 'The standing rules were not saved: they must be text. Reload the page, then try again.' });
     const r = b.reset === true ? await resetRules(HOME.data) : await saveRules(HOME.data, { ...('text' in b ? { text: b.text } : {}), ...('on' in b ? { on: b.on } : {}) });
     return json(res, 200, { ...r, defaults: DEFAULT_RULES, max: RULES_MAX });
   },

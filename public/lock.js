@@ -1,4 +1,4 @@
-// The app lock (src/applock.ts): the padlock in the top bar, the "Create a new pin" window, the full-page lock screen,
+// The app lock (src/applock.ts): the padlock in the top bar, the "Create a new PIN" window, the full-page lock screen,
 // and the App lock part of the bell window. The server refuses everything while locked; this page only shows it.
 // A1: the lock is a PIN (a number pad) or a password (a text box), chosen by the person. A2: 10 recovery codes, shown
 // once, each of which sets a new PIN or password once from the lock screen.
@@ -75,7 +75,7 @@ function showAppLock(view, keepPages = false) {
   $('#applock').hidden = false;
   const wait = view?.waitMinutes ?? 0;
   const kind = view?.kind ?? 'pin';
-  // Straight after "Save pin and lock" (and its recovery codes) the lock screen says why it is there, so a lock that
+  // Straight after "Save PIN and lock" (and its recovery codes) the lock screen says why it is there, so a lock that
   // shuts at once, as that button says, is not a surprise.
   const justSet = store('applock-just-set') === '1';
   const about = wait ? `Too many wrong tries. Wait ${wait} minute${wait > 1 ? 's' : ''}, then try again.`
@@ -215,7 +215,7 @@ async function appLockOpened() {
   app.lockShown = false;
   document.body.classList.remove('app-locked');
   $('#applock').hidden = true;
-  for (const box of [$('#applock-open-pin'), $('#applock-code'), $('#applock-new1'), $('#applock-new2')]) box.value = '';
+  for (const box of [$('#applock-open-pin'), $('#applock-code-a'), $('#applock-code-b'), $('#applock-new1'), $('#applock-new2')]) box.value = '';
   appLockUi.view = await api('/api/applock').catch(() => appLockUi.view);
   drawPadlock();
   for (const d of kept.windows) if (!d.open) d.showModal();
@@ -256,7 +256,7 @@ $('#applock-btn').addEventListener('click', async () => {
   }
 });
 
-// ---- His window: Create a new pin, Confirm pin, the tick, the warning, Save pin and lock ----
+// ---- The new lock window: Create a new PIN, Confirm PIN, the tick, the warning, Save PIN and lock ----
 
 const appNew = $('#applock-new');
 function appNewFault(text) {
@@ -272,12 +272,12 @@ function fillAppIdle() {
 }
 /** The window's words follow the kind picked: the same wording for a PIN and for a password. */
 function drawNewKind(kind) {
-  const w = kind === 'password' ? 'password' : 'pin';
+  const w = lockWord(kind);
   $('#applock-pin-label').textContent = `Create a new ${w}`;
   $('#applock-pin2-label').textContent = `Confirm ${w}`;
   $('#applock-rule').textContent = kind === 'password' ? 'Any length. A few plain words are easy to remember and hard to guess.' : '4 to 12 digits.';
   $('#applock-agree-text').textContent = `I confirm if I lose my ${w} I will be locked out`;
-  $('#applock-warn').textContent = `WARNING, BY ENABLING THIS YOU NEED TO USE ${w.toUpperCase()} TO LOGIN`;
+  $('#applock-warn').textContent = `You will need this ${w} (or a recovery code) to open TOMLIN.`;
   $('#applock-save').textContent = `Save ${w} and lock`;
   $('#applock-gen-row').hidden = kind !== 'password';
   $('#applock-gen-words').textContent = '';
@@ -330,8 +330,20 @@ $('#applock-form').addEventListener('submit', async e => {
   const fault = $('#applock-fault');
   $('#applock-open').disabled = true;
   try {
-    await api('/api/applock', { action: 'unlock', pin: $('#applock-open-pin').value });
+    const pin = $('#applock-open-pin').value;
+    await api('/api/applock', { action: 'unlock', pin });
+    // Opened after the PIN was made for "Use this PC as a node": the node is switched on now, with the PIN just typed,
+    // so it is not asked a third time after the page opens again (it is never kept). The page then says it is done.
+    if (store('node-on-after-lock') === '1') {
+      const on = await api('/api/share', { on: true, appPin: pin }).then(() => true, () => false);
+      if (on) {
+        store('node-on-after-lock', '');
+        store('node-on-done', '1');
+      }
+    }
     await appLockOpened();
+    // Opened without a reload (windows kept through the lock): said here; after a reload, home.js says it as it loads.
+    app.nodeOnDone?.();
   } catch (err) {
     fault.textContent = err.message;
     fault.hidden = false;
@@ -356,6 +368,44 @@ const recoverKind = kindSwitch($('#applock-recover-kind'), 'pin', kind => {
   }
   $('#applock-recover-strength').hidden = true;
 });
+/**
+ * The recovery code in two boxes of five with the dash between, as Windows asks for a key: letters come out in capitals,
+ * the fifth one moves on to the second box, Backspace in an empty second box goes back, and a whole code pasted (with
+ * or without its dash) fills both. The server reads the code without its dash either way.
+ */
+const codeBoxA = $('#applock-code-a');
+const codeBoxB = $('#applock-code-b');
+const codeChars = v => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+function recoveryCodeTyped() {
+  return `${codeChars(codeBoxA.value)}-${codeChars(codeBoxB.value)}`;
+}
+codeBoxA.addEventListener('input', () => {
+  const v = codeChars(codeBoxA.value);
+  codeBoxA.value = v.slice(0, 5);
+  // A whole code pasted or typed on: the rest goes into the second box.
+  if (v.length > 5) codeBoxB.value = v.slice(5, 10);
+  if (v.length >= 5) {
+    codeBoxB.focus();
+    codeBoxB.setSelectionRange(codeBoxB.value.length, codeBoxB.value.length);
+  }
+});
+codeBoxB.addEventListener('input', () => {
+  codeBoxB.value = codeChars(codeBoxB.value).slice(0, 5);
+});
+codeBoxB.addEventListener('paste', e => {
+  const v = codeChars(e.clipboardData?.getData('text') ?? '');
+  if (v.length <= 5) return;
+  e.preventDefault();
+  codeBoxA.value = v.slice(0, 5);
+  codeBoxB.value = v.slice(5, 10);
+});
+codeBoxB.addEventListener('keydown', e => {
+  if (e.key === 'Backspace' && !codeBoxB.value) {
+    e.preventDefault();
+    codeBoxA.focus();
+    codeBoxA.setSelectionRange(codeBoxA.value.length, codeBoxA.value.length);
+  }
+});
 const recoverStrength = strengthLine($('#applock-new1'), $('#applock-recover-strength'), recoverKind);
 $('#applock-recover-gen').addEventListener('click', () => generateInto($('#applock-new1'), $('#applock-new2'), $('#applock-recover-gen-words'), recoverStrength));
 function recoverShown(on) {
@@ -364,8 +414,9 @@ function recoverShown(on) {
   $('#applock-recover-fault').hidden = true;
   if (!on) return void $('#applock-open-pin').focus();
   $('#applock-recover-kind').querySelector(`[data-kind="${appLockUi.view?.kind ?? 'pin'}"]`)?.click();
-  $('#applock-code').value = '';
-  $('#applock-code').focus();
+  $('#applock-code-a').value = '';
+  $('#applock-code-b').value = '';
+  $('#applock-code-a').focus();
 }
 $('#applock-recover-open').addEventListener('click', () => recoverShown(true));
 $('#applock-recover-back').addEventListener('click', () => recoverShown(false));
@@ -374,7 +425,7 @@ $('#applock-recover').addEventListener('submit', async e => {
   const fault = $('#applock-recover-fault');
   $('#applock-recover-go').disabled = true;
   try {
-    await api('/api/applock', { action: 'recover', code: $('#applock-code').value, kind: recoverKind(), pin: $('#applock-new1').value, pin2: $('#applock-new2').value });
+    await api('/api/applock', { action: 'recover', code: recoveryCodeTyped(), kind: recoverKind(), pin: $('#applock-new1').value, pin2: $('#applock-new2').value });
     await appLockOpened();
   } catch (err) {
     fault.textContent = err.message;

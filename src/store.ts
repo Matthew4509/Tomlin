@@ -177,6 +177,10 @@ export interface ChatLine {
   failed?: boolean;
   /** A picture drawn in the chat: the gallery file (under /api/images/file/), the prompt it came from and its alt text. */
   picture?: { output: string; prompt: string; alt?: string };
+  /** A picture he sent with this message for the model to look at (src/askpics.ts): its file in data/chatpics/<chat>/. */
+  attached?: { file: string };
+  /** A clip a Videographer made (src/clips.ts): its file on the Videos shelf (under /api/clips/file/) and how it was asked. */
+  clip?: { id: string; file: string; mime: string; prompt: string; seconds: number; width: number; height: number; start?: { name: string; copied?: boolean } };
   /** The answer reached its length limit before it was finished: the page offers Continue. */
   cut?: boolean;
   /** Stop was pressed part way (in the chat, or the queue's Stop): the words so far are kept. A queued message runs again on Resume. */

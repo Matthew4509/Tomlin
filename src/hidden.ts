@@ -33,12 +33,24 @@ export class Hidden {
     return [...this.ids];
   }
 
-  /** Hides or shows one model; saved before it returns. */
+  /**
+   * Hides or shows one model; saved before it returns. A save that fails throws, and the model is as it was before
+   * (hidden or not), so nothing says saved while the file still says otherwise.
+   */
   async set(id: string, hidden: boolean): Promise<void> {
+    const was = this.ids.has(id);
     if (hidden) this.ids.add(id);
     else this.ids.delete(id);
     const text = JSON.stringify([...this.ids]);
-    this.saving = this.saving.then(() => writeAtomic(this.file, text)).catch(() => undefined);
-    await this.saving;
+    const save = this.saving.then(() => writeAtomic(this.file, text));
+    // The next save waits for this one, whether it worked or not.
+    this.saving = save.catch(() => undefined);
+    try {
+      await save;
+    } catch (e) {
+      if (was) this.ids.add(id);
+      else this.ids.delete(id);
+      throw e;
+    }
   }
 }

@@ -14,8 +14,8 @@ import { followStarted } from './installer.ts';
 import { roleOf } from './staff.ts';
 import { gateOf } from './applock.ts';
 import { followAppsEntry, refreshTray } from './trayfresh.ts';
-import { autostart } from './autostart.ts';
-import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, startupOf, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, staff, staticFile, store, modelsHome, backupsHome, runtimes, notifier, mutes } from './server/core.ts';
+import { moveStartup } from './autostart.ts';
+import { ALREADY_RUNNING, AskError, HOME, PORT, ROOT, type Route, type Routes, VERSION, apiError, body, decoded, hooks, saidError, json, starting, staff, staticFile, store, modelsHome, backupsHome, runtimes, notifier, mutes } from './server/core.ts';
 import { startDiskCare } from './diskcare.ts';
 import { settingsGet, settingsPost } from './server/settings.ts';
 import { appLock, appLockAction, appLockOn, appLockView, appOk } from './server/locks.ts';
@@ -24,6 +24,8 @@ import { answeringGet, answeringPost, askOnce } from './server/answering.ts';
 import { faceFile, offHost, peopleGet, peoplePost } from './server/people.ts';
 import { addDoc, chatGet, chatPost } from './server/chat.ts';
 import { picturesGet, picturesPost } from './server/pictures.ts';
+import { clipFile, clipHooks, clipsGet, clipsPost } from './server/clips.ts';
+import { shotsGet, shotsPost } from './server/shots.ts';
 import { previewFile, projectPost, workGet, workPost } from './server/work.ts';
 import { teamGet, teamPost } from './server/team.ts';
 import { hfGet, hfPost, resumeDownloads } from './server/hf.ts';
@@ -35,18 +37,28 @@ import { sitecheckGet, sitecheckPost } from './server/sitecheck.ts';
 import { usbGet, usbPost } from './server/usb.ts';
 import { jobRoutes, startJobs } from './server/jobs.ts';
 import { owedPost, startOwed } from './server/owed.ts';
-import { handInPicture, placesGet, placesPost } from './server/places.ts';
+import { handInClip, handInPicture, handInVoice, placesGet, placesPost } from './server/places.ts';
+import { voiceFile, voiceGet, voiceHooks, voicePost } from './server/voice.ts';
+import { cardsGet, cardsPost } from './server/cards.ts';
 import { toolsGet, toolsPost } from './server/tools.ts';
 import { todoGet, todoPost } from './server/todo.ts';
 import { costsGet, costsPost, pcPhotoFile } from './server/costs.ts';
 import { queueGet, queuePost, startQueue } from './server/queue.ts';
+import { styleSamplesGet } from './server/stylesamples.ts';
+import { pairingGet, pairingPost } from './server/pairing.ts';
+import { agentsGet, agentsPost, startAgents } from './server/agents.ts';
 import { installGet, installPost } from './server/install.ts';
 import { runtimesGet, runtimesPost } from './server/runtimes.ts';
 import { finderGet, finderPost } from './server/finder.ts';
 import { runnerCheckGet, runnerCheckPost } from './server/runnercheck.ts';
 import { faultsGet, faultsPost, watchRunners } from './server/faults.ts';
+import { videoGet, videoPost } from './server/video.ts';
 import { selfUpdateGet, selfUpdatePost, takeZip } from './server/selfupdate.ts';
 import { BRIDGE_PATH, bridgeRoute, startBridge } from './server/bridge.ts';
+import { videoModelFiles, videoModelsGet, videoModelsPost } from './server/videomodels.ts';
+import { setVideoRunner } from './server/clips.ts';
+import { videoRunner } from './video.ts';
+import { videoNode } from './jobrun/node.ts';
 
 /** Microsoft Edge, which opens TOMLIN in a window of its own (app mode); null when it is not on this PC. */
 function appWindowBrowser(): string | null {
@@ -61,6 +73,8 @@ function appWindowBrowser(): string | null {
 hooks.chatSaved = tellChat;
 images.askChat = askOnce;
 images.onKept = handInPicture;
+clipHooks.made = handInClip;
+voiceHooks.made = handInVoice;
 images.recipe = id => {
   const m = staff.get(id);
   const r = m ? roleOf(m.role) : null;
@@ -79,7 +93,25 @@ await store.settings();
 await offHost();
 startJobs();
 startOwed();
-await startQueue();
+/**
+ * Starts a part whose file another program may hold past the read's wait (a backup or sync program, a virus scanner):
+ * TOMLIN starts without it, says so in words, and tries it again every 30 seconds until it starts. Before, the start
+ * stopped there and the page said "getting ready" for ever.
+ */
+async function startOrLater(what: string, start: () => Promise<void>): Promise<void> {
+  try {
+    await start();
+  } catch (e) {
+    log.error('start', e);
+    console.warn(`${what} could not start yet (${(e as NodeJS.ErrnoException).code === 'EBUSY' || (e as NodeJS.ErrnoException).code === 'EPERM' ? 'its file is held by another program' : (e as Error).message}). TOMLIN runs without it for now and tries again every 30 seconds.`);
+    // One try at a time: the next is timed from the end of the last (a read can wait 30 seconds itself).
+    const again = () => setTimeout(() => void start().then(() => console.log(`${what} has started.`), again), 30_000).unref();
+    again();
+  }
+}
+await startOrLater('The queue', startQueue);
+// Agents' standing jobs (src/server/agents.ts): their timer adds runs to the queue.
+await startOrLater('The agents', startAgents);
 // The Bridge part: projects, local copies, audits, git, live sites and prompts (/bridge/).
 if (!TEST_START) startBridge();
 
@@ -98,12 +130,18 @@ function routesOf(...tables: Routes[]): Map<string, Route> {
   }
   return all;
 }
-const GET = routesOf(usbGet, backupHomeGet, toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, picturesGet, costsGet, queueGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, todoGet, sitecheckGet, modelHomeGet);
-const POST = routesOf(usbPost, backupHomePost, toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, owedPost, placesPost, costsPost, queuePost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, todoPost, sitecheckPost, modelHomePost);
+const GET = routesOf(usbGet, backupHomeGet, toolsGet, panesGet, teamGet, hfGet, noticesGet, settingsGet, thispcGet, workGet, chatGet, peopleGet, answeringGet, placesGet, cardsGet, picturesGet, clipsGet, voiceGet, shotsGet, costsGet, queueGet, styleSamplesGet, pairingGet, agentsGet, installGet, selfUpdateGet, runtimesGet, finderGet, runnerCheckGet, faultsGet, videoGet, todoGet, sitecheckGet, videoModelsGet, modelHomeGet);
+const POST = routesOf(usbPost, backupHomePost, toolsPost, settingsPost, teamPost, workPost, chatPost, noticesPost, panesPost, thispcPost, hfPost, answeringPost, peoplePost, picturesPost, clipsPost, voicePost, shotsPost, owedPost, placesPost, cardsPost, costsPost, queuePost, pairingPost, agentsPost, installPost, selfUpdatePost, runtimesPost, finderPost, runnerCheckPost, faultsPost, videoPost, todoPost, sitecheckPost, videoModelsPost, modelHomePost);
 
 // The holding page's socket (src/waitdoor.ts) when it is listening, so the port never goes quiet; else a new one.
 // Runner faults and whole answers go to the run history (the crash notice reads it).
 watchRunners();
+// Clips: one engine for this PC, used by a Videographer's chat here and by linked PCs' clips (src/videolink.ts).
+if (!process.env.TOMLIN_FAKE_VIDEO) {
+  const localVideo = videoRunner({ resolve: videoModelFiles });
+  setVideoRunner(localVideo);
+  videoNode.setRunner(localVideo);
+}
 const server = takeWaitDoor() ?? createServer();
 server.on('request', async (req, res) => {
   try {
@@ -142,6 +180,8 @@ server.on('request', async (req, res) => {
       // A broken %-escape names no PC: not found, as any other name that has no photo.
       const pcKey = pcPhoto ? decoded(pcPhoto[1]) : null;
       if (pcPhoto) return pcKey === null ? json(res, 404, { error: 'Not found.' }) : await pcPhotoFile(pcKey, res);
+      if (await clipFile(req, res, p)) return;
+      if (await voiceFile(req, res, p)) return;
       if (await images.get(req, res, url)) return;
       if (!p.startsWith('/api/') && !p.startsWith('/v1/')) return void (await staticFile(res, p));
       return json(res, 404, { error: 'Not found.' });
@@ -183,6 +223,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 });
 
 const started = () => {
+  starting.on = false;
   const clear =async () => images.gallery.clearDrafts((await store.settings()).draftDays).catch(() => 0);
   void clear();
   setInterval(clear, 3_600_000).unref();
@@ -192,10 +233,14 @@ const started = () => {
   // An install's current.txt follows the copy that started, so the installed program starts this one next time.
   followStarted(ROOT, process.env, line => log.info('app', line));
   // A new copy started by Start TOMLIN.cmd after an update from a linked PC: it answered, so it is kept (no going back).
-  if (process.env.TOMLIN_PREV) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
-  // Started again after a new copy failed to start: "Start TOMLIN when this PC starts", pointed at that copy, points here again.
+  // "Start TOMLIN when this PC starts" moves to it only now that it has answered (the copy before it left it as it was).
+  const prev = process.env.TOMLIN_PREV;
+  if (prev) void writeFile(join(ROOT, '.started-ok'), '').catch(() => undefined);
+  if (prev) void moveStartup(prev, ROOT).catch(() => undefined);
+  // Started again after a new copy failed to start: "Start TOMLIN when this PC starts", if it points at that copy (an
+  // older copy moved it before the new one started), points here again.
   const failed = process.env.TOMLIN_FAILED;
-  if (failed) void autostart(failed).on().then(async on => { if (on) await startupOf.set(true); }).then(() => console.log(`The new version in ${failed} did not start, so this version runs again.`)).catch(() => undefined);
+  if (failed) void moveStartup(failed, ROOT).catch(() => false).then(() => console.log(`The new version in ${failed} did not start, so this version runs again.`));
   // Start TOMLIN.cmd asks for the browser only now, once the page can answer (opened earlier, it showed "can't reach this page").
   // Its own window (Microsoft Edge app mode: no tabs, no address bar), else a tab in the default browser.
   if (process.env.TOMLIN_OPEN === '1' && process.platform === 'win32') {

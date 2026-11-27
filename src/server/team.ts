@@ -6,7 +6,7 @@ import { streamChat, type ChatTurn } from '../engine.ts';
 import * as brains from '../brains.ts';
 import sharp from 'sharp';
 import { nickname } from '../nicknames.ts';
-import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOfHire, roleOf, drawAsChange, isPlain, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
+import { LEVEL_CHOICES, LEVELS, ROLES, IMAGE_TIERS, levelOfSize, paramsB, sizeB, modelsOf, modelLeft, nowModel, staffSystem, cleanAnswer, levelOfHire, roleOf, drawAsChange, isPlain, makesVideo, workKind, matchModel, matchImageModel, runChecks, type Audition, type StaffMember } from '../staff.ts';
 import { staffState as homeState, activityOf, awardBehind, awardPeriods, bookAfter, buy, cleanAwards, cleanBook, doingOf, DOING_WORDS, purseOf, roomsOf, SHOP, shopView, undoAward, winnerOf, type Award } from '../home.ts';
 import { DamagedFile, markMended, readData, updateData, writeAtomic } from '../atomic.ts';
 import * as mute from '../mute.ts';
@@ -24,9 +24,14 @@ import { jobRoutes } from './jobs.ts';
 import { freeOn } from '../jobrun/copies.ts';
 import { officeFeed } from './notices.ts';
 import { queueHome } from './queue.ts';
+import { agentHome } from './agents.ts';
 import { staffUsage } from './costs.ts';
 import { memoryNow } from './thispc.ts';
-import { chatNeed, memOfReport, moveWontFit, ramFit } from '../calc.ts';
+import { chatNeed, memOfReport, moveWontFit, pictureFactsOf, pictureFit, picturePcOf, ramFit } from '../calc.ts';
+import { cardHere, videoList } from './videomodels.ts';
+import { VIDEO_MODELS, shortVideoName, videoModel, videoState } from '../videomodels.ts';
+import { drawingFor } from './queue.ts';
+import { sampleStyles } from '../styles.ts';
 
 // ---- Staff ----
 
@@ -75,10 +80,42 @@ async function staffView(o: { known?: boolean } = {}) {
   const here = memOf(mem);
   const chatLevel = (name: string, bytes: number) => (bytes || paramsB(name) !== null ? levelOfSize(sizeB(name, bytes)).id : null);
   const imageLevel = (bytes: number) => (bytes ? LEVELS.find(l => bytes / 2 ** 30 <= IMAGE_TIERS[l.id].maxGB)?.id ?? null : null);
+  /**
+   * A Videographer's choices on one PC ('' = this PC): every video model in the list with the fits guide for that PC's
+   * card (Fits, Tight fit, Not enough memory). On this PC, `here` says whether it is downloaded; a linked PC does not
+   * say which video models it has yet, so its choices are the list with its card's fit (`here` null).
+   */
+  // Whether a linked PC has video model `id`, as its hello says (null: a TOMLIN before 2.1.34, which does not say).
+  const videosThere = (pc: string, id: string): boolean | null => {
+    const v = jobRoutes.lastHello(pc)?.videos;
+    return v ? v.includes(id) : null;
+  };
+  const videoChoices = (pc: string) => {
+    const mem = pc ? pcMem.get(pc) : null;
+    const card = pc ? (mem?.vram ? Math.round((mem.vram / 2 ** 30) * 10) / 10 : mem?.ram ? 0 : null) : cardHere();
+    const where = pc ? `"${labels[pc] ?? pcs.find(r => r.id === pc)?.name ?? 'that PC'}"` : 'this PC';
+    return videoList(card, where).map(x => ({ id: pc ? brains.remoteRef(pc, x.id) : x.id, name: x.name, nick: '', hidden: false, pc, label: x.short, bytes: x.bytes, need: x.vramGB * 2 ** 30, fit: x.fit === 'Not enough memory' ? 'no' : x.fit === 'Tight fit' ? 'tight' : 'ok', ramFit: x.fit === 'Not enough memory' ? 'no' : 'ok', videoFit: x.fit, fitLine: x.fitLine, here: pc ? videosThere(pc, x.id) : x.installed, loaded: false, busy: false, level: null }));
+  };
+  /**
+   * How a picture model fits a PC's graphics card and RAM (src/calc.ts pictureFit): on its card, tight, or drawing on
+   * the processor with about how long a picture takes. '' = this PC (its biggest card); a linked PC by all the card
+   * memory it reports. null when the model is not in the registry or the PC's memory is not known.
+   */
+  const pictureFitOn = (pc: string, id: string, bytes: number) => {
+    const reg = images.registry.get(id);
+    const facts = reg?.kind === 'image' ? pictureFactsOf(reg, bytes || images.registry.bytes(reg)) : null;
+    const m = pc ? pcMem.get(pc) : picturePcOf(hardware);
+    return facts && m ? pictureFit(facts, m, pc ? `"${labels[pc] ?? pcs.find(r => r.id === pc)?.name ?? 'that PC'}"` : 'this PC') : null;
+  };
   const remoteChoice = (image: boolean) => (b: ReturnType<typeof pcBrains>[number]) => {
-    const pc = brains.parseRef(b.id).kind === 'remote' ? (brains.parseRef(b.id) as { pc: string }).pc : '';
+    const r = brains.parseRef(b.id);
+    const pc = r.kind === 'remote' ? r.pc : '';
     const need = image ? b.bytes : b.bytes ? Math.round(chatNeed(b.bytes)) : 0;
-    return { id: b.id, name: b.name, nick: b.nick, ok: b.ok, hidden: b.hidden, pc, label: b.label, bytes: b.bytes, need, fit: fitThere(pc, need), ramFit: fitThere(pc, need), loaded: b.loaded, busy: b.busy, level: image ? imageLevel(b.bytes) : chatLevel(b.label, b.bytes) };
+    const model = r.kind === 'remote' ? r.model : '';
+    const reg = image && model ? images.registry.get(model) : undefined;
+    // A picture model on a linked PC: its fit on that PC's card, and its licence (the same registry entry as here).
+    const extra = image ? { cardFit: model ? pictureFitOn(pc, model, b.bytes) : null, licence: reg?.licence ?? '', nonCommercial: !!reg?.nonCommercial } : {};
+    return { id: b.id, name: b.name, nick: b.nick, ok: b.ok, hidden: b.hidden, pc, label: b.label, bytes: b.bytes, need, fit: fitThere(pc, need), ramFit: fitThere(pc, need), loaded: b.loaded, busy: b.busy, level: image ? imageLevel(b.bytes) : chatLevel(b.label, b.bytes), ...extra };
   };
   return {
     sharing: jobRoutes.shareView().on,
@@ -92,18 +129,31 @@ async function staffView(o: { known?: boolean } = {}) {
     // For Hire staff (public/hire.js): every model a new hire can start on, with the short name the name box offers (src/nicknames.ts).
     hireChoices: {
       chat: [...models.filter(x => onShow(x.id, twins)).map(x => ({ id: x.id, name: marked(shortName(x.name) || x.name, x), nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: shortName(x.name) || x.name, bytes: x.bytes, need: Math.round(chatNeed(x.bytes)), fit: x.fit.level, ramFit: ramFit(Math.round(chatNeed(x.bytes)), here), loaded: runnerFor(x.id)?.view.state === 'connected', busy: false, level: chatLevel(x.name, x.bytes) })), ...pcBrains(false).map(remoteChoice(false))],
-      image: [...pictures.filter(x => x.installed).map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
+      video: [...videoChoices(''), ...pcs.filter(r => !r.backupsOnly && !r.heldByCluster).flatMap(r => videoChoices(r.id))],
+      // Every picture model in the list, as the video list is: one not downloaded says so and cannot be picked (Get it).
+      image: [...pictures.map(x => ({ id: x.id, name: x.name, nick: nickname(x.name), hidden: hidden.has(x.id), pc: '', label: x.name, bytes: x.bytes, need: x.bytes, fit: x.fit.level, ramFit: ramFit(x.bytes, here), loaded: images.pane.view.model === x.id && images.pane.view.state === 'connected', busy: false, level: imageLevel(x.bytes), here: x.installed, licence: x.licence ?? '', nonCommercial: x.nonCommercial, cardFit: pictureFitOn('', x.id, x.bytes) })), ...pcBrains(true).map(remoteChoice(true))],
     },
     connectedAll: runners.filter(p => p.view.state === 'connected').map(p => p.view.model),
     connectedImage: images.pane.view.state === 'connected' ? images.pane.view.model : null,
-    staff: staff.list().map(m => roleOf(m.role).kind
+    staff: staff.list().map(m => makesVideo(m.role)
+      ? {
+        ...m,
+        kind: 'video',
+        use: hireModelOf(m),
+        // Every video model in the list, with the fits guide for this PC's card; one not downloaded says so.
+        models: videoList().map(x => ({ id: x.id, name: x.name, bytes: x.bytes, installed: x.installed, hidden: false, unit: 'GB', against: 'any', sizeB: Math.round((x.bytes / 2 ** 30) * 10) / 10, moe: false, rank: 2, videoFit: x.fit, fitLine: x.fitLine, fit: x.fit === 'Not enough memory' ? 'no' : x.fit === 'Tight fit' ? 'tight' : 'ok', audition: null })),
+        // The video models on each linked PC, with that PC's fit (it does not say which it has yet).
+        pcBrains: pcs.filter(r => !r.backupsOnly && !r.heldByCluster).flatMap(r => videoChoices(r.id)).map(c => ({ id: c.id, name: `${c.label} on "${labels[c.pc] ?? c.pc}" · ${c.videoFit ?? 'card not known'}`, ok: true, hidden: false, audition: null, videoFit: c.videoFit })),
+      }
+      : roleOf(m.role).kind
       ? {
         ...m,
         kind: 'image',
         use: hireModelOf(m),
         pcBrains: pcBrains(true),
-        styles: brains.STYLES.map(st => ({ id: st, name: brains.STYLE_NAME[st] })),
-        models: pictures.map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, installed: x.installed, hidden: hidden.has(x.id), unit: 'GB', ...matchImageModel(m, x.bytes), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
+        // The same styles as the style tiles in the Images window (Auto is "Any: as the words ask").
+        styles: sampleStyles().map(st => ({ id: st.id, name: st.name })),
+        models: pictures.map(x => ({ id: x.id, name: x.name, bytes: x.bytes, fit: x.fit.level, cardFit: pictureFitOn('', x.id, x.bytes), installed: x.installed, hidden: hidden.has(x.id), unit: 'GB', ...matchImageModel(m, x.bytes), audition: summary(done[roleOf(m.role).id + ':' + x.id]) }))
           .sort((a, b) => Number(b.installed) - Number(a.installed) || b.rank - a.rank || a.bytes - b.bytes),
       }
       : {
@@ -121,7 +171,7 @@ async function staffView(o: { known?: boolean } = {}) {
 const summary = (a: Audition | undefined) => (a ? { score: a.score, of: a.of, seconds: a.seconds, at: a.at, model: a.model } : null);
 
 /** A hire whose preferred brain is on a paired PC: that PC's state as it last answered (Home asks it every poll). */
-function remoteState(ref: string | null | undefined, image: boolean): { state: 'on' | 'asleep' | 'off' | 'none'; text: string; modelName: string; pc: string; owner?: boolean; busy?: boolean } | null {
+function remoteState(ref: string | null | undefined, image: boolean, video = false): { state: 'on' | 'asleep' | 'off' | 'none'; text: string; modelName: string; pc: string; owner?: boolean; busy?: boolean } | null {
   const b = brains.parseRef(ref);
   if (b.kind !== 'remote') return null;
   const r = store.peek()?.remotes.find(x => x.id === b.pc);
@@ -131,6 +181,15 @@ function remoteState(ref: string | null | undefined, image: boolean): { state: '
   const h = jobRoutes.lastHello(r.id);
   const loaded = image ? h?.image?.name : h?.model;
   if (!h || Date.now() - h.at > 5 * 60_000) return { state: 'off', text: `On "${r.name}": not heard from lately`, modelName: b.model ? shortName(jobRoutes.sharedName(r.id, b.model)) : '', pc: r.name };
+  // A Videographer's model is no chat or picture model there: its own list says it (a TOMLIN before 2.1.34 does not,
+  // and the clip itself finds out), and it loads when a clip is made.
+  if (video && b.model) {
+    const meta = VIDEO_MODELS.find(x => x.id === b.model);
+    const name = meta ? shortVideoName(meta) : b.model;
+    if (h.away) return { state: 'off', text: `"${r.name}": its owner is using it for now`, modelName: name, pc: r.name, owner: true };
+    if (h.videos && !h.videos.includes(b.model)) return { state: 'none', text: `${name} is not on "${r.name}": send it there (Models, Send to)`, modelName: name, pc: r.name };
+    return { state: 'asleep', text: `Asleep: ${name} loads on "${r.name}" when a clip is made`, modelName: name, pc: r.name };
+  }
   if (b.model) {
     const name = shortName(jobRoutes.sharedName(r.id, b.model));
     const sh = h.models.find(x => x.id === b.model && (x.kind === 'image') === image);
@@ -336,14 +395,17 @@ async function homeView() {
   const profiles = await pcProfiles.all();
   const rows = staff.list().map(m => {
     const role = roleOf(m.role);
-    const image = !!role.kind;
+    const video = role.kind === 'video';
+    const image = role.kind === 'image';
     const now = nowModel(m) ?? m.model;
-    const entry = image ? pictures.find(x => x.id === now) : chats.find(x => x.id === now);
-    const away = remoteState(m.model, image);
-    const st = away ?? homeState(now, image ? imagePane : chatPane(now), image ? !!(entry && 'installed' in entry && entry.installed) : !!entry, now ? (image ? imageSeconds(now) : chatSeconds(now)) : 0);
+    // A Videographer's model is in the video list (src/videomodels.ts): it loads when a clip is made, not on Connect.
+    const clip = video && now && !String(now).startsWith('remote:') ? videoList().find(x => x.id === now) : undefined;
+    const entry = video ? (clip?.installed ? { name: clip.short } : undefined) : image ? pictures.find(x => x.id === now) : chats.find(x => x.id === now);
+    const away = video ? (String(now ?? '').startsWith('remote:') ? remoteState(m.model, true, true) : null) : remoteState(m.model, image);
+    const st = away ?? (video ? videoState(now, clip) : homeState(now, image ? imagePane : chatPane(now), image ? !!(entry && 'installed' in entry && entry.installed) : !!entry, now ? (image ? imageSeconds(now) : chatSeconds(now)) : 0));
     const busy = jobs.working?.staffId === m.id;
     const where = brains.parseRef(m.model);
-    const doing = doingOf({ state: st.state, away: !!away?.owner, remoteBusy: !!away?.busy, phase: phases.get(`staff:${m.id}`) ?? null, picture: drawing.has(`staff:${m.id}`), job: busy });
+    const doing = doingOf({ state: st.state, away: !!away?.owner, remoteBusy: !!away?.busy, phase: phases.get(`staff:${m.id}`) ?? null, picture: drawing.has(`staff:${m.id}`) || drawingFor(m.id), job: busy });
     if (WORKING.has(doing)) seenWorking.set(m.id, Date.now());
     const last = Math.max(lastWorked.get(`staff:${m.id}`) ?? 0, seenWorking.get(m.id) ?? 0);
     return {
@@ -352,7 +414,7 @@ async function homeView() {
       role: role.name,
       roleId: role.id,
       level: levelOfHire(m).name,
-      kind: image ? 'image' : 'chat',
+      kind: video ? 'video' : image ? 'image' : 'chat',
       model: m.model ?? null,
       // Not away: the answer every screen gives (src/hiremodel.ts), so a model no longer here is not "no model given".
       modelName: away ? away.modelName : entry ? shortName(entry.name) : hireModelShort(hireModelOf(m)),
@@ -366,7 +428,7 @@ async function homeView() {
       ...st,
       busy: busy ? jobs.working!.text : null,
       // The dot on their icon, and the PC they sit on in the left panel ('' = this PC).
-      activity: activityOf({ state: st.state, busy: busy || talking.has(`staff:${m.id}`) || !!away?.busy, away: !!away?.owner }),
+      activity: activityOf({ state: st.state, busy: busy || talking.has(`staff:${m.id}`) || drawingFor(m.id) || !!away?.busy, away: !!away?.owner }),
       // What they are doing now, for the office in Staff overview (public/office.js).
       doing,
       doingText: doing === 'working' ? `Working: ${jobs.working!.text}` : DOING_WORDS[doing],
@@ -394,7 +456,7 @@ async function homeView() {
   const inQueue = new Set(queue.projects);
   // Said once: a project the queue finished is "Review documents for …", not also the job's own line.
   for (const l of queue.lines) if (l.kind === 'documents' && l.job) inQueue.add(l.job);
-  const queueItems = queue.lines.map(l => ({ ...l, queue: true, goal: '', staffId: null }));
+  const queueItems = [...agentHome().map(l => ({ ...l, goal: '', staffId: null, job: null })), ...queue.lines.map(l => ({ ...l, queue: true, goal: '', staffId: null }))];
   return {
     // The host is off for now: no row for it.
     manager: HOST_ON ? manager : null,
@@ -416,6 +478,7 @@ const waking = new Map<string, { at: number; expect: number; model: string; name
 async function wake(who: string, model: string): Promise<{ status: number; body: unknown }> {
   const m = staffId(who) ? staff.get(who.slice(6)) : undefined;
   if (!m) return { status: 404, body: { error: 'There is no such person on the team.' } };
+  if (makesVideo(m.role)) return { status: 409, body: { error: `${m.name}'s video model loads when a clip is made: there is nothing to wake.` } };
   const image = !!roleOf(m.role).kind;
   const list = modelsOf(m);
   const pick = model || nowModel(m) || '';
@@ -461,6 +524,7 @@ let auditing = false;
 async function audition(id: string, ref?: unknown) {
   const member = staff.get(id);
   if (!member) return { status: 404, body: { error: 'There is no such person on the team.' } };
+  if (makesVideo(member.role)) return { status: 400, body: { error: 'A Videographer has no audition yet: make a clip with them to see what their model does.' } };
   if (roleOf(member.role).kind) return imageAudition(member);
   if (typeof ref === 'string' && ref) return brainAudition(member, ref);
   if (chat.view.state !== 'connected' || !chat.worker.base) return { status: 409, body: { error: 'Connect a chat model first: the audition runs on the model that is connected.' } };
@@ -747,11 +811,12 @@ export const teamPost: Routes = {
         // The model picked in Hire staff (they start on it): one of this PC's, or a linked PC's loaded one.
         if (typeof b.model === 'string' && b.model) {
           const ref = brains.parseRef(b.model);
-          const image = !!roleOf(b.role).kind;
-          const ok = ref.kind === 'remote' ? (await store.settings()).remotes.some(r => r.id === ref.pc) : ref.kind === 'here' && (image ? images.has(ref.id) : chatList().some(x => x.id === ref.id));
-          if (!ok) return json(res, 400, { error: `That is not a ${image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
+          const kind = workKind(b.role);
+          const image = kind === 'image';
+          const ok = ref.kind === 'remote' ? (await store.settings()).remotes.some(r => r.id === ref.pc) && (kind !== 'video' || !!videoModel(ref.model)) : ref.kind === 'here' && (kind === 'video' ? !!videoModel(ref.id) : image ? images.has(ref.id) : chatList().some(x => x.id === ref.id));
+          if (!ok) return json(res, 400, { error: `That is not a ${kind === 'video' ? 'video' : image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
         }
-        const made = await staff.hire(b.name, b.role, b.level, b.model,id => had.has(`staff:${id}`) || existsSync(join(store.dir, memory.scopeFile(`staff:${id}`))), b.look);
+        const made = await staff.hire(b.name, b.role, b.level, b.model,id => had.has(`staff:${id}`) || [memory.scopeFile(`staff:${id}`), memory.oldScopeFile(`staff:${id}`)].some(f => existsSync(join(store.dir, f))), b.look);
         hired = made.id;
         // {drawAs: true}: the new artist becomes "Draw as" (as the Hire window sets it); only someone who draws can be.
         const drawAs = drawAsChange(b.drawAs, made, (await store.settings()).imageAs);
@@ -763,22 +828,29 @@ export const teamPost: Routes = {
       } else if (b.action === 'change') {
         const was = staff.get(String(b.id));
         // A different kind of role (chat or picture) cannot keep the other kind's model.
-        const change = was && b.role !== undefined && !!roleOf(b.role).kind !== !!roleOf(was.role).kind ? { ...b, model: null, fallback: null, style: null, group: [], active: null } : b;
-        const image = !!roleOf(change.role ?? was?.role).kind;
+        // (Chat, picture and video are three kinds.)
+        const change = was && b.role !== undefined && workKind(b.role) !== workKind(was.role) ? { ...b, model: null, fallback: null, style: null, group: [], active: null } : b;
+        const kind = workKind(change.role ?? was?.role);
+        const image = kind === 'image';
+        const video = kind === 'video';
         const remotes = (await store.settings()).remotes;
         for (const k of ['model', 'fallback'] as const) {
           const v = change[k];
           if (v === undefined || v === null || v === '') continue;
           const ref = brains.parseRef(v);
-          const ok = ref.kind === 'remote' ? remotes.some(r => r.id === ref.pc) : ref.kind === 'here' && (image ? images.has(ref.id) : chatList().some(m => m.id === ref.id));
-          if (!ok) return json(res, 400, { error: `That is not a ${image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
+          const ok = ref.kind === 'remote' ? remotes.some(r => r.id === ref.pc) && (!video || !!videoModel(ref.model)) : ref.kind === 'here' && (video ? !!videoModel(ref.id) : image ? images.has(ref.id) : chatList().some(m => m.id === ref.id));
+          if (!ok) return json(res, 400, { error: `That is not a ${video ? 'video' : image ? 'picture' : 'chat'} model on this PC or a linked PC. Pick again from the list.` });
         }
         // Moving someone to another PC (the Move window: the office or the left panel): a model that will not fit that
         // PC's memory is refused, by the same rule Hire staff marks the models with (src/calc.ts ramFit).
         if (b.move === true && typeof change.model === 'string' && change.model) {
           const view = await staffView();
-          const c = view.hireChoices[image ? 'image' : 'chat'].find(x => x.id === change.model);
-          if (c?.ramFit === 'no') {
+          const c = view.hireChoices[kind].find(x => x.id === change.model);
+          if (video && c && 'videoFit' in c && c.videoFit === 'Not enough memory') {
+            const pc = c.pc ? view.pcs.find(x => x.id === c.pc) : null;
+            return json(res, 400, { error: `${c.label} needs about ${Math.round(c.need / 2 ** 30)} GB of graphics memory, more than the card of ${pc ? `"${pc.name}"` : 'this PC'} has. Pick a smaller video model, or another PC.` });
+          }
+          if (!video && c?.ramFit === 'no') {
             const pc = c.pc ? view.pcs.find(x => x.id === c.pc) : null;
             return json(res, 400, { error: moveWontFit(c.label, c.need, pc ? `"${pc.name}"` : 'This PC', pc ?? view.here) });
           }
@@ -786,7 +858,7 @@ export const teamPost: Routes = {
         // The related models a hire may also use are models on this PC (a node lends only its own).
         if (change.group !== undefined) {
           const list = Array.isArray(change.group) ? change.group : [];
-          if (list.some(id => typeof id !== 'string' || !(image ? images.has(id) : chatList().some(m => m.id === id)))) return json(res, 400, { error: `Only ${image ? 'picture' : 'chat'} models on this PC can be in the list. Download it first, then tick it.` });
+          if (list.some(id => typeof id !== 'string' || video || !(image ? images.has(id) : chatList().some(m => m.id === id)))) return json(res, 400, { error: `Only ${image ? 'picture' : 'chat'} models on this PC can be in the list. Download it first, then tick it.` });
         }
         const ran = was ? { model: was.model, group: [...(was.group ?? [])], active: was.active } : null;
         const wasChat = !!was && !roleOf(was.role).kind;

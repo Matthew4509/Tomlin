@@ -2,12 +2,13 @@
   "id": "realvisxl-v5-lightning",
   "kind": "image",
   "name": "RealVisXL V5 Lightning (SDXL, Q4, 1024 px, the middle one)",
-  "about": "Between the fast SD 1.5 models and Qwen-Image: photoreal SDXL from the maker of Realistic Vision, drawing 1024 px pictures in 5 steps. Best on a graphics card with 4 GB or more; on the CPU each picture takes minutes.",
+  "about": "Between the fast SD 1.5 models and Qwen-Image: photoreal SDXL from the maker of Realistic Vision, drawing 1024 px pictures in 5 steps. Best on a graphics card with 5 GB or more (a 4 GB card runs out part-way, so it draws on the CPU there); on the CPU each picture takes minutes.",
   "family": "sdxl",
   "licence": "CreativeML Open RAIL++-M (use limits apply, commercial use allowed); MIT (SDXL VAE fp16 fix, TAESDXL)",
   "quant": "Q4_K",
   "minRamGB": 8,
-  "minVramGB": 4,
+  "minVramGB": 5,
+  "cpuBelowGB": 5,
   "recommendedModes": [
     "blog",
     "custom"

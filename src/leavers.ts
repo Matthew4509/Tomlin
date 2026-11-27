@@ -12,7 +12,7 @@ export function nameFromId(id: string): string {
 export const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
 
 /** How a chat with leaver `id` names them: kept details when there are any, else a name made from the id. */
-export function leftPerson(id: string, kept?: Leaver): { name: string; avatar: string; role: string } {
+export function leftPerson(id: string, kept?: Leaver): { name: string; avatar: string; role: string; roleId?: string } {
   const name = kept?.name || nameFromId(id);
-  return { name: `${name} (left the team)`, avatar: initialsOf(name), role: kept ? `${roleOf(kept.role).name} · left the team` : 'Left the team' };
+  return { name: `${name} (left the team)`, avatar: initialsOf(name), role: kept ? `${roleOf(kept.role).name} · left the team` : 'Left the team', ...(kept ? { roleId: roleOf(kept.role).id } : {}) };
 }

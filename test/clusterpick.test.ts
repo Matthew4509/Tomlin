@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 /** The owner's first name in lower case, kept encoded so this shipped file does not spell it (the privacy guard below). */
 const OWNER = Buffer.from('bWF0dGhldw==', 'base64').toString();
 

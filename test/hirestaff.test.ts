@@ -188,7 +188,8 @@ test('Hire staff: role is two tiles with a sub-role drop-down, numbered steps, t
   const hire = readFileSync(new URL('../public/hire.js', import.meta.url), 'utf8');
   const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
   assert.match(hire, /name: 'Text \/ coding'/);
-  assert.match(hire, /name: 'Images'/);
+  assert.match(hire, /name: 'Pictures and video'/);
+  assert.doesNotMatch(hire, /name: 'Images'/);
   assert.match(page, /<select id="hs-subrole"><\/select>/);
   assert.match(page, /<span class="hs-step" aria-hidden="true">1<\/span>Role/);
   assert.match(page, /<span class="hs-step" aria-hidden="true">2<\/span>Assign a PC/);
@@ -227,4 +228,15 @@ test('Hire staff: a linked PC that is off is folded with a plain two-column list
   // Where a model is sits behind a "!", not spelled out on every card.
   assert.match(hire, /class: 'hs-where', type: 'button', 'data-key': `where:\$\{e\.key\}`, text: '!', title: `On \$\{where\}`/);
   assert.doesNotMatch(hire, /`On \$\{where\}`\]\.filter\(Boolean\)/);
+});
+
+test('role words: the Agent works alone (no "himself"), Home\'s role buttons say model, and Default is someone with no role', async () => {
+  const { ROLES } = await import('../src/staff.ts');
+  const agent = ROLES.find(r => r.id === 'agent');
+  assert.equal(agent?.hint, 'Works alone on a standing job you set: on a timer or a trigger, with only the tools you approve, and writes a report each run.');
+  for (const r of ROLES) assert.doesNotMatch(r.hint, /\b(himself|herself|he|she|his|her)\b/i, r.id);
+  assert.equal(ROLES.find(r => r.id === 'default')?.hint, 'This is the model by itself with no specialist role, or function');
+  const view = readFileSync(new URL('../public/homeview.js', import.meta.url), 'utf8');
+  assert.match(view, /title: r\.id === 'default' \? 'Hire someone with no role: pick their PC and model' : `Hire \$\{\/\^\[aeiou\]\/i\.test\(r\.name\) \? 'an' : 'a'\} \$\{r\.name\.toLowerCase\(\)\}: pick their PC and model`/);
+  assert.doesNotMatch(view, /pick their PC and software/);
 });

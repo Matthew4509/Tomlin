@@ -7,7 +7,7 @@
 // its chat when it comes in: at Reconnect, at every start, and once a minute.
 // The node's side is the Outbox class; the host's side is `owedLine` and `settle`. Tested in test/outbox.test.ts.
 import { randomBytes, createHash } from 'node:crypto';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { readdir, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeAtomic } from './atomic.ts';
 import type { ChatLine } from './store.ts';
@@ -245,6 +245,33 @@ export class Outbox {
     }
     await this.take(owner, rid);
     return !!r;
+  }
+
+  /**
+   * The same PC linked again and proved it held the old keys: every answer kept for `owner` is opened with the old keys
+   * and sealed again with the new ones, so it can still be collected. Each keeps its time on the disk (its three days run
+   * from when it was kept, not from now). One that does not open with the old keys is left as it was. Returns how many.
+   */
+  async reseal(owner: string, from: Lock, to: Lock): Promise<number> {
+    if (!OWNER.test(owner)) return 0;
+    let done = 0;
+    for (const name of await readdir(this.dir).catch(() => [] as string[])) {
+      const rid = name.startsWith(`${owner}-`) && name.endsWith('.box') ? name.slice(owner.length + 1, -4) : '';
+      if (!RID.test(rid)) continue;
+      const file = join(this.dir, name);
+      const s = await stat(file).catch(() => null);
+      const raw = await readFile(file).catch(() => null);
+      const plain = raw ? from.open(raw, `outbox|${rid}`) : null;
+      if (!s || !plain) continue;
+      try {
+        await writeAtomic(file, to.seal(plain, `outbox|${rid}`));
+        await utimes(file, s.atime, s.mtime).catch(() => undefined);
+        done++;
+      } catch {
+        // Left sealed with the old keys: that answer is lost to the new link, the others still move.
+      }
+    }
+    return done;
   }
 
   /** Answers kept longer than three days (their PC never came back for them) are removed. */

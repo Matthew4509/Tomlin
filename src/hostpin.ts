@@ -7,12 +7,12 @@
 // and the wait grows each time the same link is stopped again (10 minutes, 1 hour, 6 hours, 24 hours) until a right one.
 // Since 2.1.1 the host does not need a typed host PIN: it makes a random host key (HostKey, below) and gives it the same way
 // (a held "host PIN" whose secret is the key; `keyId` marks it), and uses it only while its own app lock is open, so
-// unlocking the host is the admin step. The typed host PIN still works for PCs set up with it.
+// unlocking the host is the admin step. Since 2.1.31 the admin PC sets no typed host PIN and the key has no off switch;
+// a PC still takes a typed one an older admin PC gave it, until its owner takes it away there.
 // The plain parts, tested in test/hostpin.test.ts; wired in src/server/locks.ts (the PC that holds one) and
 // src/jobrun/hostpins.ts (the main PC that sets one).
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanKind, cleanSecret, hashSecret, secretMatches, type LockKind } from './lock.ts';
-import { PinGuard } from './share.ts';
 
 /** The host-only doors of a PC: take a host PIN from this link (with the PC's own PIN), and take it away. */
 export const SET_DOOR = '/worker/host-pin-set';
@@ -23,9 +23,7 @@ export const CAN = 'host-pin';
 export const HELD_FILE = 'host-pins.json';
 /** On a PC: wrong PINs typed for it on other PCs, kept over a restart. */
 export const TRIES_FILE = 'pin-tries.json';
-/** On the main PC: the hash of its own host PIN (never the PIN itself). */
-export const OWN_FILE = 'host-pin.json';
-/** On the main PC: its host key (kept whole: it has to be sent), or `{ off: true }` when the owner turned it off. */
+/** On the main PC: its host key (kept whole: it has to be sent). An `{ off: true }` from before 2.1.31 reads as none. */
 export const KEY_FILE = 'host-key.json';
 
 /** Shortest host PIN or password: one secret opens every PC, so it is longer than the app lock's 4 digits. */
@@ -330,161 +328,79 @@ export async function hostPinDoor(p: string, b: Record<string, unknown>, who: { 
   return { status: 200, json: { ok: true, said: `"${pc}" holds the ${keyId ? 'host key' : 'host PIN'} now.` } };
 }
 
-// ---- The main PC's own host PIN ----
-
-export interface OwnFile {
-  kind: LockKind;
-  salt: string;
-  hash: string;
-  cost?: number;
-  at: string;
-}
-
-export function cleanOwn(raw: unknown): OwnFile | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const f = raw as Record<string, unknown>;
-  if (typeof f.salt !== 'string' || typeof f.hash !== 'string') return null;
-  return { kind: cleanKind(f.kind), salt: f.salt, hash: f.hash, ...(typeof f.cost === 'number' ? { cost: f.cost } : {}), at: typeof f.at === 'string' ? f.at : '' };
-}
-
-/**
- * The main PC's host PIN, kept as a hash only: checked here before it is sent anywhere, so a typing slip is said at
- * once and is never counted as a wrong try on every linked PC. Wrong ones here: 5 in 10 minutes (in memory: this
- * page is already open behind the app lock).
- */
-export class OwnHostPin {
-  private f: OwnFile | null;
-  private save: (f: OwnFile | null) => Promise<void>;
-  private guard: PinGuard;
-  constructor(raw: unknown, save: (f: OwnFile | null) => Promise<void>, now = () => Date.now()) {
-    this.f = cleanOwn(raw);
-    this.save = save;
-    this.guard = new PinGuard(now);
-  }
-  get on(): boolean {
-    return !!this.f;
-  }
-  get kind(): LockKind {
-    return this.f?.kind ?? 'pin';
-  }
-  get at(): string {
-    return this.f?.at ?? '';
-  }
-  lockedFor(): number {
-    return this.guard.lockedFor('local');
-  }
-  async set(kind: LockKind, secret: string, at = new Date().toISOString()): Promise<void> {
-    const next = { kind, ...(await hashSecret(secret)), at };
-    await this.save(next);
-    this.f = next;
-  }
-  async off(): Promise<void> {
-    await this.save(null);
-    this.f = null;
-  }
-  /** The host PIN as typed: the clean secret when it is right; null when it is not (counted). */
-  async check(v: unknown): Promise<string | null> {
-    if (!this.f || this.guard.lockedFor('local')) return null;
-    const secret = cleanHostSecret(this.f.kind, v);
-    this.guard.wrong('local');
-    if (!secret || !(await secretMatches(secret, this.f))) return null;
-    this.guard.right('local');
-    return secret;
-  }
-  /**
-   * A PIN typed in the window of one linked PC, where either that PC's own PIN or this host PIN may be typed: the clean
-   * host PIN when it is this one, else null (it then goes to that PC as its own). Only something that could be a host
-   * PIN is looked at, and wrong ones are counted apart from `check` (5 in 10 minutes), so typing PCs' own PINs never
-   * stops the host PIN's own window; `eitherTaken` clears the count when the PC took it as its own.
-   */
-  async either(v: unknown): Promise<string | null> {
-    if (!this.f || this.guard.lockedFor('either')) return null;
-    const secret = cleanHostSecret(this.f.kind, v);
-    if (!secret) return null;
-    this.guard.wrong('either');
-    if (!(await secretMatches(secret, this.f))) return null;
-    this.guard.right('either');
-    return secret;
-  }
-  eitherTaken(): void {
-    this.guard.right('either');
-  }
-}
-
 // ---- The main PC's host key: the admin step is unlocking this PC ----
 
 export interface KeyFile {
   /** The key, base64url of 32 random bytes. */
   key: string;
   at: string;
+  /** Made where the owner had turned admin access off before 2.1.31: said once on the Admin PC row until a new key is made. */
+  offBefore?: boolean;
 }
 
 /** The short id of a key (12 hex of its SHA-256): told to PCs and shown, it gives nothing of the key. */
 export const keyIdOf = (key: string): string => createHash('sha256').update(key).digest('hex').slice(0, 12);
 
-export function cleanKeyFile(raw: unknown): KeyFile | { off: true } | null {
+export function cleanKeyFile(raw: unknown): KeyFile | null {
   if (!raw || typeof raw !== 'object') return null;
   const f = raw as Record<string, unknown>;
-  if (f.off === true) return { off: true };
+  // Before 2.1.31 the owner could turn the key off (`{ off: true }`): there is no switch now, so that reads as no key
+  // yet, and one is made the next time a linked PC needs it.
   if (typeof f.key !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(f.key)) return null;
-  return { key: f.key, at: typeof f.at === 'string' ? f.at : '' };
+  return { key: f.key, at: typeof f.at === 'string' ? f.at : '', ...(f.offBefore === true ? { offBefore: true } : {}) };
 }
 
 /**
- * The main PC's host key: a random secret made here when the first linked PC needs it, given to each linked PC over its
- * sealed link in place of a typed host PIN, and used only while this PC's app lock is open (`open`), so unlocking this
- * PC is the admin step. It is kept whole in the data folder (it has to be sent), unlike a typed host PIN, which is kept
- * as a hash: anyone who can read this PC's data folder has it, and that is the trade for typing nothing. `off` keeps none.
+ * The admin PC's key (the "host key"): a random secret made here when the first linked PC needs it, given to each linked
+ * PC over its sealed link, and used only while this PC's app lock is open (`open`), so unlocking this PC is the admin
+ * step. There is no switch to turn it off (2.1.31): a linked PC's owner takes it away there. It is kept whole in the data
+ * folder (it has to be sent): anyone who can read this PC's data folder has it, and that is the trade for typing nothing.
+ * Two admin PCs each give their own key, held by link, so either one manages the PCs it is linked to.
  */
 export class HostKey {
-  private f: KeyFile | { off: true } | null;
-  private save: (f: KeyFile | { off: true } | null) => Promise<void>;
+  private f: KeyFile | null;
+  private save: (f: KeyFile) => Promise<void>;
   private open: () => boolean;
-  constructor(raw: unknown, save: (f: KeyFile | { off: true } | null) => Promise<void>, open: () => boolean = () => true) {
+  /** The file said `{ off: true }` (turned off before 2.1.31, no key made since). */
+  private off: boolean;
+  constructor(raw: unknown, save: (f: KeyFile) => Promise<void>, open: () => boolean = () => true) {
     this.f = cleanKeyFile(raw);
+    this.off = !this.f && !!raw && typeof raw === 'object' && (raw as Record<string, unknown>).off === true;
     this.save = save;
     this.open = open;
   }
-  /** Not turned off by the owner. */
-  get enabled(): boolean {
-    return !(this.f && 'off' in this.f);
+  /** Admin access had been turned off here before there was no switch: the Admin PC row says it is on now (A5). */
+  get wasOff(): boolean {
+    return this.off || !!this.f?.offBefore;
   }
   /** Made already. */
   get made(): boolean {
-    return !!this.f && 'key' in this.f;
+    return !!this.f;
   }
   get at(): string {
-    return this.f && 'key' in this.f ? this.f.at : '';
+    return this.f ? this.f.at : '';
   }
   /** Its id (not secret), or '' with none. */
   get id(): string {
-    return this.f && 'key' in this.f ? keyIdOf(this.f.key) : '';
+    return this.f ? keyIdOf(this.f.key) : '';
   }
-  /** The key, made first when there is none; null when it is turned off or this PC's app lock is shut. */
+  /** The key, made first when there is none; null while this PC's app lock is shut (or not set). */
   async use(): Promise<{ secret: string; id: string } | null> {
-    if (!this.enabled || !this.open()) return null;
-    if (!this.f || !('key' in this.f)) await this.reset();
+    if (!this.open()) return null;
+    if (!this.f) await this.reset(undefined, this.off);
     const f = this.f as KeyFile;
     return { secret: f.key, id: keyIdOf(f.key) };
   }
-  /** The key as it is now, never made here (null with none, off or a shut lock). */
+  /** The key as it is now, never made here (null with none or a shut lock). */
   peek(): { secret: string; id: string } | null {
-    if (!this.enabled || !this.open() || !this.f || !('key' in this.f)) return null;
+    if (!this.open() || !this.f) return null;
     return { secret: this.f.key, id: keyIdOf(this.f.key) };
   }
   /** A new key in place of any: written first. PCs holding the old one take the new one the next time their PIN is typed. */
-  async reset(at = new Date().toISOString()): Promise<void> {
-    const next: KeyFile = { key: randomBytes(32).toString('base64url'), at };
+  async reset(at = new Date().toISOString(), offBefore = false): Promise<void> {
+    const next: KeyFile = { key: randomBytes(32).toString('base64url'), at, ...(offBefore ? { offBefore: true } : {}) };
     await this.save(next);
     this.f = next;
-  }
-  /** No key, and none is made until it is turned on again. */
-  async turnOff(): Promise<void> {
-    await this.save({ off: true });
-    this.f = { off: true };
-  }
-  async turnOn(): Promise<void> {
-    this.f = null;
-    await this.save(null);
+    this.off = false;
   }
 }

@@ -1,0 +1,61 @@
+{
+  "id": "flux2-dev",
+  "kind": "image",
+  "name": "FLUX.2 dev (32B, Q6, the largest, test)",
+  "about": "Black Forest Labs' FLUX.2 dev, 32B: their strongest open model; on a 12 GB card most of it waits in RAM, so a picture takes many minutes. Text encoder: Mistral Small 3.2 24B. Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "flux2",
+  "licence": "FLUX.2 [dev] NON-COMMERCIAL LICENSE (the model may not be used commercially). Text encoder: Apache-2.0.",
+  "nonCommercial": true,
+  "quant": "Q6_K (image) + Q4_K_M (text encoder)",
+  "minRamGB": 64,
+  "minVramGB": 12,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1536
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "city96/FLUX.2-dev-gguf",
+      "rev": "ade5d688ddab0d9cf4a5b01bf4321e01c115020d",
+      "path": "flux2-dev-Q6_K.gguf",
+      "bytes": 27396232160,
+      "sha256": "0a662e0303d65b7da4741c7bc54bbccd4d7fc17b23e71ced36d177467f4a0ef1"
+    },
+    {
+      "role": "llm",
+      "repo": "unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF",
+      "rev": "b750ec2299225e492f1bd27cab88a0a595fa848f",
+      "path": "Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+      "bytes": 14333922848,
+      "sha256": "a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/flux2-dev",
+      "rev": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7",
+      "path": "split_files/vae/flux2-vae.safetensors",
+      "saveAs": "flux2-vae.safetensors",
+      "bytes": 336213556,
+      "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
+    }
+  ],
+  "args": [
+    "--offload-to-cpu",
+    "--fa",
+    "--vae-tiling"
+  ],
+  "defaults": {
+    "steps": 28,
+    "cfg": 1,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

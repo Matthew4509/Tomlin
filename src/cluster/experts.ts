@@ -67,10 +67,16 @@ export function shareExperts(model: ModelFacts, members: Member[], net: NetFacts
 /**
  * Moves runs of experts from one member to another while the expected time of a layer drops (big steps first), each
  * member within its cap. `owned`: the start (changed in place and returned); `per`: ms for one expert of one layer on
- * each member; `netMs`: each member's network time a layer (0 for the main loader).
+ * each member; `netMs`: each member's network time a layer (0 for the main loader). `known`: the times already worked
+ * out for these same `used`, `per` and `netMs` (a split tried again, here or in another call, is not worked out twice).
  */
-export function improveShares(owned: number[], caps: number[], used: number, per: number[], netMs: number[]): number[] {
-  const cost = (o: number[]) => expectedLayerMs(o, used, per, netMs);
+export function improveShares(owned: number[], caps: number[], used: number, per: number[], netMs: number[], known = new Map<string, number>()): number[] {
+  const cost = (o: number[]) => {
+    const key = o.join(',');
+    let c = known.get(key);
+    if (c === undefined) known.set(key, (c = expectedLayerMs(o, used, per, netMs)));
+    return c;
+  };
   let best = cost(owned);
   for (const step of [64, 32, 16, 8, 4, 2, 1]) {
     for (let moved = true, guard = 0; moved && guard < 10_000; guard++) {

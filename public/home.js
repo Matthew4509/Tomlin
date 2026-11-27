@@ -47,6 +47,12 @@ app.pcLabel = id => {
   const at = pcTwinWords()[id];
   return at ? `${pcName(id, p.name)} (${at})` : pcName(id, p.name);
 };
+/**
+ * A linked PC's name in a list that came from the server (Direct links, the admin key, updates and copies): as the left
+ * panel shows it, so two PCs both called "Worker PC" read "Worker PC (DESKTOP-7Q4M2KD)"; `name` when the left panel does
+ * not have that PC (this PC, a guest, one not read yet).
+ */
+app.pcShown = (id, name) => (id && id !== 'here' && (homeUi.pcs ?? []).some(x => x.id === id) ? app.pcLabel(id) : name);
 const shell = $('#shell');
 const phone = window.matchMedia('(max-width: 760px)');
 const PICTURE_RUNNING = ['queued', 'starting', 'drawing', 'decoding', 'finishing'];
@@ -74,7 +80,8 @@ function setView(view) {
   const was = homeUi.view;
   homeUi.view = view;
   shell.dataset.view = view;
-  if (view !== 'rail' && !PAGE_VIEWS.includes(view)) store('view', view);
+  // The person page and Memory are not kept: a reload opens where it was before them (the chat, or Home).
+  if (view !== 'rail' && view !== 'person' && view !== 'memory' && view !== 'agents' && !PAGE_VIEWS.includes(view)) store('view', view);
   if (view === 'home') $('#home').scrollTop = 0;
   // The Settings menu stays in the left panel on every page it opens, with this page marked (style.css).
   for (const b of document.querySelectorAll('[data-setup]')) {
@@ -92,7 +99,7 @@ function setView(view) {
 app.showPanes = () => setView('chat');
 
 /** The page each view shows (the chat: its message box); Staff, Jobs and Files are windows shown as pages (asPage). */
-const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', allchats: '#allchats-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', usb: '#settings-usb', addpc: '#settings-addpc', manage: '#settings-manage', storage: '#storage-page', help: '#help' };
+const PAGE_OF = { home: '#home', nodes: '#nodes', thispc: '#thispc', models: '#models-page', settings: '#settings', updates: '#updates-page', cluster: '#cluster-page', allchats: '#allchats-page', person: '#person-page', memory: '#memory-page', agents: '#agents-page', data: '#settings-data', perms: '#settings-perms', colours: '#settings-colours', usb: '#settings-usb', addpc: '#settings-addpc', manage: '#settings-manage', storage: '#storage-page', help: '#help' };
 /** Off for the first view at start: the page opens where it was, focus left alone. */
 let pageFocus = false;
 /**
@@ -133,7 +140,7 @@ const crumbName = view => (view === 'chat' ? 'Chat' : view === 'staff' ? 'Staff'
 // ---- Settings' pages: Staff, Jobs and Files open as pages beside the Settings menu, not as windows over it ----
 
 /** The pages the Settings menu stays beside, and the ones a window is shown in. */
-const SETUP_VIEWS = ['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage'];
+const SETUP_VIEWS = ['settings', 'models', 'storage', 'nodes', 'thispc', 'staff', 'jobs', 'files', 'updates', 'data', 'perms', 'colours', 'usb', 'addpc', 'manage', 'cluster', 'agents', 'memory'];
 const PAGE_VIEWS = ['staff', 'jobs', 'files'];
 /** The window shown as a page now, its view, and the page Close goes back to. */
 const asPage = { dlg: null, view: '', back: 'settings', fromMenu: false };
@@ -323,6 +330,8 @@ const ACTIVITY_WORD = { available: 'Available', asleep: 'Asleep', busy: 'Busy', 
 const activityDot = a => el('span', { class: 'sdot', 'data-activity': a, 'aria-hidden': 'true' });
 /** A hire free for work but with their model not loaded (dropped, or not woken yet): asleep, a yellow ring with a dot, not green. */
 const staffActivity = s => (s.activity === 'available' && s.state === 'asleep' ? 'asleep' : s.activity);
+/** A hire with no model (or theirs not downloaded) is grey as one who is off, but says why: their PC may be Available. */
+const staffWord = s => (s.state === 'none' && s.activity === 'offline' ? (/not downloaded/i.test(s.text ?? '') ? 'Model not downloaded' : 'No model') : undefined);
 
 /**
  * A person in the left panel. With `level`: "Name | Level", the software under it. With `inline` (a hire): "Name | Status"
@@ -428,7 +437,7 @@ function drawRail() {
   const showing = $('#panes').dataset.show;
   for (const s of d.staff) {
     const li = staffRow({
-      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), inline: true, artist: s.kind === 'image', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: staffActivity(s),
+      key: `staff:${s.id}`, name: s.name, avatar: initials(s.name), inline: true, artist: s.kind === 'image', sub: s.modelName || 'no model given', state: s.state, stateText: s.text, activity: staffActivity(s), activityWord: staffWord(s),
       busy: s.busy ? `Working: ${s.busy}` : null, count: counts[s.id], active: inChat && (s.kind === 'image' ? s.active && showing === 'image' : marked(`staff:${s.id}`, s.active)),
       title: `${s.role}${s.pc ? ` on ${s.pc}` : ''}${tokSub(s.speed)}. Press: a new chat, or one of their recent chats`,
       onClick: () => (app.openPerson ? app.openPerson(s.who ?? `staff:${s.id}`, s.name) : talkTo(s)), onEdit: () => app.editStaff?.(s.id),
@@ -480,7 +489,9 @@ function drawRail() {
     const held = p.heldByCluster === true;
     // Just shut down or updated from here: says so with a turning wheel until it shows (pcDidWord).
     const did = pcDidWord(p);
-    desks.push({ id: p.id, name: at ? `${name} (${at})` : name, activity: p.activity, backupsOnly: p.backupsOnly, held, row: staffRow({
+    // The word its card shows under its name (Available, Asleep, Offline...), for the person page of someone on it.
+    const word = did || (held && p.activity !== 'offline' ? 'In the cluster' : p.word ?? (asleep ? 'Asleep' : ACTIVITY_WORD[p.activity] ?? ''));
+    desks.push({ id: p.id, name: at ? `${name} (${at})` : name, pc: name, word, activity: asleep ? 'asleep' : p.activity, backupsOnly: p.backupsOnly, held, row: staffRow({
       key: `pc:${p.id}`, name, avatar: 'PC', sub: sub.filter(Boolean).join(' · ') || p.url, state: p.state, stateText: held && p.activity !== 'offline' ? 'In the cluster: held for big models, no staff' : p.backupsOnly && p.activity !== 'offline' ? 'Backups only: keeps backups, no staff' : p.text, activity: p.activity, activityWord: did || (held && p.activity !== 'offline' ? 'In the cluster' : p.word ?? (asleep ? 'Asleep' : undefined)),
       title: upd ? `${[upd, full].filter(Boolean).join('\n')}
 ${p.name} at ${p.url}` : `${flag ? `${flag}
@@ -492,9 +503,17 @@ ${p.name} at ${p.url}` : `${flag ? `${flag}
     const li = el('li', { class: `pc-card${x.held ? ' pc-held' : ''}`, 'data-pc': x.id, ...(x.backupsOnly ? { 'data-backups': '1' } : {}), ...(x.held ? { 'data-held': '1' } : {}) },
       on.length ? el('div', { class: 'pc-desk', 'aria-label': `Working on ${x.name ?? 'this PC'}` }, ...on.map(s => {
         const a = staffActivity(s);
-        const b = el('button', { class: 'desk-face', type: 'button', title: `${s.name} (${s.role}): ${ACTIVITY_WORD[a] ?? ''}. Drag onto another PC to move them`, 'aria-label': `${s.name}, ${ACTIVITY_WORD[a] ?? ''}` },
+        const b = el('button', { class: 'desk-face', type: 'button', title: `${s.name} (${s.role}): ${staffWord(s) ?? ACTIVITY_WORD[a] ?? ''}. Drag onto another PC to move them`, 'aria-label': `${s.name}, ${staffWord(s) ?? ACTIVITY_WORD[a] ?? ''}` },
           app.avatar ? app.avatar(`staff:${s.id}`, initials(s.name), activityDot(a)) : el('span', { class: 'rail-avatar' }, initials(s.name), activityDot(a)));
-        b.addEventListener('click', () => talkTo(s));
+        // Their page in the middle panel (chats.js): nothing loads or starts until a chat is picked or New chat is
+        // pressed. A drag onto another PC moves them; the click a browser may send after the drag is not a press.
+        b.addEventListener('click', () => {
+          if (Date.now() - (homeUi.dragEnd ?? 0) < 400) return;
+          if (!app.openPersonPage) return talkTo(s);
+          app.openPersonPage(s.who ?? `staff:${s.id}`, s.name, {
+            role: s.role, pc: x.pc ?? pcName('here', 'My PC'), pcId: x.id, word: x.word ?? ACTIVITY_WORD.available, activity: x.activity ?? 'available', model: s.modelName || '',
+          });
+        });
         deskDrag(b, s);
         return b;
       })) : null,
@@ -965,12 +984,16 @@ function drawStaffOverview(counts) {
 
 // ---- The hot desk: drag a hire onto another PC to move them there (where it has software for them) ----
 
-/** Where a hire could run on one PC ('' = this PC): that PC's models of their kind (chat, or picture). */
+/** The kind of model a hire works with: 'chat', 'image' (an artist or designer) or 'video' (a Videographer). */
+const workOf = s => (s.kind === 'image' || s.kind === 'video' ? s.kind : 'chat');
+const KIND_WORD = { chat: 'chat', image: 'picture', video: 'video' };
+/** Where a hire could run on one PC ('' = this PC): that PC's models of their kind (chat, picture or video). */
 function deskModels(s, pc) {
   // A hidden model is left out (unless "Show hidden" is ticked): a hire is moved onto models offered for picking.
-  const list = visibleModels(team.data?.hireChoices?.[s.kind === 'image' ? 'image' : 'chat'] ?? []);
+  // A Videographer's video models: only one downloaded on this PC is a place to move them to.
+  const list = visibleModels(team.data?.hireChoices?.[workOf(s)] ?? []).filter(c => c.here !== false);
   // On a linked PC: the models it lets this PC use. "What it has loaded" counts only when something is loaded there:
-  // a PC that shares nothing (its ticks under Network) offers nothing to move to.
+  // a PC that shares nothing (its ticks on This PC) offers nothing to move to.
   return pc ? list.filter(c => c.id.startsWith(`remote:${pc}:`) || (c.id === `remote:${pc}` && c.ok !== false)) : list.filter(c => !c.id.startsWith('remote:'));
 }
 
@@ -986,7 +1009,7 @@ function deskFit(s, pc) {
   const d = team.data;
   const mem = !d ? null : pc ? d.pcs?.find(p => p.id === pc) : d.here;
   if (!mem?.ram) return null;
-  const kind = s.kind === 'image' ? 'image' : 'chat';
+  const kind = workOf(s);
   const fitOf = c => c.ramFit ?? moveFit(c.need, mem);
   const models = deskModels(s, pc);
   const short = n => String(n ?? '').replace(/ on ".*$/, '').toLowerCase();
@@ -1042,6 +1065,7 @@ function deskDrag(node, s) {
   node.addEventListener('dragend', () => {
     homeUi.dragging = null;
     deskClear();
+    homeUi.dragEnd = Date.now();
   });
 }
 
@@ -1129,7 +1153,7 @@ async function deskMove(s, pc, pcName) {
     // What that PC lets this one do (Network's own words), and, for a model deleted here, its place in the suggested list.
     if (pc) {
       net = (await api('/api/network?known=1').catch(() => null))?.pcs?.find(p => p.id === pc) ?? null;
-      if (s.modelGone && s.kind !== 'image' && !net?.fetch) cat = await moveCatalog(s.modelWas).catch(() => null);
+      if (s.modelGone && workOf(s) === 'chat' && !net?.fetch) cat = await moveCatalog(s.modelWas).catch(() => null);
       if (!moveDlg.open) return;
     }
   } catch (err) {
@@ -1160,7 +1184,8 @@ async function deskMove(s, pc, pcName) {
   // Their model's file may be gone from this PC (the name then reads as a fault): the plain name is used.
   const uses = s.modelGone ? (s.modelWas || '') : (s.modelName || '');
   const ram = mem?.ram ? `${pcName} has ${gb(mem.ram)} of RAM${mem.vram ? ` and ${gb(mem.vram)} of graphics-card memory` : ''}, 3 GB of it kept for Windows` : '';
-  const ownC = pc && own && !s.modelGone && !same ? (team.data?.hireChoices?.[s.kind === 'image' ? 'image' : 'chat'] ?? []).find(c => c.id === own) ?? null : null;
+  // A video model is not copied between PCs from here: each PC downloads its own (its Models page, Video).
+  const ownC = pc && own && !s.modelGone && !same && workOf(s) !== 'video' ? (team.data?.hireChoices?.[workOf(s)] ?? []).find(c => c.id === own) ?? null : null;
   // The choices that can work, the likeliest first; the others are told in More, with why.
   const opts = [];
   const notes = [];
@@ -1184,8 +1209,8 @@ async function deskMove(s, pc, pcName) {
     const what = s.modelGone && uses ? `${uses}, ${s.name}'s model, was deleted from this PC, and ${pcName} does not have it.` : uses ? `${s.name} uses ${uses}, which ${pcName} does not have.` : `${pcName} does not have ${s.name}'s software.`;
     line.replaceChildren(what, el('br'), extra ? 'Would you like to:' : `Pick the software ${s.name} runs on there.`);
   }
-  else if (!pc) line.textContent = `This PC has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet.`;
-  else line.textContent = team.data?.pcs?.find(p => p.id === pc)?.ok ? `${pcName} has no ${s.kind === 'image' ? 'picture' : 'chat'} models yet. Send one there from Models.` : `${pcName} is not answering just now. Check it is on, then try again.`;
+  else if (!pc) line.textContent = `This PC has no ${KIND_WORD[workOf(s)]} models yet.`;
+  else line.textContent = team.data?.pcs?.find(p => p.id === pc)?.ok ? `${pcName} has no ${KIND_WORD[workOf(s)]} models yet. Send one there from Models.` : `${pcName} is not answering just now. Check it is on, then try again.`;
   if (pc && !models.length && !extra) box.append(el('button', { class: 'btn', type: 'button', text: 'Try again', onclick: () => deskMove(s, pc, pcName) }));
   // The choices as radios (only the ones that apply; the first is ticked). A lone "pick" is the select itself.
   const how = $('#desk-move-how');
@@ -1204,7 +1229,7 @@ async function deskMove(s, pc, pcName) {
   more.open = false;
   sync();
   moveDlg.dataset.send = ownC ? own : '';
-  moveDlg.dataset.kind = s.kind === 'image' ? 'image' : 'chat';
+  moveDlg.dataset.kind = workOf(s);
   moveDlg.dataset.pc = pc || '';
   moveDlg.dataset.pcName = pcName;
   moveDlg.dataset.uses = uses;
@@ -1346,15 +1371,15 @@ function modelListsChanged() {
 }
 
 /**
- * Network starts with what this PC is: an admin PC (it connects to nodes), a node, or backup and model storage. Only the
- * parts that apply show; the role is remembered in this browser. Everything stays in the page, so the code that draws it
- * does not depend on which role is open. A part from another role is reached by name (netSection), which switches the role.
+ * Network is about the other PCs: the linked ones, guests, direct links, admin access and the cluster. This PC itself (as a
+ * node, its setup and the sharing and cluster permissions) is on This PC: the node and storage tabs are links to it, and a
+ * part asked for by its old name (pc, sharing) opens This PC there (netSection).
  */
 const NET_ROLES = {
   admin: ['linked', 'guests', 'advanced'],
-  node: ['pc', 'sharing'],
-  storage: ['pc', 'sharing'],
 };
+/** The parts of this PC that moved to This PC: their element there. */
+const THISPC_PARTS = { pc: '#node-on', node: '#node-on', sharing: '#thispc-sharing' };
 function netRole(role) {
   const at = NET_ROLES[role] ? role : 'admin';
   for (const s of document.querySelectorAll('#nodes .net-sec')) s.hidden = !NET_ROLES[at].includes(s.dataset.sec);
@@ -1366,14 +1391,15 @@ function netRole(role) {
   }
   store('net-role', at);
 }
-/** Shows the part named (pc, linked, sharing, guests, advanced), changing the role when the part is not in this one. */
+/** Shows the part named (linked, guests, advanced); pc and sharing open This PC at that part. */
 function netSection(name) {
+  if (THISPC_PARTS[name]) return thisPcAt(name);
   const now = store('net-role');
   if (NET_ROLES[now]?.includes(name)) return netRole(now);
   netRole(['admin', 'node'].find(r => NET_ROLES[r].includes(name)));
 }
 app.netSection = netSection;
-for (const b of document.querySelectorAll('#net-menu .net-tab')) b.addEventListener('click', () => netRole(b.dataset.role));
+for (const b of document.querySelectorAll('#net-menu .net-tab')) b.addEventListener('click', () => (b.dataset.thispc ? thisPcAt(b.dataset.thispc) : netRole(b.dataset.role)));
 netRole(store('net-role'));
 
 /** This PC as a node: one tick, then its setup (name, setup code, optional PIN, port) and the PCs linked to it. */
@@ -1389,11 +1415,15 @@ function drawNodeSwitch(n) {
     : sh.on && sh.listening ? 'Enter the setup code into the other PCs to allow them remote access.'
     : 'Off. Turn on to let your main PC use this PC\'s models (home network only).';
   // Everything that only exists while this PC is a node (its setup, the permissions, the PIN and port) is hidden together;
-  // the Sharing page says why it is empty.
+  // the Sharing and cluster permissions part says why it is empty.
   for (const g of document.querySelectorAll('.node-gated')) g.hidden = !sh.on;
   $('#net-sharing-off').hidden = sh.on;
   // "Open sharing permissions" said why the ticks were not showing: gone once they show.
   if (sh.on) $('#node-allow-why').hidden = true;
+  // "A node must have the app lock" beside the switch: gone once the node is on or the lock is set.
+  if (sh.on || sh.appLock) nodePinNeed(false);
+  // A node running with no PIN (its owner refused one) says so under the switch, for as long as it has none.
+  $('#node-nopin-note').hidden = !(sh.on && sh.noPin);
   if (!typing($('#node-name')) && !saving) $('#node-name').value = sh.name;
   if (!typing($('#node-port')) && !saving) $('#node-port').value = String(sh.port);
   $('#node-code').textContent = sh.code;
@@ -1454,7 +1484,7 @@ function drawNodeSwitch(n) {
 }
 
 /**
- * The linked hosts that gave this PC a host PIN (one PIN typed on that host for every PC that holds it), under the PCs
+ * The admin PCs that gave this PC their admin key (or, before 2.1.31, a typed host PIN), under the PCs
  * linked to this one: each named, with Take it away (that host then asks this PC's own PIN again).
  */
 function drawHostPinsHeld(list, sh) {
@@ -1462,9 +1492,9 @@ function drawHostPinsHeld(list, sh) {
   if (sig === homeUi.drawn.hostPins) return;
   homeUi.drawn.hostPins = sig;
   const nameOf = x => sh.paired.find(p => p.id === x.id)?.name ?? x.name;
-  $('#node-host-pins').replaceChildren(...(list.length ? [el('p', { class: 'hint', text: 'Hosts that hold a host key or host PIN for this PC (unlocking that host updates this PC, turns it off or deletes a model, still only with the ticks above):' }),
+  $('#node-host-pins').replaceChildren(...(list.length ? [el('p', { class: 'hint', text: 'Admin PCs that hold a key for this PC (unlocking that PC updates this PC, turns it off or deletes a model, still only with the ticks above):' }),
     ...list.map(x => el('div', { class: 'job-remote' }, el('span', { text: nameOf(x) }), el('span', { class: 'hint', text: x.at ? `since ${new Date(x.at).toLocaleDateString()}` : '' }),
-      el('button', { class: 'link', type: 'button', text: 'Take it away', onclick: async () => { if (await askHere($('#node-paired-ask'), `Take the host ${x.key ? 'key' : 'PIN'} away from "${nameOf(x)}"? It then asks for this PC's own app lock PIN again to update it, turn it off or delete a model. It stays linked.`, 'Take it away', 'Keep it')) nodeShare({ hostPinDrop: x.id }); } })))] : []));
+      el('button', { class: 'link', type: 'button', text: 'Take it away', onclick: async () => { if (await askHere($('#node-paired-ask'), `Take the ${x.key ? 'admin key' : 'old host PIN'} away from "${nameOf(x)}"? It then asks for this PC's own app lock PIN again to update it, turn it off or delete a model. It stays linked.`, 'Take it away', 'Keep it')) nodeShare({ hostPinDrop: x.id }); } })))] : []));
 }
 
 /** A direct copy being followed on the page: the pair, the model's name, and the timer that asks how it goes. */
@@ -1488,6 +1518,8 @@ function drawDirectLinks(sh) {
   const ask = $('#node-peer-ask');
   const when = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   const scopeWords = s => (s ?? []).map(x => ({ copy: 'copies models', runner: 'sends runners', cluster: 'cluster' })[x] ?? x).join(', ');
+  // Two linked PCs with one name are told apart by their computer name (app.pcShown).
+  const nm = p => app.pcShown(p.id, p.name);
   $('#node-peers-here').replaceChildren(...(here.length ? [el('p', { class: 'hint', text: 'Linked directly to this PC:' }),
     ...here.map(p => el('div', { class: 'job-remote' },
       el('span', { text: p.name }),
@@ -1495,33 +1527,33 @@ function drawDirectLinks(sh) {
       el('span', { class: 'hint', text: p.lastUsed ? `last used ${when(p.lastUsed)}` : 'not used yet' }),
       el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere(ask, `Remove the direct link with "${p.name}"? It stops at once on this PC, and "${p.host}" cannot put it back.`, 'Remove the link', 'Keep it')) nodeShare({ peerRemoveHere: p.id }); } })))] : []));
   // The pairs this PC introduced: each with how it stands, Check, Copy a model and End.
-  const syncWords = s => (s.sync === 'latest' ? '' : ` · "${s.name}" ${s.said || 'has not been told yet'}`);
+  const syncWords = s => (s.sync === 'latest' ? '' : ` · "${nm(s)}" ${s.said || 'has not been told yet'}`);
   const modelsOf = id => (pcs.find(x => x.id === id)?.models ?? []);
   const copyPick = p => {
     const choices = [[p.a, p.b], [p.b, p.a]].flatMap(([from, to]) => modelsOf(from.id).map(m => ({ from, to, m })));
     if (!choices.length) return el('span', { class: 'hint', text: 'Neither PC shares a model to copy.' });
-    const sel = el('select', { 'aria-label': `The model to copy between "${p.a.name}" and "${p.b.name}"` }, ...choices.map((c, i) => el('option', { value: String(i), text: `${c.m.name}: from ${c.from.name} to ${c.to.name}` })));
+    const sel = el('select', { 'aria-label': `The model to copy between "${nm(p.a)}" and "${nm(p.b)}"` }, ...choices.map((c, i) => el('option', { value: String(i), text: `${c.m.name}: from ${nm(c.from)} to ${nm(c.to)}` })));
     const go = el('button', { class: 'btn', type: 'button', text: 'Copy it', onclick: async () => {
       const c = choices[Number(sel.value)];
-      said.textContent = `Asking "${c.to.name}" to copy ${c.m.name} from "${c.from.name}"…`;
+      said.textContent = `Asking "${nm(c.to)}" to copy ${c.m.name} from "${nm(c.from)}"…`;
       await nodeShare({ peerCopy: { from: c.from.id, to: c.to.id, kind: c.m.kind, model: c.m.id } }, () => followCopy(c));
     } });
     return el('span', { class: 'node-peer-copy' }, sel, go);
   };
   $('#node-peer-pairs').replaceChildren(...((view.pairs ?? []).length ? [el('p', { class: 'hint', text: 'PCs this one introduced to each other:' }),
     ...view.pairs.map(p => el('div', { class: 'job-remote node-peer-pair' },
-      el('span', { text: `${p.a.name} and ${p.b.name}` }),
+      el('span', { text: `${nm(p.a)} and ${nm(p.b)}` }),
       el('span', { class: 'hint', text: `${scopeWords(p.scopes)}${syncWords(p.a)}${syncWords(p.b)}` }),
       el('button', { class: 'link', type: 'button', text: 'Check', title: 'Each PC tries to reach the other directly now', onclick: () => {
-        said.textContent = `Asking "${p.a.name}" and "${p.b.name}" to reach each other…`;
+        said.textContent = `Asking "${nm(p.a)}" and "${nm(p.b)}" to reach each other…`;
         nodeShare({ peerCheck: { a: p.a.id, b: p.b.id } }, r => { said.textContent = (r.peerCheck ?? []).map(l => `${l.from} to ${l.to}: ${l.ok ? `reached${l.address ? ` at ${l.address}` : ''}${l.ms ? ` in ${l.ms} ms` : ''}` : l.said || 'not reached'}`).join('. '); });
       } }),
-      el('button', { class: 'link', type: 'button', text: 'End', onclick: async () => { if (await askHere(ask, `End the direct link between "${p.a.name}" and "${p.b.name}"? Each is told now, or when it is next on.`, 'End it', 'Keep it')) nodeShare({ peerRemove: { a: p.a.id, b: p.b.id } }); } }),
+      el('button', { class: 'link', type: 'button', text: 'End', onclick: async () => { if (await askHere(ask, `End the direct link between "${nm(p.a)}" and "${nm(p.b)}"? Each is told now, or when it is next on.`, 'End it', 'Keep it')) nodeShare({ peerRemove: { a: p.a.id, b: p.b.id } }); } }),
       copyPick(p)))] : []));
   // Introduce: two different linked PCs (one that runs an older TOMLIN is named as such, and refused by the host).
   // A PC that cannot be chosen is greyed, and one line says why (the reason was repeated in both lists, for each PC).
   const choosable = p => p.can !== false && p.allowed;
-  const opts = () => pcs.map(p => el('option', { value: p.id, text: p.name, disabled: !choosable(p) }));
+  const opts = () => pcs.map(p => el('option', { value: p.id, text: nm(p), disabled: !choosable(p) }));
   const a = $('#node-peer-a');
   const b = $('#node-peer-b');
   a.replaceChildren(...opts());
@@ -1532,7 +1564,7 @@ function drawDirectLinks(sh) {
   const stuck = pcs.filter(p => !choosable(p));
   const why = $('#node-peer-why');
   why.hidden = !stuck.length;
-  why.textContent = stuck.length ? `Greyed PCs cannot be chosen: ${stuck.map(p => `${p.name} (${p.can === false ? 'older TOMLIN' : 'its owner has not ticked it'})`).join(', ')}.` : '';
+  why.textContent = stuck.length ? `Greyed PCs cannot be chosen: ${stuck.map(p => `${nm(p)} (${p.can === false ? 'older TOMLIN' : 'its owner has not ticked it'})`).join(', ')}.` : '';
   $('#node-peer-make').onclick = async () => {
     if (a.value === b.value) return void (said.textContent = 'Pick two different PCs.');
     said.textContent = '';
@@ -1608,6 +1640,8 @@ function drawGuestPasses(sh) {
       el('button', { class: 'link', type: 'button', text: 'Remove', onclick: async () => { if (await askHere($('#node-pass-ask'), x.from ? `Remove the guest pass "${x.label}" on this PC? A PC linked here with it stops at once. "${x.from}" gave it, and keeps it for its other PCs.` : `Remove the guest pass "${x.label}"? A PC linked with it stops at once on every PC it is for, and its code links nothing more.`, 'Remove the pass', 'Keep it')) nodeShare({ passRemove: x.id }); } })))
       : []));
     $('#node-pass-none').hidden = passes.length > 0;
+    passCount = passes.length;
+    drawPassRow();
   }
   // Requests for more time from guests whose pass expired: one line each, answered here (Approve renews the same link).
   const asig = JSON.stringify(sh.passAsks ?? []);
@@ -1647,8 +1681,15 @@ function drawGuestPasses(sh) {
     if (!homeUi.nodeSaving) {
       $('#node-host-first').checked = sh.hostFirst !== false;
       $('#node-at-once').value = String(sh.atOnce ?? 1);
-      if (document.activeElement !== $('#node-cap-answer')) $('#node-cap-answer').value = String(sh.guestCaps?.answer ?? 2000);
-      if (document.activeElement !== $('#node-cap-prompt')) $('#node-cap-prompt').value = String(sh.guestCaps?.prompt ?? 32000);
+      // 0 is no limit: the box is empty and off, and its No limit tick on.
+      for (const [k, dflt] of [['answer', 2000], ['prompt', 32000]]) {
+        const v = sh.guestCaps?.[k] ?? dflt;
+        $(`#node-cap-${k}-none`).checked = v === 0;
+        $(`#node-cap-${k}`).disabled = v === 0;
+        if (document.activeElement !== $(`#node-cap-${k}`)) $(`#node-cap-${k}`).value = v === 0 ? '' : String(v);
+      }
+      $('#node-cap-web').checked = sh.guestCaps?.web !== false;
+      $('#node-cap-tools').checked = sh.guestCaps?.tools !== false;
     }
   }
   // Each linked node: whether it holds the latest passes made here (only once there are any).
@@ -1676,7 +1717,7 @@ function drawGuestPasses(sh) {
       el('label', { class: 'check node-pass-pcname' }, el('input', { type: 'checkbox', value: `pc:${p.id}`, 'data-pc': p.id, checked: ticked.has(`pc:${p.id}`) }), ' ', el('b', { text: p.self ? `This PC (${app.pcLabel('here')})` : app.pcLabel?.(p.id) || p.name }), el('span', { class: 'hint', text: passPcSpecs(p) })),
       // The models are one press away: a PC with many would otherwise list them all, again, for every pass.
       el('details', { class: 'net-more node-pass-models', 'data-pc': p.id, open: openPcs.has(p.id) || p.models.some(m => ticked.has(`m:${p.id}:${m.id}`)) }, el('summary', { text: `Models (${p.models.length})` }), ...passModelCols(p, ticked))))
-      : [el('p', { class: 'hint', text: 'Turn on "Enable this PC as a node", or link a node under Find other PCs, to make a guest pass for it.' })]));
+      : [el('p', { class: 'hint', text: 'Turn on "Use this PC as a node", or link a node under Find other PCs, to make a guest pass for it.' })]));
   }
 }
 
@@ -1782,7 +1823,35 @@ $('#net-join-guest').addEventListener('click', () => {
   $('#node-addr-box').scrollIntoView({ block: 'nearest' });
   $('#node-addr').focus();
 });
-// Guest passes: Create a guest pass opens its form.
+// Guest passes, as the Node row is: one switch with a line saying the state; on, the passes and the new-pass form open
+// under it. It stays on while any pass is listed (turning it off would not end them), and is kept in this browser.
+let passCount = 0;
+function drawPassRow() {
+  const on = passCount > 0 || store('guest-passes-on') === '1';
+  $('#pass-on').checked = on;
+  $('#pass-area').hidden = !on;
+  $('#pass-on-line').textContent = !on ? 'Off. Turn on to let users access your network with a passcode.'
+    : passCount ? `On. ${passCount} guest pass${passCount === 1 ? '' : 'es'}.` : 'On. Make a pass below: each one has its own code.';
+}
+$('#pass-on').addEventListener('change', e => {
+  const said = $('#pass-on-said');
+  if (!e.target.checked && passCount > 0) {
+    e.target.checked = true;
+    said.textContent = 'Remove the guest passes below first: turning this off does not end them.';
+    said.hidden = false;
+    return;
+  }
+  said.hidden = true;
+  store('guest-passes-on', e.target.checked ? '1' : '');
+  drawPassRow();
+  if (e.target.checked && !passCount && $('#node-pass-new').hidden) $('#node-pass-create').click();
+});
+app.passesOn = () => {
+  store('guest-passes-on', '1');
+  drawPassRow();
+};
+drawPassRow();
+// New guest pass opens its form.
 $('#node-pass-create').addEventListener('click', e => {
   const form = $('#node-pass-new');
   form.hidden = !form.hidden;
@@ -1791,7 +1860,14 @@ $('#node-pass-create').addEventListener('click', e => {
 });
 $('#node-host-first').addEventListener('change', e => nodeShare({ hostFirst: e.target.checked }));
 $('#node-at-once').addEventListener('change', e => nodeShare({ atOnce: Number(e.target.value) }));
-for (const id of ['#node-cap-answer', '#node-cap-prompt']) $(id).addEventListener('change', () => nodeShare({ guestCaps: { answer: Number($('#node-cap-answer').value), prompt: Number($('#node-cap-prompt').value) } }));
+// What guests may do here: the two sizes (No limit sends 0), web through this PC, and the tools of their own app.
+const saveGuestCaps = () => nodeShare({ guestCaps: {
+  answer: $('#node-cap-answer-none').checked ? 0 : Number($('#node-cap-answer').value) || 2000,
+  prompt: $('#node-cap-prompt-none').checked ? 0 : Number($('#node-cap-prompt').value) || 32000,
+  web: $('#node-cap-web').checked,
+  tools: $('#node-cap-tools').checked,
+} });
+for (const id of ['#node-cap-answer', '#node-cap-prompt', '#node-cap-answer-none', '#node-cap-prompt-none', '#node-cap-web', '#node-cap-tools']) $(id).addEventListener('change', saveGuestCaps);
 
 $('#node-pass-make').addEventListener('click', async () => {
   const said = $('#node-pass-said');
@@ -1935,10 +2011,14 @@ function drawNodeShare(sh) {
 }
 
 // Its own line: the refresh after a change redraws the others, and a refusal must stay readable.
+// On the page that made the change: This PC (the node, its setup, the ticks) or Network (direct links, guest passes).
 function nodeFault(text) {
-  const box = $('#node-fault');
-  box.textContent = text ?? '';
-  box.hidden = !text;
+  const here = homeUi.view === 'thispc' ? '#thispc-fault' : '#node-fault';
+  for (const id of ['#thispc-fault', '#node-fault']) {
+    const box = $(id);
+    box.textContent = id === here ? text ?? '' : '';
+    box.hidden = id !== here || !text;
+  }
 }
 
 /** Closes of the PIN window made by askAppPin itself, whose close events have not come yet. */
@@ -1977,24 +2057,13 @@ function askAppPin(fault, other, doing) {
     // The button says what pressing it does: "Change it" read as changing the PIN (3 Nov).
     $('#node-pin-ok').textContent = other ? `Update "${other}"` : 'Apply the change';
     $('#node-pin-about').textContent = other
-      ? 'To update, enter either your admin pin, or the individual pin for the node.'
+      ? 'To update, enter the PIN of that PC once. It then takes this PC\'s admin key and does not ask again while this PC is unlocked.'
       : `This PC is a node: every change to it needs the ${w} that opens TOMLIN, so whoever sits at it cannot change it.`;
     // A delete or a removal on another PC names itself (the words above are for an update).
     if (doing?.button) $('#node-pin-ok').textContent = doing.button;
     if (doing?.about) $('#node-pin-about').textContent = doing.about;
-    // The host PIN (one for the linked PCs) is asked in the same window, under its own name.
     if (doing?.title) $('#node-pin-title').textContent = doing.title;
     if (doing?.label) $('#node-pin-label').textContent = doing.label;
-    // A linked PC that holds this PC's host PIN takes either one in this window (not when it is being given the host PIN).
-    const either = $('#node-pin-either');
-    either.hidden = true;
-    if (other && !doing?.own) api('/api/network/host-pin', { action: 'view' }).then(v => {
-      if (!done && dlg.open) {
-        either.hidden = !(v.on && v.pcs.some(p => p.has && !p.holdsKey && p.name === other));
-      }
-    }).catch(() => {
-      either.hidden = true;
-    });
     $('#node-pin-fault').textContent = fault ?? '';
     $('#node-pin-fault').hidden = !fault;
     $('#node-pin-input').value = '';
@@ -2013,41 +2082,20 @@ function askAppPin(fault, other, doing) {
  * again after a wrong one. The update as started, or null when Cancel is pressed.
  */
 async function updatePcWithPin(pc, held) {
-  // Update all: the host PIN typed once goes first to each PC that holds it (held.hostPin, held.holders). Else the PIN
-  // that opened the PC before this one is tried first (never kept past that run), so PCs that share one PIN ask for it
-  // once. A PC that refuses either says so and asks for its own.
-  let hostPin = held?.hostPin && held.holders?.has(pc.id) ? held.hostPin : undefined;
-  let nodePin = hostPin === undefined ? held?.pin : undefined;
+  // A PC that holds this PC's admin key asks nothing. Else (Update all) the PIN that opened the PC before this one is
+  // tried first (never kept past that run), so PCs that share one PIN ask for it once. A PC that refuses it asks its own.
+  let nodePin = held?.pin;
   for (;;) {
     try {
-      const r = await api('/api/network/update', hostPin !== undefined ? { pc: pc.id, hostPin } : nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
-      if (held && hostPin === undefined && nodePin !== undefined) held.pin = nodePin;
+      const r = await api('/api/network/update', nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
+      if (held && nodePin !== undefined) held.pin = nodePin;
       markPcDid(pc.id, 'update');
       return r;
     } catch (e) {
       if (!e.data?.needNodePin) throw e;
-      const tried = hostPin !== undefined || nodePin !== undefined;
-      hostPin = undefined;
+      const tried = nodePin !== undefined;
       nodePin = await askAppPin(tried ? e.message : '', pc.name);
       if (nodePin === null) return null;
-    }
-  }
-}
-
-/**
- * The host PIN, asked once for a run over many linked PCs (Update all) and checked on this PC first, so a slip is never
- * sent to every PC as a wrong try. Null on Cancel: each PC is then asked its own PIN, as before.
- */
-async function askHostPin(button, about) {
-  let fault = '';
-  for (;;) {
-    const pin = await askAppPin(fault, null, { kind: 'password', title: 'Type the host PIN', label: 'Host PIN (or password)', button, about });
-    if (pin === null) return null;
-    try {
-      await api('/api/network/host-pin', { action: 'check', pin });
-      return pin;
-    } catch (e) {
-      fault = e.message;
     }
   }
 }
@@ -2056,32 +2104,30 @@ async function askHostPin(button, about) {
  * "Turn it off" for linked PC `pc` ({ id, name }): that PC asks its own app lock PIN (as for an update), here and again after
  * a wrong one. The answer, or null when Cancel is pressed. One PC per call: a cluster is turned off by asking each in turn.
  */
-async function powerOffWithPin(pc, held) {
-  // `held`: a host PIN asked once for several PCs (askHostPin), sent first to each PC that holds it.
-  let hostPin = held?.hostPin && held.holders?.has(pc.id) ? held.hostPin : undefined;
+async function powerOffWithPin(pc) {
+  // A PC that holds this PC's admin key asks nothing; one that does not asks its own PIN once.
   let nodePin;
   for (;;) {
     try {
-      const r = await api('/api/network/power-off', hostPin !== undefined ? { pc: pc.id, hostPin } : nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
+      const r = await api('/api/network/power-off', nodePin === undefined ? { pc: pc.id } : { pc: pc.id, nodePin });
       markPcDid(pc.id, 'off');
       return r;
     } catch (e) {
       if (!e.data?.needNodePin) throw e;
-      const tried = hostPin !== undefined || nodePin !== undefined;
-      hostPin = undefined;
-      nodePin = await askAppPin(tried ? e.message : '', pc.name, { button: `Shut down "${pc.name}"`, about: 'To shut down, enter either your admin pin, or the individual pin for the node.' });
+      const tried = nodePin !== undefined;
+      nodePin = await askAppPin(tried ? e.message : '', pc.name, { button: `Shut down "${pc.name}"`, about: 'To shut down, enter the PIN of that PC once. It then takes this PC\'s admin key and does not ask again while this PC is unlocked.' });
       if (nodePin === null) return null;
     }
   }
 }
 
 // ---- That PC's permissions, changed from here (src/permset.ts): its owner's tick "Allow host to test and change model run
-// settings" there, and its PIN (or the host PIN) typed here for each change. Never that tick itself. ----
+// settings" there, and its PIN typed here for each change unless it holds this PC's admin key. Never that tick itself. ----
 
 /** The switches, in the order and words of that PC's own Network page (src/permset.ts PERM_KEYS, PERM_WORDS). */
 const PERM_TICKS = [
   ['lend', 'Allow to be used as part of a cluster'],
-  ['plainLinks', 'Allow unencrypted cluster links'],
+  // No "Allow unencrypted cluster links": a node lets its admin choose (src/share.ts NODE_PLAIN_LINKS).
   ['update', 'Allow host to update TOMLIN remotely'],
   ['off', 'Allow host to turn this PC off'],
   ['backup', 'Enable backups'],
@@ -2100,7 +2146,7 @@ async function permSetWithPin(pc, set) {
       return await api('/api/network/perm-set', nodePin === undefined ? { pc: pc.id, set } : { pc: pc.id, set, nodePin });
     } catch (e) {
       if (!e.data?.needNodePin) throw e;
-      nodePin = await askAppPin(nodePin !== undefined ? e.message : '', pc.name, { button: 'Change it', about: `To change "${pc.name}"'s permissions, enter either your host PIN, or the PIN of that PC.` });
+      nodePin = await askAppPin(nodePin !== undefined ? e.message : '', pc.name, { button: 'Change it', about: `To change "${pc.name}"'s permissions, enter the PIN of that PC.` });
       if (nodePin === null) return null;
     }
   }
@@ -2118,7 +2164,7 @@ function permsPart(p) {
   }
   const said = el('p', { class: 'hint', role: 'status' });
   const now = k => (k === 'plainLinks' ? p.plainOk === true : p.allow?.[k] === true);
-  fold.append(el('p', { class: 'hint', text: 'Each change needs the host PIN or that PC\'s own PIN (none is asked when that PC holds this PC\'s host key), and is said on that PC\'s screen and in its log.' }),
+  fold.append(el('p', { class: 'hint', text: 'Each change needs that PC\'s own PIN (none is asked when that PC holds this PC\'s admin key), and is said on that PC\'s screen and in its log.' }),
     ...PERM_TICKS.map(([k, words]) => el('label', { class: 'node-role' }, el('input', { type: 'checkbox', checked: now(k), 'data-key': `perm:${p.id}:${k}`, onchange: async e => {
       const on = e.target.checked;
       if (k === 'plainLinks' && on && !confirm(`Allow unencrypted cluster links on "${p.name}"?\n\nA PC that asks for it borrows "${p.name}"'s card and RAM over a link that is not encrypted. Anything on your home network could then read it, or send its model runner commands of its own.\n\nOnly on a wired home network you trust.`)) {
@@ -2168,6 +2214,30 @@ async function pullWithAsk(pc) {
   return ok ? api('/api/network/pull', { pc: pc.id }) : null;
 }
 
+/**
+ * The line beside "Use this PC as a node" when it was refused for want of an app lock: where the PIN is set, and a
+ * button that opens the same App lock window. Gone once the node is saved, or the lock is on.
+ */
+function nodePinNeed(show) {
+  $('#node-pin-need').hidden = !show;
+}
+$('#node-pin-set').addEventListener('click', () => {
+  store('node-on-after-lock', '1');
+  openAppLockNew();
+});
+// Or no PIN at all: the button works only once the person ticked that they refuse one and acknowledge the risks.
+$('#node-nopin-tick').addEventListener('change', e => { $('#node-nopin-go').disabled = !e.target.checked; });
+$('#node-nopin-go').addEventListener('click', async e => {
+  if (!$('#node-nopin-tick').checked) return;
+  e.target.disabled = true;
+  store('node-on-after-lock', '');
+  const ok = await nodeShare({ on: true, refusePin: true });
+  if (ok) $('#node-nopin-tick').checked = false;
+  e.target.disabled = !$('#node-nopin-tick').checked;
+});
+// Cancel in the App lock window: the node is not waiting for a PIN any more (the switch is off, as the server has it).
+$('#applock-cancel').addEventListener('click', () => store('node-on-after-lock', ''));
+
 /** Saves a change to this node (true when it was saved); `onSaved` gets the answer, before the page is drawn again. */
 async function nodeShare(body, onSaved) {
   // While this PC is a node, a change needs the app lock PIN: asked when the server says so, again after a wrong one.
@@ -2179,6 +2249,7 @@ async function nodeShare(body, onSaved) {
       try {
         const reply = await api('/api/share', appPin === undefined ? body : { ...body, appPin });
         nodeFault('');
+        nodePinNeed(false);
         saved = true;
         onSaved?.(reply);
       } catch (e) {
@@ -2186,14 +2257,16 @@ async function nodeShare(body, onSaved) {
           appPin = await askAppPin(appPin === undefined ? '' : e.message);
           if (appPin !== null) continue;
           nodeFault('');
+        } else if (e.data?.needAppLock) {
+          // A node must have the app lock: its window opens straight away, and the switch says so once, beside itself
+          // (not in red at the top too). Once the PIN is saved (the app locks and the page opens again), this page comes
+          // back and the tick is finished: the node turns on without being ticked again.
+          nodeFault('');
+          nodePinNeed(true);
+          store('node-on-after-lock', body.on === true ? '1' : '');
+          openAppLockNew();
         } else {
           nodeFault(e.message);
-          // A node must have the app lock: its window opens straight away. Once the PIN is saved (the app locks and the page
-          // opens again), this page comes back and the tick is finished: the node turns on without being ticked again.
-          if (e.data?.needAppLock) {
-            store('node-on-after-lock', body.on === true ? '1' : '');
-            openAppLockNew();
-          }
         }
       }
       break;
@@ -2411,7 +2484,7 @@ $('#node-scan').addEventListener('click', async () => {
     const { found, own = [] } = await api('/api/remotes', { action: 'scan', port: Number($('#node-scan-port').value) || 8741 });
     const ranges = [...new Set(own.map(n => n.address.replace(/\.\d+$/, '.1 to .254')))];
     const looked = ranges.length ? ` Looked at every address ${ranges.join(' and ')} (this PC is ${own.map(n => `${n.address} on ${n.via}`).join(', ')}).` : ' This PC has no home-network address, so there was nothing to search: check its Wi-Fi or cable.';
-    line.textContent = found.length ? `Found ${found.length} PC${found.length > 1 ? 's' : ''} with "Enable this PC as a node" on.${looked}`
+    line.textContent = found.length ? `Found ${found.length} PC${found.length > 1 ? 's' : ''} with "Use this PC as a node" on.${looked}`
       : `None found.${looked} On the other PC, press Check under "Can other PCs reach this one?": it names what is in the way there. The Link helper below tests it from here.`;
     if (!found.length) openLinkHelp();
     // PCs started from a stick minted with this PC's admin key (Bootable USB): added with no code, one by one or all.
@@ -2557,6 +2630,8 @@ function pcSpecs(p) {
 
 function drawOthers(pcs) {
   homeUi.others = pcs;
+  // The grid of linked PCs (public/pcgrid.js), the same one as in Models on my other PCs.
+  window.pcGrid?.draw($('#node-grid'), pcs.filter(p => p.role !== 'guest'), homeUi.transfers ?? [], { name: p => app.pcShown(p.id, p.name), computer: p => (homeUi.pcs ?? []).find(x => x.id === p.id)?.computer ?? '', onChanged: () => refreshOthers() });
   drawUpdateAll(pcs);
   app.drawNetMap?.();
   drawCluster(pcs, homeUi.cluster ?? { on: false, members: [] });
@@ -2642,14 +2717,14 @@ function drawOthers(pcs) {
     const plainLine = !p.ok || p.plainLink !== true ? null : el('span', { class: 'hint', role: 'status', text: p.plainNow ? 'Link: NOT encrypted now (both PCs chose it).' : p.plainOk ? 'Link: unencrypted from the next load (both PCs chose it).' : `Link: sealed. "${p.name}" has not ticked Allow unencrypted cluster links.` });
     const lendLine = !p.ok || p.backupsOnly ? null : el('span', { class: 'hint', text: p.heldByCluster ? 'In the cluster, which is on: held for models too big for this PC. No staff, chats or pictures go to it until the cluster is switched off (Cluster, above).' : lends
       ? (p.noBorrow ? "Cluster: it allows this PC to borrow its card and RAM, but Don't borrow from it is ticked here." : 'Cluster: it allows this PC to borrow its card and RAM for models too big for this PC alone. Nothing to tick here.')
-      : 'Cluster: not allowed there. To borrow its card and RAM, tick Allow to be used as part of a cluster on that PC (Network, Sharing and cluster permissions).' });
+      : 'Cluster: not allowed there. To borrow its card and RAM, tick Allow to be used as part of a cluster on that PC (This PC, Sharing and cluster permissions).' });
     const disk = !p.ok ? null : p.disk
       ? el('span', { class: 'node-disk', title: `Backup disk: ${diskWords(p.disk)}`, text: `Disk: ${diskUsed(p.disk)}` })
       : el('span', { class: 'node-disk hint', title: 'That PC runs an older TOMLIN: update it to see its free space here.', text: 'Disk: not reported' });
     return el('article', { class: `node-card${p.heldByCluster ? ' pc-held' : ''}` },
       el('div', { class: 'node-head' },
         el('span', { class: 'sdot', 'data-state': p.ok && !away ? (p.model ? 'on' : 'asleep') : 'off', 'aria-hidden': 'true' }),
-        el('strong', { text: p.name }),
+        el('strong', { text: app.pcShown(p.id, p.name) }),
         // What tells two PCs of the same name apart: its address, and on hover of the (!) what it is (as on Models on my other PCs).
         el('span', { class: 'net-spec', tabindex: '0', role: 'img', 'aria-label': `About ${p.name}: ${pcSpecs(p).join(', ')}`, title: pcSpecs(p).join('\n'), text: '(!)' }),
         el('span', { class: 'hint', text: `· ${p.url.replace(/^https?:\/\//, '')}` })),
@@ -2778,17 +2853,17 @@ It shuts down about 15 seconds after it answers, and stays off until someone swi
   find.hidden = pcs.length < 6;
   const q = find.hidden ? '' : $('#node-pc-find').value.trim().toLowerCase();
   const want = find.hidden ? '' : $('#node-pc-status').value;
-  const shown = pcs.filter(p => (!q || `${p.name} ${p.url}`.toLowerCase().includes(q)) && (!want || stateOf(p) === want));
+  const shown = pcs.filter(p => (!q || `${app.pcShown(p.id, p.name)} ${p.url}`.toLowerCase().includes(q)) && (!want || stateOf(p) === want));
   keepFocus($('#node-others'), pcs.length ? (shown.length ? shown.map(p => el('button', { class: 'pc-tile', type: 'button', 'data-key': `tile:${p.id}`, title: `Open ${p.name}: memory, models, Hire staff, Remove`, onclick: () => openPcDetail(p.id) },
     el('span', { class: 'sdot', 'data-state': stateOf(p), 'aria-hidden': 'true' }),
-    el('span', { class: 'pc-tile-name' }, el('strong', { text: p.name }), ' ', el('span', { class: 'hint', text: p.url.replace(/^https?:\/\//, '') })),
+    el('span', { class: 'pc-tile-name' }, el('strong', { text: app.pcShown(p.id, p.name) }), ' ', el('span', { class: 'hint', text: p.url.replace(/^https?:\/\//, '') })),
     el('span', { class: 'hint pc-tile-state', text: wordOf(p) }),
     tiny(p) ? el('span', { class: 'hint pc-tile-tiny', text: tiny(p) }) : null)) : [el('p', { class: 'hint', text: 'No linked PC matches.' })]) : [el('p', { class: 'hint', text: 'No other PCs linked yet.' })]);
   // An open card is drawn again from the newest answer (and closed when its PC is gone).
   const open = homeUi.pcOpen && pcs.find(p => p.id === homeUi.pcOpen);
   if (homeUi.pcOpen && !open) closePcDetail();
   else if (open) {
-    $('#pc-detail-title').textContent = open.name;
+    $('#pc-detail-title').textContent = app.pcShown(open.id, open.name);
     keepFocus($('#pc-detail-body'), [pcCard(open)]);
   }
 }
@@ -2861,7 +2936,7 @@ function cachePick(p, m) {
 }
 
 async function refreshNodes() {
-  // One answer draws both pages: this PC as a node (Network) and the models on this PC (This PC).
+  // One answer draws both pages: This PC (this PC as a node, its ticks) and Network (direct links, guest passes).
   if (homeUi.view !== 'nodes' && homeUi.view !== 'thispc') return;
   try {
     drawNodes(await api('/api/nodes'));
@@ -2872,15 +2947,16 @@ async function refreshNodes() {
 async function refreshOthers() {
   if (homeUi.view !== 'nodes' && homeUi.view !== 'cluster') return;
   try {
-    const got = await api('/api/nodes/others');
+    const [got, moving] = await Promise.all([api('/api/nodes/others'), api('/api/network/transfers').catch(() => null)]);
     homeUi.cluster = got.cluster ?? homeUi.cluster;
+    homeUi.transfers = moving?.transfers ?? [];
     drawOthers(got.pcs);
   } catch {
     drawOthers([]);
   }
 }
-/** "Its settings" in a PC's window: Network (this PC as a node, or the linked PCs). */
-app.pcMore = id => (id === 'here' ? openNodes() : app.openPcs());
+/** "This PC settings" in this PC's window: This PC (its node setup and permissions); a linked PC's: Network. */
+app.pcMore = id => (id === 'here' ? openThisPc() : app.openPcs());
 
 function openNodes() {
   setView('nodes');
@@ -2891,30 +2967,33 @@ function openNodes() {
 /** This PC: the models on it, the same list as in this PC's window (under Settings). */
 function openThisPc() {
   setView('thispc');
-  homeUi.drawn.models = homeUi.drawn.team = null;
-  refreshNodes();
+  homeUi.drawn.models = homeUi.drawn.team = homeUi.drawn.paired = homeUi.drawn.hostPins = null;
+  const done = refreshNodes();
   app.pcModelsInto?.($('#node-models'), $('#node-models-ask'), $('#thispc-roles'));
+  return done;
 }
 app.openThisPc = openThisPc;
+/** This PC opened at a part (THISPC_PARTS): the node switch, or the sharing and cluster permissions. */
+async function thisPcAt(name) {
+  await openThisPc();
+  const at = $(THISPC_PARTS[name] ?? '#node-on');
+  at.scrollIntoView({ block: 'start' });
+  (at.matches('input') ? at : at.querySelector('input:not([hidden])') ?? at).focus?.({ preventScroll: true });
+}
 /**
- * Sharing and cluster permissions, opened from Network, This PC, and Manage PC and updates: the one set of ticks (under
- * Setup on Network, one set of elements, one handler), opened at their place.
+ * Sharing and cluster permissions, opened from My PC's Permissions row and Manage PC and updates: the one set of ticks (on
+ * This PC, one set of elements, one handler), opened at their place.
  */
 // Its own name: mute.js loads later and gives app.openPermissions to the Permissions page (what a chat's model may do),
 // so under that name these three buttons opened that page, not the ticks.
 app.openSharePermissions = async () => {
-  openNodes();
-  // The ticks are on the Sharing page; shown first so "hidden" below means "this PC is not a node".
-  netSection('sharing');
   // Drawn from the server's answer first, so the ticks are found where they are now (not where the last draw left them).
-  await refreshNodes();
+  await openThisPc();
   const off = !!$('#node-allow').closest('[hidden]');
-  // Not a node: the switch and the reason are on This PC.
-  if (off) netSection('pc');
-  // The ticks sit under Setup, shown only while this PC is a node: said, beside the tick that shows them.
+  // The ticks show only while this PC is a node: said, beside the switch that shows them.
   const why = $('#node-allow-why');
   why.hidden = !off;
-  why.textContent = off ? 'The sharing and cluster permissions are under Setup, which shows once "Enable this PC as a node" is turned on. Turn it on to set them.' : '';
+  why.textContent = off ? 'The sharing and cluster permissions show once "Use this PC as a node" is turned on. Turn it on to set them.' : '';
   const at = off ? $('#node-on') : $('#node-allow');
   at.scrollIntoView({ block: 'start' });
   (at.querySelector('input') ?? at).focus({ preventScroll: true });
@@ -3159,7 +3238,7 @@ function updateAllBusy(buttons, words) {
 
 /**
  * Update all and Fast update (the Network page, and the heading of Linked PCs in the left panel): every linked PC that is
- * behind this one and can be updated now, read fresh, the host PIN asked once and a PC without it asking its own.
+ * behind this one and can be updated now, read fresh; a PC without this PC's admin key asks its own PIN once.
  */
 async function updateAllLinked() {
   const buttons = ['#node-update-all', '#node-fast-update', '#rail-fast-update', '#net-push-updates'].map(q => $(q)).filter(Boolean);
@@ -3201,17 +3280,9 @@ async function updateAllRun(buttons) {
     openNodes();
     return;
   }
-  // Each PC asks its own PIN (audit X2); Cancel skips that one. One typed for a PC is tried on the next ones first.
+  // A PC that holds this PC's admin key asks nothing. One that does not asks its own PIN once (audit X2); Cancel skips
+  // that one. One typed for a PC is tried on the next ones first.
   const held = {};
-  // The host PIN: asked once here for every PC that holds it, and held for this run only.
-  const hp = await api('/api/network/host-pin', { action: 'view' }).catch(() => null);
-  const holders = new Set((hp?.pcs ?? []).filter(x => x.has && !x.holdsKey).map(x => x.id));
-  const by = can.filter(p => holders.has(p.id)).length;
-  if (hp?.on && by) {
-    const who = by < can.length ? `${by} of the ${can.length} PCs to update hold` : by === 1 ? `"${can[0].name}" holds` : `All ${by} PCs to update hold`;
-    const pin = await askHostPin(by === 1 ? 'Update it' : 'Update them', `${who} this PC's host PIN, so one PIN updates them. It is checked here and on each PC, and is not kept. ${by < can.length ? 'The others ask for their own PIN next. ' : ''}Cancel to type each PC's own PIN instead.`);
-    if (pin !== null) Object.assign(held, { hostPin: pin, holders });
-  }
   for (const p of can) {
     updateAllBusy(buttons, `Starting the update on "${p.name}"…`);
     const r = await updatePcWithPin(p, held).catch(err => void failed.push(`"${p.name}": ${err.message}`));
@@ -3222,8 +3293,8 @@ async function updateAllRun(buttons) {
   if (line) line.textContent = updateAllFaults;
   // On Manage updates too, under Push updates to network: what could not start, or nothing when all did.
   if (updateAllFaults && $('#net-push-line')) $('#net-push-line').textContent = updateAllFaults;
-  // The updates under way show in Models on my other PCs, each with its own line.
-  if (failed.length < Math.max(can.length, 1)) app.openNet?.();
+  // The updates under way show in a window of their own: only the linked PCs and how each goes (network.js).
+  if (failed.length < Math.max(can.length, 1)) app.openUpdates?.();
 }
 
 // The top of the Network page: Scan for hardware changes (this PC and every linked PC read their hardware again,
@@ -3277,170 +3348,91 @@ function drawUpdateAll(pcs) {
   drawHostPin();
 }
 
-// ---- The host PIN: one PIN for the linked PCs (src/hostpin.ts, src/jobrun/hostpins.ts) ----
+// ---- The admin PC (src/hostpin.ts HostKey, src/jobrun/hostpins.ts): unlocked, it manages the linked PCs ----
 
-/** What the last host PIN step said: stays through every refresh, until the next one. */
-let hostPinSaid = '';
-function hostPinSay(text) {
-  hostPinSaid = text;
-  $('#host-pin-said').textContent = text;
-  $('#host-pin-said').hidden = !text;
-}
-
-/** What the last admin-access step said. */
+/** What the last admin key step said (Make a new key): stays through every refresh, until the next one. */
 let hostKeySaid = '';
-async function hostKeyDo(action, ask) {
-  if (ask && !confirm(ask)) return;
+$('#host-key-new').addEventListener('click', async () => {
+  if (!confirm('Make a new admin key?\n\nThe linked PCs that hold the old one ask for their own app lock PIN once more, and then take the new one.')) return;
   try {
-    const r = await api('/api/network/host-pin', { action });
-    hostKeySaid = r.missed?.length ? `Not answering now, so still holding the key until their owner takes it away there (Network): ${r.missed.join(', ')}.` : action === 'key-off' ? 'Turned off.' : action === 'key-on' ? 'Turned on.' : 'Made a new key. Each PC takes it the next time its own app lock PIN is typed here.';
+    await api('/api/network/host-pin', { action: 'key-reset' });
+    hostKeySaid = 'Made a new key. Each PC takes it the next time its own app lock PIN is typed here.';
   } catch (e) {
     hostKeySaid = e.message;
   }
   drawHostPin();
-}
-$('#host-key-new').addEventListener('click', () => hostKeyDo('key-reset', 'Make a new key?\n\nThe linked PCs that hold the old one ask for their own app lock PIN once more, and then take the new one.'));
-$('#host-key-off').addEventListener('click', () => hostKeyDo('key-off', 'Turn admin access off?\n\nThe key is taken away here and from every linked PC that answers now. Each then asks for its own app lock PIN again to be updated, turned off or to delete a model.'));
-$('#host-key-on').addEventListener('click', () => hostKeyDo('key-on'));
-
-/** The host PIN's row under Linked PCs: whether one is set here, and which linked PCs hold it (as each last said). */
-async function drawHostPin() {
-  const v = await api('/api/network/host-pin', { action: 'view' }).catch(() => null);
-  if (!v) return;
-  const names = list => list.map(p => `"${p.name}"`).join(', ');
-  const has = v.pcs.filter(p => p.has && !p.holdsKey);
-  const lack = v.pcs.filter(p => p.can && !p.has);
-  const old = v.pcs.filter(p => p.heard && !p.can);
-  // Admin access: the host key (no PIN typed), used only while this PC is unlocked.
-  if (v.key) {
-    const keyed = v.pcs.filter(p => p.keyHeld);
-    const waiting = v.pcs.filter(p => p.can && !p.keyHeld && !(v.on && p.has && !p.holdsKey));
-    $('#host-key-line').textContent = v.key.on
-      ? `Unlocking TOMLIN here lets this PC update, turn off or delete models on the linked PCs, with no PIN typed.${keyed.length ? ` ${keyed.length} of ${v.pcs.length} linked PC${v.pcs.length > 1 ? 's' : ''} hold${keyed.length > 1 ? '' : 's'} this PC's key.` : ''}`
-      : 'Off: each linked PC asks for its own app lock PIN to be updated, turned off or to delete a model.';
-    $('#host-key-pcs').textContent = v.key.on ? [
-      keyed.length ? `Holding the key: ${names(keyed)}.` : '',
-      waiting.length ? `Not yet: ${names(waiting)}. Each takes it the first time its own app lock PIN is typed here for an update, a delete or a turn-off.` : '',
-    ].filter(Boolean).join(' ') : '';
-    $('#host-key-new').hidden = !(v.key.on && v.key.made);
-    $('#host-key-off').hidden = !v.key.on;
-    $('#host-key-on').hidden = v.key.on;
-    $('#host-key-said').textContent = hostKeySaid;
-    $('#host-key-said').hidden = !hostKeySaid;
-  }
-  $('#host-pin-set').textContent = v.on ? 'Change the host PIN' : 'Set the host PIN';
-  $('#host-pin-line').textContent = v.on
-    ? `Set${v.at ? ` on ${new Date(v.at).toLocaleDateString()}` : ''}. ${has.length ? `Held by ${has.length} of ${v.pcs.length} linked PC${v.pcs.length > 1 ? 's' : ''}.` : 'No linked PC holds it yet.'}`
-    : 'One PIN typed here updates, turns off or deletes a model on every linked PC that holds it.';
-  $('#host-pin-more').hidden = !v.on;
-  $('#host-pin-pcs').textContent = [
-    has.length ? `Held by ${names(has)}.` : '',
-    lack.length ? `Not given yet: ${names(lack)}.` : '',
-    old.length ? `Too old to hold one until updated: ${names(old)}.` : '',
-  ].filter(Boolean).join(' ');
-  $('#host-pin-give').hidden = !lack.length;
-  $('#host-pin-said').textContent = hostPinSaid;
-  $('#host-pin-said').hidden = !hostPinSaid;
-}
+});
+$('#host-key-lock').addEventListener('click', () => openAppLockNew());
 
 /**
- * Gives the host PIN (`pin`, typed on this page for this run only) to each linked PC in `pcs`: proved with the host PIN
- * it holds now (`oldPin`, when the host PIN changes), or else with that PC's own app lock PIN, asked once. Says how it went.
+ * The Admin PC row under Linked PCs: always on while this PC's app lock is set and open (there is no switch), and which
+ * linked PCs hold this PC's key (as each last said). With no app lock there is no unlocked state, so it says to set one.
  */
-async function giveHostPin(pcs, pin, oldPin) {
-  const done = [];
-  const notDone = [];
-  for (const p of pcs) {
-    let proof = oldPin !== undefined && p.has ? { oldPin } : {};
-    let tried = false;
-    for (;;) {
-      // On a busy PC a give took 20 seconds with nothing said here, the row still reading "Not given yet".
-      hostPinSay(`Giving the host PIN to "${p.name}"…`);
-      try {
-        await api('/api/network/host-pin', { action: 'give', pc: p.id, hostPin: pin, ...proof });
-        done.push(`"${p.name}"`);
-      } catch (e) {
-        if (!e.data?.needNodePin) {
-          notDone.push(`"${p.name}": ${e.message}`);
-          break;
-        }
-        const nodePin = await askAppPin(tried || proof.oldPin ? e.message : '', p.name, { own: true, button: `Give "${p.name}" the host PIN`, about: `"${p.name}" takes the host PIN once with its own app lock PIN (or password), typed here. It is checked there and not kept here.` });
-        if (nodePin === null) {
-          notDone.push(`"${p.name}": its own PIN was not typed.`);
-          break;
-        }
-        proof = { nodePin };
-        tried = true;
-        continue;
-      }
-      break;
-    }
+async function drawHostPin() {
+  const v = await api('/api/network/host-pin', { action: 'view' }).catch(() => null);
+  if (!v?.key) return;
+  // Two linked PCs with one name are told apart by their computer name (app.pcShown).
+  const names = list => list.map(p => `"${app.pcShown(p.id, p.name)}"`).join(', ');
+  const noLock = v.key.lock === false;
+  $('#host-key-title').textContent = noLock ? 'Admin PC: needs an app lock' : 'Admin PC: manages the linked PCs while unlocked';
+  $('#host-key-lock').hidden = !noLock;
+  if (noLock) {
+    $('#host-key-line').textContent = 'With no app lock, anyone at this PC could update, turn off or delete models on the linked PCs, so it does not. Set a PIN, and unlocking TOMLIN here lets it.';
+    $('#host-key-pcs').textContent = '';
+    $('#host-key-new').hidden = true;
+    $('#host-key-said').hidden = true;
+    return;
   }
-  hostPinSay([done.length ? `Given to ${done.join(', ')}.` : '', notDone.length ? `Not given to ${notDone.join(' ')}` : ''].filter(Boolean).join(' '));
-  refreshOthers();
+  const keyed = v.pcs.filter(p => p.keyHeld);
+  const waiting = v.pcs.filter(p => p.can && !p.keyHeld);
+  const old = v.pcs.filter(p => p.heard && !p.can);
+  $('#host-key-line').textContent = `Unlocking TOMLIN here lets this PC update, turn off or delete models on the linked PCs, with no PIN typed.${keyed.length ? ` ${keyed.length} of ${v.pcs.length} linked PC${v.pcs.length > 1 ? 's' : ''} hold${keyed.length > 1 ? '' : 's'} this PC's key.` : ''}`;
+  $('#host-key-pcs').textContent = [
+    // Admin access was turned off here before there was no switch (2.1.31): said until a new key is made.
+    v.key.wasOff ? 'Admin access was turned off on this PC before. There is no switch for it now, so it is on while TOMLIN here is unlocked. A linked PC\'s owner can take the key away there.' : '',
+    keyed.length ? `Holding the key: ${names(keyed)}.` : '',
+    waiting.length ? `Not yet: ${names(waiting)}. Each takes it the first time its own app lock PIN is typed here for an update, a delete or a turn-off.` : '',
+    old.length ? `Too old to hold one until updated: ${names(old)}.` : '',
+  ].filter(Boolean).join(' ');
+  $('#host-key-new').hidden = !v.key.made;
+  $('#host-key-said').textContent = hostKeySaid;
+  $('#host-key-said').hidden = !hostKeySaid;
 }
 
-$('#host-pin-set').addEventListener('click', async () => {
-  const v = await api('/api/network/host-pin', { action: 'view' }).catch(e => (hostPinSay(e.message), null));
-  if (!v) return;
-  const dlg = $('#host-pin-dlg');
-  const fault = text => {
-    $('#host-pin-fault').textContent = text;
-    $('#host-pin-fault').hidden = !text;
-  };
-  for (const id of ['#host-pin-now', '#host-pin-new', '#host-pin-new2']) $(id).value = '';
-  $('#host-pin-now-row').hidden = !v.on;
-  $('#host-pin-title').textContent = v.on ? 'Change the host PIN' : 'Set the host PIN';
-  fault('');
-  $('#host-pin-cancel').onclick = () => dlg.close();
-  $('#host-pin-form').onsubmit = async e => {
-    e.preventDefault();
-    const pin = $('#host-pin-new').value;
-    const current = v.on ? $('#host-pin-now').value : undefined;
-    // All digits (up to 12) is a PIN; anything else is a password.
-    const kind = /^[\d ]+$/.test(pin) && pin.replace(/\s+/g, '').length <= 12 ? 'pin' : 'password';
-    try {
-      await api('/api/network/host-pin', { action: 'set', kind, pin, pin2: $('#host-pin-new2').value, ...(v.on ? { current } : {}) });
-    } catch (err) {
-      return fault(err.message);
-    }
-    dlg.close();
-    // A change: every PC that can is given the new one (those holding the old one take it with that); a new one: all.
-    await giveHostPin(v.pcs.filter(p => p.can), pin, current);
-  };
-  dlg.showModal();
-  (v.on ? $('#host-pin-now') : $('#host-pin-new')).focus();
-});
-
-$('#host-pin-give').addEventListener('click', async () => {
-  const v = await api('/api/network/host-pin', { action: 'view' }).catch(e => (hostPinSay(e.message), null));
-  const lack = (v?.pcs ?? []).filter(p => p.can && !p.has);
-  if (!lack.length) return void drawHostPin();
-  const pin = await askHostPin('Give it to them', `The host PIN set on this PC, typed here for this once, is given to ${lack.map(p => `"${p.name}"`).join(', ')}. Each then asks for its own app lock PIN once.`);
-  if (pin !== null) await giveHostPin(lack, pin);
-});
-
-$('#host-pin-off').addEventListener('click', async () => {
-  if (!confirm('Turn the host PIN off?\n\nIt is taken away here and from every linked PC that answers now. Each linked PC then asks for its own app lock PIN again to be updated, turned off or to delete a model.')) return;
-  try {
-    const r = await api('/api/network/host-pin', { action: 'off' });
-    hostPinSay(r.missed?.length ? `Turned off. Not answering now, so still holding it until their owner takes it away there (Network): ${r.missed.join(', ')}.` : 'Turned off.');
-  } catch (e) {
-    hostPinSay(e.message);
-  }
-  drawHostPin();
-});
 app.openNodes = openNodes;
 setInterval(refreshOthers, 30_000);
 
 // The node tick that opened the app lock's window is finished once the PIN is saved and the app is open again: Nodes
 // opens and the node turns on, without finding the page and ticking it a second time.
+/**
+ * Turned on as a node at the unlock (lock.js), with the PIN just typed: This PC opens and says so once, with the way to
+ * the permissions, in place of asking for the PIN a third time.
+ */
+async function nodeOnDone() {
+  if (store('node-on-done') !== '1') return;
+  store('node-on-done', '');
+  await openThisPc();
+  const box = el('dialog', { class: 'help', 'aria-labelledby': 'node-done-title' });
+  const close = () => { box.close(); box.remove(); };
+  box.append(el('div', { class: 'help-body' },
+    el('h2', { id: 'node-done-title', text: 'This PC is a node' }),
+    el('p', { text: 'Now set as a node, check permissions so another PC can connect to it' }),
+    el('div', { class: 'team-actions' },
+      el('button', { class: 'btn primary', type: 'button', text: 'Check permissions', onclick: () => { close(); app.openSharePermissions?.(); } }),
+      el('button', { class: 'btn', type: 'button', text: 'Close', onclick: close }))));
+  box.addEventListener('cancel', close);
+  document.body.append(box);
+  box.showModal();
+}
+app.nodeOnDone = nodeOnDone;
+nodeOnDone().catch(() => undefined);
+
 (async () => {
   if (store('node-on-after-lock') !== '1') return;
   const v = await api('/api/applock').catch(() => null);
   if (!v?.on || !v.open) return;
   store('node-on-after-lock', '');
-  openNodes();
+  await openThisPc();
   await nodeShare({ on: true });
 })();
 

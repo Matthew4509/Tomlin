@@ -66,7 +66,7 @@ const POPULAR = [
 
 // Model categories as tick boxes: any ticked kind shows; Abliterated / Uncensored (either word in the name) narrow it;
 // none ticked (All models) shows every one.
-const CATS = [['all', 'All models'], ['chat', 'Chat models'], ['image', 'Picture models'], ['helper', 'Helpers'], ['runner', 'Model runners']];
+const CATS = [['all', 'All models'], ['chat', 'Chat models'], ['image', 'Picture models'], ['video', 'Video models'], ['helper', 'Helpers'], ['runner', 'Model runners']];
 const CAT_NAME = Object.fromEntries(CATS);
 const TERM_NAME = { abliterated: 'Abliterated', uncensored: 'Uncensored' };
 const TERM_TIP = { abliterated: 'Only models with abliterated in the name: their built-in refusals were taken out', uncensored: 'Only models with uncensored in the name' };
@@ -81,7 +81,7 @@ const MOE = /(?:^|[^a-z0-9])(?:\d+x\d+(?:\.\d+)?b|a\d+(?:\.\d+)?[bm]|[a-z]*moe|m
  */
 const CAP_NAME = { images: 'Reads pictures', tools: 'Uses tools', general: 'General chat' };
 const CAP_TIP = {
-  images: 'Only models that can read pictures: a picture-and-text model, or one with a vision file. TOMLIN does not send pictures to a chat model yet',
+  images: 'Only models that can read pictures: a picture-and-text model, or one with a vision file. A picture added to a chat goes to a model on this PC that has its vision file (an mmproj file) beside it',
   tools: 'Only models whose chat format has a place for tools (web search, reading pages, files). The format allows it; a small model may still not use tools well',
   general: 'Only plain chat models: no picture reading and no place for tools in the chat format',
 };
@@ -454,6 +454,56 @@ function runnerPick(r) {
   return el('div', { class: 'mp-get' }, el('label', { class: 'mp-to' }, el('span', { text: 'Send to' }), sel), btn, said);
 }
 
+/** A linked PC's reason it cannot take a model sent to it now, in a word or two for the list. */
+function sendWord(why) {
+  if (!why) return '';
+  if (/Accept models/.test(why)) return ' (does not accept models)';
+  if (/older TOMLIN/.test(why)) return ' (update it first)';
+  if (/being used/.test(why)) return ' (in use)';
+  return ' (off)';
+}
+
+/**
+ * Send a downloaded video model to a linked PC (all its files, checked there by size and SHA-256), so a Videographer can be
+ * set up on a PC nobody sits at. The PCs listed say why one cannot take it now.
+ */
+function videoSendPick(x) {
+  const pcs = mp.net ?? [];
+  // No other PC linked (once the network has answered): the row says why there is nothing to send to.
+  if (!pcs.length) return mp.net ? el('p', { class: 'hint mp-send-none', text: 'Send to: no other PC is linked to this one yet. Link one with Add another PC, then send it there.' }) : null;
+  const whyOf = p => p.sendVideo ?? p.send ?? '';
+  const chosen = pcs.find(p => p.id === mp.videoTo?.get(x.id) && !whyOf(p)) ?? pcs.find(p => !whyOf(p));
+  mp.videoTo ??= new Map();
+  const sel = el('select', { 'aria-label': `Send ${x.short} to`, onchange: e => { mp.videoTo.set(x.id, e.target.value); mpDraw(); } },
+    ...pcs.map(p => el('option', { value: p.id, disabled: !!whyOf(p), text: `${toName(p.id)}${sendWord(whyOf(p))}`, title: whyOf(p) })));
+  const said = el('span', { class: 'hint', role: 'status' });
+  if (!chosen) {
+    sel.prepend(el('option', { value: '', text: 'No linked PC can take it now' }));
+    sel.value = '';
+    said.textContent = pcs.length === 1 ? whyOf(pcs[0]) : 'Open the list to see why for each PC.';
+    return el('div', { class: 'mp-get' }, el('label', { class: 'mp-to' }, el('span', { text: 'Send to' }), sel), said);
+  }
+  sel.value = chosen.id;
+  const name = toName(chosen.id);
+  const btn = el('button', {
+    class: 'btn', type: 'button', text: `Send ${MP_GB(x.bytes)} to ${name}`,
+    title: `Sends every file of it to ${name} over your home network. ${name} checks each file by size and SHA-256 and keeps it in its own models folder. Network shows how far it is, with Stop.`,
+    onclick: async e => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      b.textContent = 'Starting…';
+      try {
+        await api('/api/network/send', { pc: chosen.id, kind: 'video', model: x.id });
+        b.textContent = `Sending to ${name}`;
+        app.openNet?.();
+      } catch (error) {
+        b.replaceWith(el('span', { class: 'fault-line', text: error.message }));
+      }
+    },
+  });
+  return el('div', { class: 'mp-get' }, el('label', { class: 'mp-to' }, el('span', { text: 'Send to' }), sel), btn, said);
+}
+
 /**
  * A runner row's buttons: Download (a CUDA one only with an NVIDIA card here; a Vulkan one for any card) or Remove (CUDA
  * only: Vulkan may have come with TOMLIN) on this PC, and Send to a linked PC (CUDA only).
@@ -505,8 +555,8 @@ function runnerButtons(r) {
   if (r.engine === 'llama' && r.installed && app.openRunnerCheck) {
     parts.push(el('button', { class: 'btn quiet', type: 'button', text: 'Test the runners on this PC', title: 'Loads the smallest chat model that fits the card on each graphics runner here, asks three short questions, and keeps the first that passes (about 2 to 6 minutes).', onclick: () => app.openRunnerCheck() }));
   }
-  // Sending between PCs: the chat runner only (a node says how its chat runner is, not its picture one).
-  const pick = r.engine === 'llama' && r.device === 'cuda' ? runnerPick(r) : null;
+  // Sending between PCs: the CUDA chat runners, and the CUDA picture and video one (a Videographer on a linked PC needs it).
+  const pick = r.device === 'cuda' && (r.engine === 'llama' || r.engine === 'sd') ? runnerPick(r) : null;
   if (pick) parts.push(pick);
   return parts.length ? el('div', { class: 'mp-get' }, ...parts) : null;
 }
@@ -615,7 +665,8 @@ function mpItems() {
   const d = mp.data;
   if (!d) return [];
   const items = [];
-  const downloadBtn = x => {
+  // A video model downloads through its own door (src/server/videomodels.ts); the rest through /api/downloads.
+  const downloadBtn = (x, door = '/api/downloads') => {
     const dl = x.download;
     const moving = dl && !dl.done && !dl.error;
     if (x.installed) return null;
@@ -624,9 +675,9 @@ function mpItems() {
       return el('div', { class: 'dl-now' },
         el('div', { class: 'dl-track', role: 'progressbar', 'aria-label': `Downloading ${x.name}`, 'aria-valuenow': String(pc) }, el('span', { class: 'dl-fill', 'data-w': String(pc) })),
         el('span', { class: 'dl-text', text: `${dl.checking ? 'Checking' : 'Downloading'} ${pc}% of ${MP_GB(dl.bytes)}` }),
-        el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: async () => { await api('/api/downloads/stop', { id: x.id }); mpLoad(); } }));
+        el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: async () => { await api(`${door}/stop`, { id: x.id }); mpLoad(); } }));
     }
-    return el('button', { class: 'btn', type: 'button', text: `Download ${MP_GB(x.bytes)}`, onclick: async e => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Starting…'; try { await api('/api/downloads/start', { id: x.id }); } catch (error) { e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }), ...(error.data?.room ? [' ', app.cleanupButton(error.data.room)] : [])); return; } mpLoad(); } });
+    return el('button', { class: 'btn', type: 'button', text: `Download ${MP_GB(door === '/api/videomodels' && x.missing ? x.missing : x.bytes)}`, onclick: async e => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Starting…'; try { await api(`${door}/start`, { id: x.id }); } catch (error) { e.target.replaceWith(el('span', { class: 'fault-line', text: error.message }), ...(error.data?.room ? [' ', app.cleanupButton(error.data.room)] : [])); return; } mpLoad(); } });
   };
   const regState = x => {
     const dl = x.download;
@@ -640,9 +691,14 @@ function mpItems() {
     if (x.hardwareFit) more.push(`${x.hardwareFit.level === 'ok' ? '✓' : x.hardwareFit.level === 'slow' ? '▲' : '✕'} ${x.hardwareFit.text}`);
     items.push({ id: `image:${x.id}`, kind: 'image', modes: x.modes ?? [], name: x.name.replace(/\s*\(.*\)$/, ''), tag: (/\((.*)\)$/.exec(x.name) ?? [])[1] ?? '', about: x.about ?? '', more, warn: x.nonCommercial || x.hardwareFit?.level === 'no', state: regState(x), button: withTo(`img|${x.id}`, downloadBtn(x), { kind: 'image', id: x.id, what: x.name.replace(/\s*\(.*\)$/, '') }, x.bytes, true), bytes: x.bytes });
   }
+  // Video models (a Videographer's): the fits guide for this PC's card, with what each needs (an estimate until measured).
+  for (const x of d.video ?? []) {
+    const more = [`Licence: ${x.licence}`, `From ${x.source.replace(/^https:\/\//, '')}.`, `${x.fit === 'Fits' ? '✓' : x.fit === 'Tight fit' ? '▲' : '✕'} ${x.fit ?? 'Card not known'}: ${x.fitLine}`];
+    items.push({ id: `video:${x.id}`, kind: 'video', name: x.short, tag: x.fit ?? '', about: x.about ?? '', more, warn: x.fit === 'Not enough memory', state: regState(x), button: x.installed ? videoSendPick(x) : downloadBtn(x, '/api/videomodels'), bytes: x.bytes });
+  }
   for (const x of d.helpers) items.push({ id: `helper:${x.id}`, kind: 'helper', name: x.name, tag: '', about: x.about ?? '', more: [`Licence: ${x.licence}`], state: regState(x), button: downloadBtn(x), bytes: x.bytes });
   for (const c of d.chat) items.push({ id: `chat:${c.id}`, kind: 'chat', name: c.name, tag: MP_GB(c.bytes), about: c.where === 'ollama' ? 'From Ollama\'s models (the file stays where Ollama keeps it).' : c.where === 'other' ? 'From your other models folder (models-folder.txt); the file stays there.' : 'In TOMLIN\'s models folder.', more: [`File: ${c.id}`, cardText(c)].filter(Boolean), state: '✓ On this PC', button: null, params: paramsFromName(c.name), bytes: c.bytes, card: c.card ?? null, moe: !!c.moe, caps: c.caps ?? null });
-  for (const r of mp.runners ?? d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: r.installed ? 'Installed: it runs the models.' : `Not on this PC (${MP_GB(r.bytes)}).`, more: runnerMore(r), state: r.installed ? '✓ Installed' : 'Not installed', button: runnerButtons(r) });
+  for (const r of mp.runners ?? d.runtimes) items.push({ id: `runner:${r.id}`, kind: 'runner', name: r.name, tag: '', about: `${r.installed ? 'Installed: it runs the models.' : `Not on this PC (${MP_GB(r.bytes)}).`}${r.video ? ' It makes pictures and video clips.' : ''}`, more: runnerMore(r), state: r.installed ? '✓ Installed' : 'Not installed', button: runnerButtons(r) });
   for (const p of POPULAR) items.push({ id: `popular:${p.repo}`, kind: 'popular', name: p.name, tag: 'Suggested', about: p.about, more: [`From huggingface.co/${p.repo}.`], repo: p.repo });
   return items;
 }
@@ -950,8 +1006,8 @@ async function mpPopularSizes() {
 }
 
 async function mpLoad() {
-  const [d, m, j, l, rt] = await Promise.all([api('/api/downloads').catch(() => null), api('/api/models').catch(() => null), api('/api/chatmodels/get').catch(() => null), api('/api/hflist').catch(() => null), api('/api/runtimes').catch(() => null)]);
-  if (d && m) mp.data = { image: d.image, helpers: d.helpers, chat: m.chat, runtimes: m.runtimes };
+  const [d, m, j, l, rt, v] = await Promise.all([api('/api/downloads').catch(() => null), api('/api/models').catch(() => null), api('/api/chatmodels/get').catch(() => null), api('/api/hflist').catch(() => null), api('/api/runtimes').catch(() => null), api('/api/videomodels').catch(() => null)]);
+  if (d && m) mp.data = { image: d.image, helpers: d.helpers, video: v?.models ?? [], chat: m.chat, runtimes: m.runtimes };
   if (rt) mp.runners = rt.runtimes;
   if (m) mp.cards = m.cards ?? null;
   if (m) mpFolderLine(m.folder, m.copies ?? [], m.ownFolder, m.folderMissing);
@@ -979,7 +1035,7 @@ async function mpLoad() {
   }).catch(() => undefined);
   // A picture-model download running: asked again each second while the page is open.
   const runnerGetting = (rt?.runtimes ?? []).some(r => r.getting && !r.getting.done && !r.getting.error);
-  if (d && ([...d.image, ...d.helpers].some(x => x.download && !x.download.done && !x.download.error) || runnerGetting) && homeUi.view === 'models') setTimeout(mpLoad, 1000);
+  if (d && ([...d.image, ...d.helpers, ...(v?.models ?? [])].some(x => x.download && !x.download.done && !x.download.error) || runnerGetting) && homeUi.view === 'models') setTimeout(mpLoad, 1000);
 }
 
 /** Which folders besides this copy's own are used: the chosen one, and older copies of TOMLIN beside this one. */

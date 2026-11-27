@@ -48,7 +48,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     const own = usb?.key ?? null;
     if (b.adminKey === true && !own) return { status: 400, body: { error: 'This PC has no admin key yet: make one under Settings, Bootable USB.' } };
     const code = own ? '' : share.cleanCode(b.code);
-    if (!own && code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC under Network (for example ABCD-EFGH).' } };
+    if (!own && code.length !== 8) return { status: 400, body: { error: 'Type that PC\'s setup code: 8 letters and numbers, shown on that PC, on This PC (for example ABCD-EFGH).' } };
     const pinWhy = linkhelp.pinAdvice(String(b.pin ?? ''));
     if (pinWhy) return { status: 400, body: { error: pinWhy } };
     const pin = own ? '' : String(b.pin ?? '').replace(/\D/g, '');
@@ -70,7 +70,7 @@ export async function remotes(b: Record<string, unknown>): Promise<{ status: num
     // "smart-manager": the app's name on the wire since before TOMLIN; every PC, old and new, answers with it.
     // A TOMLIN PC with node mode off does not listen on the link port at all (and its own screen is on another port),
     // so whatever answers here is not that PC's link part.
-    if (about.app !== 'smart-manager') return { status: 400, body: { error: `Something answered at ${url}, but it is not TOMLIN's link part. If TOMLIN is running on that PC, tick "Enable this PC as a node" there (Settings, Network) and use the address shown there; the port is usually 8741, not the one in the browser address bar.` } };
+    if (about.app !== 'smart-manager') return { status: 400, body: { error: `Something answered at ${url}, but it is not TOMLIN's link part. If TOMLIN is running on that PC, turn on "Use this PC as a node" there (This PC) and use the address shown there; the port is usually 8741, not the one in the browser address bar.` } };
     if (Number(about.link) !== link.LINK_VERSION) return { status: 400, body: { error: `That PC runs an older TOMLIN (${String(about.version || 'before 2.0.26').slice(0, 20)}), which cannot make the encrypted link. Update TOMLIN there, then link again.` } };
     // The setup code (and the PIN) never cross the network: both PCs prove they know them (src/link.ts). A stick of this
     // admin's is checked before anything is sent: on the list of sticks minted here, and not marked lost.

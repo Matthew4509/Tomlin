@@ -43,6 +43,23 @@ async function netDo(path, body) {
 }
 
 let netLast = [];
+/** The linked PCs as /api/nodes/others last gave them, for the grid (read again every 5 seconds while the window is open). */
+let netPcsLast = [];
+let netPcsAt = 0;
+/** Two linked PCs with one name are told apart by their computer name (app.pcShown, public/home.js). */
+const netPcName = (id, name) => app.pcShown?.(id, name) ?? name;
+/** The grid of linked PCs (public/pcgrid.js), from the PCs and the transfers: an update shows in its PC's cell, not as a row. */
+function drawNetGrid() {
+  window.pcGrid?.draw($('#net-grid'), netPcsLast, netLast, { name: p => netPcName(p.id, p.name), computer: p => (homeUi.pcs ?? []).find(x => x.id === p.id)?.computer ?? '', onChanged: () => netReadPcs().then(netRead) });
+}
+async function netReadPcs() {
+  try {
+    netPcsLast = (await api('/api/nodes/others')).pcs ?? [];
+    netPcsAt = Date.now();
+  } catch {
+    // The grid keeps what it had; the top line says when the server does not answer.
+  }
+}
 
 /** Seconds as plain words: "40 s", "3 min", "1 h 5 min". */
 const netSpan = s => (s < 60 ? `${Math.max(1, Math.round(s))} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
@@ -61,13 +78,17 @@ function netEta(t) {
 
 function drawNetTransfers(list) {
   netLast = list;
-  const verb = t => (t.state === 'done'
+  drawNetGrid();
+  // An update to a linked PC shows in its cell of the grid (with See progress and Retry), not as a row of its own: with
+  // many PCs, one row each was hundreds of lines.
+  const rows = list.filter(t => t.kind !== 'update');
+  const verb = x => { const t = { ...x, pcName: netPcName(x.pc, x.pcName) }; return (t.state === 'done'
     ? { copy: `Copied ${t.what} from "${t.pcName}"`, send: `Sent ${t.what} to "${t.pcName}"`, move: `Moved ${t.what} to "${t.pcName}"`, backup: `Backed up to "${t.pcName}"`, bring: `Brought back a restore point from "${t.pcName}"`, update: `Updated "${t.pcName}" to ${t.what}`, pull: `Took ${t.what} from "${t.pcName}" for this PC`, projects: `Projects backed up to "${t.pcName}"`, restore: `Brought projects back from "${t.pcName}"`, fetch: `Downloaded ${t.what} on "${t.pcName}"`, runner: `Sent ${t.what} to "${t.pcName}"` }
-    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, move: `Moving ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind];
+    : { copy: `Copying ${t.what} from "${t.pcName}"`, send: `Sending ${t.what} to "${t.pcName}"`, move: `Moving ${t.what} to "${t.pcName}"`, backup: `Backing up to "${t.pcName}"`, bring: `Bringing back a restore point from "${t.pcName}"`, update: `Updating "${t.pcName}" to ${t.what}`, pull: `Updating this PC to ${t.what} from "${t.pcName}"`, projects: `Backing up projects to "${t.pcName}"`, restore: `Bringing projects back from "${t.pcName}"`, fetch: `Downloading ${t.what} on "${t.pcName}"`, runner: `Sending ${t.what} to "${t.pcName}"` })[t.kind]; };
   // While one is going: the window can be closed (they run on the server), and more can be started (they wait their turn).
-  const going = list.some(t => t.state === 'working');
+  const going = rows.some(t => t.state === 'working');
   const safe = going ? el('p', { class: 'hint', text: 'Safe to close this window: it carries on. You can also start more downloads; they wait their turn.' }) : null;
-  $('#net-transfers').replaceChildren(...list.map(t => {
+  $('#net-transfers').replaceChildren(...rows.map(t => {
     const fill = el('div', { class: 'p-fill' });
     const frac = t.bytes ? t.done / t.bytes : 0;
     fill.style.width = `${Math.round(frac * 100)}%`;
@@ -94,8 +115,8 @@ function drawNetTransfers(list) {
     const waitingThere = working && !queued && (!t.bytes || t.done >= t.bytes);
     return el('div', { class: 'net-row' },
       el('span', { class: 'net-name' }, el('strong', { text: verb(t) })),
-      // An update or pull going: its steps screen again (it may have been closed).
-      working && (t.kind === 'update' || t.kind === 'pull') ? el('button', { class: 'btn quiet', type: 'button', text: 'See progress', onclick: () => { netDlg.close(); app.openUpdate(t); } }) : null,
+      // A pull going (this PC taking an update): its steps screen again (it may have been closed).
+      working && t.kind === 'pull' ? el('button', { class: 'btn quiet', type: 'button', text: 'See progress', onclick: () => { netDlg.close(); app.openUpdate(t); } }) : null,
       working ? el('button', { class: 'btn quiet', type: 'button', text: 'Stop', onclick: () => netDo('/api/network/stop', { id: t.id }) }) : null,
       el('div', { class: 'progress' }, working ? el('div', { class: 'p-track' }, fill) : null, el('div', { class: 'p-text', role: t.state === 'failed' ? 'alert' : null }, waitingThere ? el('span', { class: 'net-spin', 'aria-hidden': 'true' }) : null, line)));
   }), ...(safe ? [safe] : []));
@@ -122,9 +143,14 @@ function drawNet(v) {
 
   // Shared by linked PCs: one tile for each PC, its models behind "See models installed" (a tile stays open while the window redraws).
   const modelsOn = p => v.rows.filter(r => r.on.some(o => o.pc === p.id));
-  $('#net-rows').replaceChildren(...(v.rows.length ? v.pcs.map(p => {
+  // Its video models, as it says them (none said by a TOMLIN before 2.1.34): sent from Models, Send to; copied there.
+  const videoRows = p => (p.videos ?? []).map(x => el('div', { class: 'net-row' },
+    el('span', { class: 'net-name' }, el('strong', { text: x.name }), el('br'), el('span', { class: 'hint', text: 'video model' })),
+    el('span', { class: 'hint', text: x.here ? 'On this PC' : 'Not on this PC' })));
+  $('#net-rows').replaceChildren(...(v.rows.length || v.pcs.some(p => p.videos?.length) ? v.pcs.map(p => {
     const mine = modelsOn(p);
     const total = mine.reduce((n, r) => n + (r.bytes || 0), 0);
+    const vids = videoRows(p);
     const list = mine.map(r => {
       const o = r.on.find(x => x.pc === p.id);
       const about = [r.kind === 'image' ? 'picture model' : 'chat model', netSize(r.bytes)].join(' · ');
@@ -139,8 +165,8 @@ function drawNet(v) {
         action);
     });
     return el('article', { class: `net-tile${p.ok ? '' : ' is-off'}` },
-      el('div', { class: 'net-tile-head' }, nameOf(p), el('span', { class: 'hint', text: p.ok ? `${mine.length} model${mine.length === 1 ? '' : 's'}${mine.length ? ` · ${netSize(total)}` : ''}` : lastSeen(p) })),
-      mine.length ? netFold(`models:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: `See models installed (${mine.length})` }), el('div', { class: 'net-list' }, ...list)))
+      el('div', { class: 'net-tile-head' }, nameOf(p), el('span', { class: 'hint', text: p.ok ? `${mine.length + vids.length} model${mine.length + vids.length === 1 ? '' : 's'}${mine.length ? ` · ${netSize(total)}` : ''}` : lastSeen(p) })),
+      mine.length || vids.length ? netFold(`models:${p.id}`, el('details', { class: 'net-more' }, el('summary', { text: `See models installed (${mine.length + vids.length})` }), el('div', { class: 'net-list' }, ...list, ...vids)))
         : el('p', { class: 'hint', text: p.ok ? 'Shares no models.' : '' }));
   }) : [el('p', { class: 'hint', text: v.pcs.length ? 'No shared models yet. Each node has to select "yes" to sharing. It will then display here.' : 'No PCs are linked to this one yet: link one under Network.' })]));
 
@@ -209,6 +235,7 @@ async function drawKept(pcs) {
 
 async function netRead() {
   try {
+    if (Date.now() - netPcsAt > 5000) await netReadPcs();
     const v = await api('/api/network');
     drawNet(v);
     netRunning = new Set(v.transfers.filter(t => t.state === 'working').map(t => t.id));
@@ -228,6 +255,7 @@ function netWatch() {
       return;
     }
     try {
+      if (Date.now() - netPcsAt > 5000) await netReadPcs();
       const { transfers } = await api('/api/network/transfers');
       drawNetTransfers(transfers);
       const now = new Set(transfers.filter(t => t.state === 'working').map(t => t.id));
@@ -244,6 +272,7 @@ function netWatch() {
 app.openNet = async () => {
   netSaid('Asking the linked PCs…');
   $('#net-rows').replaceChildren();
+  netPcsAt = 0;
   $('#net-kept').replaceChildren();
   $('#net-backups').replaceChildren();
   if (!netDlg.open) netDlg.showModal();
@@ -251,6 +280,42 @@ app.openNet = async () => {
   netWatch();
 };
 for (const b of document.querySelectorAll('[data-net]')) b.addEventListener('click', () => app.openNet());
+
+// ---- Updating linked PCs: the window Update all and Fast update open, with only the linked PCs and how each update goes
+// (the grid of public/pcgrid.js, read every 2 seconds while it is open). Models, restore points and copies stay in the
+// window above. ----
+
+const updsDlg = $('#upds-dlg');
+let updsTimer = null;
+/** A read still going: the next tick waits for it (a linked PC that does not answer holds /api/nodes/others up). */
+let updsBusy = false;
+async function updsRead() {
+  if (updsBusy) return;
+  updsBusy = true;
+  try {
+    const [pcs, tr] = await Promise.all([api('/api/nodes/others'), api('/api/network/transfers')]);
+    window.pcGrid?.draw($('#upds-grid'), (pcs.pcs ?? []).filter(p => p.role !== 'guest'), tr.transfers ?? [], { name: p => netPcName(p.id, p.name), computer: p => (homeUi.pcs ?? []).find(x => x.id === p.id)?.computer ?? '', onChanged: updsRead, brief: true });
+    $('#upds-said').textContent = '';
+  } catch (e) {
+    $('#upds-said').textContent = e.message;
+  } finally {
+    updsBusy = false;
+  }
+}
+app.openUpdates = async () => {
+  $('#upds-said').textContent = 'Asking the linked PCs…';
+  if (!updsDlg.open) updsDlg.showModal();
+  await updsRead();
+  if (updsTimer) return;
+  updsTimer = setInterval(() => {
+    if (!updsDlg.open) {
+      clearInterval(updsTimer);
+      updsTimer = null;
+      return;
+    }
+    void updsRead();
+  }, 2000);
+};
 
 // ---- The update screen: the four steps of "Update it", each ticked only once it has really happened ----
 // A pull (Update this PC from it) shows the same screen with this PC's steps, then waits for this PC to start again.

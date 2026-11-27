@@ -103,7 +103,7 @@ test('the Models page: three ticks beside Mixture-of-experts, badges on rows, th
   assert.match(page, /\.\.\.capBadges\(capsOfItem\(x\)\)/);
   assert.match(page, /text: 'Pictures'/);
   assert.match(page, /text: 'Tools'/);
-  assert.match(page, /TOMLIN does not send pictures to a chat model yet/);
+  assert.match(page, /A picture added to a chat goes to a model on this PC that has its vision file \(an mmproj file\) beside it/);
   assert.match(page, /a small model may still not use tools well/);
   assert.match(page, /caps: c\.caps \?\? null/);
   // All models clears them, and the list leaves out what is not a chat model while one is ticked.

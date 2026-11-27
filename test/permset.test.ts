@@ -118,7 +118,9 @@ test('the host asks through its route, with the PIN or the host PIN, and refuses
 
 test('Network here: a fold of that PC\'s switches in its own words, the unencrypted one asked twice, its page saying who changed what', () => {
   const home = read('public', 'home.js');
-  for (const k of PERM_KEYS) assert.ok(home.includes(`['${k}', '${PERM_WORDS[k]}']`), k);
+  // Every switch but the unencrypted one: a node now lets its admin choose that (src/share.ts NODE_PLAIN_LINKS).
+  for (const k of PERM_KEYS) if (k !== 'plainLinks') assert.ok(home.includes(`['${k}', '${PERM_WORDS[k]}']`), k);
+  assert.ok(!home.includes("['plainLinks', 'Allow unencrypted cluster links']"));
   assert.match(home, /permsPart\(p\),/);
   assert.match(home, /if \(!p\.ok \|\| !p\.can\?\.includes\('perm-set'\)\) return null;/);
   assert.match(home, /if \(k === 'plainLinks' && on && !confirm\(/);

@@ -4,6 +4,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
+import { constants, setPriority } from 'node:os';
 import { alive } from './hardware.ts';
 import { forget, remember } from './runnerkeys.ts';
 import { startFact } from './runnerpush.ts';
@@ -210,6 +211,15 @@ export class Worker {
     const exitLog = watchRunner(child, spec.exe, () => this.child !== child, { feed: true });
     const start = this.pane === 'chat' ? { device: spec.device, ...(spec.runner ? { runner: spec.runner } : {}), seconds: null as number | null, lines: [] as string[] } : null;
     if (start) lastStart = start;
+    // A picture runner works below normal priority: on a PC with few cores, TOMLIN itself and Windows (the network, the
+    // link to the PC that asked) still get their turn, and a long picture on the CPU is not mistaken for a lost PC.
+    if (this.pane === 'image' && child.pid) {
+      try {
+        setPriority(child.pid, constants.priority.PRIORITY_BELOW_NORMAL);
+      } catch {
+        // Not allowed here: it runs at normal priority, as before.
+      }
+    }
     leftovers.started(child.pid, spec.exe);
     this.child = child;
     this.holdExit();

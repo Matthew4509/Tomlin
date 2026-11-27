@@ -1,6 +1,6 @@
 // Chat models from Hugging Face: search, sizes, the downloads list (one at a time, in order: src/dlqueue.ts); and models
 // in another folder.
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, renameSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { totalmem } from 'node:os';
@@ -28,17 +28,53 @@ const QFILE = join(HOME.data, 'download-queue.json');
 let dlList: DQ.DlItem[] | null = null;
 /** The one running now, with its Stop and why it was stopped. */
 let dlRun: { id: string; ac: AbortController; why: 'stop' | 'cancel' | null } | null = null;
+/** Said once while the saved list cannot be read, so the log is not filled each time the list is asked for. */
+let dlUnreadSaid = false;
+/**
+ * The saved downloads list as it is on disk: [] when there is none; null when it is there but cannot be read now (a
+ * virus scanner holding it, a permission set wrong for a moment), so it is read again next time and never taken for an
+ * empty list. A file that reads but is not a list (a power cut mid-write) is set aside beside itself, never written over.
+ */
+function readJsonOrSetAside(file: string): unknown[] | null {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if (!dlUnreadSaid) console.error(`The downloads list could not be read (${(e as Error).message}): it is read again when it is next needed, and nothing is saved over it until then.`);
+    dlUnreadSaid = true;
+    return null;
+  }
+  try {
+    const v = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+    if (Array.isArray(v)) return v;
+  } catch {
+    // Damaged: set aside below.
+  }
+  const keptAs = `${file}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  try {
+    renameSync(file, keptAs);
+    console.error(`The downloads list could not be read and was set aside as ${keptAs}.`);
+  } catch (e) {
+    console.error(`The downloads list could not be read, nor set aside (${(e as Error).message}): nothing is saved over it.`);
+    return null;
+  }
+  return [];
+}
 function dlNow(): DQ.DlItem[] {
   if (!dlList) {
-    try {
-      dlList = DQ.afterRestart(DQ.cleanList(JSON.parse(readFileSync(QFILE, 'utf8'))));
-    } catch {
-      dlList = [];
-    }
+    const read = readJsonOrSetAside(QFILE);
+    // Not readable now: shown as empty for this moment only; the next ask reads the file again.
+    if (!read) return [];
+    dlList = DQ.afterRestart(DQ.cleanList(read));
+    dlUnreadSaid = false;
   }
   return dlList;
 }
 function dlSet(list: DQ.DlItem[]): void {
+  // A change made from a list that was never read (the file could not be read yet, so it was shown empty) is refused:
+  // saving it would lose what the file holds.
+  if (!dlList) throw new Error('The downloads list could not be read just now, so nothing was changed. Try again in a moment.');
   dlList = DQ.trimmed(list);
   void writeAtomic(QFILE, JSON.stringify(dlList, null, 2)).catch(e => console.error(`The downloads list was not saved: ${(e as Error).message}`));
 }

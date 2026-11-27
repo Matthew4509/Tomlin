@@ -35,3 +35,15 @@ test('the Options button names what is on, and the menu closes on Escape or a pr
 test('Memory in the top bar is an icon like its neighbours (the word was cut off there), named for screen readers', () => {
   assert.match(read('index.html'), /id="notebook-open" title="[^"]*" aria-label="Memory"><svg/);
 });
+
+test('Save, Copy and Memory are in This chat (the … menu), not shown in the chat\'s top bar', () => {
+  const html = read('index.html');
+  for (const id of ['chat-save', 'chat-copy', 'notebook-open']) assert.match(html, new RegExp(`class="[^"]*chat-in-menu[^"]*" type="button" id="${id}"`));
+  assert.match(read('style.css'), /#pane-chat \.chat-tools \.chat-whole\.chat-in-menu \{ display: none; \}/);
+  const menu = html.slice(html.indexOf('<dialog id="chat-menu"'), html.indexOf('</dialog>', html.indexOf('<dialog id="chat-menu"')));
+  assert.match(menu, /<h3>The whole chat<\/h3>/);
+  assert.match(menu, /id="chat-menu-save">Save<\/button><button class="btn" type="button" id="chat-menu-copy">Copy<\/button><button class="btn" type="button" id="chat-menu-memory">Memory<\/button>/);
+  const js = read('chats.js');
+  assert.match(js, /\$\('#chat-menu-save'\)\.addEventListener\('click', \(\) => \{\n\s+\$\('#chat-menu'\)\.close\(\);\n\s+\$\('#chat-save'\)\.click\(\);/);
+  assert.match(js, /\$\('#chat-menu-memory'\)\.hidden = \$\('#notebook-open'\)\.hidden;/);
+});

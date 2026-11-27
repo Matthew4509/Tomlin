@@ -1,0 +1,60 @@
+{
+  "id": "qwen-image",
+  "kind": "image",
+  "name": "Qwen-Image (20B, Q8, the large one, test)",
+  "about": "Qwen's first picture model, 20B: strong text in pictures and detail; most of it waits in RAM on a 12 GB card. Text encoder: Qwen2.5-VL 7B. Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "qwen-image",
+  "licence": "Apache-2.0 (model, text encoder and VAE; commercial use allowed).",
+  "quant": "Q8_0 (image) + Q8_0 (text encoder)",
+  "minRamGB": 48,
+  "minVramGB": 8,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1328,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1328
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "QuantStack/Qwen-Image-GGUF",
+      "rev": "257f261fa92593bed760aa6fa3f7921a49fea00f",
+      "path": "Qwen_Image-Q8_0.gguf",
+      "bytes": 21761817120,
+      "sha256": "43142b32778dc0568c27395abc6f8291ac53f1de0b98eed919712cf161f248de"
+    },
+    {
+      "role": "llm",
+      "repo": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+      "rev": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+      "path": "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
+      "bytes": 8098524160,
+      "sha256": "577bfb3e41f93f00414e594c56a38bbe91207b3b636ab7faf343e34a20aa73ca"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "rev": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "path": "split_files/vae/qwen_image_vae.safetensors",
+      "bytes": 253806246,
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+    }
+  ],
+  "args": [
+    "--offload-to-cpu",
+    "--fa",
+    "--flow-shift",
+    "3"
+  ],
+  "defaults": {
+    "steps": 30,
+    "cfg": 2.5,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

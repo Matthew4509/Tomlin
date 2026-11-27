@@ -54,6 +54,17 @@ export function startupScript(root: string, env: NodeJS.ProcessEnv = process.env
   ].join('\r\n');
 }
 
+/**
+ * "Start TOMLIN when this PC starts" meant the app, not the folder: when it starts the copy in `from`, it now starts the
+ * copy in `to`. Called by a new copy once it has answered (never before, so one that fails to start is never the one
+ * Windows starts), and by the copy before it when a new one failed. True when it moved.
+ */
+export async function moveStartup(from: string, to: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  if (!(await autostart(from, env).on())) return false;
+  await autostart(to, env).set(true);
+  return true;
+}
+
 export function autostart(root: string, env: NodeJS.ProcessEnv = process.env) {
   const file = () => {
     const dir = startupDir(env);

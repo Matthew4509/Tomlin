@@ -48,6 +48,12 @@ function inTurn<T>(file: string, job: () => Promise<T>): Promise<T> {
   return turn;
 }
 
+/**
+ * Runs `job` in the turn of `key` (any name, not a file's own path, which writeAtomic takes for itself): for a change
+ * that reads and writes more than one file and must never interleave with another of the same kind.
+ */
+export const inFileTurn = <T>(key: string, job: () => Promise<T>): Promise<T> => inTurn(`turn:${key}`, job);
+
 /** Writes `data` to `file` whole or not at all. */
 export function writeAtomic(file: string, data: string | Buffer): Promise<void> {
   return inTurn(file, () => writeNow(file, data));
@@ -139,8 +145,12 @@ export const clearDamaged = (): void => void damagedNow.splice(0);
 /** A good copy of `file` has been put back in its place: the page says so, not that it is gone. */
 export const markMended = (file: string): void => { for (const d of damagedNow) if (d.file === file) d.mended = true; };
 
-/** Sets a damaged file aside (renamed beside itself), so nothing is ever saved over it. */
-async function setAside(file: string): Promise<void> {
+/**
+ * Sets a damaged file aside (renamed beside itself, and reported), so nothing is ever saved over it. Also for a file
+ * that reads as JSON but is not the shape its reader knows (from another version): call it in the file's turn (inside
+ * `updateData`).
+ */
+export async function setAside(file: string): Promise<void> {
   const keptAs = `${file}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   await rename(file, keptAs);
   damagedNow.push({ file, keptAs: basename(keptAs), at: new Date().toISOString() });
@@ -156,20 +166,30 @@ export class DamagedFile extends Error {
   }
 }
 
-async function readNow<T>(file: string, fallback: T, leave = false): Promise<T> {
-  let text: string;
+/** How long a read waits for a file another program holds (a backup tool, a scanner, a sync app) before it fails. */
+export const HELD_FOR_MS = 30_000;
+
+/**
+ * The text of `file`, or null when it is not there. A file held by another program is tried again, 40 ms, 80 ms, ... at
+ * most a second apart, for HELD_FOR_MS; still held, the read fails (and nothing is saved over it).
+ */
+export async function readHeld(file: string): Promise<string | null> {
+  const until = Date.now() + HELD_FOR_MS;
   for (let i = 1; ; i++) {
     try {
-      text = await readFile(file, 'utf8');
-      break;
+      return await readFile(file, 'utf8');
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? '';
-      if (code === 'ENOENT') return fallback;
-      // Held by a scanner for a moment: try again; still held, the read fails (and nothing is saved over it).
-      if (i >= 15 || !BUSY.has(code)) throw e;
-      await wait(40 * i);
+      if (code === 'ENOENT') return null;
+      if (!BUSY.has(code) || Date.now() >= until) throw e;
+      await wait(Math.min(40 * i, 1000));
     }
   }
+}
+
+async function readNow<T>(file: string, fallback: T, leave = false): Promise<T> {
+  const text = await readHeld(file);
+  if (text === null) return fallback;
   try {
     // A file saved by hand in Notepad or PowerShell can start with a byte-order mark, which JSON.parse refuses: it is skipped.
     return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as T;

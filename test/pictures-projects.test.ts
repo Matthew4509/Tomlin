@@ -25,37 +25,72 @@ test('the words to leave out go with a picture asked of a linked PC', () => {
 
 test('they go all the way: the Images window and the queue, the door of that PC, and the picture it draws', () => {
   const pictures = read('src/server/pictures.ts');
-  assert.match(fn(pictures, /async function startAway\([\s\S]*?\n\}/), /\.\.\.drawChoices\(b\)/);
+  assert.match(fn(pictures, /async function startAway\([\s\S]*?\n\}/), /\.\.\.drawChoices\(asked\)/);
   const queued = fn(pictures, /export async function queuedPicture\([\s\S]*?\n\}/);
-  assert.match(queued, /const negative = \[o\.negative\?\.trim\(\), recipe\?\.negative\]/, 'the asked words and the artist\'s own');
+  // The asked words, a picked style's (src/styles.ts), then the artist's own.
+  assert.match(queued, /const negative = \[o\.negative\?\.trim\(\), extra\.negative, recipe\?\.negative\]/, 'the asked words and the artist\'s own');
   assert.match(queued, /jobRoutes\.drawOn\(away\.r, \{[^}]*\.\.\.\(negative \? \{ negative \} : \{\}\)/);
   assert.match(queued, /images\.generate\(\{ prompt: o\.prompt, negative: o\.negative,/, 'drawn here too');
   assert.match(read('src/jobrun/links.ts'), /export async function drawOn\(r: Remote, ask: \{[^}]*negative\?: string/);
   const node = read('src/jobrun/node.ts');
   assert.match(fn(node, /async function workerDraw\([\s\S]*?\n\}/), /const choices = nodestaff\.drawChoices\(b\);/);
-  assert.match(fn(node, /async function drawShared\([\s\S]*?\n\}/), /negative: ask\.negative \}/);
+  assert.match(fn(node, /async function drawShared\([\s\S]*?\n\}/), /negative: ask\.negative[,}]/);
   assert.match(fn(pictures, /export async function drawForPc\([\s\S]*?\n\}/), /images\.generate\(\{ prompt: o\.prompt, negative: o\.negative,/);
   // The queue keeps them with the picture.
   assert.match(read('src/queue.ts'), /\['negative', str\(r\.negative, 1000\)\]/);
-  assert.match(read('src/server/queue.ts'), /negative: it\.negative \}, signal/);
+  assert.match(read('src/server/queue.ts'), /negative: it\.negative, \.\.\.chosen, \.\.\.refs(, \.\.\.look)? \}, signal/);
 });
 
 test('a queued picture kept while the host is away still carries its words to leave out and its size', () => {
   // The queue asks with its request id (src/jobrun/pictureback.ts) and the words and size together; the id names them
   // too, so a changed item asks anew, and an item without words keeps the id it had before.
   const run = fn(read('src/server/queue.ts'), /async function runPicture\([\s\S]*?\n\}/);
-  assert.match(run, /ridOf\(\{[^}]*width: it\.width \?\? 0, height: it\.height \?\? 0, \.\.\.\(it\.negative \? \{ negative: it\.negative \} : \{\}\) \}\)/);
-  assert.match(run, /queuedPicture\(\{[^}]*width: it\.width, height: it\.height, rid, negative: it\.negative \}/);
+  assert.match(run, /ridOf\(\{[^}]*width: it\.width \?\? 0, height: it\.height \?\? 0, \.\.\.\(it\.negative \? \{ negative: it\.negative \} : \{\}\), \.\.\.chosen, \.\.\.refs(, \.\.\.look)? \}\)/);
+  assert.match(run, /queuedPicture\(\{[^}]*width: it\.width, height: it\.height, rid, negative: it\.negative, \.\.\.chosen, \.\.\.refs(, \.\.\.look)? \}/);
+  // An item with no @Name pictures adds nothing to the id, so it keeps the id it had before.
+  assert.match(run, /const refs = it\.refs\?\.length \? \{ refs: it\.refs \} : \{\};/);
   const queued = fn(read('src/server/pictures.ts'), /export async function queuedPicture\([\s\S]*?\n\}/);
   assert.match(queued, /jobRoutes\.drawOn\(away\.r, \{ prompt, style, width: o\.width, height: o\.height, \.\.\.\(negative \? \{ negative \} : \{\}\), .*\.\.\.\(o\.rid \? \{ rid: o\.rid \} : \{\}\) \}/);
   assert.match(queued, /await got\.taken\(\);/);
   // drawOn sends everything asked, with the id, to that PC; that PC's kept draw passes the words on.
   const drawOn = fn(read('src/jobrun/links.ts'), /export async function drawOn\([\s\S]*?\n\}/);
-  assert.match(drawOn, /const \{ rid: askedRid, \.\.\.rest \} = ask;/);
-  assert.match(drawOn, /const body = rid \? \{ \.\.\.rest, rid \} : rest;/);
+  // keepMs is this PC's own wait for a cut stream, never sent.
+  assert.match(drawOn, /const \{ rid: askedRid, keepMs, refImages, \.\.\.rest \} = ask;/);
+  assert.match(drawOn, /const body: Record<string, unknown> = \{ \.\.\.\(rid \? \{ \.\.\.rest, rid \} : rest\), \.\.\.\(refsGo \? \{ refImages \} : \{\}\) \};/);
   const shared = fn(read('src/jobrun/node.ts'), /async function drawShared\([\s\S]*?\n\}/);
   assert.match(shared, /drawFor\(res, keep,/);
-  assert.match(shared, /width: ask\.width, height: ask\.height,[^}]*negative: ask\.negative \}/);
+  assert.match(shared, /width: ask\.width, height: ask\.height,[^}]*negative: ask\.negative, \.\.\.\(ask\.refData\?\.length \? \{ refData: ask\.refData \} : \{\}\) \}/);
+});
+
+test('a queued picture keeps Draft, Mid or High and its seed, and draws with them here and on a linked PC (Q1)', async () => {
+  const Q = await import('../src/queue.ts');
+  const base = { id: 'abc123', kind: 'picture', title: 'a fox', prompt: 'a fox', added: '2026-11-26T00:00:00.000Z', project: '' };
+  const kept = Q.cleanItem({ ...base, quality: 'high', seed: 42 })!;
+  assert.equal(kept.quality, 'high');
+  assert.equal(kept.seed, 42);
+  // Anything else is left out: the PC's own choice and a new seed, as before.
+  const odd = Q.cleanItem({ ...base, quality: 'ultra', seed: -1 })!;
+  assert.equal(odd.quality, undefined);
+  assert.equal(odd.seed, undefined);
+  // Every seed the Images window takes is kept (up to 2^32 - 1, src/drawrefs.ts SEED_MOST); past it, left out.
+  assert.equal(Q.cleanItem({ ...base, seed: 2 ** 31 })!.seed, 2 ** 31);
+  assert.equal(Q.cleanItem({ ...base, seed: 2 ** 32 })!.seed, undefined);
+  assert.equal(Q.cleanItem({ ...base, seed: 1.5 })!.seed, undefined);
+  // Added with them, run with them; an item with neither keeps the request id it had before.
+  const server = read('src/server/queue.ts');
+  assert.match(server, /quality: raw\.quality, seed: raw\.seed, project: projectId/);
+  const run = fn(server, /async function runPicture\([\s\S]*?\n\}/);
+  assert.match(run, /const chosen = \{ \.\.\.\(it\.quality \? \{ quality: it\.quality \} : \{\}\), \.\.\.\(it\.seed !== undefined \? \{ seed: it\.seed \} : \{\}\) \};/);
+  const queued = fn(read('src/server/pictures.ts'), /export async function queuedPicture\([\s\S]*?\n\}/);
+  assert.match(queued, /\.\.\.drawChoices\(\{ quality: o\.quality, seed: o\.seed \}\), \.\.\.\(refImages\.length \? \{ refImages \} : \{\}\), queue: true/, 'sent to a linked PC');
+  assert.match(queued, /\.\.\.\(o\.quality \? \{ quality: o\.quality \} : \{\}\), \.\.\.\(o\.seed !== undefined \? \{ seed: o\.seed \} : \{\}\), \.\.\.\(refPaths\.length \? \{ refs: refPaths \} : \{\}\) \}\);/, 'drawn here');
+  assert.deepEqual(drawChoices({ quality: 'mid', seed: 42 }), { quality: 'mid', seed: 42 });
+  assert.deepEqual(drawChoices({ quality: undefined, seed: undefined }), {});
+  // The Images window's Add to the queue sends them (the seed only when Random is off).
+  const page = fn(read('public/queue.js'), /function pictureFields\(\) \{[\s\S]*?\n {2}\}/);
+  assert.match(page, /input\[name="img-quality"\]:checked/);
+  assert.match(page, /!\$\('#img-random'\)\?\.checked && \/\^\\d\+\$\/\.test\(seedText\)/);
+  assert.match(page, /quality, seed, project:/);
 });
 
 // ---- 16: the size asked ----

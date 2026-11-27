@@ -72,11 +72,24 @@ test('a model the PCs cannot hold without going under the floor is refused befor
   assert.match((p as { why: string }).why, /more room than the PCs have free/);
 });
 
-test('no lender devices, or no card on this PC: the usual fit stays (no refusal)', () => {
+test('no lender devices: no plan (no refusal); no card on this PC: still a plan, the lenders kept to the RAM policy', () => {
   const none = planLayers({ layers: 48, bytes: 10 * GB, kv: 1 * GB }, [dev('CUDA0', 'card', 12, 11)], [z820], host);
   assert.ok('why' in none && !none.refuse);
-  const noCard = planLayers({ layers: 48, bytes: 10 * GB, kv: 1 * GB }, [dev('RPC0', z820.endpoint, 64, 56)], [{ ...z820, hasCard: false }], host);
-  assert.ok('why' in noCard && !noCard.refuse);
+  // A PC with no card (its processor's runner lists the lenders and CPU only): never left to llama.cpp's own fit.
+  const noCard = planLayers({ layers: 48, bytes: 10 * GB, kv: 1 * GB }, [dev('RPC0', z820.endpoint, 64, 56), dev('CPU', 'cpu', 32, 20)], [{ ...z820, hasCard: false }], host);
+  assert.ok(!('why' in noCard), 'why' in noCard ? noCard.why : '');
+  assert.deepEqual(noCard.dev, ['RPC0']);
+  // A 24 GB lender with no card is given its share of free RAM only, never ~16 GB of a 30 GB model.
+  const small = planLayers({ layers: 40, bytes: 30 * GB, kv: 2 * GB }, [dev('RPC0', '127.0.0.1:5002', 24, 20.5), dev('CPU', 'Xeon', 64, 50)], [{ name: 'HP 800', endpoint: '127.0.0.1:5002', hasCard: false }], { free: 50 * GB });
+  if (!('why' in small)) assert.ok((small.ramHeld['HP 800'] ?? 0) <= 20.5 * GB * 0.6, `HP 800 holds ${((small.ramHeld['HP 800'] ?? 0) / GB).toFixed(1)} GB`);
+  else assert.equal(small.refuse, true);
+});
+
+test('a PC with no card runs a split by room on its processor: -ngl is the lenders\' layers, not 0', () => {
+  const args = chatArgs('m.gguf', 8080, 'cpu', 0, false, { ctx: 8192, cache: 'f16', place: 'auto', rpc: ['127.0.0.1:5001'], maxPlace: { device: 'cpu', dev: ['RPC0'], split: [30], override: [], ngl: 30 } });
+  assert.equal(args[args.indexOf('-ngl') + 1], '30');
+  assert.equal(args[args.indexOf('-dev') + 1], 'RPC0');
+  assert.ok(!args.includes('-fitt'), 'not llama.cpp\'s own fit');
 });
 
 test('llama-server gets the layers off the processor, not 999, for a split by room', () => {

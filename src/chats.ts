@@ -2,8 +2,9 @@
 // is with, its title, when it was started and last used). A chat is with one person: the manager, one hire
 // ("staff:<id>"); that never changes, so one person's answers are never read by another. Pictures drawn while a chat is open carry its id in the gallery (src/gallery.ts), so each chat keeps its own.
 import { randomBytes } from 'node:crypto';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { removeAtomic } from './atomic.ts';
+import { DamagedFile, readHeld, removeAtomic, setAside } from './atomic.ts';
 import type { ChatLine, Store } from './store.ts';
 import { chatFolder } from './folders.ts';
 
@@ -54,16 +55,22 @@ export interface ChatInfo {
   readSpeed?: number;
 }
 
-export const NEW_TITLE = 'New chat';
+// Not "New chat": that is the button that starts one, and a chat called it read like the button in its own menu.
+export const NEW_TITLE = 'Untitled chat';
+/** The name an unnamed chat had before 2.1.20: read as unnamed, so its first message still names it. */
+export const OLD_NEW_TITLE = 'New chat';
 const INDEX = 'chats/index.json';
 const ID = /^[a-f0-9]{12}$/;
+
+/** The first `n` characters of `s`, never ending in half of an emoji (a lone first half of a pair is dropped). */
+export const cutText = (s: string, n: number): string => s.slice(0, n).replace(/[\uD800-\uDBFF]$/, '');
 
 /** A chat's title from its first message: one line, about 48 characters, cut at a word. */
 export function titleFrom(text: string): string {
   const one = text.replace(/\s+/g, ' ').trim();
   if (!one) return NEW_TITLE;
   if (one.length <= 48) return one;
-  const cut = one.slice(0, 48);
+  const cut = cutText(one, 48);
   const at = cut.lastIndexOf(' ');
   return `${(at > 24 ? cut.slice(0, at) : cut).replace(/[\s,.;:!?-]+$/, '')}…`;
 }
@@ -79,12 +86,12 @@ export function describe(info: ChatInfo, lines: ChatLine[], now = new Date().toI
 export const PREVIEW_CHARS = 100;
 export function previewOf(lines: ChatLine[]): string {
   const first = lines.find(l => l.role === 'user' && !l.refused);
-  return first ? String(first.content ?? '').replace(/\s+/g, ' ').trim().slice(0, PREVIEW_CHARS) : '';
+  return first ? cutText(String(first.content ?? '').replace(/\s+/g, ' ').trim(), PREVIEW_CHARS) : '';
 }
 
 /** A name given to a chat (a subject), as kept: one line, at most 80 characters. */
 export function cleanTitle(title: unknown): string {
-  return String(title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return cutText(String(title ?? '').replace(/\s+/g, ' ').trim(), 80);
 }
 
 /**
@@ -163,6 +170,39 @@ export function recentEntries(list: Array<Pick<ChatInfo, 'id' | 'updated' | 'pro
 const PINNED_PROJECTS = 'chats/pinned-projects.json';
 const PROJECT_ID = /^[A-Za-z0-9][\w.-]{0,99}$/;
 
+/**
+ * What can still be read of a damaged chats list, by chat id: who it is with, its title, when it was started, its
+ * project and whether it was named, each only where its whole value is still there (a list cut short loses the rest).
+ */
+export function salvage(text: string): Map<string, { who?: string; title?: string; created?: string; project?: string; named?: boolean }> {
+  const out = new Map<string, { who?: string; title?: string; created?: string; project?: string; named?: boolean }>();
+  const starts = [...text.matchAll(/"id"\s*:\s*"([a-f0-9]{12})"/g)];
+  for (const [i, m] of starts.entries()) {
+    // The entry's fields are those after its id, up to the next id (the list is written id first).
+    const part = text.slice(m.index!, starts[i + 1]?.index ?? text.length);
+    const str = (k: string): string | undefined => {
+      const v = new RegExp(`"${k}"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*")`).exec(part)?.[1];
+      if (!v) return undefined;
+      try {
+        const s = JSON.parse(v) as unknown;
+        return typeof s === 'string' ? s : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const who = str('who');
+    const project = str('project');
+    out.set(m[1], {
+      ...(who && /^(manager|partner|staff:[a-z0-9-]{1,40}|node:[\w.:-]{1,80})$/.test(who) ? { who } : {}),
+      ...(str('title') ? { title: cleanTitle(str('title')) || undefined } : {}),
+      ...(str('created') && !Number.isNaN(Date.parse(str('created')!)) ? { created: str('created') } : {}),
+      ...(project && PROJECT_ID.test(project) ? { project } : {}),
+      ...(/"named"\s*:\s*true/.test(part) ? { named: true } : {}),
+    });
+  }
+  return out;
+}
+
 /** Chats left in the list by the private chat (taken out of the app) are never listed or opened; their files stay as they are. */
 const shown = (c: ChatInfo) => c.who !== 'partner';
 
@@ -184,17 +224,62 @@ export class Chats {
 
   private async index(): Promise<ChatInfo[]> {
     if (this.cache) return this.cache;
-    this.reading ??= this.store.readJson<ChatInfo[]>(INDEX, []).then(list => {
+    this.reading ??= this.readIndex().then(list => {
       // An entry missing its title or times (or with ones that are not words) is kept, with them filled in, so sorting
       // and naming never stop on it.
       const words = (v: unknown, or: string) => (typeof v === 'string' ? v : or);
-      this.cache ??= Array.isArray(list) ? list.filter(c => c && ID.test(c.id) && typeof c.who === 'string')
-        .map(c => ({ ...c, title: words(c.title, NEW_TITLE), created: words(c.created, ''), updated: words(c.updated, words(c.created, '')) })) : [];
+      this.cache ??= list.filter(c => c && ID.test(c.id) && typeof c.who === 'string')
+        .map(c => ({ ...c, title: !c.named && c.title === OLD_NEW_TITLE ? NEW_TITLE : words(c.title, NEW_TITLE), created: words(c.created, ''), updated: words(c.updated, words(c.created, '')) }));
       return this.cache;
     }).finally(() => {
       this.reading = null;
     });
     return this.reading;
+  }
+
+  /**
+   * The list as the file holds it. A list that is damaged (cut short by a power cut) or not a list at all is set aside,
+   * never saved over, and the list is made again from the chats' own files, with who each was with and its name read
+   * from what is left of the damaged list (see `rebuilt`), and saved.
+   */
+  private async readIndex(): Promise<ChatInfo[]> {
+    const file = join(this.store.dir, INDEX);
+    let got: unknown;
+    try {
+      got = await this.store.readJson<unknown>(INDEX, [], { leave: true });
+    } catch (e) {
+      if (!(e instanceof DamagedFile)) throw e;
+      got = undefined;
+    }
+    if (Array.isArray(got)) return got as ChatInfo[];
+    const text = (await readHeld(file).catch(() => null)) ?? '';
+    await setAside(file);
+    const list = await this.rebuilt(text);
+    await this.store.writeJson(INDEX, list);
+    return list;
+  }
+
+  /**
+   * The list made again from the chats' files (data/chats/<id>.json): each with its count, preview, times and the title
+   * its first message gives it. Who each chat was with, its name and project are read from `damaged` (what was left of
+   * the list) where they are still there; a chat whose person cannot be read is put with the host, so it is still listed.
+   */
+  private async rebuilt(damaged: string): Promise<ChatInfo[]> {
+    const known = salvage(damaged);
+    const names = await readdir(join(this.store.dir, 'chats')).catch(() => [] as string[]);
+    const ids = new Set([...names.map(n => /^([a-f0-9]{12})\.json$/.exec(n)?.[1]).filter((x): x is string => !!x), ...known.keys()]);
+    const out: ChatInfo[] = [];
+    for (const id of ids) {
+      const k = known.get(id) ?? {};
+      const lines = names.includes(`${id}.json`) ? await this.store.chat(this.file(id)).catch(() => [] as ChatLine[]) : [];
+      const good = Array.isArray(lines) ? lines : [];
+      const first = good.find(l => typeof l?.at === 'string')?.at;
+      const last = [...good].reverse().find(l => typeof l?.at === 'string')?.at;
+      const created = k.created ?? first ?? new Date().toISOString();
+      const base: ChatInfo = { id, who: k.who ?? 'manager', title: k.title ?? NEW_TITLE, created, updated: created, messages: 0, ...(k.named ? { named: true } : {}), ...(k.project ? { project: k.project } : {}) };
+      out.push(describe(base, good, last ?? created));
+    }
+    return out;
   }
 
   // A save that fails (a full disk) leaves the list in memory changed and the file not: the list is read from the file
@@ -359,9 +444,14 @@ export class Chats {
    * first message, its time from the last line). The old files are left where they were, untouched.
    */
   async moveOld(files: string[]): Promise<ChatInfo[]> {
-    if (await this.store.readJson<unknown>(INDEX, null)) return [];
+    // A list that is there (even a damaged one, which index() sets aside and makes again) means this was done before.
+    if ((await readHeld(join(this.store.dir, INDEX))) !== null) {
+      await this.index();
+      return [];
+    }
     const made: ChatInfo[] = [];
-    this.cache = [];
+    // The list gone while chats are still there (deleted by hand): they are listed again from their files.
+    this.cache = await this.rebuilt('');
     for (const { file, who } of oldChats(files)) {
       const lines = await this.store.chat(file);
       if (!Array.isArray(lines) || !lines.length) continue;

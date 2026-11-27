@@ -115,10 +115,10 @@ test('an older TOMLIN that does not know the line is told busy, as before, while
 
 test('the guest caps: answer length clamped, a prompt over the cap refused, both shown; the owner may change them', () => {
   assert.deepEqual(nl.GUEST_CAPS, { answer: 2000, prompt: 32000 });
-  assert.deepEqual(nl.cleanCaps({ answer: '4000', prompt: 9_999_999 }), { answer: 4000, prompt: 200_000 });
-  assert.deepEqual(nl.cleanCaps({ answer: 10, prompt: 'x' }), { answer: 256, prompt: 32000 });
-  assert.deepEqual(nl.cleanCaps(undefined), nl.GUEST_CAPS);
-  const caps = { answer: 2000, prompt: 100 };
+  assert.deepEqual(nl.cleanCaps({ answer: '4000', prompt: 9_999_999 }), { answer: 4000, prompt: 200_000, web: true, tools: true });
+  assert.deepEqual(nl.cleanCaps({ answer: 10, prompt: 'x' }), { answer: 256, prompt: 32000, web: true, tools: true });
+  assert.deepEqual(nl.cleanCaps(undefined), { ...nl.GUEST_CAPS, web: true, tools: true });
+  const caps = { answer: 2000, prompt: 100, web: true, tools: true };
   assert.equal(nl.capAnswer(8000, caps), 2000);
   assert.equal(nl.capAnswer(500, caps), 500);
   assert.equal(nl.promptRefusal({ system: 'x'.repeat(40), user: 'y'.repeat(60) }, caps), null);
@@ -129,7 +129,7 @@ test('the guest caps: answer length clamped, a prompt over the cap refused, both
 
 test('a guest\'s tool definitions count in its prompt; its tools run few rounds and calls, and what they give back counts against its cap', async () => {
   const def = { type: 'function', function: { name: 'read_file', description: 'd'.repeat(3000), parameters: { type: 'object' } } };
-  const caps = { answer: 2000, prompt: 2000 };
+  const caps = { answer: 2000, prompt: 2000, web: true, tools: true };
   assert.equal(nl.promptRefusal({ user: 'hi' }, caps), null);
   assert.match(nl.promptRefusal({ user: 'hi', tools: { defs: [def], rounds: 24, parallel: [] } }, caps)!, /2000 characters/, 'a short message with a long tool list is over the cap');
   assert.ok(nl.promptSize({ user: 'hi', tools: { defs: [def], rounds: 1, parallel: [] } }) > 3000);
@@ -170,4 +170,23 @@ test('a model that does not fit now waits its turn for room; one that can never 
   const no = nl.chatTurn({ ...base, loadedOrBusy: false }, T0) as { refuse: string };
   assert.match(no.refuse, /^Big model is too big for "Office node" even with nothing else loaded there/);
   assert.doesNotMatch(no.refuse, /Drop in the top bar|Close other programs/, 'no words meant for the owner of that PC');
+});
+
+test('a guest pass with no limits (a test cluster): any answer and prompt size, no tool rounds held; web and own tools on or off', () => {
+  const none = nl.cleanCaps({ answer: 0, prompt: 0 });
+  assert.deepEqual(none, { answer: 0, prompt: 0, web: true, tools: true });
+  assert.ok(nl.noLimits(none));
+  assert.equal(nl.capAnswer(30_000, none), 30_000);
+  assert.equal(nl.promptRefusal({ user: 'y'.repeat(500_000) }, none), null);
+  assert.equal(nl.guestRoomOf(none, 500_000), null, 'no guest tool box at all');
+  assert.equal(nl.capsWords(none), 'answers of any length, prompts of any length');
+  // Only the answer limited: the tools keep their rounds, with all the room there is.
+  const answerOnly = nl.cleanCaps({ answer: 2000, prompt: 0 });
+  assert.equal(nl.guestRoomOf(answerOnly, 10), Number.MAX_SAFE_INTEGER);
+  assert.equal(nl.guestRoomOf(nl.cleanCaps({ answer: 2000, prompt: 1000 }), 400), 600);
+  // The ticks: what is off is taken out of the guest's request.
+  const shut = nl.cleanCaps({ web: false, tools: false });
+  assert.deepEqual(nl.guestAllowed({ user: 'hi', web: { seed: 1 }, tools: { defs: [] } }, shut), { user: 'hi' });
+  assert.deepEqual(nl.guestAllowed({ user: 'hi', web: { seed: 1 } }, nl.cleanCaps({})), { user: 'hi', web: { seed: 1 } });
+  assert.equal(nl.capsWords(shut), 'answers up to 2000 tokens, prompts up to 32000 characters, no web, no tools of its own');
 });

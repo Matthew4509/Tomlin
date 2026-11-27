@@ -67,17 +67,64 @@ function dlLine(x) {
     running ? el('div', { class: 'dl-track', 'aria-hidden': 'true' }, fill) : null].filter(Boolean));
 }
 
+/** Arriving at this PC, or going to the PC named: the words for each kind of copy between PCs (src/jobrun/copies.ts). */
+const DL_HERE = ['copy', 'pull', 'bring', 'restore'];
+const DL_WHY = { backup: 'backup in progress', projects: 'backup in progress', restore: 'backup in progress', update: 'update in progress', pull: 'update in progress', bring: 'update in progress' };
+const dlWhy = t => DL_WHY[t.kind] ?? 'copy in progress';
+/** "about 25 min left", from the copy's own speed so far; '' until it has moved enough to tell. */
+function dlLeft(t) {
+  const secs = (Date.now() - (t.started ?? Date.now())) / 1000;
+  if (!t.bytes || !t.done || secs < 10) return '';
+  const left = (t.bytes - t.done) / (t.done / secs);
+  if (!Number.isFinite(left) || left <= 0) return '';
+  return left < 90 ? 'about a minute left' : left < 5400 ? `about ${Math.round(left / 60)} min left` : `about ${(left / 3600).toFixed(1)} h left`;
+}
+/** One copy between PCs: "Downloading to Worker PC · Qwen3-8B · 34% of 12.0 GB · about 6 min left", with Stop. */
+function dlCopyLine(t) {
+  const here = DL_HERE.includes(t.kind);
+  const pct = t.bytes ? Math.floor((t.done / t.bytes) * 100) : 0;
+  const fill = el('span', { class: 'dl-fill' });
+  fill.style.width = `${pct}%`;
+  const words = t.bytes ? [`${pct}% of ${dlGB(t.bytes)}`, dlLeft(t)].filter(Boolean).join(' · ') : t.wait || 'starting';
+  return el('li', { class: 'dl-line is-running' },
+    el('span', { class: 'dl-line-pc', text: here ? `Downloading to this PC from ${t.pcName}` : `Downloading to ${t.pcName}` }),
+    el('span', { class: 'dl-line-name', text: t.what }),
+    el('span', { class: 'dl-line-words', text: words }),
+    el('button', { class: 'btn quiet', type: 'button', text: 'Stop', title: 'Stops it; what has come is kept, and copying it again carries on from there.', onclick: async () => { await api('/api/network/stop', { id: t.id }).catch(e => { dlSaid = e.message; }); await dlRead(); } }),
+    el('div', { class: 'dl-track', 'aria-hidden': 'true' }, fill));
+}
+/**
+ * Which PCs must stay on for what is going now, and why: a copy between PCs needs this PC and the other one; a download
+ * from the internet needs only the PC downloading it.
+ */
+function dlStayOn(open) {
+  const why = new Map();
+  const add = (name, w) => { if (!why.has(name)) why.set(name, w); };
+  for (const t of dlCopies) {
+    add('This PC', dlWhy(t));
+    add(t.pcName, dlWhy(t));
+  }
+  for (const x of open) add(x.pcName === 'This PC' || x.pc === 'here' ? 'This PC' : x.pcName, 'download in progress');
+  return [...why].map(([name, w]) => `${name} (${w})`);
+}
+
 function dlDraw() {
   const all = dlAll();
   const open = all.filter(dlOpen);
   const done = all.filter(x => !dlOpen(x));
   const off = dlLast.pcs.filter(p => !p.ok && p.why);
+  const stay = dlStayOn(open);
   // null for a part left out (el and replaceChildren would write it as text).
   dlDlg.replaceChildren(...[
     el('h2', { id: 'dl-title', text: 'Downloads' }),
-    el('p', { class: 'hint', text: 'Each PC works through its own list, one download at a time, even with this PC turned off.' }),
-    open.length ? el('ol', { class: 'dl-lines' }, ...open.map(dlLine)) : el('p', { class: 'hint', text: 'Nothing is downloading or waiting.' }),
-    dlCopies.length ? el('p', { class: 'hint' }, `Also copying between PCs: ${dlCopies.map(t => `${t.what} (${t.pcName})`).join(', ')}. `, el('button', { class: 'btn quiet', type: 'button', text: 'See on Network', onclick: () => { dlDlg.close(); app.openNet?.(); } })) : null,
+    // What must stay on for it, first: so a PC is not switched off part way through a copy.
+    stay.length ? el('p', { class: 'dl-stay' }, 'This runs in the background. Other PCs can be used or turned off, as long as these stay on: ', el('b', { text: stay.join(', ') }), '.') : null,
+    !open.length && !dlCopies.length ? el('p', { class: 'hint', text: 'Nothing is downloading or waiting.' }) : null,
+    dlCopies.length ? el('h3', { text: 'Between your PCs' }) : null,
+    dlCopies.length ? el('ol', { class: 'dl-lines' }, ...dlCopies.map(dlCopyLine)) : null,
+    open.length ? el('h3', { text: 'From the internet' }) : null,
+    open.length ? el('p', { class: 'hint', text: 'Each PC works through its own list, one download at a time, even with this PC turned off.' }) : null,
+    open.length ? el('ol', { class: 'dl-lines' }, ...open.map(dlLine)) : null,
     ...off.map(p => el('p', { class: 'hint', text: `${p.pcName}: ${p.why}` })),
     done.length ? el('h3', { text: 'Finished' }) : null,
     done.length ? el('ol', { class: 'dl-lines' }, ...done.map(dlLine)) : null,

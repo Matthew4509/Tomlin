@@ -1,10 +1,11 @@
 // Who a chat can be with, which chat is open, the Chats tab's list and the profile photos.
 import type { ServerResponse } from 'node:http';
+import { isVideographer, VIDEOGRAPHER } from '../clips.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as brains from '../brains.ts';
 import { WHO, whoOf, cleanName } from '../persona.ts';
-import { levelOfHire, roleOf, type StaffMember } from '../staff.ts';
+import { levelOfHire, makesVideo, roleOf, type StaffMember } from '../staff.ts';
 import { isFaceKey, visibleFaces } from '../faces.ts';
 import { LOOK_OPTIONS, cleanLook } from '../look.ts';
 import * as mute from '../mute.ts';
@@ -13,9 +14,11 @@ import * as nodestaff from '../nodestaff.ts';
 import { HOME, HOST_NAME, HOST_ON, SECURITY_HEADERS, type Route, type Routes, chatLogs, chats, decoded, faces, json, mutes, publicSettings, shortName, staff, staffId, store, workspaceDir } from './core.ts';
 import { chat, chatList, images, runners } from './panes.ts';
 import { hireModel, type HireModel } from '../hiremodel.ts';
+import { VIDEO_MODELS, isHdModel, shortVideoName, takesStartPicture, wordsOnlyLine } from '../videomodels.ts';
+import { videoList } from './videomodels.ts';
 import { leftPerson } from '../leavers.ts';
 import { chatWork, stopChats } from './answering.ts';
-import { docStore, liveAnswers } from './chat.ts';
+import { askPics, docStore, liveAnswers } from './chat.ts';
 import { jobRoutes } from './jobs.ts';
 import { moveChatFiles, projectFolder, saveToOf } from './places.ts';
 import { bridgePictures } from './bridge.ts';
@@ -99,12 +102,30 @@ export async function setWho(to: string): Promise<string> {
  * This PC's chat or picture models, by id and short name, read once per turn of the event loop: a page asks for every
  * hire's model in one go, and each read checks every model file on disk (1,000 staff took Home 28 seconds).
  */
-let hereNow: { chat?: { id: string; name: string }[]; picture?: { id: string; name: string }[] } | null = null;
-function modelsHere(picture: boolean): { id: string; name: string }[] {
+let hereNow: { chat?: { id: string; name: string }[]; picture?: { id: string; name: string }[]; video?: { id: string; name: string }[] } | null = null;
+/** A Videographer's video model and the PC it is made on: their first brain ref ('' when none is chosen). */
+export function clipModelOf(m: StaffMember): { model: string; pc: string } {
+  const first = brains.parseRef(brains.refsOf(m)[0] ?? m.model ?? '');
+  const model = first.kind === 'here' ? first.id : first.kind === 'remote' ? first.model ?? '' : '';
+  return { model, pc: first.kind === 'remote' ? first.pc : 'here' };
+}
+
+/**
+ * Whether a Videographer's model can start a clip from a picture, and the line said when it cannot; `hd` when it is
+ * made for 720p (the 720p sizes are offered under the box).
+ */
+function startPictureOf(m: StaffMember): { startPicture: boolean; wordsOnly?: string; hd?: boolean } {
+  const { model } = clipModelOf(m);
+  const hd = isHdModel(model) ? { hd: true } : {};
+  return takesStartPicture(model) ? { startPicture: true, ...hd } : { startPicture: false, wordsOnly: wordsOnlyLine(model), ...hd };
+}
+
+function modelsHere(picture: boolean, video = false): { id: string; name: string }[] {
   if (!hereNow) {
     hereNow = {};
     setImmediate(() => { hereNow = null; });
   }
+  if (video) return (hereNow.video ??= videoList().filter(x => x.installed).map(x => ({ id: x.id, name: x.short })));
   return picture
     ? (hereNow.picture ??= images.list().filter(x => x.installed).map(x => ({ id: x.id, name: shortName(x.name.replace(/\s*\(.*\)$/, '')) || x.name })))
     : (hereNow.chat ??= chatList().map(x => ({ id: x.id, name: shortName(x.name) || x.name })));
@@ -116,19 +137,21 @@ function modelsHere(picture: boolean): { id: string; name: string }[] {
  */
 export function hireModelOf(m: StaffMember): HireModel {
   const s = store.peek();
-  const picture = !!roleOf(m.role).kind;
-  const here = modelsHere(picture);
+  const video = makesVideo(m.role);
+  const picture = !video && !!roleOf(m.role).kind;
+  const here = modelsHere(picture, video);
   const pcs = (s?.remotes ?? []).map(r => {
     const h = jobRoutes.lastHello(r.id);
     const list = h?.can?.includes('models') ? h.models : r.models ?? null;
     const loaded = picture ? h?.image?.name ?? null : h?.model ?? null;
-    return { id: r.id, name: r.name, backupsOnly: r.backupsOnly === true, loaded: loaded ? shortName(loaded) || loaded : null, models: list ? list.filter(x => (x.kind === 'image') === picture).map(x => ({ id: x.id, name: shortName(x.name) || x.name })) : null };
+    // A linked PC does not say which video models it has yet: a Videographer there is named from the list.
+    return { id: r.id, name: r.name, backupsOnly: r.backupsOnly === true, loaded: video ? null : loaded ? shortName(loaded) || loaded : null, models: video ? VIDEO_MODELS.map(x => ({ id: x.id, name: shortVideoName(x) })) : list ? list.filter(x => (x.kind === 'image') === picture).map(x => ({ id: x.id, name: shortName(x.name) || x.name })) : null };
   });
   // No model given: the main chat runner answers (else any chat model loaded); an artist, the picture model loaded.
-  const on = picture
+  const on = video ? null : picture
     ? (images.pane.view.state === 'connected' ? images.pane.view.model : null)
     : chat.view.state === 'connected' ? chat.view.model : runners.find(p => p.view.state === 'connected')?.view.model ?? null;
-  return hireModel(m.model, { picture, here, pcs, connected: on ? here.find(x => x.id === on)?.name ?? on : null });
+  return hireModel(m.model, { picture, video, here, pcs, ...(video ? { known: VIDEO_MODELS.map(x => ({ id: x.id, name: shortVideoName(x) })) } : {}), connected: on ? here.find(x => x.id === on)?.name ?? on : null });
 }
 
 /** Everyone a new chat can be with: the manager and each hire who chats. */
@@ -151,14 +174,16 @@ export function chatPeople() {
   };
   const pictures = images.list();
   // roleId: the role by its id ('host' for the host), for what "Write it as a prompt for…" asks (src/sendto.ts).
-  const people: Array<{ who: string; name: string; avatar: string; role: string; roleId: string; model: string; pc: string; pcId?: string; hint: string; kind: 'chat' | 'image'; named?: boolean; use?: HireModel }> = [
+  const people: Array<{ who: string; name: string; avatar: string; role: string; roleId: string; model: string; pc: string; pcId?: string; hint: string; kind: 'chat' | 'image'; named?: boolean; use?: HireModel; video?: boolean; startPicture?: boolean; wordsOnly?: string; hd?: boolean }> = [
     // The host: this PC's own assistant, not one of the staff (it answers on the chat model connected here). Off for now.
     ...(HOST_ON ? [{ kind: 'chat' as const, who: 'manager', name: s.managerName || HOST_NAME, avatar: s.managerName ? s.managerName.slice(0, 2).toUpperCase() : 'H', named: !!s.managerName, role: 'Not staff: this PC\'s own assistant', roleId: 'host', model: modelName(s.hostModel || s.chat.model), pc: 'this PC', hint: 'The host: this PC\'s own assistant, not one of the staff. It answers on its own model (the pencil beside it in the left panel), and how it talks (Standard, Professional, Friend) is set in the chat settings.' }] : []),
-    ...staff.list().filter(m => !roleOf(m.role).kind).map(m => ({
+    ...staff.list().filter(m => !roleOf(m.role).kind || isVideographer(m)).map(m => ({
       kind: 'chat' as const, who: `staff:${m.id}`, name: m.name, avatar: m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), role: roleOf(m.role).name, roleId: roleOf(m.role).id, ...where(m), use: hireModelOf(m), hint: roleOf(m.role).hint,
+      // A Videographer's chat is the chat pane, with the clip choices under the box (public/clips.js).
+      ...(isVideographer(m) ? { video: true, role: 'Videographer', roleId: VIDEOGRAPHER, hint: `${m.name} makes short clips: what you type in their chat is what the clip shows.`, ...startPictureOf(m) } : {}),
     })),
     // Artists: their chat is the pictures pane, and what you type there is drawn word for word.
-    ...staff.list().filter(m => roleOf(m.role).kind).map(m => ({
+    ...staff.list().filter(m => roleOf(m.role).kind && !isVideographer(m)).map(m => ({
       kind: 'image' as const, who: `staff:${m.id}`, name: m.name, avatar: m.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), role: `${roleOf(m.role).name} · draws what you ask`, roleId: roleOf(m.role).id,
       model: String(m.model ?? '').startsWith('remote:') ? 'draws on a linked PC' : shortName(pictures.find(x => x.id === m.model)?.name.replace(/\s*\(.*\)$/, '')) || 'the picture model connected here', pc: String(m.model ?? '').startsWith('remote:') ? where(m).pc : 'this PC',
       use: hireModelOf(m),
@@ -207,15 +232,23 @@ async function facesView() {
   return { faces: visibleFaces(await faces.all()), people: facePeople(), looks, madeUp: Object.fromEntries(everyone.filter(m => !cleanLook(m.look) && !m.initials).map(m => [`staff:${m.id}`, m.role])), lookOptions: LOOK_OPTIONS };
 }
 
-/** Deletes one chat: its answer stops, its documents and log go; its pictures are kept in the gallery unless `pictures`. */
+/**
+ * Work kept for a chat elsewhere that must end when the chat is deleted (a Videographer's shot list and clips,
+ * src/server/shots.ts): each is told the chat's id before it goes.
+ */
+export const chatGone: Array<(chat: string) => Promise<void> | void> = [];
+
+/** Deletes one chat: its answer stops, its documents, log and the pictures sent in it go; its drawn pictures are kept in the gallery unless `pictures`. */
 async function dropChat(c: ChatInfo, pictures: boolean) {
   stopChats(a => a.chatId === c.id);
+  for (const gone of chatGone) await Promise.resolve(gone(c.id)).catch(error => console.warn(`Work for a deleted chat could not be stopped: ${(error as Error).message}`));
   // An answer or picture still running for it saves nothing after this, so its file is never written again.
   store.chatEmptied(chats.file(c.id));
   if ((await store.settings()).chatId === c.id) await store.saveSettings({ chatId: '' });
   const n = await images.gallery.forgetChat(c.id, pictures);
   await chats.remove(c.id);
   await docStore.drop(c.id);
+  await askPics.drop(c.id);
   await chatLogs.drop(c.id);
   const m = await mutes.get();
   if (m.items[`chat:${c.id}`]) await mutes.save(mute.set(m, `chat:${c.id}`, 'off'));
@@ -236,7 +269,9 @@ async function chatsView() {
   const list = (await chats.list()).map(c => {
     const p = nameOf(c.who);
     const here = chatPersonHere(c.who);
-    return { ...c, name: p.name, avatar: p.avatar, role: p.role, here, ...(isLeft(c.who) ? { left: true } : {}), pictures: pics[c.id] ?? 0 };
+    // roleId and roleKind: for All chats' Role filter (the role's id, and 'chat' or 'image'; '' when not known).
+    const roleId = 'roleId' in p && p.roleId && p.roleId !== 'host' ? p.roleId : '';
+    return { ...c, name: p.name, avatar: p.avatar, role: p.role, roleId, roleKind: roleId ? roleOf(roleId).kind ?? 'chat' : '', here, ...(isLeft(c.who) ? { left: true } : {}), pictures: pics[c.id] ?? 0 };
   });
   const open = await openChat();
   // "Recent chats" in the left panel: projects as one entry each, chats in no project on their own (src/chats.ts).

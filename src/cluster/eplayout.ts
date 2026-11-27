@@ -136,19 +136,44 @@ export function planEp(m: EpModel, host: EpHost, lenders: EpLender[], net: NetFa
   const netMs = pcs.map((_, i) => (i === 0 ? 0 : wire));
 
   // Each way of placing the big tables (one PC each), the experts split for it; the fastest (or the most room) wins.
+  // The work is bounded however many PCs and tables there are: the split is searched for in full once, with no table
+  // anywhere (the most room each PC has); each way then starts from that split, moved only as far as its tables need,
+  // and only the few fastest of those starts are searched further. With 8 PCs and 3 tables, searching all 512 ways
+  // in full held the server for a minute.
   const tables = p.tables;
   let best: { owned: number[]; at: number[]; cost: number } | null = null;
   const ways = tables.length ? Math.pow(pcs.length, Math.min(tables.length, 3)) : 1;
+  // The time of each split tried, kept over every way: the ways mostly meet at the same splits.
+  const times = new Map<string, number>();
+  const cost = (o: number[]) => {
+    const key = o.join(',');
+    let c = times.get(key);
+    if (c === undefined) times.set(key, (c = expectedLayerMs(o, m.used, per, netMs)));
+    return c;
+  };
+  const roomy = pcs.map((_, i) => Math.min(m.experts, Math.floor(room(i, 0) / perExpert)));
+  const base = known && roomy.reduce((a, b) => a + b, 0) >= m.experts ? improveShares(startShares(roomy, m.experts, per), roomy, m.used, per, netMs, times) : null;
+  const tried: { owned: number[]; at: number[]; caps: number[]; cost: number }[] = [];
   for (let w = 0; w < ways; w++) {
     const at = tables.map((_, t) => (t < 3 ? Math.floor(w / Math.pow(pcs.length, t)) % pcs.length : 0));
     const on = pcs.map((_, i) => at.reduce((n, a, t) => n + (a === i ? tables[t].bytes : 0), 0));
     const caps = pcs.map((_, i) => Math.min(m.experts, Math.floor(room(i, on[i]) / perExpert)));
     if (caps.reduce((a, b) => a + b, 0) < m.experts) continue;
-    const owned = startShares(caps, m.experts, known ? per : null);
-    const done = known ? improveShares(owned, caps, m.used, per, netMs) : owned;
-    // Unknown speeds: the way with the most room left over.
-    const cost = known ? expectedLayerMs(done, m.used, per, netMs) : -caps.reduce((a, b) => a + b, 0);
-    if (!best || cost < best.cost - 1e-9) best = { owned: done, at, cost };
+    if (!known) {
+      // Unknown speeds: the way with the most room left over.
+      const c = -caps.reduce((a, b) => a + b, 0);
+      if (!best || c < best.cost - 1e-9) best = { owned: startShares(caps, m.experts, null), at, cost: c };
+      continue;
+    }
+    const owned = base ? fitShares(base, caps, m.experts, per) : startShares(caps, m.experts, per);
+    tried.push({ owned, at, caps, cost: cost(owned) });
+  }
+  // The fastest starts (the first way on a tie, as listed), each searched further; the fastest after that wins.
+  const SEARCHED = 3;
+  for (const t of tried.map((t, n) => ({ t, n })).sort((a, b) => a.t.cost - b.t.cost || a.n - b.n).slice(0, SEARCHED).sort((a, b) => a.n - b.n)) {
+    const done = improveShares(t.t.owned.slice(), t.t.caps, m.used, per, netMs, times);
+    const c = cost(done);
+    if (!best || c < best.cost - 1e-9) best = { owned: done, at: t.t.at, cost: c };
   }
   if (!best) {
     const need = perExpert * m.experts + tables.reduce((n, t) => n + t.bytes, 0);
@@ -211,6 +236,23 @@ function startShares(caps: number[], total: number, per: number[] | null): numbe
       left -= add;
     }
   return owned;
+}
+
+/**
+ * A split moved into smaller caps: each PC keeps what still fits it, and what no longer fits goes to the PCs with room
+ * left, the fastest first (the PC asked first on a tie). Adds up to `total` when the caps do.
+ */
+function fitShares(owned: number[], caps: number[], total: number, per: number[]): number[] {
+  const out = owned.map((n, i) => Math.min(n, caps[i]));
+  let left = total - out.reduce((a, b) => a + b, 0);
+  const order = out.map((_, i) => i).sort((a, b) => per[a] - per[b] || a - b);
+  for (const i of order) {
+    if (left <= 0) break;
+    const add = Math.min(left, caps[i] - out[i]);
+    out[i] += add;
+    left -= add;
+  }
+  return out;
 }
 
 /** ms a word: the card's layers, the processor's layers, every layer's expert part (expected), and the output. */

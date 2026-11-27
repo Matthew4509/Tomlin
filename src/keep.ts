@@ -95,7 +95,8 @@ export interface Source {
 
 const readJson = <T>(file: string): T | null => {
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as T;
+    // A file saved by hand in Notepad or PowerShell can start with a byte-order mark, which JSON.parse refuses: it is skipped.
+    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')) as T;
   } catch {
     return null;
   }
@@ -195,13 +196,16 @@ export const HOSTING = 'bridge/hosting';
 export const BRIDGE_LOGS = 'bridge/logs';
 /** Never in a restore point sent from here (since 2.0.5x): a brought-back one that carries them was made elsewhere. */
 // usb.json holds the Bootable USB admin key, which links to every stick minted with it with no code or PIN.
-const NEVER_SENT = ['share.json', 'app-lock.json', 'usb.json'];
+// agent-secrets.json holds the phone topic and the calendar addresses the agents use (src/agentnotify.ts).
+const NEVER_SENT = ['share.json', 'app-lock.json', 'usb.json', 'agent-secrets.json'];
 /**
  * Left out of a restore point kept on another PC (Back up to a linked PC), with the keys to the linked PCs in
  * settings.json: this PC's sharing code and paired links, its PIN and recovery codes, and the backup claims waiting on
  * it. That PC keeps the chats, never the keys; putting one back keeps this PC's own (carryKept).
  */
 const NOT_ELSEWHERE = [...NEVER_SENT, CODES_FILE, 'claims.json'];
+/** The app lock's PIN and its recovery codes: never put back from a backup, so the lock stays as it is now. */
+const LOCK_FILES = ['app-lock.json', CODES_FILE];
 /** In a restore point kept on another PC: says what was left out, so putting it back keeps this PC's own. */
 export const ELSEWHERE_MARK = 'kept-elsewhere.json';
 const tar = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar');
@@ -279,12 +283,14 @@ export const KEEP_ALWAYS = 2;
  * smaller of BACKUPS_SHARE of the drive (`driveTotal` bytes; null: not known) and BACKUPS_TIMES the newest backup; the
  * oldest go first, and the newest KEEP_ALWAYS always stay. Pure.
  */
-export function keptBySize(backups: Backup[], kept: Set<string>, driveTotal: number | null): Set<string> {
+export function keptBySize(backups: Backup[], kept: Set<string>, driveTotal: number | null, now = new Date()): Set<string> {
   const newest = [...backups].filter(b => kept.has(b.name)).sort((a, b) => b.name.localeCompare(a.name));
   if (!newest.length) return new Set();
   // The newest backup this PC made (its name starts with its date): a small zip of another name (put there by hand, or
-  // brought back from a linked PC) sorts first by name, and 5 times its size once let every backup but one go.
-  const made = newest.find(b => STAMPED.test(b.name)) ?? newest[0];
+  // brought back from a linked PC) sorts first by name, and 5 times its size once let every backup but one go. One
+  // dated after today (made while the clock ran fast) is not the newest: a small one let every real backup but one go.
+  const soon = now.getTime() + 86_400_000;
+  const made = newest.find(b => STAMPED.test(b.name) && madeAt(b).getTime() <= soon) ?? newest.find(b => STAMPED.test(b.name)) ?? newest[0];
   // A tenth more than 5 times the newest: zips of much the same data differ a little in size, and 5 of them still fit.
   const cap = Math.min(driveTotal && driveTotal > 0 ? driveTotal * BACKUPS_SHARE : Infinity, made.bytes * BACKUPS_TIMES * 1.1);
   const out = new Set<string>();
@@ -682,6 +688,9 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
     await rm(join(fresh, ELSEWHERE_MARK), { force: true });
   }
   await rm(join(fresh, LINKS_NOTE), { force: true });
+  // The app lock is this PC's as it is now, from any backup: an old PIN never comes back in place of the one set since,
+  // and a recovery code spent since never works again. The swap carries this PC's own lock files over (carryKept).
+  for (const f of LOCK_FILES) await rm(join(fresh, f), { force: true });
   // The data as it is now is kept first; without that copy nothing is replaced.
   let kept: string;
   try {
@@ -692,10 +701,16 @@ export async function restore(home: Home, name: string, appVersion: string): Pro
   }
   await swapData(home, fresh);
   const v = readVersion(home);
-  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no web search key, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network).' : ''}`;
+  const note = `Restored the backup "${name.replace(/\.zip$/, '')}". The data as it was just before is kept as the backup "${kept.replace(/\.zip$/, '')}".${elsewhere ? ' It was a restore point kept on another PC, so it held no keys to your linked PCs, no web search key, no sharing code and no PIN: this PC\'s own stayed as they were. A linked PC this PC holds no key for any more needs linking again (Network).' : ''} The app lock (PIN and recovery codes) stayed as it is now.`;
   await saveNote(home, { data: v?.data ?? DATA_VERSION, app: appVersion, note });
   return note;
 }
+
+/**
+ * An empty home beside older copies with data: 'ask' asks whether to import, 'never' does not look (a test copy, or a
+ * second copy with a home of its own: TOMLIN_HOME or TOMLIN_DATA set; an import there would move the main copy's models).
+ */
+export type Bring = 'ask' | 'never';
 
 export type Ready =
   | { state: 'ready'; note?: string; noteTitle?: string }
@@ -707,7 +722,8 @@ export type Ready =
 /**
  * Runs before anything reads the data: a planned import or restore, then the version check and the update backup.
  */
-export async function prepare(home: Home, root: string, appVersion: string, startup?: { repoint: (fromRoot: string) => Promise<boolean> }): Promise<Ready> {
+export async function prepare(home: Home, root: string, appVersion: string, startup?: { repoint: (fromRoot: string) => Promise<boolean> }, o: { bring?: Bring } = {}): Promise<Ready> {
+  const bring = o.bring ?? 'ask';
   await mkdir(home.home, { recursive: true });
   await mkdir(home.models, { recursive: true });
   await settleSwap(home);
@@ -732,7 +748,7 @@ export async function prepare(home: Home, root: string, appVersion: string, star
   const v = readVersion(home);
   if (!v) {
     const hasData = existsSync(join(home.data, 'settings.json'));
-    const sources = hasData ? [] : findSources(root, home);
+    const sources = hasData || bring === 'never' ? [] : findSources(root, home);
     // Data already here with no version file (a test copy, a home made by hand, or the file lost) is adopted, after a
     // backup of it; an empty home with an older copy beside it asks once.
     if (hasData) await backup(home, `before ${appVersion}`).catch(e => console.error(`A backup before using this data could not be made: ${(e as Error).message}`));
@@ -743,7 +759,7 @@ export async function prepare(home: Home, root: string, appVersion: string, star
   if (v.offer) {
     // "Later" was pressed and this home has since got chats or staff of its own: an import would replace them, so the
     // question is not asked again (an import is still there under Settings, Your data, from a backup).
-    const sources = hasOwnData(home) ? [] : findSources(root, home);
+    const sources = hasOwnData(home) || bring === 'never' ? [] : findSources(root, home);
     if (sources.length) return { state: 'offer', sources };
     await writeVersion(home, { ...v, offer: undefined });
   }

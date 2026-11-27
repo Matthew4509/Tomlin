@@ -1,0 +1,71 @@
+{
+  "id": "qwen-image-edit-2511",
+  "kind": "image",
+  "name": "Qwen-Image-Edit 2511 (20B, Q4, takes reference pictures, test)",
+  "about": "Qwen's picture editor, 20B: draws with up to 3 reference pictures, so a character or a location from a Character set (@Name) keeps its face, markings and look. On a 12 GB card most of it waits in RAM, so a picture takes minutes. Text encoder: Qwen2.5-VL 7B with its vision part, which reads the references. Picture test entry (26 Nov 2026), not yet judged for the model list.",
+  "family": "qwen-image",
+  "licence": "Apache-2.0 (model, text encoder and VAE; commercial use allowed).",
+  "quant": "Q4_K_M (image) + Q8_0 (text encoder)",
+  "minRamGB": 32,
+  "minVramGB": 8,
+  "refs": 3,
+  "recommendedModes": [
+    "blog",
+    "custom"
+  ],
+  "native": 1024,
+  "quality": {
+    "draft": 768,
+    "mid": 1024,
+    "high": 1328
+  },
+  "files": [
+    {
+      "role": "diffusion",
+      "repo": "unsloth/Qwen-Image-Edit-2511-GGUF",
+      "rev": "52838251db242ddd8e8d0118de36c71006d7c397",
+      "path": "qwen-image-edit-2511-Q4_K_M.gguf",
+      "bytes": 12842830432,
+      "sha256": "07951f61941a81e236cbd4a9b6f250d49626b3ba518f260135bf2e01a87cf1c8"
+    },
+    {
+      "role": "llm",
+      "repo": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+      "rev": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+      "path": "Qwen2.5-VL-7B-Instruct.Q8_0.gguf",
+      "bytes": 8098524160,
+      "sha256": "577bfb3e41f93f00414e594c56a38bbe91207b3b636ab7faf343e34a20aa73ca"
+    },
+    {
+      "role": "llm_vision",
+      "repo": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+      "rev": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+      "path": "Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf",
+      "bytes": 853119712,
+      "sha256": "2185ca0adf339f96845318c7b666f5d242f86bbace5657a89cb834785d0cea57"
+    },
+    {
+      "role": "vae",
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "rev": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "path": "split_files/vae/qwen_image_vae.safetensors",
+      "bytes": 253806246,
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+    }
+  ],
+  "args": [
+    "--offload-to-cpu",
+    "--fa",
+    "--flow-shift",
+    "3",
+    "--model-args",
+    "qwen_image_zero_cond_t=true"
+  ],
+  "defaults": {
+    "steps": 28,
+    "cfg": 2.5,
+    "sampler": "euler",
+    "scheduler": "",
+    "negative": ""
+  }
+}

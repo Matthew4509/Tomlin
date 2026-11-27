@@ -50,8 +50,8 @@ test('two PCs: Download to a linked PC runs on that PC (no push tick needed) and
     }
     const unknown = await host.post('/api/network/runner', { pc, id: 'llama-nothing' });
     assert.equal(unknown.status, 400, JSON.stringify(unknown.body));
-    // The picture runner is not sent between PCs (a node says how its chat runner is, not its picture one).
-    assert.equal((await host.post('/api/network/runner', { pc, id: 'sd-cuda' })).status, 400);
+    // The CUDA picture and video runner can be sent too (src/runnerpush.ts): not refused as an unknown or unsendable one.
+    assert.notEqual((await host.post('/api/network/runner', { pc, id: 'sd-cuda' })).status, 400);
     // This PC's own runner rows: the CUDA one says why it cannot help here (no NVIDIA card), and is not downloaded.
     const here = (await host.get('/api/runtimes')).body as { nvidia: boolean; runtimes: { id: string; device: string; installed: boolean; why: string; zips: boolean }[] };
     const cuda = here.runtimes.find(r => r.id === 'llama-cuda')!;

@@ -6,11 +6,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scryptSync } from 'node:crypto';
 import { freePort, link, NODE_PIN, nodeHome, startPc, unlock, until, type Pc } from './pcs.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ONE = 'Qwen3.5-35B-A3B-Q4_K_M.gguf';
 const TWO = 'Qwen3.5-0.8B-Q4_K_M.gguf';
+const HOST_LOCK = '1357';
 
 test('two PCs: the host key goes to a node with its own PIN once, then deletes need no PIN; turning it off takes it away', { timeout: 300_000 }, async () => {
   const top = mkdtempSync(join(tmpdir(), 'tomlin-hostkey-'));
@@ -26,9 +28,13 @@ test('two PCs: the host key goes to a node with its own PIN once, then deletes n
     mkdirSync(noOllama);
     const node = await startPc({ root: ROOT, home: nodeDir, env: { OLLAMA: noOllama } });
     pcs.push(node);
+    // The host has an app lock of its own (admin access is off without one: anyone at that PC could use it), opened.
     const hostDir = join(top, 'host');
+    mkdirSync(join(hostDir, 'data'), { recursive: true });
+    writeFileSync(join(hostDir, 'data', 'app-lock.json'), JSON.stringify({ salt: 'beef', hash: scryptSync(HOST_LOCK, 'beef', 32).toString('hex'), idleMinutes: 0 }));
     const host = await startPc({ root: ROOT, home: hostDir, env: { OLLAMA: noOllama } });
     pcs.push(host);
+    assert.equal((await host.post('/api/applock', { action: 'unlock', pin: HOST_LOCK })).status, 200, 'the host opens');
     const pc = await link(host, workerPort);
     await unlock(node);
     const seen = async () => ((await host.get('/api/nodes/others')).body.pcs as any[]).find(x => x.id === pc);
@@ -51,9 +57,7 @@ test('two PCs: the host key goes to a node with its own PIN once, then deletes n
       const x = await view();
       return x.pcs.some((p: any) => p.id === pc && p.keyHeld) ? x : null;
     }, 30_000);
-    assert.equal(v.key.on, true);
     assert.match(v.key.id, /^[0-9a-f]{12}$/);
-    assert.equal(v.on, false, 'no typed host PIN was ever set');
     const keyFile = readFileSync(join(hostDir, 'data', 'host-key.json'), 'utf8');
     const secret = JSON.parse(keyFile).key as string;
     // The node keeps only a hash of it, and shows it as a key.
@@ -61,19 +65,15 @@ test('two PCs: the host key goes to a node with its own PIN once, then deletes n
     assert.doesNotMatch(heldFile, new RegExp(secret));
     assert.match(heldFile, /"keyId"/);
 
-    // The next delete needs no PIN.
+    // 2.1.31: there is no switch to turn it off and no typed host PIN to set: those are refused, and the key stays.
+    for (const action of ['key-off', 'key-on', 'set', 'give', 'off', 'check']) assert.equal((await host.post('/api/network/host-pin', { action })).status, 400, action);
+    assert.equal((await view()).key.made, true);
+
+    // The next delete still needs no PIN.
     const second = await remove(TWO);
     assert.equal(second.status, 200, JSON.stringify(second.body));
     assert.ok(!existsSync(join(chat, TWO)));
 
-    // Turned off: the node forgets the key, and the node's own PIN is asked again.
-    const off = await host.post('/api/network/host-pin', { action: 'key-off' });
-    assert.equal(off.status, 200, JSON.stringify(off.body));
-    const held = () => Object.keys(JSON.parse(readFileSync(join(nodeDir, 'data', 'host-pins.json'), 'utf8') || '{}')).length;
-    await until('the node to drop the key', async () => held() === 0, 30_000);
-    const again = await remove(ONE);
-    assert.equal(again.status, 403, JSON.stringify(again.body));
-    assert.equal((await view()).key.on, false);
   } finally {
     for (const p of pcs) await p.stop();
     rmSync(top, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });

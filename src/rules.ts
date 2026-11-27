@@ -63,6 +63,8 @@ export async function loadRules(dir: string): Promise<Rules> {
 }
 
 export async function saveRules(dir: string, next: { on?: unknown; text?: unknown }): Promise<Rules> {
+  // Text that is not words (null, a list, a number) is refused: read as '' it wiped the standing rules.
+  if ('text' in next && typeof next.text !== 'string') throw new Error('The standing rules were not saved: they must be text. Reload the page, then try again.');
   const text = 'text' in next ? cleanRules(next.text) : current.text;
   current = { on: 'on' in next ? next.on !== false : current.on, text };
   await writeAtomic(join(dir, RULES_FILE), serialize(current));

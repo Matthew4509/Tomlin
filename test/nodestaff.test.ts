@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RETIRED_NODE_HIRE, afterRun, cleanShared, cleanStats, keepAll, keepChat, modelRefusal, parseNodeWho, sharedList, statsModel, type LoadedFor } from '../src/nodestaff.ts';
+import { LOADED_HELLO_MS, RETIRED_NODE_HIRE, afterRun, cleanLoaded, cleanShared, cleanStats, keepAll, keepChat, loadedOf, loadedThere, modelRefusal, parseNodeWho, sharedList, statsModel, type LoadedFor } from '../src/nodestaff.ts';
 import { modelsOf, nowModel } from '../src/staff.ts';
 
 test('an old chat with a hire who lived on a linked PC is still recognised, and the retirement says the way on', () => {
@@ -136,4 +136,44 @@ test('the node keeps models through these rules only: the meters name the chat\'
   assert.match(thispc, /nodestaff\.statsModel\(/);
   const chats = readFileSync(new URL('../public/chats.js', import.meta.url), 'utf8');
   assert.match(chats, /\/api\/node\/stats\?pc=\$\{encodeURIComponent\(pc\)\}&who=\$\{encodeURIComponent\(meters\.who\)\}/);
+});
+
+test('what is loaded on a linked PC comes from that PC: its meters first, a fresh hello next, else not known', () => {
+  const shared = cleanShared([
+    { id: 'a.gguf', name: 'GLM-4.7-Flash-UD', kind: 'chat', loaded: false },
+    { id: 'b.gguf', name: 'Qwen3.5-35B', kind: 'chat', loaded: true },
+    { id: 'p', name: 'Flux small', kind: 'image', loaded: true },
+  ]);
+  assert.deepEqual(loadedOf(shared), { chat: ['Qwen3.5-35B'], image: 'Flux small' });
+  assert.deepEqual(loadedOf([]), { chat: [], image: null });
+  assert.deepEqual(cleanLoaded({ chat: ['A<b>', 'A<b>', '', 7], image: '' }), { chat: ['Ab', '7'], image: null });
+  assert.equal(cleanLoaded({ image: 'x' }), null);
+  assert.equal(cleanLoaded(null), null);
+  const now = 1_000_000;
+  // Asleep: the meters say nothing is loaded, whatever the hire chose.
+  assert.deepEqual(loadedThere({ cpu: 3, loaded: { chat: [], image: null } }, { at: now, model: 'Old', models: shared }, now), { chat: [], image: null });
+  // An older PC's meters say nothing of it: its hello under 90 s old does.
+  assert.deepEqual(loadedThere({ cpu: 3 }, { at: now - 1000, model: 'Qwen3.5-35B', image: { name: null }, models: shared }, now), { chat: ['Qwen3.5-35B'], image: 'Flux small' });
+  assert.deepEqual(loadedThere({ cpu: 3 }, { at: now, model: null, image: null, models: [] }, now), { chat: [], image: null });
+  // No hello, or one too old: not known (null), never a guess.
+  assert.equal(loadedThere({ cpu: 3 }, null, now), null);
+  assert.equal(loadedThere({ cpu: 3 }, { at: now - LOADED_HELLO_MS, model: 'Qwen3.5-35B', models: shared }, now), null);
+});
+
+test('the bar route: /api/node/stats answers loaded, chosen and the hire, the node sends what is loaded, the bar shows loaded only', async () => {
+  const { readFileSync } = await import('node:fs');
+  const links = readFileSync(new URL('../src/jobrun/links.ts', import.meta.url), 'utf8');
+  const fn = links.slice(links.indexOf('export async function nodeStats('), links.indexOf('export async function nodeLog('));
+  for (const state of ['gone', 'old', 'on', 'off']) assert.match(fn, new RegExp(`state: '${state}'[^}]*loaded[^}]*chosen`));
+  assert.doesNotMatch(fn, /model: null|, model \}/);
+  const thispc = readFileSync(new URL('../src/server/thispc.ts', import.meta.url), 'utf8');
+  assert.match(thispc, /'\/api\/node\/stats'[\s\S]{0,700}hire: m\?\.name \?\? null/);
+  const node = readFileSync(new URL('../src/jobrun/node.ts', import.meta.url), 'utf8');
+  const door = node.slice(node.indexOf("if (p === '/worker/stats')"), node.indexOf("if (p === '/worker/ask-answer')"));
+  assert.match(door, /loaded: nodestaff\.loadedOf\(\(await sharedNow\(\)\)\.filter\(m => may\(m\.id\)\)\)/);
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const bar = app.slice(app.indexOf('function drawPcBar('), app.indexOf('function drawBar('));
+  assert.doesNotMatch(bar, /r\.model\b/);
+  assert.match(bar, /'No model loaded'/);
+  assert.match(bar, /uses \$\{r\.chosen\}: it loads when you send\./);
 });

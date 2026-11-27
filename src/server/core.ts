@@ -8,9 +8,10 @@ import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hardwareChanges, readHardware, Sampler } from '../hardware.ts';
-import { logConsole, openLog } from '../log.ts';
+import { log, logConsole, openLog } from '../log.ts';
 import { endBecause, startLastWords } from '../lastwords.ts';
-import { overlaps, systemFolderWhy } from '../workspace.ts';
+import { overlaps, setOnSaved, systemFolderWhy } from '../workspace.ts';
+import { ModelSaved } from '../modelsaved.ts';
 import { crashedHere, cudaOrder, Runtimes } from '../runtimes.ts';
 import { hardwareKey, RunnerChecks } from '../runnercheck.ts';
 import { Models } from '../models.ts';
@@ -40,6 +41,29 @@ import { HfList } from '../hflist.ts';
 import { onExit } from '../exithook.ts';
 import { buildId, NEXT_COPY_FILE, RESTART_INTO } from '../update.ts';
 import { openWaitDoor } from '../waitdoor.ts';
+
+/** True until the server answers (src/server.ts sets it false): a fault until then is a start that cannot finish. */
+export const starting = { on: true };
+
+/** A start fault in words: a file held by another program, or not allowed, named as such; anything else as it said. */
+export function startFault(e: unknown): string {
+  const x = e as NodeJS.ErrnoException;
+  const file = typeof x?.path === 'string' ? x.path : '';
+  if (x?.code === 'EBUSY' || x?.code === 'EPERM' || x?.code === 'EACCES') return `${file || 'one of its data files'} is held by another program (a backup, sync or virus-scan program) or may not be opened. Wait a minute or close that program, then start TOMLIN again. Nothing was changed.`;
+  if (x?.code === 'ENOSPC') return 'the disk is full. Free some space on it, then start TOMLIN again. Nothing was changed.';
+  return `${x?.message ?? String(e)}. The details are in the log (the logs folder in TOMLIN's data folder).`;
+}
+
+// A step of the start itself that failed (a data file another program held past the wait) reaches Node as a rejected
+// module: the start could never finish, and the page said "getting ready" for ever. Until the server answers, such a
+// fault (and any fault before the handler further down is in place) ends the start with the reason in words, the
+// detail in the log. A fault in the background after that is handled further down, as before.
+process.on('uncaughtException', (e, origin) => {
+  if (!starting.on || (origin !== 'unhandledRejection' && process.listenerCount('uncaughtException') > 1)) return;
+  log.error('start', e);
+  console.error(`TOMLIN could not start: ${startFault(e)}`);
+  process.exit(1);
+});
 
 export const staffId = (v: unknown) => (typeof v === 'string' && v.startsWith('staff:') && staff.get(v.slice(6)) ? v : null);
 /** What the chat with this PC's own assistant is called until it is given a name: the host (it is not one of the staff). */
@@ -90,8 +114,8 @@ export const startupOf = autostart(ROOT);
  * reaches whoever asked first.
  */
 export async function restartInto(dir: string): Promise<void> {
-  // "Start TOMLIN when this PC starts" meant the app, not the folder: it now starts the new copy.
-  if (await startupOf.on().catch(() => false)) await autostart(dir).set(true).catch(() => undefined);
+  // "Start TOMLIN when this PC starts" stays on this copy until the new one has answered (src/server.ts moves it then):
+  // a new copy that never starts is never the one Windows starts.
   await writeFile(join(ROOT, NEXT_COPY_FILE), dir);
   setTimeout(() => process.exit(RESTART_INTO), 1500).unref();
 }
@@ -101,7 +125,7 @@ await openWaitDoor(PORT);
 export const ready = await keep.prepare(HOME, ROOT, VERSION, {
   // "Start TOMLIN when this PC starts" pointed at the copy imported from: it now starts this one (the tick meant the app, not the folder).
   repoint: async from => (await autostart(from).on()) && (await startupOf.set(true), true),
-});
+}, { bring: process.env.TOMLIN_HOME || process.env.TOMLIN_DATA ? 'never' : 'ask' });
 if (ready.state === 'too-new') {
   console.error(`Your data in ${HOME.data} was last used by TOMLIN ${ready.app}, which changed how it is kept. This copy (${VERSION}) is older and cannot read it safely. Start ${ready.app} or newer, or put a backup back from ${HOME.backups} with that version.`);
   process.exit(1);
@@ -126,7 +150,11 @@ store.onChatSaved = async (file, lines) => {
   await hooks.chatSaved(file, lines);
 };
 // The team notebook and one per hire (src/memory.ts).
-export const notebooks = new memory.Notebooks(store);
+// The file starts with a name for people: "# Memory: Fern (artist)".
+export const notebooks = new memory.Notebooks(store, scope => {
+  const m = scope === 'team' ? null : staff.get(scope.slice(6));
+  return scope === 'team' ? 'Memory: the team' : m ? `Memory: ${m.name} (${m.role})` : `Memory: ${scope.slice(6)}`;
+});
 // Each layered chat's log and what its last fold sent (src/layers.ts).
 export const chatLogs = new ChatLogs(store);
 await chats.moveOld(await readdir(store.dir).catch(() => [] as string[]));
@@ -205,9 +233,18 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.
 // A background save or job that fails is written to this window; it never stops the server (and the models it runs).
 // The log file (PLAN F10 G8): data/logs, a week kept; console.error and console.warn land there too.
 openLog(join(HOME.data, 'logs'));
+// Every file TOMLIN writes in the workspace for a model (not the person's typing in Files) is remembered until the person
+// next allows a command in that folder (src/modelsaved.ts): a model cannot save a script one answer and run it the next.
+export const modelSaved = ModelSaved.load(join(HOME.data, 'model-saved.json'));
+setOnSaved(full => modelSaved.mark(full));
 logConsole();
 // Every end of this run leaves a line saying why; a run before this one that ended without one is placed now.
 startLastWords(join(HOME.data, 'logs'), VERSION);
+// A fatal error (Node out of memory) ends the process before any handler runs: Node writes its own report into the logs
+// folder instead (without the environment, which can hold keys), and the next start names it (src/lastwords.ts).
+process.report.reportOnFatalError = true;
+process.report.directory = join(HOME.data, 'logs');
+if ('excludeEnv' in process.report) (process.report as { excludeEnv: boolean }).excludeEnv = true;
 process.on('unhandledRejection', e => console.error('Something failed in the background:', e));
 // The same for a fault outside any request (an 'error' nobody listened for): logged, and the models keep running.
 process.on('uncaughtException', e => console.error('Something failed and was caught at the last moment:', e));

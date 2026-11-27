@@ -167,6 +167,9 @@ export function planExperts(m: ModelBytes, listed: Listed[], lenders: Lender[], 
   const hostCard = cards.find(x => host.cards?.includes(x.name)) ?? (host.cards?.length ? undefined : cards[0]);
   if (!hostCard) return { why: 'this PC has no graphics card for the attention' };
   const other = (m.rest + m.kv) / m.layers;
+  // Layers whose attention and cache fit `room` on a card: any number when a layer has nothing outside its experts
+  // (0 / 0 would give NaN and every count after it).
+  const byRoom = (room: number) => (other > 0 ? Math.floor(room / other) : Infinity);
   const e = m.expertLayer;
   const rpcDevs = listed.filter(x => /^RPC\d+$/.test(x.name));
   const skipped: string[] = [];
@@ -177,7 +180,7 @@ export function planExperts(m: ModelBytes, listed: Listed[], lenders: Lender[], 
     if (devs.length >= 2) {
       const card = devs[0];
       const ram = devs[devs.length - 1];
-      const byCard = Math.floor(Math.max(0, card.free - 1.5 * GB) / other);
+      const byCard = byRoom(Math.max(0, card.free - 1.5 * GB));
       pool.push(holder(l.name, ram.free, keep => Math.floor(lendRamCap(ram.free, keep) / e), byCard, { endpoint: l.endpoint }));
     } else if (devs.length === 1 && l.hasCard === false) {
       // A PC with no card lends its processor and RAM only: the whole layer, experts and attention, stays there.
@@ -185,7 +188,7 @@ export function planExperts(m: ModelBytes, listed: Listed[], lenders: Lender[], 
       pool.push(holder(l.name, ram.free, keep => Math.floor(lendRamCap(ram.free, keep) / (e + other)), Infinity, { endpoint: l.endpoint }));
     } else skipped.push(l.name);
   }
-  const byHostCard = Math.floor(Math.max(0, hostCard.free - 1.5 * GB) / other);
+  const byHostCard = byRoom(Math.max(0, hostCard.free - 1.5 * GB));
   const here = holder('this PC', host.free, keep => Math.floor(lendRamCap(host.free, keep) / e), byHostCard, { layerDev: hostCard.name, experts: 'CPU', host: true });
   // The aim first: every PC in use keeps 4 GB free. Short of that, the floor: none left under 2 GB.
   let keep = LEND_AIM_KEEP;

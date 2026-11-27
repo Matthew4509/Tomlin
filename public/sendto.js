@@ -183,7 +183,7 @@ $('#send-to-go').addEventListener('click', async () => {
     await showOpened(r);
     // The answer it came from says where it went (not when it was sent into the same chat).
     if (from?.chat && from.chat !== r.chat.id) {
-      const to = `${p.who === 'manager' ? 'the host' : p.name}${r.chat.title && r.chat.title !== 'New chat' ? ` · ${r.chat.title}` : ''}`;
+      const to = `${p.who === 'manager' ? 'the host' : p.name}${r.chat.title && !['Untitled chat', 'New chat'].includes(r.chat.title) ? ` · ${r.chat.title}` : ''}`;
       api('/api/chats/sent', { chat: from.chat, text: from.text, to }).catch(() => undefined);
     }
     if (p.kind === 'image') await drawSent(who, p, text, r);
@@ -215,7 +215,7 @@ app.sendButton = (text, who) => {
     b.dataset.picked = '';
     const p = sendPerson(who);
     const title = chatUi.open?.title;
-    const label = `${p ? `${app.inSentence(p.name)}'s chat` : 'a chat'}${title && title !== 'New chat' ? ` "${title}"` : ''}`;
+    const label = `${p ? `${app.inSentence(p.name)}'s chat` : 'a chat'}${title && !['Untitled chat', 'New chat'].includes(title) ? ` "${title}"` : ''}`;
     app.openSend({ text: part || text, from: { chat: app.chatId ?? '', label, text: part || text } });
   });
   return b;

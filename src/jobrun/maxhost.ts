@@ -185,8 +185,28 @@ export function keepWireAlive(socket: { setKeepAlive?: (on: boolean, ms: number)
   socket.setKeepAlive?.(true, WIRE_KEEPALIVE_MS);
 }
 
+/** The unencrypted streams open now to each lending PC, by link id: plainNow lists a PC while its count is above 0. */
+const plainOpen = new Map<string, number>();
+/** Counts one unencrypted stream to `id` as open; the function returned counts it closed (once, however often it is called). */
+function plainOpened(id: string): () => void {
+  plainOpen.set(id, (plainOpen.get(id) ?? 0) + 1);
+  plainNow.add(id);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const n = (plainOpen.get(id) ?? 1) - 1;
+    if (n > 0) return void plainOpen.set(id, n);
+    plainOpen.delete(id);
+    plainNow.delete(id);
+  };
+}
+
+/** One opened stream: its socket, its keys, any bytes read past the answer, whether it is unencrypted, and `ended` to call once it is closed (closing the socket calls it too). */
+export type Wire = { socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer; plain: boolean; ended: () => void };
+
 /** Opens one sealed stream to `r`: its socket, this stream's keys, and any bytes read past the answer. Throws in plain words. */
-export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()?.build ?? ''): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer; plain: boolean }> {
+export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()?.build ?? ''): Promise<Wire> {
   // A PC whose clock is wrong refuses the first try; its answer taught this PC its clock, so once more in its time.
   return openWireOnce(r, ms, build).catch(async e => {
     if (!link.clockRefused((e as Error).message)) throw e;
@@ -195,7 +215,7 @@ export async function openWire(r: Remote, ms = OPEN_MS, build = d.rpcProgram?.()
   });
 }
 
-async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ socket: Socket; keys: { send: Buffer; read: Buffer }; head: Buffer; plain: boolean }> {
+async function openWireOnce(r: Remote, ms: number, build: string): Promise<Wire> {
   if (backupsOnly(r.id)) throw new Error(backupsOnlyWhy(labelOf(r)));
   const linkKeys = link.keysOf(r.key);
   if (!linkKeys) throw new Error(`"${labelOf(r)}" was linked before links were encrypted. Link it again.`);
@@ -228,10 +248,11 @@ async function openWireOnce(r: Remote, ms: number, build: string): Promise<{ soc
         const nodeNonce = Buffer.from(String(said.nonce ?? ''), 'base64url');
         // Unsealed only when this PC asked AND that PC agreed in its sealed answer; anything else stays sealed.
         const plain = r.plainLink === true && said.plain === true;
-        if (plain) plainNow.add(r.id);
-        else plainNow.delete(r.id);
+        // The PC list says "unencrypted" only while an unencrypted stream to that PC is open.
+        const ended = plain ? plainOpened(r.id) : () => undefined;
+        socket.once('close', ended);
         keepWireAlive(socket);
-        resolve({ socket, keys: streamKeys(linkKeys, hostNonce, nodeNonce, 'host'), head, plain });
+        resolve({ socket, keys: streamKeys(linkKeys, hostNonce, nodeNonce, 'host'), head, plain, ended });
       } catch (e) {
         socket.destroy();
         reject(e);
@@ -272,11 +293,46 @@ export const matchView = () => lastMatch;
 /** One port here for each lending PC; llama-server may open several connections to it. */
 const ports = new Map<string, { server: Server; port: number; last: string }>();
 
+/**
+ * Whether linked PC `id` may still be borrowed from, as saved here now: still linked, and named in TOMLIN_MAX or one of
+ * the PCs maxCandidates gives (the switched-on cluster's members, or with none saved those not set to "Don't borrow
+ * from it"). Its owner's tick is not read here: that is asked when a load starts.
+ */
+function mayBorrow(id: string): boolean {
+  const saved = d?.store?.peek();
+  const remotes = saved?.remotes ?? [];
+  if (!remotes.some(x => x.id === id)) return false;
+  const said = process.env.TOMLIN_MAX ?? '';
+  return (namesNone(said) ? maxCandidates(remotes, saved?.cluster) : maxPcs(said, remotes)).some(x => x.id === id);
+}
+
+/** Closes the port here for linked PC `id` (streams already open through it run on until they end). */
+function closePort(id: string): void {
+  const had = ports.get(id);
+  if (!had) return;
+  ports.delete(id);
+  had.server.close();
+}
+
+/** Closes the ports of PCs that may no longer be borrowed from (unlinked, out of the cluster, or the cluster off). */
+export function closeStalePorts(): void {
+  for (const id of [...ports.keys()]) if (!mayBorrow(id)) closePort(id);
+}
+
 async function portFor(r: Remote): Promise<number> {
   const had = ports.get(r.id);
   if (had) return had.port;
   const entry = { server: createServer(), port: 0, last: '' };
   entry.server.on('connection', (local: Socket) => {
+    // A PC unlinked, left out of the cluster, or with the cluster switched off since the port was opened lends no more:
+    // the connection is refused before anything reaches it, and the port is closed.
+    if (!mayBorrow(r.id)) {
+      local.destroy();
+      if (ports.get(r.id) === entry) closePort(r.id);
+      else entry.server.close();
+      log.info('max', `A connection for "${labelOf(r)}" was refused: it is no longer a PC to borrow from here.`);
+      return;
+    }
     const now = (d.store.peek()?.remotes ?? []).find(x => x.id === r.id) ?? r;
     const who = labelOf(now);
     streamOpened(who);
@@ -353,6 +409,7 @@ export interface MaxLoad {
 }
 
 export async function rpcFor(pcs = maxPcs(), host: Option[] = d.runner?.options?.() ?? []): Promise<MaxLoad> {
+  closeStalePorts();
   const endpoints: string[] = [];
   const lent: string[] = [];
   const ids: string[] = [];
@@ -372,8 +429,9 @@ export async function rpcFor(pcs = maxPcs(), host: Option[] = d.runner?.options?
       continue;
     }
     try {
-      const { socket, plain } = await openWire(r, OPEN_MS, mine);
+      const { socket, plain, ended } = await openWire(r, OPEN_MS, mine);
       socket.destroy();
+      ended();
       // Said with the load, so a speed read from it is never taken for a sealed one.
       if (plain) notes.push(`Max mode: the link to "${labelOf(r)}" is NOT encrypted (both PCs chose an unencrypted cluster link): faster on the network, readable on the home network.`);
       else if (r.plainLink === true) notes.push(`Max mode: "${labelOf(r)}" did not allow an unencrypted cluster link, so its link is sealed as usual.`);

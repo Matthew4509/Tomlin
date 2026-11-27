@@ -33,7 +33,7 @@
 <h2>The four steps</h2>
 <ol>
 <li><b>Download Rufus</b> (it's free) from rufus.ie. Rufus is needed to image the usb drive.</li>
-<li><b>Download the Linux ISO</b>: the page downloads Debian 13's live image with no desktop into your Downloads folder, and checks it against its SHA-256. <b>Get the parts</b> downloads what Mint adds: Node.js and llama.cpp for Linux (the same build as this PC's runners, so a cluster's parts match) and the picture tools' Linux part. Tick the CUDA build only for NVIDIA RTX 20 series cards and newer.</li>
+<li><b>Download the Linux ISO and the extra parts</b>: two downloads, each with its own button and bar (its speed and the time left), and both can run at once. The ISO is Debian 13's live image with no desktop: it goes into your Downloads folder, is checked against its SHA-256, and is what Rufus writes in step 3. <b>Download the extra parts</b> downloadswhat Mint adds: Node.js and llama.cpp for Linux (the same build as this PC's runners, so a cluster's parts match) and the picture tools' Linux part. Tick the CUDA build only for NVIDIA RTX 20 series cards and newer.</li>
 <li><b>Use Rufus to image the USB drive</b>: the stick, the ISO, a persistent partition of about a third of the stick, then START and "Write in ISO Image mode".</li>
 <li><b>Select the stick and Mint</b>: pick the stick on the page, name it, and press <b>Mint</b>.</li>
 </ol>
@@ -43,7 +43,7 @@
 <h2>Adding it</h2>
 <p>On this PC: Network, <b>Add another PC</b>, <b>Find PCs on my network</b>. A PC started from a stick minted here says "Made with your admin key": press <b>Add</b>, or <b>Add all</b> for several. It then shows under Linked PCs like any other.</p>
 <h2>What it allows at first</h2>
-<p>A stick PC starts with node mode on and these ticks: take models sent to it, be tested and have its run settings changed, be part of a cluster, and be turned off from here. <b>Allow unencrypted cluster links</b> is off unless ticked at Mint. Change them later under Network, the PC, Sharing permissions: a stick PC has no app lock, so its admin's link stands for its PIN.</p>
+<p>A stick PC starts with node mode on and these ticks: take models sent to it, be tested and have its run settings changed, be part of a cluster, be turned off from here, and let the other PCs linked to its admin connect to it directly (<b>Let PCs my host introduces connect to this PC directly</b>), so stick nodes copy models straight to each other. <b>Allow unencrypted cluster links</b> is off unless ticked at Mint. Change them later on that PC's This PC page, Sharing and cluster permissions: a stick PC has no app lock, so its admin's link stands for its PIN.</p>
 <h2>Best settings per kind of hardware</h2>
 <p>At the foot of the page, <b>Read</b> lists every linked PC by its kind: the same processor, memory and cards. For each model, the fastest speed found on that kind is kept with its run settings, and each PC's own speed is shown beside it. A twin under 85% of the best is marked: it usually has bad RAM, a hot card or the wrong driver. <b>Use on its twins</b> puts those settings on every other PC of the kind.</p>
 <h2>Ports and the firewall</h2>

@@ -4,8 +4,12 @@
 // work comes back. The server (src/server/queue.ts) runs the items and keeps the list in data/queue.json.
 
 import { MESSAGE_MAX } from './memory.ts';
+// A picture's whole prompt with its cards' words, and the seeds the Images window takes: the same limits here.
+import { CARD_KINDS, type CardKind, PROMPT_MOST, cleanName } from './cards.ts';
+import { isSeed } from './drawrefs.ts';
+import { pickedStyle } from './styles.ts';
 
-export type QKind = 'picture' | 'project' | 'chat';
+export type QKind = 'picture' | 'project' | 'chat' | 'agent';
 /** waiting: in line; running; done; needs: a project stopped at a step that needs him; failed; cancelled. */
 export type QState = 'waiting' | 'running' | 'done' | 'needs' | 'failed' | 'cancelled';
 
@@ -30,10 +34,21 @@ export interface QItem {
   /** The artist (a hire's id) who draws it; none: the first artist on the team. */
   as?: string;
   mode?: string;
+  /** The style picked (src/styles.ts), when it is not Auto. */
+  look?: string;
+  /** A style sample: drawn without the artist's way of working, and kept as that style's sample for its model. */
+  sample?: boolean;
   width?: number;
   height?: number;
   /** Words to leave out of the picture (sent on to a linked PC too). */
   negative?: string;
+  /** Draft, Mid or High, and the seed, as the Images window asked them (none: the PC's own choice and a new seed). */
+  quality?: 'draft' | 'mid' | 'high';
+  seed?: number;
+  /** The @Name characters' and locations' ticked pictures, as the workspace names them (src/server/cards.ts refsAt). */
+  refs?: string[];
+  /** A sheet's view: when it is drawn, a copy goes into this character's or location's folder (Make a sheet). */
+  card?: { kind: CardKind; name: string };
   /** Drawn for this step (0-based) of its project: the step is marked done when it comes back. */
   step?: number;
   // ---- A project: its waiting steps, run one after another (the reviewer reads each when `review`) ----
@@ -44,6 +59,8 @@ export interface QItem {
   chat?: string;
   message?: string;
   think?: boolean;
+  // ---- An agent's run (src/server/agents.ts): its run's id there; `as` is the Agent ----
+  agentRun?: string;
   // ---- What came back ----
   /** What happened, in words written by code. */
   result?: string;
@@ -72,7 +89,7 @@ export const EMPTY: Queue = { paused: false, items: [] };
 export const MAX_ITEMS = 300;
 /** The most items added in one go (a pasted list). */
 export const MAX_ADD = 50;
-const KINDS: QKind[] = ['picture', 'project', 'chat'];
+const KINDS: QKind[] = ['picture', 'project', 'chat', 'agent'];
 const STATES: QState[] = ['waiting', 'running', 'done', 'needs', 'failed', 'cancelled'];
 export const FINISHED: QState[] = ['done', 'needs', 'failed', 'cancelled'];
 export const isFinished = (it: QItem) => FINISHED.includes(it.state);
@@ -80,6 +97,13 @@ export const isFinished = (it: QItem) => FINISHED.includes(it.state);
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\r/g, '').slice(0, max) : undefined);
 const num = (v: unknown, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? Math.round(v) : undefined);
 const id = (v: unknown) => (typeof v === 'string' && /^[\w-]{1,40}$/.test(v) ? v : undefined);
+
+/** A sheet view's card ({kind, name}) as read, or undefined. */
+function cardOf(v: unknown): QItem['card'] {
+  const c = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  const name = cleanName(c?.name);
+  return c && CARD_KINDS.includes(c.kind as CardKind) && name ? { kind: c.kind as CardKind, name } : undefined;
+}
 
 /** One item as read from disk: anything unknown is left out, an item of no known kind is dropped. */
 export function cleanItem(raw: unknown): QItem | null {
@@ -96,12 +120,15 @@ export function cleanItem(raw: unknown): QItem | null {
   const keep: [keyof QItem, unknown][] = [
     ['started', str(r.started, 40)], ['ended', str(r.ended, 40)], ['projectName', str(r.projectName, 120)],
     ['lanes', Array.isArray(r.lanes) ? r.lanes.filter(x => typeof x === 'string' && /^(here|jobs|pc:[\w-]{1,40})$/.test(x)).slice(0, 3) : undefined],
-    ['laneName', str(r.laneName, 80)], ['prompt', str(r.prompt, 2000)], ['as', id(r.as)], ['mode', str(r.mode, 20)], ['negative', str(r.negative, 1000)],
+    ['laneName', str(r.laneName, 80)], ['prompt', str(r.prompt, PROMPT_MOST)], ['as', id(r.as)], ['mode', str(r.mode, 20)], ['look', pickedStyle(r.look)?.id], ['sample', r.sample === true && pickedStyle(r.look) ? true : undefined], ['negative', str(r.negative, 1000)],
+    ['quality', r.quality === 'draft' || r.quality === 'mid' || r.quality === 'high' ? r.quality : undefined],
+    ['seed', isSeed(r.seed) ? r.seed : undefined],
+    ['refs', Array.isArray(r.refs) && r.refs.length ? r.refs.filter((x): x is string => typeof x === 'string' && x.length <= 400 && !x.split(/[\\/]/).includes('..') && !/^([a-z]:|[\\/])/i.test(x)).slice(0, 4) : undefined],
     ['width', num(r.width, 64, 4096)], ['height', num(r.height, 64, 4096)], ['step', num(r.step, 0, 999)],
     ['review', r.review === true ? true : undefined], ['waitFor', id(r.waitFor)], ['chat', id(r.chat)], ['message', str(r.message, MESSAGE_MAX)],
     ['think', r.think === true ? true : undefined], ['result', str(r.result, 600)], ['output', str(r.output, 300)], ['handed', str(r.handed, 400)],
     ['error', str(r.error, 600)], ['after', num(r.after, 0, 1e15)], ['tries', num(r.tries, 0, 1000)], ['note', str(r.note, 300)],
-    ['seen', r.seen === true ? true : undefined],
+    ['seen', r.seen === true ? true : undefined], ['agentRun', id(r.agentRun)], ['card', cardOf(r.card)],
   ];
   for (const [k, v] of keep) if (v !== undefined) (it as unknown as Record<string, unknown>)[k] = v;
   return it;
@@ -124,9 +151,11 @@ export function afterRestart(q: Queue): Queue {
 /**
  * The items that may start now, in order. Each PC (lane) does one item at a time; an item that cannot start yet keeps its
  * place in its lanes, so a later one for the same PC never overtakes it. A project waiting for one of its pictures holds
- * no place. `lanesOf` gives each waiting item's lanes; `busy` is lanes in use by something outside the queue.
+ * no place. `lanesOf` gives each waiting item's lanes; `busy` is lanes in use by something outside the queue. `held`: an
+ * item that waits for now and holds no place either (an agent's run while a person uses its PC: his own work behind it
+ * goes on).
  */
-export function toStart(q: Queue, lanesOf: (it: QItem) => string[], busy: Set<string>, now = Date.now()): QItem[] {
+export function toStart(q: Queue, lanesOf: (it: QItem) => string[], busy: Set<string>, now = Date.now(), held: (it: QItem) => boolean = () => false): QItem[] {
   if (q.paused) return [];
   const taken = new Set(busy);
   for (const it of q.items) if (it.state === 'running') for (const l of it.lanes ?? []) taken.add(l);
@@ -135,6 +164,7 @@ export function toStart(q: Queue, lanesOf: (it: QItem) => string[], busy: Set<st
     if (it.state !== 'waiting') continue;
     if (it.waitFor && q.items.some(x => x.id === it.waitFor && (x.state === 'waiting' || x.state === 'running'))) continue;
     const lanes = lanesOf(it);
+    if (lanes.every(l => !taken.has(l)) && held(it)) continue;
     const free = lanes.every(l => !taken.has(l)) && !(it.after && it.after > now);
     for (const l of lanes) taken.add(l);
     if (free) out.push(it);
@@ -196,7 +226,8 @@ export interface QueueLine {
  * documents to review (per project), replies to answer (per chat), and work that did not finish. Written by code.
  */
 export function homeLines(q: Queue, chatTitle: (chatId: string) => string = () => ''): QueueLine[] {
-  const fresh = q.items.filter(it => isFinished(it) && it.state !== 'cancelled' && !it.seen);
+  // An agent's run has its own line on Home (src/agents.ts agentHomeLines), with its report.
+  const fresh = q.items.filter(it => isFinished(it) && it.state !== 'cancelled' && !it.seen && it.kind !== 'agent');
   const out: QueueLine[] = [];
   const newest = (xs: QItem[]) => xs.map(x => x.ended ?? x.added).sort().at(-1) ?? '';
   for (const it of fresh.filter(x => x.state === 'needs')) {

@@ -79,3 +79,28 @@ test('a mark that cannot be read is left alone, and a broken one never stops the
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a silent end names Node\'s own fault report when the run left one (out of memory), and ignores another run\'s (S1)', async () => {
+  const { mkdtempSync, writeFileSync, utimesSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fatalReportLine } = await import('../src/lastwords.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'tomlin-reports-'));
+  try {
+    const m = { pid: 78480, version: '2.1.28', started: Date.parse('2026-11-26T09:13:00'), alive: Date.parse('2026-11-26T15:31:00') };
+    assert.equal(fatalReportLine(dir, m), '', 'no report: nothing added');
+    writeFileSync(join(dir, 'report.20261126.153110.78480.0.001.json'), JSON.stringify({ header: { event: 'Allocation failed - JavaScript heap out of memory', trigger: 'FatalError' } }));
+    assert.equal(fatalReportLine(dir, m), ' Node itself ran out of memory ("Allocation failed - JavaScript heap out of memory"); its report is report.20261126.153110.78480.0.001.json in the logs folder.');
+    // Another process's report from days before is not this run's.
+    rmSync(join(dir, 'report.20261126.153110.78480.0.001.json'));
+    const old = join(dir, 'report.20261120.101010.1234.0.001.json');
+    writeFileSync(old, JSON.stringify({ header: { event: 'something else' } }));
+    utimesSync(old, new Date('2026-11-20T10:10:10'), new Date('2026-11-20T10:10:10'));
+    assert.equal(fatalReportLine(dir, m), '');
+    const core = (await import('node:fs')).readFileSync(new URL('../src/server/core.ts', import.meta.url), 'utf8');
+    assert.match(core, /process\.report\.reportOnFatalError = true;/);
+    assert.match(core, /excludeEnv = true/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

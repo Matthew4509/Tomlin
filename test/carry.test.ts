@@ -538,3 +538,14 @@ test('Move needs a PC that can check a copy: one without carry-sum is refused wi
   assert.match(carry.moveWhy({ ...ok, ok: false }), /off or not answering/);
   assert.match(carry.moveWhy({ ...ok, allow: { ...ok.allow!, receive: false } }), /Accept models from linked PCs/);
 });
+
+test('a picture model copied here names a file it shares with one already here where that file is, so the copy skips it (Q2)', () => {
+  const jobs = readFileSync(new URL('../src/server/jobs.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const dest = jobs.slice(jobs.indexOf('pictureDest: id => {'), jobs.indexOf('videoFiles: id =>'));
+  assert.match(dest, /const at = images\.registry\.filePath\(m, f\);/);
+  assert.match(dest, /have = statSync\(at\)\.size === f\.bytes;/);
+  assert.match(dest, /path: have \? at : images\.registry\.ownPath\(m, f\)/);
+  // pull() skips a file already whole at the place it is given.
+  const carry = readFileSync(new URL('../src/carry.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(carry, /if \(\(await sizeOf\(where\[k\]\)\) === f\.bytes\) \{\n\s+before \+= f\.bytes;\n\s+continue;/);
+});

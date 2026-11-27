@@ -39,15 +39,12 @@ export function assignedTo(hires: Hire[], ref: string): Assigned[] {
 
 const names = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : (items[0] ?? ''));
 
-const label = (a: Assigned) => {
-  const parts: string[] = [...a.as];
-  if ((a.as.includes('first choice') || a.as.includes('on it now')) && !a.spare) parts.push('no backup');
-  return `${a.name} (${parts.join(', ')})`;
-};
-
-/** "Assigned to staff: Ann (first choice, no backup) and Bo (backup)." ('' when nobody). `where` adds " on "Z820"" for a linked PC's own hires. */
+/**
+ * "In use by staff Ann and Bo." ('' when nobody): short, names only (what deleting it does to them is said in the confirm,
+ * assignedWarning). `where` adds " on "Z820"" for a linked PC's own hires.
+ */
 export function assignedWords(list: Assigned[], where = ''): string {
-  return list.length ? `Assigned to staff${where ? ` on ${where}` : ''}: ${names(list.map(label))}.` : '';
+  return list.length ? `In use by staff ${names(list.map(a => a.name))}${where ? ` on ${where}` : ''}.` : '';
 }
 
 /** What deleting it does to them, for the confirm: no model, a backup answering, or a lost backup ('' when nobody). */

@@ -37,7 +37,7 @@ export interface PowerOffDeps {
 export function powerOffSide(d: PowerOffDeps) {
   return async (body: Record<string, unknown>, who: { key: string; name: string; link?: string }): Promise<{ status: number; json: Record<string, unknown> }> => {
     const name = d.pcName();
-    if (!d.allowed()) return { status: 403, json: { error: `"${name}" does not allow a host to turn it off now (its owner ticks "Allow host to turn this PC off" under Network).` } };
+    if (!d.allowed()) return { status: 403, json: { error: `"${name}" does not allow a host to turn it off now (its owner ticks "Allow host to turn this PC off" on This PC).` } };
     if (!d.supported) return { status: 501, json: { error: `"${name}" cannot be turned off by TOMLIN (only a Windows PC can).` } };
     if (d.away()) return { status: 503, json: { error: `"${name}" is being used by its owner for now. Try again later.` } };
     const busy = d.busy();

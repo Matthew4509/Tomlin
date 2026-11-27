@@ -1,6 +1,6 @@
 // The chat runners and the image pane: what is loaded, where a model goes, whether it fits, how each was started.
 import { usedFromTimings } from '../meter.ts';
-import { cardFit } from '../calc.ts';
+import { cardFit, pictureFactsOf, pictureFit, picturePcOf } from '../calc.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync } from 'node:fs';
 import { freemem } from 'node:os';
@@ -14,9 +14,8 @@ import type { Gpu } from '../hardware.ts';
 import { buildFits, ccFromName, crashedHere, cudaOrder, type Device, type GpuFacts, firstStartNote, missingCardRunner, pinOfRunner, RUNNER_PINS, runnerDevice, runnerOfPin, type RunnerName, tccNote, testedHere } from '../runtimes.ts';
 import type { Option } from '../runnermatch.ts';
 import { noCardStart } from '../runnerpush.ts';
-import { chatArgs, fileFault, TEMPLATE_FAULT, whyItFailed, type ChatRun } from '../llama.ts';
+import { chatArgs, fileFault, TEMPLATE_FAULT, VISION_FAULT, whyItFailed, type ChatRun } from '../llama.ts';
 import { startSeconds } from '../loadlimit.ts';
-import { FIT_KEEP_WITH_LENDERS } from '../layersplit.ts';
 import { Pane } from '../pane.ts';
 import * as runnersOf from '../runners.ts';
 import { readings, runnerFetch, runnerJson, streamChat } from '../engine.ts';
@@ -25,7 +24,7 @@ import type { Asked } from '../worker.ts';
 import { Images } from '../images.ts';
 import { TONES } from '../persona.ts';
 import { cacheBytes, modelShape, type ModelShape } from '../gguf.ts';
-import { modelCaps, type Caps } from '../capabilities.ts';
+import { modelCaps, visionPathFor, type Caps } from '../capabilities.ts';
 import { autoCache, cleanRunWith, devicesForRun, guessersFor, pickRoomyCtx, withLendersRoomy } from '../runset.ts';
 import { cleanFoldWait } from '../layers.ts';
 import { plainModelName } from '../llama.ts';
@@ -35,7 +34,7 @@ import { shortBuild } from '../update.ts';
 import { BUILD, GB, HOME, ROOT, type Routes, VERSION, apiError, body, cachedCopies, chatModels, decoded, gbText, hardware, hidden, hwKey, json, modelsHome, publicSettings, runnerChecks, runtimes, sampler, shortName, store } from './core.ts';
 import { answeringBusy, endAnswer, stopOn, takeChat } from './answering.ts';
 import { whoList } from './people.ts';
-import { paneJob } from './pictures.ts';
+import { alsoDrawing, paneJob } from './pictures.ts';
 import { readSpeedsNow } from './thispc.ts';
 import { jobRoutes } from './jobs.ts';
 import { labelOf, loanBusyWhy, maxCandidates, maxLent, maxLoad, optionsOf, shareAll } from '../jobrun/maxhost.ts';
@@ -60,6 +59,10 @@ export const loadSpeeds = LoadSpeeds.open(HOME.data);
 export const runners: Pane[] = [];
 /** How each runner's model was started (context, cache), and when each last answered. */
 const runnerRun = new Map<Pane, RunOptions>();
+/** Each runner's last start: whether it was given its model's vision add-on (--mmproj), so it can look at pictures. */
+const runnerSees = new WeakMap<Pane, boolean>();
+/** The runner is connected and was started with its model's vision add-on: a picture sent with a message reaches the model. */
+export const seesPictures = (runner: Pane): boolean => runner.view.state === 'connected' && runnerSees.get(runner) === true;
 /** The runner build each runner's start had to use (Max mode: the lending PCs' build), for the old-runner check. */
 const runnerWant = new Map<Pane, Want | undefined>();
 /** The program each runner's model was started from (src/oldrunner.ts), once it connected. */
@@ -210,7 +213,7 @@ async function status() {
       chat: here.pane,
       // The chat models loaded beside the open chat's (two or more chat models on this PC).
       chatAlso: runners.filter(p => here.beside(p) && p.view.model && (p.view.state === 'connected' || p.view.state === 'loading')).map(p => { const st = paneStatus(p); return { model: st.model, modelName: st.modelName, state: st.state, device: st.device, memory: st.memory, working: answeringBusy(p), oldRunner: oldRunnerOf(p) || null }; }),
-      image: { ...paneStatus(images.pane), idleMinutes: s.image.idleMinutes, threadsSetting: s.image.threads, job: paneJob(), working: images.busy() },
+      image: { ...paneStatus(images.pane), idleMinutes: s.image.idleMinutes, threadsSetting: s.image.threads, ...((job) => ({ job, also: alsoDrawing(job?.id ?? null) }))(paneJob()), working: images.busy() },
     },
     serving: jobRoutes.servingNow(),
     // The chat's Max switch: why it is greyed on the lenders' side now ('' when it can run), and the PCs it would borrow.
@@ -794,7 +797,9 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   timeLimit = startSeconds(entry.bytes, !!max?.endpoints.length);
   // A laptop's built-in chip beside its card: Vulkan would spread the layers over both, so the cards are named.
   const cards = startCards(run.cards, await readCards(), builtInHere);
-  let started: ChatRun = { ...run, cards, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}) };
+  // The model's vision add-on beside it (an mmproj file): started with it, it can look at pictures sent in a chat.
+  const mmproj = visionPathFor(path);
+  let started: ChatRun = { ...run, cards, draft: draftPath ?? undefined, moe: (shapes.get(id)?.experts ?? 0) > 0, ...(max?.endpoints.length ? { rpc: max.endpoints } : {}), ...(mmproj ? { mmproj } : {}) };
   const draftName = draftPath ? draftPath.split(/[\\/]/).pop()!.replace(/\.gguf$/i, '') : '';
   const beside = at.replaces === null ? runners.filter(p => p !== runner && p.view.state === 'connected').map(p => ({ name: shortName(p.view.modelName ?? '') })) : [];
   const runnerWords: Record<RunnerName, string> = { cuda: 'CUDA 12', cuda13: 'CUDA 13', vulkan: 'Vulkan' };
@@ -837,10 +842,20 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
   if (placed?.refuse) return { error: placed.refuse };
   if (placed?.maxPlace) started = { ...started, rpc: placed.rpc, maxPlace: placed.maxPlace };
   // Any other Max mode load: the layers dealt by each device's room, every PC keeping its free RAM (src/layersplit.ts).
-  const spread = !ep && !placed?.maxPlace && cardDevice && max?.endpoints.length ? await maxSplit({ name, layers: shapes.get(id)?.layers ?? 0, bytes: entry.bytes, cache: contextBytes(id, run), exe: chatExe(cardDevice, held, run, want).exe, device: cardDevice, cards, max, path: chatModels.path(id), experts: shapes.get(id)?.experts ? { count: shapes.get(id)!.experts, used: shapes.get(id)!.expertsUsed ?? 0 } : null }) : null;
+  // A PC with no card plans on its processor's runner: the lenders still keep to the RAM policy.
+  const splitDevice = cardDevice ?? (devices.includes('cpu') ? 'cpu' as const : undefined);
+  const spread = !ep && !placed?.maxPlace && splitDevice && max?.endpoints.length ? await maxSplit({ name, layers: shapes.get(id)?.layers ?? 0, bytes: entry.bytes, cache: contextBytes(id, run), exe: chatExe(splitDevice, held, run, want).exe, device: splitDevice, cards, max, path: chatModels.path(id), experts: shapes.get(id)?.experts ? { count: shapes.get(id)!.experts, used: shapes.get(id)!.expertsUsed ?? 0 } : null }) : null;
   if (spread?.refuse) return { error: spread.refuse };
   if (spread?.maxPlace) started = { ...started, maxPlace: spread.maxPlace };
-  else if (max?.endpoints.length && !started.maxPlace) started = { ...started, fitMargin: Math.max(started.fitMargin ?? 0, FIT_KEEP_WITH_LENDERS) };
+  else if (!ep && max?.endpoints.length && !started.maxPlace) {
+    // No plan (the devices could not be listed, or the model's size read): llama.cpp's own fit would place layers on
+    // the lenders past their RAM limits (14 Nov 2026: a 24 GB PC given about 16 GB hung), so it loads on this PC alone.
+    const { rpc: _lent, ...rest } = started;
+    started = rest;
+    max = { ...max, endpoints: [], lent: [], ids: [] };
+    maxWords = `Max mode: not used for ${name}: the layers could not be dealt by each PC's room (the log says why), so it runs on this PC alone.`;
+    timeLimit = startSeconds(entry.bytes, false);
+  }
   // The lending notes are shared by both ways of borrowing: a load the chat's Max switch did not ask for is Cluster's
   // borrowing (by itself), so its notes say "Cluster:", never "Max mode:".
   const lendWords = (n: string) => (maxPath || !n || n === maxWords ? n : n.replace(/^Max mode: /, 'Cluster: '));
@@ -906,7 +921,9 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     slotNotes.delete(id);
   }
   // A runner build with the MMQ expert-matrix padding fault (pin `mmqIdsFault`, src/runtimes.ts) is not given the big prompt chunks.
-  const ubFor = (device: Device, r: ChatRun): ChatRun => (runtimes.pins[chatExe(device, held, run, want).id]?.cuda?.mmqIdsFault ? { ...r, smallBatch: true } : r);
+  // Each start's arguments say whether it had the vision add-on (the last start is the one that runs).
+  const ubFor = (device: Device, r: ChatRun): ChatRun => (runnerSees.set(runner, !!r.mmproj), runtimes.pins[chatExe(device, held, run, want).id]?.cuda?.mmqIdsFault ? { ...r, smallBatch: true } : r);
+  const build = (device: Device) => ({ ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port: number, key: string) => chatArgs(path, port, device, threads, false, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit });
   const loading = runner.connect({
     model: id,
     modelName: name,
@@ -918,9 +935,10 @@ async function placeChat(id: string, asked: Asked, threads: number, main: boolea
     expectedSeconds: expected,
     plan,
     // Expert parallel starts the patched runner (same build as the stock one, b11284) with its split in the environment.
-    build: device => ({ ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit }),
+    build,
     // A start that failed with the expert placement (or expert parallel) is tried again on the stock runner with llama.cpp's own layer split.
-    retry: (device, tail) => (ep ? (log.info('max', `${name}: the expert parallel start failed, so ${maxPath ? 'it is started again on this PC alone (Max mode never uses the layer split)' : 'llama.cpp\'s own layer split is tried'}. The runner's last words: ${tail.replace(/s+/g, ' ').trim().slice(-1500) || '(none)'}`), epFailed(tail)) : undefined, TEMPLATE_FAULT.test(tail) ? { ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, true, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : started.maxPlace ? { ...chatExe(device, held, run, want), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, maxPath ? (maxAlone(runner, name), { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: undefined }) : { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: max?.endpoints, fitMargin: FIT_KEEP_WITH_LENDERS }), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : null),
+    // One that would not open the vision add-on is started again without it: the model loads, and cannot look at pictures.
+    retry: (device, tail) => (started.mmproj && VISION_FAULT.test(tail) && !TEMPLATE_FAULT.test(tail) ? (log.info('chat', `${name}: it would not start with its vision add-on (${started.mmproj.split(/[\\/]/).pop()}), so it is started again without it.`), started = { ...started, mmproj: undefined }, build(device)) : (ep ? (log.info('max', `${name}: the expert parallel start failed, so ${maxPath ? 'it is started again on this PC alone (Max mode never uses the layer split)' : 'llama.cpp\'s own layer split is tried'}. The runner's last words: ${tail.replace(/\s+/g, ' ').trim().slice(-1500) || '(none)'}`), epFailed(tail)) : undefined, TEMPLATE_FAULT.test(tail) ? { ...(ep && device === 'cuda' ? { ...chatExe(device, held, run, want), exe: ep.exe, env: started.env } : chatExe(device, held, run, want)), args: (port, key) => chatArgs(path, port, device, threads, true, ubFor(device, started), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : started.maxPlace ? { ...chatExe(device, held, run, want), args: (port, key) => chatArgs(path, port, device, threads, false, ubFor(device, (maxPath ? maxAlone(runner, name) : log.info('max', `${name}: the start with the layers dealt by room failed, so it is started again on this PC alone (llama.cpp's own fit ignores the lenders' RAM limits).`), { ...started, maxPlace: undefined, env: undefined, batch: undefined, rpc: undefined })), cardFor(device), key), ready, device, timeoutSeconds: timeLimit } : null)),
     why: tail => whyItFailed(tail, entry.file),
     fileFault,
     // A card start that put the model on the CPU counts as failed (Max mode's lent cards aside): the next device is
@@ -1173,7 +1191,7 @@ export const panesGet: Routes = {
   '/api/models': async ({ res }) => {
     await loadShapes();
     const cards = cardMem();
-    return json(res, 200, { cards, cardList: cardsNow(), chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id), card: cardFit(m.bytes, cards) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id) })), runtimes: runtimeList(), folder: chatModels.other(), folderMissing: chatModels.otherMissing(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
+    return json(res, 200, { cards, cardList: cardsNow(), chat: chatList().map(m => ({ ...m, hidden: hidden.has(m.id), card: cardFit(m.bytes, cards) })), image: images.list().map(m => ({ ...m, hidden: hidden.has(m.id), cardFit: ((f) => (f ? pictureFit(f, picturePcOf(hardware)) : null))(pictureFactsOf(images.registry.get(m.id), m.bytes)) })), runtimes: runtimeList(), folder: chatModels.other(), folderMissing: chatModels.otherMissing(), ownFolder: chatModels.own, copies: cachedCopies(), hardware, settings: publicSettings(await store.settings()), who: whoList(), tones: TONES.map(({ id, name }) => ({ id, name })), contexts: CONTEXTS });
   },
   '/api/place/try': async ({ res }) => json(res, 200, { job: tryView() }),
   '/v1/models': async ({ res }) => json(res, 200, { object: 'list', data: [chat, images.pane].filter(x => x.view.state === 'connected').map(x => ({ id: x.view.model, object: 'model', owned_by: 'tomlin' })) }),

@@ -3,6 +3,7 @@
 import { usedFromPieces, usedFromTimings, type Used } from './meter.ts';
 import { runnerHeaders } from './runnerkeys.ts';
 import { withRules } from './rules.ts';
+import { withPictures, type PicTurn } from './askpics.ts';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -412,6 +413,8 @@ export interface Streamed {
 
 /** An answer that has begun and then gets no word-piece for this long is ended and offered Continue: a hung runner, not a slow one. */
 export const STALL_MS = 10 * 60_000;
+/** Before the first word, a runner that sends nothing at all is waited on this many times STALL_MS, then ended. */
+export const QUIET_START = 6;
 
 export type ThoughtStop = 'loop' | 'long' | 'hurry';
 
@@ -442,6 +445,8 @@ export interface AskOpts {
   stallMs?: number;
   /** Which round of tool calls this is, 0 the first (set by streamChat). */
   round?: number;
+  /** Pictures for a model here started with its vision add-on, each on the message it came with (src/askpics.ts). */
+  pictures?: PicTurn[];
 }
 
 /**
@@ -557,6 +562,26 @@ export async function runnerFetch(url: string, init: RequestInit = {}): Promise<
 /** Told of every answer that came back whole, with the runner's address and its writing speed (the run history). */
 export const answered: { on: ((base: string, perSecond: number | null) => void) | null } = { on: null };
 
+/**
+ * What a runner's refusal says, in words: a web page (a proxy's or a server's "503 Service Unavailable" page) loses its
+ * markup, scripts and styles, so the person is not shown raw HTML. At most 200 characters.
+ */
+export function plainReply(body: string): string {
+  if (!/<(!doctype|html|head|body|title|p|h\d|div|pre)\b/i.test(body)) return body.slice(0, 200);
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body)?.[1] ?? '';
+  const text = body
+    .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '‹')
+    .replace(/&gt;/gi, '›')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const said = text || title.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return (said || 'a web page with no words in it').slice(0, 200);
+}
+
 export async function streamChat(base: string, model: string, turns: ChatTurn[], onText: (text: string) => void, signal: AbortSignal, maxTokens = MAX_ANSWER, opts: AskOpts = {}): Promise<Streamed> {
   const chosen = opts.plain ? plainStyle(model, opts.think) : chatStyle(model, opts.think);
   const style = opts.final ? finalStyle(model, chosen) : chosen;
@@ -577,12 +602,12 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
       headers: { 'content-type': 'application/json', ...runnerHeaders(base) },
       // return_progress: llama.cpp says how far it has read the prompt, once a batch, before the first word. Asked
       // always, not only when it is shown: a line now and then keeps the stream from going quiet on a long prompt.
-      body: runnerJson({ messages: [...turnsFor(withRules(turns), style), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, return_progress: true }),
+      body: runnerJson({ messages: [...withPictures(turnsFor(withRules(turns), style), opts.pictures ?? []), ...(opts.toolTurns ?? [])], stream: true, max_tokens: maxTokens, ...style.sampling, ...tools, return_progress: true }),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) {
       const all = await res.text().catch(() => '');
-      const said = all.slice(0, 200);
+      const said = plainReply(all);
       if (res.status === 400 && turns.at(-1)?.role === 'assistant' && /prefill/i.test(said)) throw new NoPrefill(said);
       const full = contextFull(all);
       if (full) throw full;
@@ -625,12 +650,22 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     let firstAt = 0;
     let lastAt = 0;
     let longestGap = 0;
-    // A model that has begun writing and then goes quiet for STALL_MS is ended, not waited on for ever.
+    // A model that has begun writing and then goes quiet for STALL_MS is ended, not waited on for ever. Before the first
+    // word a runner that sends nothing at all (no reading progress either) for QUIET_START times that long (an hour) is
+    // ended too: the stream was opened and then nothing came. A slow read of a long prompt sends its progress, and a
+    // slow start that is only slow is given far longer than a stall.
     let stalled = 0;
+    let heardAt = t0;
+    let silent = false;
     const stallMs = opts.stallMs ?? STALL_MS;
     const watchdog = setInterval(() => {
-      if (lastAt && !stalled && clock() - lastAt >= stallMs) {
+      if (stalled) return;
+      if (lastAt && clock() - lastAt >= stallMs) {
         stalled = Math.max(1, Math.round((clock() - lastAt) / 1000));
+        ac.abort();
+      } else if (!lastAt && clock() - heardAt >= stallMs * QUIET_START) {
+        stalled = Math.max(1, Math.round((clock() - heardAt) / 1000));
+        silent = true;
         ac.abort();
       }
     }, Math.max(20, Math.min(5000, Math.floor(stallMs / 4))));
@@ -650,6 +685,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
           const line = buffer.slice(0, nl).trim();
           buffer = buffer.slice(nl + 1);
           if (!line.startsWith('data:')) continue;
+          heardAt = clock();
           const data = line.slice(5).trim();
           if (data === '[DONE]') continue;
           let msg: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string | null }>; timings?: { predicted_n?: number; predicted_per_second?: number; prompt_n?: number; prompt_per_second?: number; prompt_ms?: number; predicted_ms?: number } };
@@ -714,6 +750,10 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     } finally {
       clearInterval(watchdog);
     }
+    if (silent && !signal.aborted) {
+      const m = Math.round(stalled / 60);
+      throw new Error(`The model server sent nothing for ${m >= 1 ? `${m} minute${m === 1 ? '' : 's'}` : `${stalled} second${stalled === 1 ? '' : 's'}`} after it began, so the answer was stopped. Press Send again, or reconnect the model if it happens again.`);
+    }
     if (stalled) cut = true;
     if (!perSecond) {
       const fallback = streamedSpeed(pieces, firstAt, lastAt);
@@ -762,7 +802,7 @@ export async function streamChat(base: string, model: string, turns: ChatTurn[],
     if (why && !signal.aborted && !opts.final && (thinksOf(model) === 'switch' || why === 'hurry')) {
       // What the tools gave goes with it (Answer now in a later round must not lose the pages read), calls off.
       const web = opts.tools && opts.toolTurns?.length ? { tools: opts.tools, toolTurns: opts.toolTurns, round: opts.tools.rounds } : {};
-      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - (opts.thinkRoom ?? THINK_ROOM)), { plain: opts.plain, final: true, ...web });
+      const again = await streamChat(base, model, withWorking(turns, all), onText, signal, Math.max(512, maxTokens - (opts.thinkRoom ?? THINK_ROOM)), { plain: opts.plain, final: true, ...web, ...(opts.pictures ? { pictures: opts.pictures } : {}) });
       return { ...again, thought, thoughtSeconds, thoughtStopped: why };
     }
     // An answer that came back whole: the run history counts it for the runner at `base` (src/server/faults.ts).

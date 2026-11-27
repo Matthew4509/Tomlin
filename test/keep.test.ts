@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -349,5 +349,29 @@ test('a data backup leaves out the Bridge snapshot browser profile (a locked fil
     assert.doesNotMatch(listed, /snaps\/profile/);
   } finally {
     await rm(top, { recursive: true, force: true });
+  }
+});
+
+test('a test copy (its own home) never looks for older copies, so it never asks and never moves their models', async () => {
+  const w = await world();
+  try {
+    assert.equal((await keep.prepare(w.home, w.root, '2.0.27', undefined, { bring: 'never' })).state, 'ready');
+    assert.ok(!existsSync(join(w.home.data, 'chats', 'c1.json')), 'nothing brought in');
+    assert.ok(existsSync(join(w.old, 'models', 'chat', 'org', 'qwen.gguf')), 'the older copy keeps its models');
+    assert.equal(keep.readVersion(w.home)?.offer, undefined, 'no offer is marked');
+    assert.equal((await keep.prepare(w.home, w.root, '2.0.27', undefined, { bring: 'never' })).state, 'ready');
+    const core = readFileSync(new URL('../src/server/core.ts', import.meta.url), 'utf8');
+    assert.match(core, /\{ bring: process\.env\.TOMLIN_HOME \|\| process\.env\.TOMLIN_DATA \? 'never' : 'ask' \}/);
+  } finally {
+    await rm(w.top, { recursive: true, force: true });
+  }
+});
+
+test('a copy with no home of its own still asks when an older copy is beside it', async () => {
+  const w = await world();
+  try {
+    assert.equal((await keep.prepare(w.home, w.root, '2.0.27', undefined, { bring: 'ask' })).state, 'offer');
+  } finally {
+    await rm(w.top, { recursive: true, force: true });
   }
 });

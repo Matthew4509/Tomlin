@@ -228,6 +228,21 @@ export function sealRequest(keys: Buffer, path: string, body: unknown, now = Dat
 }
 
 /**
+ * The header a host sends with each sealed request: a second, tiny sealed request for the same door, which the node opens
+ * before it sets room aside to read the body. A large body is read whole before its own seal can be checked, so without
+ * it anyone who saw a link's fingerprint (it crosses the network in the clear) could hold that link's room and have the
+ * real host's requests refused. Each one is taken once, like a request.
+ */
+export const BODY_PROOF = 'x-link-proof';
+const proofDoor = (path: string) => `${path}#body`;
+export const bodyProof = (keys: Buffer, path: string, now = Date.now()): string => sealRequest(keys, proofDoor(path), {}, now).box;
+/** Whether `proof` (the header as sent) proves the link's keys for `path`: right key, right door, in time, not seen before. */
+export function bodyProven(keys: Buffer, proof: unknown, path: string, seen: Seen, now = Date.now()): boolean {
+  if (typeof proof !== 'string' || !proof || proof.length > 1024) return false;
+  return !('error' in openRequest(keys, { box: proof }, proofDoor(path), seen, now));
+}
+
+/**
  * Requests already taken, by id, so the same one sent again is refused. With `keepIn`, also kept on the disk: a request
  * is good for 15 minutes either side, so without it a copy recorded on the network (a turn-off, a model deleted) could
  * be sent again after a restart within that time. Each id is added to the file as it is taken (before the request is
@@ -327,6 +342,59 @@ export function openAnswer(keys: Buffer, id: string, n: number, box: unknown): u
   return JSON.parse(plain.toString());
 }
 
+/** The largest picture a PC sends back (src/jobrun/pictureback.ts refuses more). */
+export const PICTURE_MOST = 20 * 2 ** 20;
+/** The largest block of a sealed stream, and of a plain sealed answer: a picture, as letters, sealed, as letters again, and room. */
+export const LINK_BLOCK_MOST = Math.ceil(PICTURE_MOST * (4 / 3) * (4 / 3)) + (1 << 20);
+/** A plain answer whose body goes quiet this long after it began is given up. */
+export const LINK_BODY_QUIET_MS = 60_000;
+
+/** Why a linked PC's answer was not read to its end: too big, or it went quiet. */
+export class AnswerCut extends Error {
+  readonly why: 'big' | 'quiet';
+  constructor(message: string, why: 'big' | 'quiet') {
+    super(message);
+    this.why = why;
+  }
+}
+
+/**
+ * A linked PC's plain answer read as text, never more than `most` bytes, and given up when nothing comes for
+ * `quietMs` (U1: whatever answers at that address could otherwise fill this PC's memory until Stop).
+ */
+export async function readCapped(res: Response, most = LINK_BLOCK_MOST, quietMs = LINK_BODY_QUIET_MS): Promise<string> {
+  return (await readCappedBytes(res, most, quietMs)).toString();
+}
+/** As readCapped, as bytes (a piece of a clip). */
+export async function readCappedBytes(res: Response, most = LINK_BLOCK_MOST, quietMs = LINK_BODY_QUIET_MS): Promise<Buffer> {
+  if (!res.body) return Buffer.alloc(0);
+  const said = Number(res.headers.get('content-length'));
+  if (Number.isFinite(said) && said > most) {
+    await res.body.cancel().catch(() => undefined);
+    throw new AnswerCut('the answer was larger than any it could be, so it was refused.', 'big');
+  }
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const quiet = new Promise<'quiet'>(ok => (timer = setTimeout(() => ok('quiet'), quietMs)));
+    const got = await Promise.race([reader.read(), quiet]).finally(() => clearTimeout(timer));
+    if (got === 'quiet') {
+      await reader.cancel().catch(() => undefined);
+      throw new AnswerCut('the answer went quiet part way through.', 'quiet');
+    }
+    if (got.done) break;
+    size += got.value.byteLength;
+    if (size > most) {
+      await reader.cancel().catch(() => undefined);
+      throw new AnswerCut('the answer ran on past the largest one it could be, so it was refused.', 'big');
+    }
+    parts.push(got.value);
+  }
+  return Buffer.concat(parts);
+}
+
 /** One sealed event of a stream, as written on the wire: its name and data are inside the box. */
 export const sealedEvent = (keys: Buffer, id: string, n: number, event: string, data: unknown) => `event: e\ndata: ${JSON.stringify({ box: sealAnswer(keys, id, n, { event, data }) })}\n\n`;
 
@@ -360,6 +428,12 @@ export function openStream(keys: Buffer, id: string, body: ReadableStream<Uint8A
           return out.terminate();
         }
         out.enqueue(enc.encode(`event: ${String(ev.event).replace(/\W/g, '')}\ndata: ${JSON.stringify(ev.data ?? {})}\n\n`));
+      }
+      // One block is at most a sealed picture: what runs on past that without ending a block is refused before it is held (L-01).
+      if (buf.length > LINK_BLOCK_MOST) {
+        buf = '';
+        out.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ text: 'an answer on the link ran on past the largest one it could be, so it was refused.' })}\n\n`));
+        return out.terminate();
       }
     },
   }));

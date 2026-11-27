@@ -109,7 +109,11 @@ export async function driveJobsOn(b: Record<string, unknown>) {
   if (!/^[A-Z]:$/.test(drive)) return { status: 400, body: { error: 'Choose a drive first.' } };
   if (b.pc === 'here' || !b.pc) {
     if (!(await drivesHere()).some(x => x.drive === drive)) return { status: 404, body: { error: `This PC has no drive ${drive} now.` } };
-    dj.setJobsHere(drive, jobs);
+    try {
+      dj.setJobsHere(drive, jobs);
+    } catch (e) {
+      return { status: 409, body: { error: `This PC's drive jobs could not be read or saved just now (${(e as Error).message}). Nothing was changed: try again in a moment.` } };
+    }
     justSet.delete(`here|${drive}`);
     return { status: 200, body: { said: saidOf('This PC', drive, jobs), ...(await storageView()) } };
   }
@@ -152,7 +156,11 @@ export async function poolModeOn(b: Record<string, unknown>) {
   const pool = b.pool === 'store' || b.pool === 'backups' ? b.pool : null;
   const mode = b.mode === 'spread' || b.mode === 'mirror' ? b.mode : null;
   if (!pool || !mode) return { status: 400, body: { error: 'Choose a storage and Duplicate or Extended.' } };
-  dj.setPoolMode(pool, mode);
+  try {
+    dj.setPoolMode(pool, mode);
+  } catch (e) {
+    return { status: 409, body: { error: `The storage settings could not be read or saved just now (${(e as Error).message}). Nothing was changed: try again in a moment.` } };
+  }
   return { status: 200, body: { said: `${dj.POOL_WORDS[pool]}: ${mode === 'mirror' ? 'Duplicate, two copies of each file on two different PCs' : 'Extended, each file kept once'}.`, ...(await storageView()) } };
 }
 

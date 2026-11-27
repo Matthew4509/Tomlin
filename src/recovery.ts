@@ -109,11 +109,16 @@ export class RecoveryCodes {
     return next;
   }
 
-  /** True once for each code of this set: it is crossed off (and saved) before this answers. */
-  use(v: unknown): Promise<boolean> {
+  /**
+   * True once for each code of this set: it is crossed off (and saved) before this answers. `first` runs once the code
+   * is found right and before it is crossed off (a new PIN saved, say), in the code's turn: when it throws, the code
+   * stays unused and the fault comes back, so a code is never spent on something that did not happen.
+   */
+  use(v: unknown, first?: () => Promise<void>): Promise<boolean> {
     const next = this.chain.then(async () => {
       const i = await this.find(v);
       if (i < 0) return false;
+      if (first) await first();
       const file = { ...this.file, codes: this.file.codes.map((c, j) => (j === i ? { ...c, used: new Date().toISOString() } : c)) };
       await this.save(file);
       this.file = file;
